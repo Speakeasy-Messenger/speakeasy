@@ -128,7 +128,9 @@ class SqlCipherSignalProtocolStore(
 
   override fun loadSignedPreKeys(): List<SignedPreKeyRecord> {
     val out = mutableListOf<SignedPreKeyRecord>()
-    db.rawQuery("SELECT record FROM signed_prekeys", arrayOf<Any?>()).use { cur ->
+    // Use the String[] overload with null bindArgs — see Schema.kt
+    // comment about the rawQuery(String, Object...) bug with empty arrays.
+    db.rawQuery("SELECT record FROM signed_prekeys", null as Array<String>?).use { cur ->
       while (cur.moveToNext()) {
         out += SignedPreKeyRecord(cur.getBlob(0))
       }
@@ -282,9 +284,12 @@ class SqlCipherSignalProtocolStore(
      * call [persistLocalIdentity].
      */
     fun loadFromDb(db: SQLiteDatabase): SqlCipherSignalProtocolStore? {
+      // String[] overload with null bindArgs — see Schema.kt note about
+      // the rawQuery(String, Object...) bug.
       db.rawQuery(
               "SELECT identity_key_pair, registration_id FROM identity WHERE id = 0",
-              arrayOf<Any?>())
+              null as Array<String>?,
+          )
           .use { cur ->
             if (!cur.moveToFirst()) return null
             val ikp = IdentityKeyPair(cur.getBlob(0))

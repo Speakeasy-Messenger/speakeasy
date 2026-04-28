@@ -87,9 +87,15 @@ object Schema {
       )
 
   fun applyMigrations(db: SQLiteDatabase) {
-    val cur = db.rawQuery("PRAGMA user_version", arrayOf<Any?>())
-    val current =
-        if (cur.moveToFirst()) cur.getInt(0).also { cur.close() } else 0.also { cur.close() }
+    // Don't use rawQuery for PRAGMA reads: SQLCipher Android's
+    // rawQuery(String, Object...) overload mis-binds empty Object[]
+    // arrays against PRAGMA's 0-parameter prepared statements,
+    // throwing "cannot bind argument at index 1 because the index is
+    // out of range. The statement has 0 parameters." compileStatement
+    // → simpleQueryForLong is the canonical path.
+    val current = db.compileStatement("PRAGMA user_version").use {
+      it.simpleQueryForLong().toInt()
+    }
     if (current >= MIGRATIONS.size) return
     db.beginTransaction()
     try {
