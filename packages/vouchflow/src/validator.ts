@@ -52,6 +52,17 @@ export class VouchflowValidator implements Validator {
     const rep = await this.opts.apiClient.getDeviceReputation(deviceToken);
 
     if (!rep.last_verification) {
+      // Diagnostic dump — alpha builds frequently hit this when client
+      // SDK env doesn't match the validator's API base URL, or when
+      // Vouchflow hasn't yet propagated a fresh verify into the rep API.
+      const tail = deviceToken.length >= 12 ? deviceToken.slice(-8) : deviceToken;
+      // eslint-disable-next-line no-console
+      console.warn(
+        '[vouchflow] no_verification — token tail:',
+        tail,
+        'rep:',
+        JSON.stringify(rep),
+      );
       throw new VouchflowValidationError('no_verification');
     }
 

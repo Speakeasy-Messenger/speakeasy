@@ -154,10 +154,16 @@ dependencies {
     // + Play Integrity attestation for device-native verification.
     // Maven coordinate: dev.vouchflow. Auto-published per push, so newer
     // patches arrive often; pinning explicitly for reproducible builds.
-    // 1.0.3 adds `Vouchflow.cachedDeviceToken` for at-rest derivation
+    // 1.0.3 added `Vouchflow.cachedDeviceToken` for at-rest derivation
     // (no biometric / no network). Used by `SpeakeasyDb` to derive the
     // SQLCipher passphrase per spec §4c.
-    implementation("dev.vouchflow:android-sdk:1.0.3")
+    //
+    // 1.0.4 fixes the enrollment retry path: the SDK was building a raw
+    // 04||x||y EC point instead of calling `publicKey.encoded` (SPKI
+    // DER), which caused every signature verification after a failed
+    // first enroll to silently fail. Affected devices need to clear
+    // app data / Vouchflow.reset() before re-enrolling.
+    implementation("dev.vouchflow:android-sdk:1.0.4")
 
     // Phase 5b: Signal Protocol — official AGPLv3 library from Open Whisper
     // Systems. Rust-backed implementation of Double Ratchet + X3DH on top of
