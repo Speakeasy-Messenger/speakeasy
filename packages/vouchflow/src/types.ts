@@ -28,8 +28,8 @@ export const CONFIDENCE_RANK: Record<Confidence, number> = {
 /** Floor for any authenticated request — spec §2. */
 export const MIN_CONFIDENCE: Confidence = 'medium';
 
-export function meetsMinimumConfidence(c: Confidence): boolean {
-  return CONFIDENCE_RANK[c] >= CONFIDENCE_RANK[MIN_CONFIDENCE];
+export function meetsMinimumConfidence(c: Confidence, floor: Confidence = MIN_CONFIDENCE): boolean {
+  return CONFIDENCE_RANK[c] >= CONFIDENCE_RANK[floor];
 }
 
 export type VerificationContext = 'signup' | 'login' | 'sensitive_action';

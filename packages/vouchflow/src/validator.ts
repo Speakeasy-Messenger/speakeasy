@@ -1,5 +1,6 @@
 import type { VouchflowApiClient } from './api-client.js';
 import {
+  Confidence,
   meetsMinimumConfidence,
   Validator,
   ValidatedAttestation,
@@ -12,6 +13,13 @@ export interface VouchflowValidatorOptions {
   maxVerificationAgeMs?: number;
   /** Reject above this. Default 70. Set to 100 to disable. */
   maxRiskScore?: number;
+  /**
+   * Lowest acceptable confidence level. Defaults to `medium` (spec §2).
+   * Set to `low` for sandbox / debug environments where sideloaded APKs
+   * fail Play Integrity / App Attest and only get recorded at `low`.
+   * Production servers must keep the default.
+   */
+  minConfidence?: Confidence;
   /**
    * Anomaly flags that hard-reject. Phase 4 hardening — defaults to empty so
    * existing behaviour (surface but allow) is preserved unless opted in.
@@ -38,12 +46,14 @@ const DEFAULT_MAX_RISK = 70;
 export class VouchflowValidator implements Validator {
   private readonly maxAgeMs: number;
   private readonly maxRisk: number;
+  private readonly minConfidence: Confidence;
   private readonly hardAnomalyFlags: ReadonlySet<string>;
   private readonly now: () => number;
 
   constructor(private readonly opts: VouchflowValidatorOptions) {
     this.maxAgeMs = opts.maxVerificationAgeMs ?? DEFAULT_MAX_AGE_MS;
     this.maxRisk = opts.maxRiskScore ?? DEFAULT_MAX_RISK;
+    this.minConfidence = opts.minConfidence ?? 'medium';
     this.hardAnomalyFlags = new Set(opts.hardAnomalyFlags ?? []);
     this.now = opts.now ?? Date.now;
   }
@@ -68,7 +78,7 @@ export class VouchflowValidator implements Validator {
 
     const lv = rep.last_verification;
 
-    if (!meetsMinimumConfidence(lv.confidence)) {
+    if (!meetsMinimumConfidence(lv.confidence, this.minConfidence)) {
       throw new VouchflowValidationError('low_confidence');
     }
 

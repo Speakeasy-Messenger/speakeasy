@@ -87,10 +87,25 @@ function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
   const apiClient = new VouchflowApiClient({ baseUrl, readKey });
   const maxAge = Number(process.env.VOUCHFLOW_MAX_VERIFICATION_AGE_MS) || undefined;
   const maxRisk = Number(process.env.VOUCHFLOW_MAX_RISK_SCORE) || undefined;
+  // Sandbox env relaxes the confidence floor to `low`. Sideloaded debug-
+  // signed APKs fail Play Integrity / App Attest, which makes Vouchflow
+  // record their verifies at `low`. Production must keep the default
+  // `medium` floor — set VOUCHFLOW_MIN_CONFIDENCE explicitly only on
+  // sandbox boxes.
+  const isSandbox = baseUrl.includes('sandbox');
+  const envOverride = process.env.VOUCHFLOW_MIN_CONFIDENCE as 'low' | 'medium' | 'high' | undefined;
+  const minConfidence = envOverride ?? (isSandbox ? 'low' : 'medium');
+  if (minConfidence !== 'medium') {
+    log.warn(
+      { minConfidence, baseUrl },
+      'vouchflow validator using non-default minimum confidence — sandbox / debug only',
+    );
+  }
   return new VouchflowValidator({
     apiClient,
     maxVerificationAgeMs: maxAge,
     maxRiskScore: maxRisk,
+    minConfidence,
   });
 }
 
