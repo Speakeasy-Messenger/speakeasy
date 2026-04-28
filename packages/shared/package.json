@@ -1,0 +1,39 @@
+{
+  "name": "@speakeasy/shared",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "main": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    },
+    "./ids": {
+      "types": "./dist/ids/index.d.ts",
+      "import": "./dist/ids/index.js"
+    },
+    "./types": {
+      "types": "./dist/types/index.d.ts",
+      "import": "./dist/types/index.js"
+    },
+    "./wordlists": {
+      "types": "./dist/wordlists/index.d.ts",
+      "import": "./dist/wordlists/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/wordlists','dist/wordlists',{recursive:true,filter:(s)=>s.endsWith('.txt')||!require('node:fs').statSync(s).isFile()})\"",
+    "typecheck": "tsc -p tsconfig.json --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "ulid": "^2.3.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.3",
+    "vitest": "^2.1.4"
+  }
+}

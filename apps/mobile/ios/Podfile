@@ -1,0 +1,69 @@
+# Resolve react_native_pods.rb with node to allow for hoisting
+require Pod::Executable.execute_command('node', ['-p',
+  'require.resolve(
+    "react-native/scripts/react_native_pods.rb",
+    {paths: [process.argv[1]]},
+  )', __dir__]).strip
+
+platform :ios, min_ios_version_supported
+prepare_react_native_project!
+
+linkage = ENV['USE_FRAMEWORKS']
+if linkage != nil
+  Pod::UI.puts "Configuring Pod with #{linkage}ally linked Frameworks".green
+  use_frameworks! :linkage => linkage.to_sym
+end
+
+target 'Speakeasy' do
+  config = use_native_modules!
+
+  use_react_native!(
+    :path => config[:reactNativePath],
+    # An absolute path to your application root.
+    :app_path => "#{Pod::Config.instance.installation_root}/.."
+  )
+
+  # Phase 5b iOS: native dependencies for the four custom bridges. These
+  # mirror the Android coordinates in `android/app/build.gradle`:
+  #   dev.vouchflow:android-sdk:1.0.3       → Vouchflow iOS SDK
+  #   org.signal:libsignal-android:0.59.0   → LibSignalClient
+  #   net.zetetic:sqlcipher-android:4.14.1  → SQLCipher
+  #
+  # Vouchflow iOS — SPM-only distribution (no podspec on CocoaPods Trunk).
+  # Added via Xcode: File → Add Package Dependencies → paste URL:
+  #   https://github.com/vouchflow/ios-sdk
+  # **Pin: exact 1.0.3** (matches the Android coordinate
+  # `dev.vouchflow:android-sdk:1.0.3` — required for the cachedDeviceToken
+  # property used by SpeakeasyDb HKDF derivation).
+
+  # libsignal-client iOS — git-based CocoaPods dep (the canonical install
+  # path per signalapp/libsignal's swift/README.md). The pod's
+  # prepare_command builds the Rust library, OR downloads a prebuilt
+  # binary if `LIBSIGNAL_FFI_PREBUILD_CHECKSUM` is set in the env.
+  #
+  # We use the prebuild path so the first `pod install` doesn't trigger
+  # a 10+ min Rust compile. The checksum below is for libsignal v0.59.0,
+  # pulled from the GitHub release artifact:
+  #   github.com/signalapp/libsignal/releases/download/v0.59.0/libsignal-client-ios-build-v0.59.0.tar.gz.sha256
+  ENV['LIBSIGNAL_FFI_PREBUILD_CHECKSUM'] =
+    '32eac8d2c22768caf4015d6b039b93f8a0c03db3896c7802f8a02b85fd2765e8'
+  pod 'LibSignalClient', git: 'https://github.com/signalapp/libsignal.git', tag: 'v0.59.0'
+
+  # SQLCipher iOS — same DB encryption library as the Android side.
+  pod 'SQLCipher', '~> 4.6.0'
+
+  target 'SpeakeasyTests' do
+    inherit! :complete
+    # Pods for testing
+  end
+
+  post_install do |installer|
+    # https://github.com/facebook/react-native/blob/main/packages/react-native/scripts/react_native_pods.rb#L197-L202
+    react_native_post_install(
+      installer,
+      config[:reactNativePath],
+      :mac_catalyst_enabled => false,
+      # :ccache_enabled => true
+    )
+  end
+end

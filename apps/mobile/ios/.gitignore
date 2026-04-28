@@ -1,0 +1,8 @@
+Vouchflow.plist
+
+# Phase 5b iOS: vendored libsignal-client iOS as a local SwiftPM package
+# (signalapp/libsignal ships Package.swift in swift/ subdir, so SPM can't
+# resolve via its remote URL — see CLAUDE.md "iOS — libsignal vendoring").
+# We vendor the source tree but exclude the .git dir.
+Vendor/libsignal/.git/
+Vendor/libsignal/target/

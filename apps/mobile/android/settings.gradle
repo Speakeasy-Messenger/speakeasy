@@ -1,0 +1,8 @@
+// Monorepo: @react-native/gradle-plugin is hoisted to the workspace root's
+// node_modules. Path goes up three levels: android/ → apps/mobile/ → apps/ → root.
+pluginManagement { includeBuild("../../../node_modules/@react-native/gradle-plugin") }
+plugins { id("com.facebook.react.settings") }
+extensions.configure(com.facebook.react.ReactSettingsExtension){ ex -> ex.autolinkLibrariesFromCommand() }
+rootProject.name = 'Speakeasy'
+include ':app'
+includeBuild('../../../node_modules/@react-native/gradle-plugin')

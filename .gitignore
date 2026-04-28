@@ -1,0 +1,55 @@
+# Dependencies
+node_modules/
+.pnp
+.pnp.js
+
+# Build outputs
+dist/
+build/
+*.tsbuildinfo
+.turbo/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Editor
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Env
+.env
+.env.local
+.env.*.local
+
+# Mobile
+apps/mobile/ios/build/
+apps/mobile/ios/Pods/
+apps/mobile/android/build/
+apps/mobile/android/.gradle/
+apps/mobile/android/app/build/
+
+# Coverage
+coverage/
+
+# Local DB
+*.sqlite
+*.sqlite-journal
+
+# iOS native shells (not yet committed)
+apps/mobile/ios/Vendor/libsignal/
+apps/mobile/ios/Speakeasy.xcodeproj/xcuserdata/
+apps/mobile/ios/Speakeasy.xcworkspace/xcuserdata/
+*.xcuserdata*
+
+# Build artifacts (the APK ships as a release asset, not a tracked file)
+*.apk
+*.aab
+
+# Mac
+.DS_Store

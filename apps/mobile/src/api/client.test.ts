@@ -1,0 +1,63 @@
+import { describe, expect, it, vi } from 'vitest';
+import { ApiClient, ApiError } from './client.js';
+
+function bundle() {
+  return {
+    registrationId: 1,
+    signedPreKeyId: 100,
+    signedPreKey: 'AAA=',
+    signedPreKeySig: 'BBB=',
+    preKeys: [{ id: 1, key: 'CCC=' }],
+  };
+}
+
+function fakeResponse(status: number, body: unknown): Response {
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { 'content-type': 'application/json' },
+  });
+}
+
+describe('ApiClient.enroll', () => {
+  it('POSTs to /v1/enroll and returns user_id on 201', async () => {
+    const fetchImpl: typeof fetch = vi.fn(async () =>
+      fakeResponse(201, { user_id: 'silent-golden-hawk' }),
+    );
+    const c = new ApiClient({ baseUrl: 'https://api.example.test/', fetchImpl });
+    const out = await c.enroll({
+      token: 't',
+      publicKey: 'pk',
+      preKeyBundle: bundle(),
+    });
+    expect(out.user_id).toBe('silent-golden-hawk');
+    const mock = vi.mocked(fetchImpl);
+    expect(mock).toHaveBeenCalledTimes(1);
+    const [url, init] = mock.mock.calls[0]!;
+    expect(url).toBe('https://api.example.test/v1/enroll');
+    expect(init?.method).toBe('POST');
+    expect(init?.headers).toEqual({ 'content-type': 'application/json' });
+    expect(JSON.parse(init?.body as string)).toEqual({
+      token: 't',
+      publicKey: 'pk',
+      preKeyBundle: bundle(),
+    });
+  });
+
+  it('throws ApiError with code on 401', async () => {
+    const fetchImpl = vi.fn(async () => fakeResponse(401, { error: 'low_confidence' }));
+    const c = new ApiClient({ baseUrl: 'https://api.example.test', fetchImpl });
+    await expect(
+      c.enroll({ token: 't', publicKey: 'pk', preKeyBundle: bundle() }),
+    ).rejects.toMatchObject({ status: 401, code: 'low_confidence' });
+  });
+
+  it('throws ApiError without code on opaque 5xx', async () => {
+    const fetchImpl = vi.fn(async () => new Response('boom', { status: 500 }));
+    const c = new ApiClient({ baseUrl: 'https://api.example.test', fetchImpl });
+    const err = await c
+      .enroll({ token: 't', publicKey: 'pk', preKeyBundle: bundle() })
+      .catch((e) => e);
+    expect(err).toBeInstanceOf(ApiError);
+    expect((err as ApiError).status).toBe(500);
+  });
+});

@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Phase 5e alpha: allow cleartext HTTP only to the dev sandbox server's
+  public IP. Android 9+ blocks cleartext by default. Once Fly + DNS are
+  up, the app talks to https://sandbox.api.speakeasyapp.xyz (TLS) and
+  this whitelist gets removed.
+
+  All other hosts remain HTTPS-only.
+-->
+<network-security-config>
+    <domain-config cleartextTrafficPermitted="true">
+        <domain includeSubdomains="false">65.21.224.209</domain>
+    </domain-config>
+</network-security-config>

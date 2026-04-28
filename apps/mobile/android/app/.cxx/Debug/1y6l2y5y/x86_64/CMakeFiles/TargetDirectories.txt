@@ -1,0 +1,12 @@
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/CMakeFiles/appmodules.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/CMakeFiles/edit_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/CMakeFiles/rebuild_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/safeareacontext_autolinked_build/CMakeFiles/react_codegen_safeareacontext.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/safeareacontext_autolinked_build/CMakeFiles/edit_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/safeareacontext_autolinked_build/CMakeFiles/rebuild_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/rnscreens_autolinked_build/CMakeFiles/react_codegen_rnscreens.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/rnscreens_autolinked_build/CMakeFiles/edit_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/rnscreens_autolinked_build/CMakeFiles/rebuild_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/rnsvg_autolinked_build/CMakeFiles/react_codegen_rnsvg.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/rnsvg_autolinked_build/CMakeFiles/edit_cache.dir
+/home/lunchbox/speakeasy/apps/mobile/android/app/.cxx/Debug/1y6l2y5y/x86_64/rnsvg_autolinked_build/CMakeFiles/rebuild_cache.dir

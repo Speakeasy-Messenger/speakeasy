@@ -1,0 +1,1 @@
+/home/lunchbox/speakeasy/apps/mobile/android/app/build/intermediates/cxx/Debug/1y6l2y5y/obj/x86_64

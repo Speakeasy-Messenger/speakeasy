@@ -1,0 +1,12 @@
+# Local override for the Vouchflow SDK API key. Do not commit a real key.
+#
+# Copy this file to ~/.gradle/gradle.properties (or set as env vars) so the
+# value lands in BuildConfig.VOUCHFLOW_API_KEY without going through the
+# tracked apps/mobile/android/gradle.properties.
+#
+# Sandbox keys (vsk_sandbox_write_…) come from the Vouchflow dashboard,
+# Settings → API Keys, write scope. Mobile uses write-scoped keys; the
+# server uses read-scoped (kept in apps/api/.env.local).
+
+vouchflow.environment=sandbox
+vouchflow.apiKey=vsk_sandbox_write_PASTE_KEY_HERE

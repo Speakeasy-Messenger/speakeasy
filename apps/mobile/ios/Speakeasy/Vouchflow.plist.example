@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Phase 5b iOS — copy this file to Speakeasy/Vouchflow.plist (gitignored)
+  and fill in the real API key + environment. Mirrors the Android
+  android/gradle.properties.example pattern.
+
+  After copying, add Vouchflow.plist to the Xcode target's "Copy Bundle
+  Resources" build phase (Xcode → Speakeasy target → Build Phases →
+  Copy Bundle Resources → +) so the runtime can read it.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>VouchflowApiKey</key>
+  <string>vsk_sandbox_replace_with_real_key</string>
+  <key>VouchflowEnvironment</key>
+  <string>sandbox</string>
+</dict>
+</plist>
