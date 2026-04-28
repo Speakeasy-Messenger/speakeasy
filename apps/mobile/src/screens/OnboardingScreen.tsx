@@ -76,14 +76,17 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       useIdentity.getState().setUserId(user_id);
       onEnrolled(user_id);
     } catch (err: unknown) {
+      // Surface the actual error reason on screen — debugging on a real
+      // device without USB/adb is otherwise opaque.
       if (err instanceof VouchflowClientError) {
-        setError(messageForVouchflowError(err.reason));
+        setError(`${messageForVouchflowError(err.reason)} [${err.reason}]`);
       } else if (err instanceof SignalClientError) {
-        setError('Could not generate identity keys. Please try again.');
+        setError(`Identity key gen failed: ${err.reason}${err.message && err.message !== err.reason ? ` — ${err.message}` : ''}`);
       } else if (err instanceof ApiError) {
         setError(`Enrollment failed (${err.status}${err.code ? ` ${err.code}` : ''}).`);
       } else {
-        setError('Could not reach the server.');
+        const e = err as { message?: string; name?: string };
+        setError(`Unexpected: ${e.name ?? 'Error'} — ${e.message ?? String(err)}`);
       }
     } finally {
       setBusy(false);
