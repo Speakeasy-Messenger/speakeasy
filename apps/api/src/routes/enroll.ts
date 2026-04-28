@@ -1,5 +1,8 @@
 import { FastifyInstance, preHandlerHookHandler } from 'fastify';
-import { generateUserId } from '@speakeasy/shared';
+// Server-only subpath: `generateUserId` lives outside the package root
+// because it pulls in `node:crypto` + the wordlists, which crash the
+// React Native Metro bundler. See packages/shared/src/index.ts.
+import { generateUserId } from '@speakeasy/shared/ids/generate';
 import { VouchflowValidationError } from '@speakeasy/vouchflow';
 import type { PreKeyBundleInput, UserRepo } from '../db/users.js';
 

@@ -92,6 +92,57 @@ export class ApiClient {
   }
 
   /**
+   * Create a new group. Caller becomes the first member; add others via
+   * `addGroupMember`. Returns the assigned `group_id`.
+   */
+  async createGroup(deviceToken: string): Promise<{ group_id: string }> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/groups`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deviceToken}`,
+      },
+    });
+    if (res.status === 201) return (await res.json()) as { group_id: string };
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
+   * Add a member to an existing group. Caller must already be a member.
+   * Returns the post-add member count.
+   */
+  async addGroupMember(
+    deviceToken: string,
+    groupId: string,
+    userId: string,
+  ): Promise<{ members: number }> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/groups/${groupId}/members`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify({ user_id: userId }),
+    });
+    if (res.status === 201) return (await res.json()) as { members: number };
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
    * Fetch a peer's PreKey bundle so we can establish a Signal session.
    * Server consumes one OTPK on the way out; the response includes a
    * `low_water` flag the *peer's* device acts on next time it auths.

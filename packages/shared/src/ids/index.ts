@@ -1,21 +1,18 @@
-import { randomInt } from 'node:crypto';
 import { ulid } from 'ulid';
-import { ADJECTIVES, NOUNS } from '../wordlists/index.js';
+
+/**
+ * Mobile-safe ID validators + non-wordlist generators. This module is
+ * deliberately Node-free: no `node:crypto`, no `node:fs`, no wordlist
+ * imports — Metro bundles it cleanly into the React Native app.
+ *
+ * Wordlist-dependent generation (`generateUserId`, `ID_SPACE_SIZE`)
+ * lives in `./generate.ts` (server-only subpath); the server imports
+ * via `@speakeasy/shared/ids/generate`.
+ */
 
 export const ID_REGEX = /^[a-z]+-[a-z]+-[a-z]+$/;
 export const GROUP_ID_REGEX = /^grp-[0-9A-HJKMNP-TV-Z]{26}$/;
 export const COMMUNITY_ID_REGEX = /^com-[0-9A-HJKMNP-TV-Z]{26}$/;
-
-/**
- * Generate a candidate user ID in `adjective-adjective-noun` form.
- * Server must verify uniqueness against the users table before issuing.
- */
-export function generateUserId(): string {
-  const adj1 = ADJECTIVES[randomInt(ADJECTIVES.length)]!;
-  const adj2 = ADJECTIVES[randomInt(ADJECTIVES.length)]!;
-  const noun = NOUNS[randomInt(NOUNS.length)]!;
-  return `${adj1}-${adj2}-${noun}`;
-}
 
 export function isUserId(value: string): boolean {
   return ID_REGEX.test(value);
@@ -40,5 +37,3 @@ export function isCommunityId(value: string): boolean {
 export function newMessageId(): string {
   return ulid();
 }
-
-export const ID_SPACE_SIZE = ADJECTIVES.length * ADJECTIVES.length * NOUNS.length;

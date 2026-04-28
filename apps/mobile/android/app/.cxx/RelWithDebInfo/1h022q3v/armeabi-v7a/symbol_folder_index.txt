@@ -1,0 +1,1 @@
+/home/lunchbox/speakeasy/apps/mobile/android/app/build/intermediates/cxx/RelWithDebInfo/1h022q3v/obj/armeabi-v7a

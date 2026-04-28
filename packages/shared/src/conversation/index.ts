@@ -1,5 +1,9 @@
-import { createHash } from 'node:crypto';
+import { sha256 } from 'js-sha256';
 import { isCommunityId, isGroupId, isUserId } from '../ids/index.js';
+
+// Pure-JS sha256 (not `node:crypto`) so this module bundles cleanly into
+// the React Native runtime. Output is identical to Node's createHash;
+// server + mobile compute the same conversation ids.
 
 /**
  * Deterministic conversation identifier per spec §8 (the `messages.conversation`
@@ -19,7 +23,7 @@ export function conversationIdForDirect(a: string, b: string): string {
     throw new Error('conversationIdForDirect: both ids must be user ids');
   }
   const [first, second] = a < b ? [a, b] : [b, a];
-  const hash = createHash('sha256').update(`${first}:${second}`).digest('hex');
+  const hash = sha256(`${first}:${second}`);
   return `dm-${hash.slice(0, 16)}`;
 }
 

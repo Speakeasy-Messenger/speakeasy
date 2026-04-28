@@ -41,8 +41,13 @@ react {
     // extraPackagerArgs = []
 
     /* Hermes Commands */
-    //   The hermes compiler command to run. By default it is 'hermesc'
-    // hermesCommand = "$rootDir/my-custom-hermesc/bin/hermesc"
+    //   The hermes compiler command to run. By default it is 'hermesc'.
+    //   Monorepo override: RN's gradle plugin auto-detects hermesc using
+    //   `${reactNativeDir}/sdks/hermesc/${osBin}/hermesc` BUT the auto-
+    //   detection logic uses Gradle's `OperatingSystem.current()`, which
+    //   on a few Linux distros mis-detects and leaves `%OS-BIN%`
+    //   unsubstituted. Hardcode the linux64 path to avoid the failure.
+    hermesCommand = file("${rootDir}/../../../node_modules/react-native/sdks/hermesc/linux64-bin/hermesc").absolutePath
     //
     //   The list of flags to pass to the Hermes compiler. By default is "-O", "-output-source-map"
     // hermesFlags = ["-O", "-output-source-map"]

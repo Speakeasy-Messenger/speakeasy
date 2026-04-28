@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   ID_REGEX,
-  ID_SPACE_SIZE,
-  generateUserId,
   isCommunityId,
   isGroupId,
   isUserId,
@@ -10,6 +8,7 @@ import {
   newGroupId,
   newMessageId,
 } from './index.js';
+import { ID_SPACE_SIZE, generateUserId } from './generate.js';
 import { ADJECTIVES, NOUNS } from '../wordlists/index.js';
 
 describe('wordlists', () => {
