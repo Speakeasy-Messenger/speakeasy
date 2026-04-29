@@ -21,6 +21,13 @@ export async function registerEnrollRoutes(
     generateId?: () => string;
     /** Optional Phase-4 rate-limit preHandler. Subject defaults to req.ip. */
     enrollRateLimit?: preHandlerHookHandler;
+    /**
+     * Sandbox-only hook: called after a successful mint with the
+     * (deviceToken, userId) pair. Lets the in-memory dev validator
+     * remember the binding for subsequent verifies. No-op in production
+     * — real Vouchflow tracks this binding server-side.
+     */
+    onUserMinted?: (deviceToken: string, userId: string) => void;
   },
 ): Promise<void> {
   const { repo, generateId = generateUserId } = opts;
@@ -92,6 +99,10 @@ export async function registerEnrollRoutes(
           bundle: preKeyBundle,
         });
         if (created) {
+          // Sandbox-only: tell the dev validator about the new binding
+          // so subsequent verifies (login, WS auth) recognize the user.
+          // No-op in production where real Vouchflow tracks this.
+          opts.onUserMinted?.(token, userId);
           return reply.code(201).send({ user_id: userId });
         }
       }
