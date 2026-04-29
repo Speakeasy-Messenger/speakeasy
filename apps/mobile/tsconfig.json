@@ -14,5 +14,11 @@
     "resolveJsonModule": true
   },
   "include": ["src/**/*", "App.tsx", "index.js"],
-  "exclude": ["node_modules", "dist", "ios", "android"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "ios",
+    "android",
+    "src/integration"
+  ]
 }

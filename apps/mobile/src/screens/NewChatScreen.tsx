@@ -11,6 +11,8 @@ import {
 } from 'react-native';
 import { isUserId } from '@speakeasy/shared';
 import { useIdentity } from '../store/identity.js';
+import { api } from '../services.js';
+import { ApiError } from '../api/client.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 
 interface Props {
@@ -32,6 +34,7 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
   const myUserId = useIdentity((s) => s.userId);
   const [input, setInput] = useState('');
   const [error, setError] = useState<string | undefined>();
+  const [busy, setBusy] = useState(false);
 
   function normalize(s: string): string {
     return s.trim().toLowerCase().replace(/\s+/g, '-');
@@ -52,7 +55,7 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
     return parts.join('-');
   }
 
-  function handleStart() {
+  async function handleStart() {
     const candidate = normalize(input);
     if (!candidate) {
       setError('Paste a peer ID to start.');
@@ -62,7 +65,39 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
       setError('That doesn’t look like a valid Speakeasy ID. Format: word-word-word.');
       return;
     }
-    onStart(candidate);
+    // Self-DM is allowed; skip the precheck — the server already knows
+    // we exist (we're enrolled).
+    if (candidate === myUserId) {
+      onStart(candidate);
+      return;
+    }
+    // Precheck: ask the server whether the peer is enrolled. We do this
+    // via the existing `POST /v1/prekeys/bundle` route — a 404 here is
+    // exactly "no such user", and the bundle round-trip is one we'd
+    // make on first send anyway, so it's not wasted work. Surfacing the
+    // failure here means the user sees "user not found" before opening
+    // a chat, instead of an opaque `[send failed]` halfway through.
+    setBusy(true);
+    setError(undefined);
+    try {
+      const deviceToken = useIdentity.getState().deviceToken;
+      if (!deviceToken) {
+        setError('Sign in again — device token missing.');
+        return;
+      }
+      await api.fetchPreKeyBundle(deviceToken, candidate);
+      onStart(candidate);
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 404) {
+        setError('No such user. Speakeasy IDs are case-sensitive — double-check it.');
+      } else if (err instanceof ApiError) {
+        setError(`Couldn’t reach that user (${err.code ?? err.status}).`);
+      } else {
+        setError('Network error — try again.');
+      }
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
@@ -105,8 +140,12 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
         </View>
 
         <View style={styles.bottom}>
-          <Pressable onPress={handleStart} style={styles.startBtn}>
-            <Text style={styles.startBtnText}>Start chat</Text>
+          <Pressable
+            onPress={handleStart}
+            style={[styles.startBtn, busy && styles.startBtnDisabled]}
+            disabled={busy}
+          >
+            <Text style={styles.startBtnText}>{busy ? 'Checking…' : 'Start chat'}</Text>
           </Pressable>
         </View>
       </KeyboardAvoidingView>
@@ -146,6 +185,7 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     alignItems: 'center',
   },
+  startBtnDisabled: { opacity: 0.6 },
   startBtnText: {
     color: colors.cream,
     fontFamily: fonts.inter500,

@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StatusBar } from 'react-native';
+import { StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
@@ -14,6 +14,16 @@ import { colors } from './src/theme/index.js';
 
 export default function App() {
   const userId = useIdentity((s) => s.userId);
+  const hydrated = useIdentity((s) => s.hydrated);
+
+  // Pull persisted identity off disk on first mount. Renders a blank
+  // screen until done so the navigator doesn't briefly show Onboarding
+  // (no userId yet) and then snap to Conversations (userId arrived).
+  useEffect(() => {
+    if (!hydrated) {
+      void useIdentity.getState().hydrate();
+    }
+  }, [hydrated]);
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.
   // Token comes from the identity store (set at signup); we only fall
@@ -85,7 +95,11 @@ export default function App() {
         barStyle="dark-content"
         backgroundColor={colors.cream}
       />
-      <RootNavigator />
+      {hydrated ? (
+        <RootNavigator />
+      ) : (
+        <View style={{ flex: 1, backgroundColor: colors.cream }} />
+      )}
     </SafeAreaProvider>
   );
 }
