@@ -18,7 +18,9 @@ import { isCommunityId, isGroupId, isUserId } from '../ids/index.js';
  */
 
 export function conversationIdForDirect(a: string, b: string): string {
-  if (a === b) throw new Error('conversationIdForDirect: cannot DM yourself');
+  // Self-DM is allowed: it's a "Notes to self" / quick-test conversation.
+  // The sorted-pair sha256 collapses to sha256("self:self") for a single
+  // user id, which is fine — deterministic and unique to that user.
   if (!isUserId(a) || !isUserId(b)) {
     throw new Error('conversationIdForDirect: both ids must be user ids');
   }

@@ -19,6 +19,7 @@ import { api, getWsClient, signalProtocol, vouchflow } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { ensureSessionWithPeer } from '../crypto/session.js';
+import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 
 interface Props {
@@ -74,45 +75,10 @@ export function ChatScreen({ peerId, onBack }: Props) {
     openDirect(myUserId, peerId);
   }, [myUserId, peerId, openDirect]);
 
-  // Wire incoming messages from the WS client into the conversation store
-  // and auto-ack each one. Phase 4 will tighten this with offline buffering.
-  useEffect(() => {
-    const ws = getWsClient(async () => (await vouchflow.verify({ context: 'login' })).deviceToken);
-    const off = registerOnMessage(ws, (frame) => {
-      if (frame.msg_type !== 'direct') return;
-      if (frame.from !== peerId) return;
-      // Decrypt off the React render path — async kick-off, push into the
-      // store when complete. A failure surfaces as a red [decrypt failed]
-      // bubble so the user sees the gap instead of silently dropping.
-      void (async () => {
-        let bodyText: string;
-        try {
-          const ciphertext = b64ToBytes(frame.ciphertext);
-          const plaintext = await signalProtocol.decrypt(peerId, ciphertext);
-          bodyText = bytesToUtf8(plaintext);
-        } catch (err) {
-          bodyText =
-            err instanceof SignalClientError && err.reason === 'untrusted_identity'
-              ? '[identity changed — verify with peer]'
-              : '[decrypt failed]';
-        }
-        add(conversationId, {
-          id: frame.message_id,
-          from: peerId,
-          text: bodyText,
-          kind: 'direct',
-          sentAt: Date.now(),
-          stage: 'sent',
-        });
-        try {
-          ws.send({ type: 'ack', message_id: frame.message_id });
-        } catch {
-          /* ignore — sender may not be authed yet */
-        }
-      })();
-    });
-    return off;
-  }, [peerId, conversationId, add]);
+  // Inbound direct frames now flow through the App-level message router
+  // (see App.tsx) which adds them to the conversations store and acks
+  // for us. ChatScreen is a read-only view over `messages` for this
+  // conversation; nothing here subscribes to the WS client directly.
 
   // Local TTL engine: schedule each message through its dissolve stages.
   // The actual bubble component performs the visual transitions; this
@@ -163,15 +129,40 @@ export function ChatScreen({ peerId, onBack }: Props) {
     });
     void (async () => {
       try {
-        const verifyResult = await vouchflow.verify({ context: 'login' });
-        await ensureSessionWithPeer({
-          api,
-          signalProtocol,
-          deviceToken: verifyResult.deviceToken,
-          peerUserId: peerId,
-        });
-        const ciphertext = await signalProtocol.encrypt(peerId, utf8ToBytes(trimmed));
-        const ws = getWsClient(async () => verifyResult.deviceToken);
+        // Reuse the deviceToken minted at signup. Falling back to verify()
+        // here only fires if the identity store was wiped without a
+        // sign-out (shouldn't happen in normal operation).
+        let deviceToken = useIdentity.getState().deviceToken;
+        if (!deviceToken) {
+          const r = await vouchflow.verify({ context: 'login' });
+          useIdentity.getState().setDeviceToken(r.deviceToken);
+          deviceToken = r.deviceToken;
+        }
+        // Self-DM bypasses libsignal — self-paired Signal sessions are
+        // implementation-dependent on the native bridge and not worth
+        // the alpha-debug cost for a "Notes to self" / round-trip test
+        // feature. The plaintext bytes go on the wire directly; the
+        // server is opaque to ciphertext anyway, and the message router
+        // on the receive side recognises self-from and skips decrypt.
+        const isSelf = peerId === myUserId;
+        let ciphertext: Uint8Array;
+        if (isSelf) {
+          ciphertext = utf8ToBytes(trimmed);
+        } else {
+          await ensureSessionWithPeer({
+            api,
+            signalProtocol,
+            deviceToken,
+            peerUserId: peerId,
+          });
+          ciphertext = await signalProtocol.encrypt(peerId, utf8ToBytes(trimmed));
+        }
+        const ws = getWsClient(async () => deviceToken);
+        // ChatScreen can mount before the WS finishes its auth handshake
+        // (App.tsx kicked off connect, but it's network-bound). Without
+        // this wait, ws.send throws "cannot send in state=authenticating"
+        // and the user sees an opaque [send failed].
+        await ws.waitForAuthed();
         ws.send({
           type: 'message',
           to: peerId,
@@ -182,13 +173,15 @@ export function ChatScreen({ peerId, onBack }: Props) {
         // Outbound queue isn't here yet — surface failure on the bubble
         // so the user knows to retry. Same fail-mode for ApiError (peer
         // bundle fetch failed) and SignalClientError (untrusted identity,
-        // encryption failure).
+        // encryption failure). Generic Error gets its message rendered
+        // verbatim so we can diagnose without a logcat.
+        const e = err as { name?: string; message?: string };
         const reason =
           err instanceof SignalClientError
             ? `[encrypt failed: ${err.reason}]`
             : err instanceof ApiError
               ? `[send failed: ${err.code ?? err.status}]`
-              : '[send failed]';
+              : `[send failed: ${e.name ?? 'Error'} — ${e.message ?? String(err)}]`;
         add(conversationId, {
           id: newMessageId(),
           from: 'me',
@@ -269,42 +262,9 @@ export function ChatScreen({ peerId, onBack }: Props) {
 
 // -- helpers ----------------------------------------------------------------
 
-/**
- * Subscribe to incoming `message` frames on the WS client. Returns an
- * unsubscribe function. Backs onto the client's `subscribe()` API so
- * multiple consumers (chat, prekey replenishment, future settings)
- * coexist cleanly.
- */
-function registerOnMessage(
-  ws: ReturnType<typeof getWsClient>,
-  cb: (frame: {
-    type: 'message';
-    from: string;
-    ciphertext: string;
-    message_id: string;
-    msg_type: 'direct' | 'group' | 'community';
-  }) => void,
-): () => void {
-  return ws.subscribe((m) => {
-    if ((m as { type?: string }).type === 'message') {
-      cb(m as Parameters<typeof cb>[0]);
-    }
-  });
-}
-
-// Buffer is provided by RN's polyfill in Metro bundles + Node natively.
-function utf8ToBytes(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'utf8'));
-}
-function bytesToUtf8(b: Uint8Array): string {
-  return Buffer.from(b).toString('utf8');
-}
-function b64ToBytes(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'base64'));
-}
-function bytesToB64(b: Uint8Array): string {
-  return Buffer.from(b).toString('base64');
-}
+// utf8ToBytes / bytesToB64 imported from ../utils/bytes — they're
+// Hermes-safe (no Buffer dependency). The previous Buffer-based inline
+// helpers crashed on first send because Hermes doesn't ship Buffer.
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },

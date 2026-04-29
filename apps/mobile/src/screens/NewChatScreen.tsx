@@ -37,6 +37,21 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
     return s.trim().toLowerCase().replace(/\s+/g, '-');
   }
 
+  // Live formatter so the user can type with spaces, hyphens, or shouty
+  // caps and still end up with a `word-word-word` candidate. Lowercases,
+  // converts whitespace to a dash, drops anything that isn't [a-z-],
+  // collapses runs of dashes, and caps at three tokens.
+  function formatInput(raw: string): string {
+    const cleaned = raw
+      .toLowerCase()
+      .replace(/\s+/g, '-')
+      .replace(/[^a-z-]/g, '')
+      .replace(/-{2,}/g, '-')
+      .replace(/^-/, '');
+    const parts = cleaned.split('-').slice(0, 3);
+    return parts.join('-');
+  }
+
   function handleStart() {
     const candidate = normalize(input);
     if (!candidate) {
@@ -45,10 +60,6 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
     }
     if (!isUserId(candidate)) {
       setError('That doesn’t look like a valid Speakeasy ID. Format: word-word-word.');
-      return;
-    }
-    if (candidate === myUserId) {
-      setError('You can’t message yourself. Yet.');
       return;
     }
     onStart(candidate);
@@ -79,7 +90,7 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
             style={styles.input}
             value={input}
             onChangeText={(s) => {
-              setInput(s);
+              setInput(formatInput(s));
               if (error) setError(undefined);
             }}
             placeholder="silent-golden-hawk"

@@ -156,4 +156,50 @@ describe('SpeakeasyWsClient', () => {
       client.send({ type: 'message', to: 'x', ciphertext: 'AAA=', msg_type: 'direct' }),
     ).toThrow();
   });
+
+  it('waitForAuthed resolves once the handshake completes', async () => {
+    const { client } = makeClient();
+    client.connect();
+
+    let resolved = false;
+    const wait = client.waitForAuthed(5000).then(() => (resolved = true));
+
+    const sock = FakeSocket.instances[0]!;
+    sock.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    sock.message({ type: 'authed', user_id: 'me' });
+    await wait;
+    expect(resolved).toBe(true);
+  });
+
+  it('waitForAuthed resolves immediately if already authed', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const sock = FakeSocket.instances[0]!;
+    sock.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    sock.message({ type: 'authed', user_id: 'me' });
+    expect(client.getState()).toBe('authed');
+    await client.waitForAuthed(100);
+  });
+
+  it('waitForAuthed rejects if the socket transitions to closed', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const wait = client.waitForAuthed(5000);
+    client.close();
+    await expect(wait).rejects.toThrow(/closed/);
+  });
+
+  it('waitForAuthed rejects after the timeout if the handshake never completes', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const wait = client.waitForAuthed(50);
+    vi.advanceTimersByTime(60);
+    await expect(wait).rejects.toThrow(/timeout/);
+  });
 });

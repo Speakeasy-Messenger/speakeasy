@@ -73,6 +73,11 @@ export function OnboardingScreen({ onEnrolled }: Props) {
           preKeys: ownBundle.preKeys,
         },
       });
+      // Persist the deviceToken alongside the userId. Every authenticated
+      // request (WS auth, prekey fetch, send) reads it back from the
+      // identity store — no further vouchflow.verify() calls until sign out
+      // or the server invalidates the token.
+      useIdentity.getState().setDeviceToken(verifyResult.deviceToken);
       useIdentity.getState().setUserId(user_id);
       onEnrolled(user_id);
     } catch (err: unknown) {
@@ -96,7 +101,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <IconMark size={120} />
+        <IconMark size={120} animate />
         <Wordmark variant="hero" subtitle={SLOGAN_PLACEHOLDER} />
       </View>
       <View style={styles.principles}>

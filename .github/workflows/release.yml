@@ -1,0 +1,106 @@
+name: Release APK
+
+# Triggered when a tag matching `alpha-*` is pushed (e.g. `alpha-0.2.0`).
+# Builds the release APK with the real Vouchflow API key (via repo
+# secret) and uploads it as an asset on the matching GitHub release.
+#
+# Setup required (one-time):
+#   gh secret set VOUCHFLOW_WRITE_KEY --body "$VOUCHFLOW_WRITE_KEY"
+#
+# Usage:
+#   gh release create alpha-0.2.0 --prerelease --title "..." --notes "..."
+#   git push --tags
+# CI takes it from there — APK lands on the release within ~5 min.
+
+on:
+  push:
+    tags: ['alpha-*']
+
+permissions:
+  contents: write
+
+jobs:
+  release-apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.1.10909125 cmake;3.22.1'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            apps/mobile/android/.gradle
+          key: gradle-release-${{ runner.os }}-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-release-${{ runner.os }}-
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        # The gradle prebuild hook handles this too, but doing it once
+        # at the workspace level catches any package-build error before
+        # we sink ~5 min into the gradle leg.
+        run: npm run build
+
+      - name: Typecheck + test
+        run: |
+          npm run typecheck
+          npm run test
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
+            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set."
+            echo "::error::Configure it: gh secret set VOUCHFLOW_WRITE_KEY"
+            exit 1
+          fi
+          ./gradlew :app:assembleRelease --no-daemon \
+            -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
+
+      - name: Rename APK with version tag
+        id: rename
+        run: |
+          tag="${GITHUB_REF##*/}"
+          src="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          out="speakeasy-${tag}.apk"
+          cp "$src" "$out"
+          echo "apk=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF##*/}"
+          # If the release already exists (created manually with `gh release
+          # create` so the tag exists), upload to it. Otherwise create one.
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${{ steps.rename.outputs.apk }}" --clobber
+          else
+            gh release create "$tag" "${{ steps.rename.outputs.apk }}" \
+              --prerelease \
+              --title "$tag" \
+              --notes "APK built by .github/workflows/release.yml. See commits since previous tag."
+          fi

@@ -44,8 +44,13 @@ export class LocalDevValidator implements Validator {
       deviceToken,
       userId,
       confidence: 'low' as Confidence,
-      anomalyFlags: [],
       verifiedAt: new Date().toISOString(),
+      riskScore: 0,
+      anomalyFlags: [],
+      lastContext: 'login',
+      biometricUsed: false,
+      fallbackUsed: false,
+      platform: 'android',
     };
   }
 }

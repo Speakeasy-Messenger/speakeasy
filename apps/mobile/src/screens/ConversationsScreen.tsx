@@ -10,46 +10,76 @@ import {
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
+import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
 
-interface ConversationRow {
+interface DirectRow {
+  kind: 'direct';
   conversationId: string;
   peerUserId: string;
   preview: string;
-  /** Wall-clock ms of the last message, or createdAt if empty. */
   sortKey: number;
 }
+interface GroupRow {
+  kind: 'group';
+  groupId: string;
+  name: string;
+  memberCount: number;
+  preview: string;
+  sortKey: number;
+}
+type Row = DirectRow | GroupRow;
 
 interface Props {
   onOpenChat: (peerUserId: string) => void;
+  onOpenGroup: (groupId: string) => void;
   onNewChat: () => void;
+  onNewGroup: () => void;
 }
 
 /**
- * Phase 5e: real conversations list. Renders every direct conversation
- * known to the local store, sorted by most-recent activity. The "+ New
- * chat" CTA opens [NewChatScreen] which collects a peer ID.
- *
- * Group / community chats not yet listed here — Phase 5e UI follow-up
- * once group/community membership state lives client-side.
+ * Phase 5e: combined conversations list — direct chats + groups, sorted
+ * by most-recent activity. Groups render with a `#` prefix per spec §14
+ * so they're trivially distinguishable from a peer id.
  */
-export function ConversationsScreen({ onOpenChat, onNewChat }: Props) {
+export function ConversationsScreen({
+  onOpenChat,
+  onOpenGroup,
+  onNewChat,
+  onNewGroup,
+}: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
-  const byId = useConversations((s) => s.byId);
+  const conversationsById = useConversations((s) => s.byId);
+  const groupsById = useGroups((s) => s.byId);
 
-  const rows: ConversationRow[] = Object.entries(byId)
+  const directRows: DirectRow[] = Object.entries(conversationsById)
     .filter(([_, c]) => c.kind === 'direct' && !!c.peerUserId)
     .map(([conversationId, c]) => {
       const last = c.messages[c.messages.length - 1];
       return {
+        kind: 'direct' as const,
         conversationId,
         peerUserId: c.peerUserId!,
         preview: last?.text ?? '(no messages yet)',
         sortKey: last?.sentAt ?? c.createdAt,
       };
-    })
-    .sort((a, b) => b.sortKey - a.sortKey);
+    });
+
+  const groupRows: GroupRow[] = Object.entries(groupsById).map(([groupId, g]) => {
+    const conv = conversationsById[groupId];
+    const last = conv?.messages[conv.messages.length - 1];
+    return {
+      kind: 'group' as const,
+      groupId,
+      name: g.name,
+      memberCount: g.members.length,
+      preview: last?.text ?? '(no messages yet)',
+      sortKey: last?.sentAt ?? g.createdAt,
+    };
+  });
+
+  const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
 
   return (
     <SafeAreaView style={styles.root}>
@@ -61,37 +91,52 @@ export function ConversationsScreen({ onOpenChat, onNewChat }: Props) {
 
       <FlatList
         data={rows}
-        keyExtractor={(r) => r.conversationId}
+        keyExtractor={(r) => (r.kind === 'direct' ? r.conversationId : r.groupId)}
         contentContainerStyle={rows.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
           <Text style={[text.subtitle, styles.emptyText]}>No conversations yet.</Text>
         }
-        renderItem={({ item }) => (
-          <Pressable onPress={() => onOpenChat(item.peerUserId)} style={styles.row}>
-            <View style={styles.avatar}>
-              <Text style={styles.avatarText}>{initials(item.peerUserId)}</Text>
-            </View>
-            <View style={styles.rowBody}>
-              <Text style={styles.rowName} numberOfLines={1}>{item.peerUserId}</Text>
-              <Text style={styles.rowPreview} numberOfLines={1}>{item.preview}</Text>
-            </View>
-          </Pressable>
-        )}
+        renderItem={({ item }) =>
+          item.kind === 'direct' ? (
+            <Pressable onPress={() => onOpenChat(item.peerUserId)} style={styles.row}>
+              <View style={styles.avatar}>
+                <Text style={styles.avatarText}>{initials(item.peerUserId)}</Text>
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={styles.rowName} numberOfLines={1}>{item.peerUserId}</Text>
+                <Text style={styles.rowPreview} numberOfLines={1}>{item.preview}</Text>
+              </View>
+            </Pressable>
+          ) : (
+            <Pressable onPress={() => onOpenGroup(item.groupId)} style={styles.row}>
+              <View style={[styles.avatar, styles.avatarGroup]}>
+                <Text style={styles.avatarGroupText}>#</Text>
+              </View>
+              <View style={styles.rowBody}>
+                <Text style={styles.rowName} numberOfLines={1}>
+                  # {item.name}
+                </Text>
+                <Text style={styles.rowPreview} numberOfLines={1}>
+                  {item.memberCount} member{item.memberCount === 1 ? '' : 's'} · {item.preview}
+                </Text>
+              </View>
+            </Pressable>
+          )
+        }
       />
 
       <View style={styles.bottom}>
         <Pressable onPress={onNewChat} style={styles.newBtn}>
           <Text style={styles.newBtnText}>+ New chat</Text>
         </Pressable>
+        <Pressable onPress={onNewGroup} style={styles.newGroupBtn}>
+          <Text style={styles.newGroupBtnText}># New group</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
 }
 
-/**
- * Two-letter initials from a hyphenated id (e.g. silent-golden-hawk → SH).
- * First letter of the first word + first letter of the last word.
- */
 function initials(userId: string): string {
   const parts = userId.split('-').filter(Boolean);
   if (parts.length === 0) return '??';
@@ -131,6 +176,12 @@ const styles = StyleSheet.create({
     color: colors.primary,
     letterSpacing: 0.5,
   },
+  avatarGroup: { backgroundColor: colors.primary },
+  avatarGroupText: {
+    fontFamily: fonts.inter500,
+    fontSize: 22,
+    color: colors.cream,
+  },
   rowBody: { flex: 1, gap: 2 },
   rowName: {
     color: colors.ink,
@@ -153,5 +204,17 @@ const styles = StyleSheet.create({
     color: colors.cream,
     fontFamily: fonts.inter500,
     fontSize: 15,
+  },
+  newGroupBtn: {
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: colors.primary,
+  },
+  newGroupBtnText: {
+    color: colors.primary,
+    fontFamily: fonts.inter500,
+    fontSize: 14,
   },
 });

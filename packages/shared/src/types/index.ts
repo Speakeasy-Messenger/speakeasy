@@ -91,6 +91,15 @@ export type WsServerMsg =
       ciphertext: string;
       message_id: MessageId;
       msg_type: ConversationKind;
+      /**
+       * Server-computed conversation id. For `direct` it's the
+       * sha256-derived `dm-…` id; for `group`/`community` it's the
+       * group/community id directly. Lets the recipient bucket the
+       * incoming frame into the right local conversation without
+       * having to re-derive (and without leaking the group id from
+       * inside the ciphertext envelope).
+       */
+      conversation_id: string;
     }
   | { type: 'delivered'; message_id: MessageId }
   | { type: 'pong' }

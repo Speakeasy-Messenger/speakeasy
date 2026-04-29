@@ -8,7 +8,9 @@ import {
 import { LocalDevValidator } from './auth/local-dev-validator.js';
 import { vouchflowPlugin } from './auth/vouchflow.js';
 import { DrizzleUserRepo } from './db/users.drizzle.js';
+import { InMemoryUserRepo } from './db/users.memory.js';
 import type { UserRepo } from './db/users.js';
+import { InMemoryPreKeyRepo } from './db/prekeys.memory.js';
 import { registerEnrollRoutes } from './routes/enroll.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerPreKeyRoutes } from './routes/prekeys.js';
@@ -136,7 +138,13 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     opts.userNotifier ??
     (connections ? defaultUserNotifier(connections, instanceId) : new NoopUserNotifier());
 
-  const repo = opts.userRepo ?? new DrizzleUserRepo();
+  // UserRepo: Drizzle by default, but fall back to InMemory when there's
+  // no DATABASE_URL (sandbox / dev). The other repos (messages, groups,
+  // communities, devices, prekeys) already default to InMemory and don't
+  // require Postgres; the user repo was the lone holdout.
+  const repo =
+    opts.userRepo ??
+    (process.env.DATABASE_URL ? new DrizzleUserRepo() : new InMemoryUserRepo());
   // Sandbox / dev mode hook: the LocalDevValidator needs the
   // (deviceToken, userId) pair after a fresh mint so subsequent verifies
   // (login, WS auth) recognize the user. Real VouchflowValidator ignores
@@ -157,9 +165,16 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     onUserMinted,
   });
   await registerUserRoutes(app, { repo });
-  if (opts.preKeyRepo) {
+  // Default prekey repo: when we're already using the in-memory user repo
+  // (no DATABASE_URL), wire the in-memory prekey repo against the same
+  // user store so prekey bundle fetch / replenish work for the alpha
+  // sandbox. Production (Drizzle) still requires an explicit opts.preKeyRepo.
+  const preKeyRepo =
+    opts.preKeyRepo ??
+    (repo instanceof InMemoryUserRepo ? new InMemoryPreKeyRepo(repo) : undefined);
+  if (preKeyRepo) {
     await registerPreKeyRoutes(app, {
-      repo: opts.preKeyRepo,
+      repo: preKeyRepo,
       limiter,
       notifier: userNotifier,
     });

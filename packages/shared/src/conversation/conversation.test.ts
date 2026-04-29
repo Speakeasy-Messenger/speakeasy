@@ -25,8 +25,15 @@ describe('conversationIdForDirect', () => {
     expect(a).not.toBe(b);
   });
 
-  it('rejects self-DM', () => {
-    expect(() => conversationIdForDirect('one-two-three', 'one-two-three')).toThrow();
+  it('allows self-DM (Notes to self)', () => {
+    // Sender = recipient is a real use case (a "saved messages" thread
+    // / a way to test the WS round-trip without a second device). The
+    // sorted-pair sha256 collapses to sha256("self:self") which is
+    // deterministic + unique to that user.
+    const id = conversationIdForDirect('one-two-three', 'one-two-three');
+    expect(id).toMatch(/^dm-[0-9a-f]{16}$/);
+    // Idempotent on second call.
+    expect(conversationIdForDirect('one-two-three', 'one-two-three')).toBe(id);
   });
 
   it('rejects malformed ids', () => {

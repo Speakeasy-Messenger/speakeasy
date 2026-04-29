@@ -8,7 +8,9 @@ import { OnboardingScreen } from '../screens/OnboardingScreen.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
 import { ChatScreen } from '../screens/ChatScreen.js';
+import { GroupChatScreen } from '../screens/GroupChatScreen.js';
 import { NewChatScreen } from '../screens/NewChatScreen.js';
+import { NewGroupScreen } from '../screens/NewGroupScreen.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 
@@ -17,7 +19,9 @@ export type RootStack = {
   IdReveal: { userId: string };
   Conversations: undefined;
   Chat: { peerId: string };
+  GroupChat: { groupId: string };
   NewChat: undefined;
+  NewGroup: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -53,7 +57,9 @@ export function RootNavigator() {
               {({ navigation }: NativeStackScreenProps<RootStack, 'Conversations'>) => (
                 <ConversationsScreen
                   onOpenChat={(peerId) => navigation.navigate('Chat', { peerId })}
+                  onOpenGroup={(groupId) => navigation.navigate('GroupChat', { groupId })}
                   onNewChat={() => navigation.navigate('NewChat')}
+                  onNewGroup={() => navigation.navigate('NewGroup')}
                 />
               )}
             </Stack.Screen>
@@ -66,10 +72,19 @@ export function RootNavigator() {
                   onCancel={() => navigation.goBack()}
                   onStart={(peerId) => {
                     openDirect(userId, peerId);
-                    // Replace the modal so back from chat lands on the list,
-                    // not on the new-chat form.
                     navigation.replace('Chat', { peerId });
                   }}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen
+              name="NewGroup"
+              options={{ presentation: 'modal' }}
+            >
+              {({ navigation }: NativeStackScreenProps<RootStack, 'NewGroup'>) => (
+                <NewGroupScreen
+                  onCancel={() => navigation.goBack()}
+                  onCreated={(groupId) => navigation.replace('GroupChat', { groupId })}
                 />
               )}
             </Stack.Screen>
@@ -77,6 +92,14 @@ export function RootNavigator() {
               {({ navigation, route }: NativeStackScreenProps<RootStack, 'Chat'>) => (
                 <ChatScreen
                   peerId={route.params.peerId}
+                  onBack={() => navigation.goBack()}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="GroupChat">
+              {({ navigation, route }: NativeStackScreenProps<RootStack, 'GroupChat'>) => (
+                <GroupChatScreen
+                  groupId={route.params.groupId}
                   onBack={() => navigation.goBack()}
                 />
               )}

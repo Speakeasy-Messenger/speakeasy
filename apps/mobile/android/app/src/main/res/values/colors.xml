@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Adaptive icon background — cream from spec §14 palette. -->
+    <color name="ic_launcher_background">#F7F6F3</color>
+</resources>

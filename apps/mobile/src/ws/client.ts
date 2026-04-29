@@ -44,6 +44,7 @@ export class SpeakeasyWsClient {
   private intentionalClose = false;
   private readonly Ws: typeof WebSocket;
   private readonly subscribers = new Set<Subscriber>();
+  private readonly stateSubscribers = new Set<(state: WsState) => void>();
 
   constructor(private readonly opts: SpeakeasyWsClientOptions) {
     const Ws = opts.webSocketImpl ?? (globalThis as unknown as { WebSocket?: typeof WebSocket }).WebSocket;
@@ -77,6 +78,51 @@ export class SpeakeasyWsClient {
       throw new Error(`cannot send in state=${this.state}`);
     }
     this.socket.send(JSON.stringify(msg));
+  }
+
+  /**
+   * Resolve when the socket reaches `authed`. Useful when the UI lets a
+   * user attempt a send right after opening a chat screen — the socket
+   * may still be `connecting` / `authenticating` from the App-level
+   * mount. Without this, send() throws a generic Error and the UX
+   * surfaces an opaque "[send failed]". With this, callers can await
+   * the handshake (with a timeout) and surface a clearer "couldn't
+   * reach the server" if it never arrives.
+   *
+   * Rejects on `closed` — the caller must call `connect()` first.
+   * Rejects after `timeoutMs` (default 10s) if still not authed.
+   */
+  waitForAuthed(timeoutMs = 10_000): Promise<void> {
+    if (this.state === 'authed') return Promise.resolve();
+    if (this.state === 'closed') {
+      return Promise.reject(new Error('ws is closed; call connect() first'));
+    }
+    return new Promise((resolve, reject) => {
+      const t = setTimeout(() => {
+        unsubscribe();
+        reject(new Error(`ws.waitForAuthed timeout after ${timeoutMs}ms (state=${this.state})`));
+      }, timeoutMs);
+      const unsubscribe = this.onState((state) => {
+        if (state === 'authed') {
+          clearTimeout(t);
+          unsubscribe();
+          resolve();
+        } else if (state === 'closed') {
+          clearTimeout(t);
+          unsubscribe();
+          reject(new Error('ws transitioned to closed'));
+        }
+      });
+    });
+  }
+
+  /**
+   * Subscribe to state transitions. Returns an unsubscribe function.
+   * Used by `waitForAuthed`.
+   */
+  private onState(cb: (state: WsState) => void): () => void {
+    this.stateSubscribers.add(cb);
+    return () => this.stateSubscribers.delete(cb);
   }
 
   private openSocket(): void {
@@ -176,5 +222,12 @@ export class SpeakeasyWsClient {
     if (state === this.state) return;
     this.state = state;
     this.opts.onState?.(state);
+    for (const sub of this.stateSubscribers) {
+      try {
+        sub(state);
+      } catch {
+        /* a misbehaving listener shouldn't break others */
+      }
+    }
   }
 }

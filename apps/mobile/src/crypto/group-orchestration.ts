@@ -2,6 +2,7 @@ import type { ApiClient } from '../api/client.js';
 import type { GroupMessagingModule, SignalProtocolModule } from '@speakeasy/crypto';
 import type { SpeakeasyWsClient } from '../ws/client.js';
 import { ensureSessionWithPeer } from './session.js';
+import { b64ToBytes, bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 
 /**
  * Send-side orchestration for group messaging (Phase 5b carry-over).
@@ -69,15 +70,8 @@ export interface GroupOrchestrator {
   reset(): void;
 }
 
-function utf8ToBytes(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'utf8'));
-}
-function bytesToB64(b: Uint8Array): string {
-  return Buffer.from(b).toString('base64');
-}
-function b64ToBytes(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'base64'));
-}
+// utf8ToBytes / bytesToB64 / b64ToBytes imported above from ../utils/bytes.
+// They're Hermes-safe (no Buffer dependency).
 
 export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchestrator {
   /** (groupId, recipientUserId) → boolean (sent SKDM in this process). */

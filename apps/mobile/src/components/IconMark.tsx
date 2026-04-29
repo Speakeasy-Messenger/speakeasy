@@ -1,6 +1,5 @@
 import React from 'react';
-import { View } from 'react-native';
-import Svg, { Circle, Line } from 'react-native-svg';
+import { Image, View } from 'react-native';
 import { colors } from '../theme/index.js';
 
 export interface IconMarkProps {
@@ -8,74 +7,47 @@ export interface IconMarkProps {
   size?: number;
   /** Wrap in a cream rounded shell (app-icon style). Default false. */
   shell?: boolean;
+  /**
+   * Reserved for backwards compatibility — the previous SVG-based mark
+   * supported a continuous "dissolve" loop. The new image-based mark
+   * doesn't (yet); the prop is accepted but ignored so callers don't
+   * have to be touched. Re-instate when we have a sprite sheet or
+   * Lottie / Reanimated path that matches the static asset's fidelity.
+   */
+  animate?: boolean;
 }
 
 /**
- * The Speakeasy icon mark — spec §14 (April 2026):
+ * The Speakeasy icon mark — spec §14.
  *
- *   solid purple disc on the left + parallel horizontal trails fading right.
+ * Rendered as the canonical PNG asset shipped at `assets/logo-mark.png`,
+ * cropped from the brand sheet master with the dark navy background
+ * removed (transparent). Same asset feeds the Android launcher icon
+ * generation pipeline (see /tmp/build-icon-svg.mjs and the mipmap-*
+ * directories).
  *
- * Reads as a signal in the act of dispersing — the visual core of
- * "this won't be here long." Sibling of the Vouchflow mark (two geometric
- * squares = device verification): disc + trail = signal that fades.
- *
- *   - Disc:   fill primary, ~28% of canvas height
- *   - Trails: 6 parallel horizontals, length & opacity decreasing along
- *     primary → soft → 0
+ * The image's intrinsic aspect ratio is ~0.96:1 (slightly portrait —
+ * tall bubble, streaks extend right). The component preserves that ratio
+ * while rendering at the requested width.
  */
+const LOGO = require('../../assets/logo-mark.png');
+const LOGO_ASPECT_RATIO = 1024 / 1067; // matches the master PNG's dimensions.
+
 export function IconMark({ size = 64, shell = false }: IconMarkProps) {
-  // The mark sits in a wider canvas than tall to accommodate the trails.
-  const w = size;
-  const h = size * 0.5;
-  const padX = size * 0.04;
+  const width = size;
+  const height = Math.round(size / LOGO_ASPECT_RATIO);
 
-  const discR = h * 0.34;
-  const discCx = padX + discR;
-  const discCy = h / 2;
-
-  // Trails — start just right of the disc and extend to the right edge.
-  const trailStartX = discCx + discR;
-  const trailEndX = w - padX;
-  const trailSpanX = trailEndX - trailStartX;
-
-  const trailCount = 6;
-  const trails = Array.from({ length: trailCount }, (_, i) => {
-    const t = i / (trailCount - 1); // 0 → 1
-    // Length shrinks toward the tail.
-    const len = trailSpanX * (1 - t * 0.6);
-    // Vertically distributed across the disc's height; subtle vertical fan.
-    const yOffset = (i - (trailCount - 1) / 2) * (discR * 0.55);
-    const x1 = trailStartX + 2;
-    const x2 = trailStartX + len;
-    const y = discCy + yOffset;
-    // Opacity fades along primary → soft → 0.
-    const opacity = 1 - t * 0.85;
-    // Stroke transitions from primary toward soft at the tail.
-    const stroke = t < 0.5 ? colors.primary : colors.soft;
-    const strokeWidth = Math.max(1.2, h / 28) * (1 - t * 0.4);
-    return { x1, x2, y, opacity, stroke, strokeWidth, key: i };
-  });
-
-  const svg = (
-    <Svg width={w} height={h} viewBox={`0 0 ${w} ${h}`}>
-      <Circle cx={discCx} cy={discCy} r={discR} fill={colors.primary} />
-      {trails.map((t) => (
-        <Line
-          key={t.key}
-          x1={t.x1}
-          y1={t.y}
-          x2={t.x2}
-          y2={t.y}
-          stroke={t.stroke}
-          strokeOpacity={t.opacity}
-          strokeWidth={t.strokeWidth}
-          strokeLinecap="round"
-        />
-      ))}
-    </Svg>
+  const image = (
+    <Image
+      source={LOGO}
+      style={{ width, height }}
+      resizeMode="contain"
+      accessible
+      accessibilityLabel="Speakeasy"
+    />
   );
 
-  if (!shell) return svg;
+  if (!shell) return image;
   return (
     <View
       style={{
@@ -87,7 +59,11 @@ export function IconMark({ size = 64, shell = false }: IconMarkProps) {
         justifyContent: 'center',
       }}
     >
-      {svg}
+      <Image
+        source={LOGO}
+        style={{ width: size * 0.78, height: size * 0.78 }}
+        resizeMode="contain"
+      />
     </View>
   );
 }

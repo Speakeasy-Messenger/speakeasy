@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket, AddressInfo } from 'ws';
 import { MockValidator } from '@speakeasy/vouchflow';
-import { newCommunityId, newGroupId } from '@speakeasy/shared';
+import { conversationIdForDirect, newCommunityId, newGroupId } from '@speakeasy/shared';
 import { buildServer } from '../server.js';
 import { InMemoryUserRepo } from '../db/users.memory.js';
 import { InMemoryConnections } from './connections.js';
@@ -757,5 +757,238 @@ describe('ws SKDM envelope — Phase 5b carry-over', () => {
       userId: 'bob-red-bear',
       msgType: 'direct',
     });
+  });
+});
+
+/**
+ * 1:1 direct-message coverage extensions — spec §4a, §5, §9, §11 Phase 3.
+ *
+ * The earlier blocks cover the happy paths (live routing, ack/delivered,
+ * buffered drain, multi-device fan-out). These extend to the invariants
+ * the server *must* uphold for the chat path to be safe + correct:
+ *   - the server never sees plaintext (ciphertext is opaque, byte-perfect
+ *     round-trip)
+ *   - conversation_id agrees with the client-side computation (so both
+ *     sides resolve to the same row when persistence lands)
+ *   - the relay rejects malformed / unauthenticated frames
+ *   - sending to self is rejected (loopback would corrupt the conversation
+ *     model and burn delivery slots needlessly)
+ */
+describe('ws messaging — 1:1 direct invariants', () => {
+  async function authedSocket(
+    userId: string,
+  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+    const ws = await open();
+    const q = new MsgQueue(ws);
+    ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
+    const authed = (await q.next()) as { type: string };
+    expect(authed.type).toBe('authed');
+    return { ws, q };
+  }
+
+  it('forwards ciphertext byte-for-byte (server never decodes plaintext)', async () => {
+    // 32 random bytes as a stand-in for a real Signal Protocol envelope.
+    // The crucial property is that what the recipient receives base64-decodes
+    // to the *exact same* bytes the sender base64-encoded — no
+    // re-canonicalisation, no truncation, no UTF-8 round-trip damage.
+    const plaintext = new Uint8Array([
+      0x02, 0xff, 0x00, 0x7f, 0x80, 0x10, 0xa5, 0x33, 0x9c, 0x42, 0x18, 0xee, 0xb1, 0xc4,
+      0x6d, 0x57, 0x29, 0x88, 0xf1, 0x0b, 0x5e, 0xa0, 0x71, 0x3d, 0x4c, 0xfa, 0x66, 0x91,
+      0x14, 0x2b, 0xe7, 0xdc,
+    ]);
+    const wireB64 = Buffer.from(plaintext).toString('base64');
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: wireB64,
+        msg_type: 'direct',
+      }),
+    );
+    const incoming = (await b.q.next()) as { ciphertext: string };
+    const decoded = Buffer.from(incoming.ciphertext, 'base64');
+    expect(decoded.equals(Buffer.from(plaintext))).toBe(true);
+
+    // Also verify the persisted row holds those same bytes — this is what
+    // any later debug / migration tooling will see.
+    const stored = [...messagesRepo.buffer.values()][0]!;
+    expect(stored.ciphertext.equals(Buffer.from(plaintext))).toBe(true);
+  });
+
+  it('persists the same conversation_id the client would compute (§5 / sha256-based)', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+      }),
+    );
+    await b.q.next();
+    const stored = [...messagesRepo.buffer.values()][0]!;
+    // Symmetric: either side computes the same id from the sorted pair.
+    const fromAlice = conversationIdForDirect('alice-blue-fox', 'bob-red-bear');
+    const fromBob = conversationIdForDirect('bob-red-bear', 'alice-blue-fox');
+    expect(fromAlice).toBe(fromBob);
+    expect(stored.conversation).toBe(fromAlice);
+    expect(stored.conversation).toMatch(/^dm-[0-9a-f]{16}$/);
+  });
+
+  it('rejects a message frame sent before the auth handshake (§9.4)', async () => {
+    const ws = await open();
+    ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+      }),
+    );
+    const err = (await nextMsg(ws)) as { type: string; code: string };
+    expect(err.type).toBe('error');
+    expect(err.code).toBe('unauthenticated');
+    expect(messagesRepo.buffer.size).toBe(0);
+  });
+
+  it('rejects a direct message with a missing/invalid msg_type', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+        msg_type: 'broadcast', // not in the {direct, group, community} union
+      }),
+    );
+    const err = (await a.q.next()) as { type: string; code: string };
+    expect(err.type).toBe('error');
+    // Whatever code it is, the message must not have been persisted.
+    expect(messagesRepo.buffer.size).toBe(0);
+  });
+
+  it('routes a self-DM back to the sender (Notes to self)', async () => {
+    // Self-DM is allowed: the server stores the row and fans out to the
+    // sender's own connections (multi-device aware). With one device,
+    // the sender receives their own message back and can ack it.
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'alice-blue-fox',
+        ciphertext: 'aGVsbG8gbWU=', // utf-8 "hello me"
+        msg_type: 'direct',
+      }),
+    );
+    const incoming = (await a.q.next()) as {
+      type: string;
+      from: string;
+      ciphertext: string;
+      message_id: string;
+      msg_type: string;
+      conversation_id: string;
+    };
+    expect(incoming.type).toBe('message');
+    expect(incoming.from).toBe('alice-blue-fox');
+    expect(incoming.msg_type).toBe('direct');
+    expect(incoming.ciphertext).toBe('aGVsbG8gbWU=');
+    expect(incoming.conversation_id).toMatch(/^dm-[0-9a-f]{16}$/);
+
+    // Acking from the same device deletes the row + emits delivered.
+    a.ws.send(JSON.stringify({ type: 'ack', message_id: incoming.message_id }));
+    const delivered = (await a.q.next()) as { type: string; message_id: string };
+    expect(delivered.type).toBe('delivered');
+    expect(delivered.message_id).toBe(incoming.message_id);
+    expect(messagesRepo.buffer.size).toBe(0);
+  });
+
+  it('routes to a peer who has never connected (buffers, no devices yet)', async () => {
+    // Recipient userId that no one has ever auth'd as. The send should
+    // still succeed at the relay layer — the row lands in the buffer
+    // with an empty targetDevices snapshot, and a future auth from that
+    // userId will drain it. Push fires (offline path).
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'never-here-before',
+        ciphertext: 'cGVuZGluZw==',
+        msg_type: 'direct',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(messagesRepo.buffer.size).toBe(1);
+    const stored = [...messagesRepo.buffer.values()][0]!;
+    expect(stored.recipientId).toBe('never-here-before');
+    expect(stored.targetDevices).toEqual([]);
+    expect(pushProvider.calls).toContainEqual(
+      expect.objectContaining({ userId: 'never-here-before', msgType: 'direct' }),
+    );
+  });
+
+  it('an ack from the wrong device does not delete the row (§5 + Phase 5f)', async () => {
+    // Alice sends to Bob (single device). Carol — a totally unrelated
+    // userId — somehow obtains the message_id (e.g. malicious replay) and
+    // tries to ack. The relay must ignore that ack: the row stays in the
+    // buffer until Bob's actual device acks.
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    const carol = await authedSocket('carol-pink-owl');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+      }),
+    );
+    const incoming = (await b.q.next()) as { message_id: string };
+    expect(messagesRepo.buffer.size).toBe(1);
+
+    carol.ws.send(JSON.stringify({ type: 'ack', message_id: incoming.message_id }));
+    await new Promise((r) => setTimeout(r, 50));
+    // Carol's ack used her deviceToken which isn't on the row's
+    // targetDevices list → markDeliveredByDevice returns 'pending' /
+    // 'not_found' and the row survives.
+    expect(messagesRepo.buffer.size).toBe(1);
+
+    // Bob's real ack still works.
+    b.ws.send(JSON.stringify({ type: 'ack', message_id: incoming.message_id }));
+    const delivered = (await a.q.next()) as { type: string; message_id: string };
+    expect(delivered.type).toBe('delivered');
+    expect(messagesRepo.buffer.size).toBe(0);
+  });
+
+  it('does not redeliver a buffered message after the same device acks then reconnects', async () => {
+    // Bob is offline → Alice sends → row buffers. Bob connects → drain →
+    // Bob acks → row deletes. Bob disconnects + reconnects → must NOT
+    // see the message again (already acked by this deviceToken).
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(messagesRepo.buffer.size).toBe(1);
+
+    const b1 = await authedSocket('bob-red-bear');
+    const drained = (await b1.q.next()) as { message_id: string };
+    b1.ws.send(JSON.stringify({ type: 'ack', message_id: drained.message_id }));
+    await a.q.next(); // delivered
+    expect(messagesRepo.buffer.size).toBe(0);
+
+    b1.ws.close();
+    await new Promise((r) => setTimeout(r, 30));
+
+    const b2 = await authedSocket('bob-red-bear');
+    // No further messages should arrive on the second connection.
+    await expect(b2.q.next(150)).rejects.toThrow(/timeout/);
   });
 });

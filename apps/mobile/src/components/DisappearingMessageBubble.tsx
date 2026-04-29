@@ -79,19 +79,25 @@ export function DisappearingMessageBubble({
     const t = TARGETS[stage];
     const easing = Easing.out(Easing.cubic);
 
+    // All four animated values share this Animated.View, and `blur` +
+    // `heightFactor` (interpolated to maxHeight) can't run on the native
+    // driver — they aren't transform/opacity. Mixing drivers on the same
+    // view crashes with "animated node moved to native earlier" the next
+    // time the JS-driven prop changes. Pinning all four to JS sidesteps
+    // it; chat-bubble-rate animations don't need native-thread perf.
     if (t.pulse) {
       Animated.sequence([
         Animated.timing(scale, {
           toValue: t.pulse.peakScale,
           duration: t.pulse.halfDuration,
           easing,
-          useNativeDriver: true,
+          useNativeDriver: false,
         }),
         Animated.timing(scale, {
           toValue: 1,
           duration: t.pulse.halfDuration,
           easing,
-          useNativeDriver: true,
+          useNativeDriver: false,
         }),
       ]).start(() => onStageAnimated?.(stage));
       return;
@@ -102,19 +108,18 @@ export function DisappearingMessageBubble({
         toValue: t.opacity,
         duration: t.duration,
         easing,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
       Animated.timing(scale, {
         toValue: t.scale,
         duration: t.duration,
         easing,
-        useNativeDriver: true,
+        useNativeDriver: false,
       }),
       Animated.timing(blur, {
         toValue: t.blur,
         duration: t.duration,
         easing,
-        // blur isn't a transform/opacity, can't use the native driver.
         useNativeDriver: false,
       }),
       Animated.timing(heightFactor, {

@@ -134,6 +134,7 @@ async function deliverBuffered(
         ciphertext: m.ciphertext.toString('base64'),
         message_id: m.id,
         msg_type: m.msgType,
+        conversation_id: m.conversation,
       });
     }
   }
@@ -229,6 +230,35 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         return;
       }
       case 'message': {
+        // Wire frames are dynamically parsed JSON — TS can't statically
+        // narrow `msg.msg_type` to the union {direct, group, community}.
+        // Without this guard, an unknown value falls through the
+        // (no-default) switches in conversationFor / recipientsFor and
+        // returns undefined, which then crashes at `recipients.length`.
+        if (
+          msg.msg_type !== 'direct' &&
+          msg.msg_type !== 'group' &&
+          msg.msg_type !== 'community'
+        ) {
+          sendError(
+            socket,
+            'invalid_msg_type',
+            `msg_type must be one of: direct, group, community`,
+          );
+          return;
+        }
+        if (!msg.to || typeof msg.to !== 'string') {
+          sendError(socket, 'invalid_target', 'message.to is required');
+          return;
+        }
+        if (typeof msg.ciphertext !== 'string') {
+          sendError(socket, 'invalid_ciphertext', 'message.ciphertext is required');
+          return;
+        }
+        // Self-DM is allowed for direct messages — "Notes to self". For
+        // group/community, sending to a group/community you're a member
+        // of *is* implicitly self-inclusive (fan-out filters self out),
+        // so the recipientsFor() filter handles those upstream.
         let conversation: string;
         try {
           conversation = conversationFor(msg.msg_type, session.userId, msg.to);
@@ -289,6 +319,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                   ciphertext: msg.ciphertext,
                   message_id: rowId,
                   msg_type: msg.msg_type,
+                  conversation_id: conversation,
                 });
               }
             } else {

@@ -2,6 +2,32 @@ apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
 
+// Workspace packages (@speakeasy/shared, /crypto, /vouchflow) compile to
+// `dist/` and are consumed by Metro through the workspace symlink. They
+// live outside the Android project tree, so gradle's incremental build
+// doesn't track their source files as inputs to the JS bundle task —
+// editing a .ts in packages/shared and running `assembleRelease` would
+// silently reuse the cached bundle. Three failed alpha builds traced to
+// this exact failure mode (0.1.9, 0.1.10, 0.1.11).
+//
+// Fix: a gradle task that runs `npm run build` for those packages, and
+// a hook that makes the JS bundle task depend on it. The task is always
+// out-of-date so it runs every build — the underlying tsc is fast and
+// incremental, so the cost is small.
+def monorepoRoot = file("${rootDir}/../../..")
+task buildSpeakeasyWorkspacePackages(type: Exec) {
+    workingDir monorepoRoot
+    commandLine 'npm', 'run', 'build', '--if-present',
+        '-w', '@speakeasy/shared',
+        '-w', '@speakeasy/crypto',
+        '-w', '@speakeasy/vouchflow'
+    outputs.upToDateWhen { false }
+}
+afterEvaluate {
+    tasks.matching { it.name ==~ /(create|bundle)(Debug|Release|.*)JsAndAssets/ }
+        .configureEach { it.dependsOn buildSpeakeasyWorkspacePackages }
+}
+
 /**
  * This is the configuration block to customize your React Native Android app.
  * By default you don't need to apply any configuration, just uncomment the lines you need.
@@ -98,8 +124,19 @@ android {
         // Phase 5b: BuildConfig fields for Vouchflow SDK init. Pulled from
         // android/gradle.properties (the api key is gitignored — see
         // android/gradle.properties.example for the placeholder).
-        buildConfigField "String", "VOUCHFLOW_API_KEY",
-            "\"${project.findProperty('vouchflow.apiKey') ?: 'PLACEHOLDER_REPLACE_BEFORE_RUNNING'}\""
+        //
+        // Guard: fail the build if the api key is still the placeholder.
+        // The SDK throws InvalidApiKey during configure() at app start,
+        // which kills the app with no way to diagnose without the inline
+        // crash writer. Surface the same failure at build time instead.
+        def vouchflowKey = project.findProperty('vouchflow.apiKey') ?: 'PLACEHOLDER_REPLACE_BEFORE_RUNNING'
+        if (vouchflowKey == 'PLACEHOLDER_REPLACE_BEFORE_RUNNING' || vouchflowKey.startsWith('vsk_sandbox_write_PASTE')) {
+            throw new GradleException(
+                "vouchflow.apiKey is the placeholder. Pass a real key:\n" +
+                "  ./gradlew :app:assembleRelease -Pvouchflow.apiKey=\$VOUCHFLOW_WRITE_KEY\n" +
+                "Source apps/api/.env.local first to populate VOUCHFLOW_WRITE_KEY in your shell.")
+        }
+        buildConfigField "String", "VOUCHFLOW_API_KEY", "\"${vouchflowKey}\""
         buildConfigField "String", "VOUCHFLOW_ENVIRONMENT",
             "\"${project.findProperty('vouchflow.environment') ?: 'sandbox'}\""
     }

@@ -8,6 +8,7 @@ import type { WsServerMsg } from '@speakeasy/shared';
 import type { SpeakeasyWsClient } from './client.js';
 import type { GroupOrchestrator } from '../crypto/group-orchestration.js';
 import type { ChatMessage } from '../store/conversations.js';
+import { b64ToBytes as bytesFromB64, utf8FromBytes } from '../utils/bytes.js';
 
 /**
  * Single dispatcher for every inbound WS frame.
@@ -41,13 +42,6 @@ export interface MessageRouterDeps {
   ) => string;
   /** Optional structured logger; defaults to console. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
-}
-
-function utf8FromBytes(b: Uint8Array): string {
-  return Buffer.from(b).toString('utf8');
-}
-function bytesFromB64(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'base64'));
 }
 
 export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg) => void {
@@ -101,11 +95,19 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         if (frame.msg_type === 'direct') {
           void (async () => {
             let bubble: string;
-            try {
-              const plaintext = await deps.signalProtocol.decrypt(frame.from, ciphertext);
-              bubble = utf8FromBytes(plaintext);
-            } catch (err) {
-              bubble = decodeBubble(err as Error);
+            // Self-DM round-trip — sender already has the plaintext on
+            // the optimistic bubble; the wire payload was utf-8 (no
+            // libsignal encrypt). Decode directly instead of running
+            // decrypt against a self-paired session that may not exist.
+            if (frame.from === deps.myUserId) {
+              bubble = utf8FromBytes(ciphertext);
+            } else {
+              try {
+                const plaintext = await deps.signalProtocol.decrypt(frame.from, ciphertext);
+                bubble = utf8FromBytes(plaintext);
+              } catch (err) {
+                bubble = decodeBubble(err as Error);
+              }
             }
             const conversationId = deps.conversationIdFor(
               'direct',
@@ -127,14 +129,9 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             }
           })();
         } else if (frame.msg_type === 'group') {
-          // Group message — the conversation id IS the group id.
-          // (`to` field on the server-side frame doesn't make sense for
-          // group messages since fan-out is implicit; the server's
-          // delivery contract gives us only `from` and the group route
-          // is encoded in the ciphertext envelope.)
-          // For now we infer the group id from the message metadata.
-          // Improvement: server adds a `group_id` field on group-typed
-          // message frames.
+          // Server stamps the group id as conversation_id on the frame
+          // (added when group messages can't carry it inside the
+          // ciphertext envelope). Bucket directly into that group.
           void (async () => {
             let bubble: string;
             try {
@@ -146,12 +143,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             } catch (err) {
               bubble = decodeBubble(err as Error);
             }
-            // Without an explicit group_id on the frame, we put the
-            // message in a per-(sender) bucket keyed `group-from-<sender>`
-            // until the server frame carries the group context. That's
-            // a server-side TODO; client renders correctly once it arrives.
-            const conversationId = `group-from-${frame.from}`;
-            deps.addToConversation(conversationId, {
+            deps.addToConversation(frame.conversation_id, {
               id: frame.message_id,
               from: frame.from,
               text: bubble,
