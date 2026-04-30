@@ -85,7 +85,18 @@ export function IdRevealScreen({ userId, onContinue }: Props) {
         <Text style={styles.tagline}>Say it & leave.</Text>
       </View>
       <View style={styles.bottom}>
-        <Text testID="id-reveal-userid" style={{ height: 0, opacity: 0 }}>
+        {/* The IdReveal screen renders the userId in a stack of animated
+            words, which Maestro can't easily reassemble. We mirror it
+            into a visible-but-tiny Text node tagged with both testID and
+            accessibilityLabel so Tier B can read it without altering
+            the layout. fontSize: 1 + opacity: 0 keeps it offscreen
+            visually but inside the rendered hierarchy. */}
+        <Text
+          testID="id-reveal-userid"
+          accessible
+          accessibilityLabel={userId}
+          style={styles.hiddenLabel}
+        >
           {userId}
         </Text>
         <Button
@@ -118,4 +129,5 @@ const styles = StyleSheet.create({
     marginTop: space.xl,
   },
   bottom: { gap: space.sm },
+  hiddenLabel: { fontSize: 1, color: colors.cream, height: 1 },
 });
