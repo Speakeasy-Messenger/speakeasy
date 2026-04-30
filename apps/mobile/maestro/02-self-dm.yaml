@@ -51,8 +51,11 @@ appId: xyz.speakeasyapp.app
     visible: "yo from maestro"
     timeout: 10000
 - back
-- assertVisible:
-    id: "conversations-userid"
+- waitForAnimationToEnd
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 8000
 - extendedWaitUntil:
     visible: "yo from maestro"
     timeout: 5000
