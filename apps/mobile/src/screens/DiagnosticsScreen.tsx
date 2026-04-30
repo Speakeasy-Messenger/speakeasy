@@ -1,0 +1,116 @@
+import React, { useEffect, useState } from 'react';
+import {
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import {
+  clearDiag,
+  formatDiag,
+  getDiagSnapshot,
+  subscribeDiag,
+  type DiagEntry,
+} from '../diag/log.js';
+import { colors, fonts, radius, space } from '../theme/index.js';
+
+interface Props {
+  onBack: () => void;
+}
+
+/**
+ * Reads from the in-process diagnostic ring buffer (apps/mobile/src/diag/log.ts).
+ * Live-updates as new events arrive. The user can paste the formatted
+ * snapshot back to us when something silently fails on-device — without
+ * requiring USB / adb logcat access.
+ *
+ * Not a permanent feature; lives behind a discoverable affordance on
+ * the Conversations screen. Will become opt-in once the alpha is
+ * stable enough that we don't routinely need to peek at runtime state.
+ */
+export function DiagnosticsScreen({ onBack }: Props) {
+  const [entries, setEntries] = useState<DiagEntry[]>(() => getDiagSnapshot());
+
+  useEffect(() => {
+    const off = subscribeDiag((e) => setEntries(e.slice()));
+    return off;
+  }, []);
+
+  return (
+    <SafeAreaView style={styles.root}>
+      <View style={styles.header}>
+        <Pressable onPress={onBack} hitSlop={12}>
+          <Text style={styles.back}>‹ Back</Text>
+        </Pressable>
+        <Text style={styles.title}>Diagnostics</Text>
+        <Text style={styles.subtitle}>
+          {entries.length} event{entries.length === 1 ? '' : 's'} captured. Long-press a
+          row to copy.
+        </Text>
+      </View>
+
+      <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        {entries.length === 0 ? (
+          <Text style={styles.empty}>No diagnostic events yet.</Text>
+        ) : (
+          <Text selectable style={styles.log}>
+            {formatDiag(entries)}
+          </Text>
+        )}
+      </ScrollView>
+
+      <View style={styles.bottom}>
+        <Pressable
+          onPress={clearDiag}
+          style={[styles.btn, styles.btnSecondary]}
+        >
+          <Text style={styles.btnTextSecondary}>Clear</Text>
+        </Pressable>
+      </View>
+    </SafeAreaView>
+  );
+}
+
+const styles = StyleSheet.create({
+  root: { flex: 1, backgroundColor: colors.cream },
+  header: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.md,
+    paddingBottom: space.sm,
+    gap: space.xs,
+    borderBottomColor: colors.pale,
+    borderBottomWidth: 1,
+  },
+  back: { color: colors.primary, fontFamily: fonts.inter500, fontSize: 14 },
+  title: { color: colors.ink, fontFamily: fonts.inter500, fontSize: 18 },
+  subtitle: { color: colors.slate, fontFamily: fonts.inter400, fontSize: 12 },
+  scroll: { flex: 1 },
+  scrollContent: { padding: space.md, paddingBottom: space.xl },
+  empty: {
+    color: colors.slate,
+    fontFamily: fonts.inter400,
+    fontSize: 13,
+    textAlign: 'center',
+    marginTop: space.xl,
+  },
+  log: {
+    color: colors.ink,
+    fontFamily: fonts.inter400,
+    fontSize: 11,
+    lineHeight: 16,
+  },
+  bottom: { padding: space.lg, gap: space.sm },
+  btn: {
+    paddingVertical: 12,
+    borderRadius: radius.pill,
+    alignItems: 'center',
+  },
+  btnSecondary: { borderWidth: 1, borderColor: colors.primary },
+  btnTextSecondary: {
+    color: colors.primary,
+    fontFamily: fonts.inter500,
+    fontSize: 14,
+  },
+});

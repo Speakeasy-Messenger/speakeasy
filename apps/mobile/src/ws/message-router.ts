@@ -9,6 +9,7 @@ import type { SpeakeasyWsClient } from './client.js';
 import type { GroupOrchestrator } from '../crypto/group-orchestration.js';
 import type { ChatMessage } from '../store/conversations.js';
 import { b64ToBytes as bytesFromB64, utf8FromBytes } from '../utils/bytes.js';
+import { diag } from '../diag/log.js';
 
 /**
  * Single dispatcher for every inbound WS frame.
@@ -58,6 +59,12 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
   }
 
   return (frame: WsServerMsg) => {
+    diag('router', `frame: ${frame.type}`, {
+      ...((frame as { from?: string }).from ? { from: (frame as { from: string }).from } : {}),
+      ...((frame as { msg_type?: string }).msg_type
+        ? { msg_type: (frame as { msg_type: string }).msg_type }
+        : {}),
+    });
     switch (frame.type) {
       case 'authed':
       case 'pong':
@@ -109,11 +116,27 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 bubble = decodeBubble(err as Error);
               }
             }
-            const conversationId = deps.conversationIdFor(
-              'direct',
-              frame.from,
-              deps.myUserId,
-            );
+            let conversationId: string;
+            try {
+              conversationId = deps.conversationIdFor(
+                'direct',
+                frame.from,
+                deps.myUserId,
+              );
+            } catch (err) {
+              diag('router', 'conversationIdFor THREW', {
+                from: frame.from,
+                me: deps.myUserId,
+                err: String(err),
+              });
+              return;
+            }
+            diag('router', 'add direct to conversation', {
+              convId: conversationId,
+              from: frame.from,
+              isSelf: frame.from === deps.myUserId,
+              textPreview: bubble.slice(0, 24),
+            });
             deps.addToConversation(conversationId, {
               id: frame.message_id,
               from: frame.from,

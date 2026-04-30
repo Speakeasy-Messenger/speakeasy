@@ -20,6 +20,7 @@ import { ApiError } from '../api/client.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { ensureSessionWithPeer } from '../crypto/session.js';
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
+import { diag } from '../diag/log.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 
 interface Props {
@@ -119,6 +120,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
     // Optimistic local echo — we render the plaintext immediately so the
     // bubble appears with no perceived latency, then send the encrypted
     // payload over the wire in the background.
+    diag('chat', 'send', { convId: conversationId, peerId, isSelf: peerId === myUserId });
     add(conversationId, {
       id,
       from: 'me',

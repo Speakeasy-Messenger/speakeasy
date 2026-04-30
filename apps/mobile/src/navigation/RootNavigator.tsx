@@ -11,6 +11,7 @@ import { ChatScreen } from '../screens/ChatScreen.js';
 import { GroupChatScreen } from '../screens/GroupChatScreen.js';
 import { NewChatScreen } from '../screens/NewChatScreen.js';
 import { NewGroupScreen } from '../screens/NewGroupScreen.js';
+import { DiagnosticsScreen } from '../screens/DiagnosticsScreen.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 
@@ -22,6 +23,7 @@ export type RootStack = {
   GroupChat: { groupId: string };
   NewChat: undefined;
   NewGroup: undefined;
+  Diagnostics: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -60,7 +62,13 @@ export function RootNavigator() {
                   onOpenGroup={(groupId) => navigation.navigate('GroupChat', { groupId })}
                   onNewChat={() => navigation.navigate('NewChat')}
                   onNewGroup={() => navigation.navigate('NewGroup')}
+                  onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
                 />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="Diagnostics">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'Diagnostics'>) => (
+                <DiagnosticsScreen onBack={() => navigation.goBack()} />
               )}
             </Stack.Screen>
             <Stack.Screen

@@ -10,6 +10,7 @@ import { api, getWsClient, groupMessaging, signalProtocol, vouchflow } from './s
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
+import { diag } from './src/diag/log.js';
 import { colors } from './src/theme/index.js';
 
 export default function App() {
@@ -31,6 +32,7 @@ export default function App() {
   // we got into App-with-userId without going through OnboardingScreen).
   useEffect(() => {
     if (!userId) return;
+    diag('app', 'mounting router for userId', { userId });
     const getToken = async () => {
       const cached = useIdentity.getState().deviceToken;
       if (cached) return cached;
@@ -84,6 +86,7 @@ export default function App() {
 
     const unsubscribe = ws.subscribe(router);
     return () => {
+      diag('app', 'cleanup router for userId', { userId });
       unsubscribe();
       ws.close();
     };

@@ -35,6 +35,7 @@ interface Props {
   onOpenGroup: (groupId: string) => void;
   onNewChat: () => void;
   onNewGroup: () => void;
+  onOpenDiagnostics: () => void;
 }
 
 /**
@@ -47,6 +48,7 @@ export function ConversationsScreen({
   onOpenGroup,
   onNewChat,
   onNewGroup,
+  onOpenDiagnostics,
 }: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
@@ -86,7 +88,11 @@ export function ConversationsScreen({
       <View style={styles.header}>
         <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
         <Text style={[text.heroBody, styles.you]}>{userId}</Text>
-        <Text style={[text.footnote, styles.status]}>connection · {wsState}</Text>
+        <Pressable onPress={onOpenDiagnostics} hitSlop={8}>
+          <Text style={[text.footnote, styles.status]}>
+            connection · {wsState} · tap for diagnostics
+          </Text>
+        </Pressable>
       </View>
 
       <FlatList
