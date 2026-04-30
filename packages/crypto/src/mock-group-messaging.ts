@@ -1,4 +1,5 @@
 import type { GroupMessagingModule } from './group-messaging.js';
+import { utf8FromBytes, utf8ToBytes } from './bytes.js';
 
 /**
  * Test-only Sender Keys client. Models the libsignal Sender Keys flow at
@@ -76,7 +77,7 @@ export class MockGroupMessagingClient implements GroupMessagingModule {
 }
 
 function encodeSkdm(distributionId: string): Uint8Array {
-  const idBytes = Buffer.from(distributionId, 'utf8');
+  const idBytes = utf8ToBytes(distributionId);
   const out = new Uint8Array(2 + idBytes.length);
   out[0] = SKDM_MAGIC;
   out[1] = idBytes.length;
@@ -87,11 +88,11 @@ function encodeSkdm(distributionId: string): Uint8Array {
 function decodeSkdm(b: Uint8Array): string {
   if (b[0] !== SKDM_MAGIC) throw makeError('invalid_message', 'not an SKDM');
   const len = b[1] ?? 0;
-  return Buffer.from(b.slice(2, 2 + len)).toString('utf8');
+  return utf8FromBytes(b.slice(2, 2 + len));
 }
 
 function encodeMessage(distributionId: string, plaintext: Uint8Array): Uint8Array {
-  const idBytes = Buffer.from(distributionId, 'utf8');
+  const idBytes = utf8ToBytes(distributionId);
   const out = new Uint8Array(2 + idBytes.length + plaintext.length);
   out[0] = MSG_MAGIC;
   out[1] = idBytes.length;
@@ -103,7 +104,7 @@ function encodeMessage(distributionId: string, plaintext: Uint8Array): Uint8Arra
 function decodeMessage(b: Uint8Array): { distributionId: string; plaintext: Uint8Array } {
   if (b[0] !== MSG_MAGIC) throw makeError('invalid_message', 'not a group message');
   const len = b[1] ?? 0;
-  const distributionId = Buffer.from(b.slice(2, 2 + len)).toString('utf8');
+  const distributionId = utf8FromBytes(b.slice(2, 2 + len));
   const plaintext = b.slice(2 + len);
   return { distributionId, plaintext };
 }

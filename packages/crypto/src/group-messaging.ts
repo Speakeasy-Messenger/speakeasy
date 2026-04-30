@@ -103,12 +103,7 @@ function loadNativeModule(): NativeGroupMessagingModuleAPI | undefined {
   }
 }
 
-function b64Encode(bytes: Uint8Array): string {
-  return Buffer.from(bytes).toString('base64');
-}
-function b64Decode(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'base64'));
-}
+import { b64ToBytes as b64Decode, bytesToB64 as b64Encode } from './bytes.js';
 
 /**
  * Production wiring. Calls `NativeModules.GroupMessaging.*` (Kotlin

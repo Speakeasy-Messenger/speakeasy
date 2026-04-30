@@ -38,39 +38,55 @@ const BANNED = [
   },
 ];
 
-describe('no Hermes-banned globals in mobile runtime', () => {
-  for (const { pattern, name, why } of BANNED) {
-    it(`runtime code never reaches for ${name} (${why})`, () => {
-      let stdout = '';
-      try {
-        stdout = execSync(
-          `grep -rlE '${pattern}' src ` +
-            '--include="*.ts" --include="*.tsx" ' +
-            '--exclude="*.test.ts" --exclude="*.test.tsx"',
-          { cwd: __dirname.replace(/\/src\/integration$/, ''), encoding: 'utf8' },
-        );
-      } catch (e) {
-        const err = e as { status?: number };
-        // grep exits 1 with no matches — that's the green path.
-        if (err.status === 1) return;
-        throw e;
-      }
-      const offenders = stdout
-        .split('\n')
-        .map((l) => l.trim())
-        .filter((l) => l.length > 0)
-        // utils/bytes.ts may legitimately reference the banned name in
-        // comments explaining why it doesn't use it. Pattern is anchored
-        // to actual usage so this exemption rarely matters in practice.
-        .filter((l) => !l.includes('src/utils/bytes.ts'))
-        // Integration harness imports from outside the mobile rootDir
-        // and may reference Node globals the harness itself uses.
-        .filter((l) => !l.startsWith('src/integration/'));
-      expect(
-        offenders,
-        `mobile runtime files using ${name} (banned: ${why}):\n  ` +
-          offenders.join('\n  '),
-      ).toEqual([]);
-    });
+/**
+ * Workspace packages bundled into the mobile app. Each gets the same
+ * lint applied. The 0.2.7 alpha shipped a `Buffer.from` in
+ * @speakeasy/crypto that this lint missed because it only scanned
+ * apps/mobile/src — bug class repeated, that's on us.
+ */
+const SCOPES = [
+  { cwd: 'apps/mobile', src: 'src', exempt: ['src/utils/bytes.ts'] },
+  // @speakeasy/crypto is bundled directly. Server-only files
+  // (software-channel-key.ts uses node:crypto) are exempt explicitly.
+  {
+    cwd: 'packages/crypto',
+    src: 'src',
+    exempt: ['src/bytes.ts', 'src/software-channel-key.ts'],
+  },
+  { cwd: 'packages/shared', src: 'src', exempt: [] },
+];
+
+const monorepoRoot = __dirname.replace(/\/apps\/mobile\/src\/integration$/, '');
+
+describe('no Hermes-banned globals in any mobile-bundled workspace package', () => {
+  for (const scope of SCOPES) {
+    for (const { pattern, name, why } of BANNED) {
+      it(`${scope.cwd}: never uses ${name} (${why})`, () => {
+        let stdout = '';
+        try {
+          stdout = execSync(
+            `grep -rlE '${pattern}' ${scope.src} ` +
+              '--include="*.ts" --include="*.tsx" ' +
+              '--exclude="*.test.ts" --exclude="*.test.tsx"',
+            { cwd: `${monorepoRoot}/${scope.cwd}`, encoding: 'utf8' },
+          );
+        } catch (e) {
+          const err = e as { status?: number };
+          if (err.status === 1) return;
+          throw e;
+        }
+        const offenders = stdout
+          .split('\n')
+          .map((l) => l.trim())
+          .filter((l) => l.length > 0)
+          .filter((l) => !scope.exempt.includes(l))
+          .filter((l) => !l.startsWith('src/integration/'));
+        expect(
+          offenders,
+          `${scope.cwd} files using ${name} (banned: ${why}):\n  ` +
+            offenders.join('\n  '),
+        ).toEqual([]);
+      });
+    }
   }
 });

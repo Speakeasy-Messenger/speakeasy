@@ -134,13 +134,9 @@ function loadNativeModule(): NativeSignalModule | undefined {
   }
 }
 
-function b64Encode(bytes: Uint8Array): string {
-  // Buffer is provided by RN's polyfill in Metro bundles + Node natively.
-  return Buffer.from(bytes).toString('base64');
-}
-function b64Decode(s: string): Uint8Array {
-  return new Uint8Array(Buffer.from(s, 'base64'));
-}
+// Hermes does NOT ship Buffer despite RN docs. The pure-JS helpers in
+// ./bytes.ts work in both Hermes and Node.
+import { b64ToBytes as b64Decode, bytesToB64 as b64Encode } from './bytes.js';
 
 /**
  * Production wiring — Phase 5b. Calls `NativeModules.SignalProtocol.*`

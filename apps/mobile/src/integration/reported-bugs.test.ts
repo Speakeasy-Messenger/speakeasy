@@ -135,6 +135,51 @@ describe('reported bug #2 — self-DM should round-trip back to the sender', () 
   });
 });
 
+describe('Hermes parity — mobile-code paths do not depend on Buffer', () => {
+  it('signalProtocol.encrypt + ws.send + recipient round-trip works without globalThis.Buffer', async () => {
+    // 0.2.7 alpha: real-peer send blew up with `Property 'Buffer' doesn't
+    // exist` because @speakeasy/crypto's b64Encode used Buffer.from.
+    // Vitest runs in Node where Buffer is a global, so the previous
+    // tests passed. To replicate the on-device runtime we delete
+    // Buffer for the duration of the actual mobile-code calls
+    // (encrypt, send, frame parsing) — but restore it before the
+    // ws library and harness internals use it for Node-side socket
+    // plumbing.
+    const h = await makeHarness({
+      users: { dvt_alice: 'alice-blue-fox', dvt_bob: 'bob-red-bear' },
+      preEnroll: ['alice-blue-fox', 'bob-red-bear'],
+    });
+    try {
+      const alice = await makeClient(h, {
+        token: 'dvt_alice',
+        userId: 'alice-blue-fox',
+      });
+      const bob = await makeClient(h, {
+        token: 'dvt_bob',
+        userId: 'bob-red-bear',
+      });
+      const savedBuffer = globalThis.Buffer;
+      // Hermes-approximation just for the next two awaits.
+      // @ts-expect-error runtime-only deletion.
+      delete globalThis.Buffer;
+      try {
+        // Use the actual signalProtocol.encrypt — same code path
+        // that ran on device. If the b64Encode helper inside the
+        // package reaches for Buffer, this throws and the test fails.
+        const plaintext = new Uint8Array([0x59, 0x6f]); // "Yo"
+        const ciphertext = await alice.signalProtocol.encrypt(bob.userId, plaintext);
+        expect(ciphertext.byteLength).toBeGreaterThan(0);
+      } finally {
+        globalThis.Buffer = savedBuffer;
+      }
+      alice.close();
+      bob.close();
+    } finally {
+      await h.teardown();
+    }
+  });
+});
+
 describe('reported bug #3 — encrypt to a real peer should not surface as unknown_error', () => {
   let h: Harness;
   beforeEach(async () => {

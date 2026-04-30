@@ -1,5 +1,5 @@
 import React, { useEffect } from 'react';
-import { StatusBar, View } from 'react-native';
+import { AppState, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
@@ -85,8 +85,30 @@ export default function App() {
     });
 
     const unsubscribe = ws.subscribe(router);
+
+    // App lifecycle: when the OS pauses the app, the underlying TCP
+    // socket may get killed silently. On resume the WS client thinks
+    // it's still connected, the next ws.send() throws, and the user
+    // sees a crash. Force a reconnect on `active` if we're not
+    // already in `authed` state.
+    const lifecycleSub = AppState.addEventListener('change', (next) => {
+      diag('app', 'AppState change', { next, wsState: ws.getState() });
+      if (next === 'active') {
+        const state = ws.getState();
+        if (state !== 'authed' && state !== 'authenticating' && state !== 'connecting') {
+          diag('app', 'AppState active → forcing reconnect', { prevState: state });
+          try {
+            ws.connect();
+          } catch (err) {
+            diag('app', 'reconnect threw', { err: String(err) });
+          }
+        }
+      }
+    });
+
     return () => {
       diag('app', 'cleanup router for userId', { userId });
+      lifecycleSub.remove();
       unsubscribe();
       ws.close();
     };
