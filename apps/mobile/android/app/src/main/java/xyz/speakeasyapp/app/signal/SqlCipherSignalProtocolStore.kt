@@ -76,9 +76,13 @@ class SqlCipherSignalProtocolStore(
   }
 
   override fun getIdentity(address: SignalProtocolAddress): IdentityKey? {
+    // SQLCipher Android's `rawQuery(String, Object...)` mis-binds Int args
+    // (caused 0.1.3 PRAGMA bug; same root cause silently broke session
+    // lookup until 0.2.9). Use the String[] overload — it works for all
+    // selection-arg types.
     db.rawQuery(
             "SELECT identity_key FROM identities WHERE name = ? AND device_id = ?",
-            arrayOf<Any?>(address.name, address.deviceId))
+            arrayOf(address.name, address.deviceId.toString()))
         .use { cur ->
           if (!cur.moveToFirst()) return null
           val bytes = cur.getBlob(0)
@@ -89,7 +93,7 @@ class SqlCipherSignalProtocolStore(
   // ---------------- PreKeyStore ----------------
 
   override fun loadPreKey(preKeyId: Int): PreKeyRecord {
-    db.rawQuery("SELECT record FROM prekeys WHERE id = ?", arrayOf<Any?>(preKeyId)).use { cur ->
+    db.rawQuery("SELECT record FROM prekeys WHERE id = ?", arrayOf(preKeyId.toString())).use { cur ->
       if (!cur.moveToFirst()) {
         throw InvalidKeyIdException("No such prekey: $preKeyId")
       }
@@ -104,7 +108,7 @@ class SqlCipherSignalProtocolStore(
   }
 
   override fun containsPreKey(preKeyId: Int): Boolean {
-    db.rawQuery("SELECT 1 FROM prekeys WHERE id = ?", arrayOf<Any?>(preKeyId)).use { cur ->
+    db.rawQuery("SELECT 1 FROM prekeys WHERE id = ?", arrayOf(preKeyId.toString())).use { cur ->
       return cur.moveToFirst()
     }
   }
@@ -117,7 +121,7 @@ class SqlCipherSignalProtocolStore(
 
   override fun loadSignedPreKey(signedPreKeyId: Int): SignedPreKeyRecord {
     db.rawQuery(
-            "SELECT record FROM signed_prekeys WHERE id = ?", arrayOf<Any?>(signedPreKeyId))
+            "SELECT record FROM signed_prekeys WHERE id = ?", arrayOf(signedPreKeyId.toString()))
         .use { cur ->
           if (!cur.moveToFirst()) {
             throw InvalidKeyIdException("No such signed prekey: $signedPreKeyId")
@@ -145,7 +149,7 @@ class SqlCipherSignalProtocolStore(
   }
 
   override fun containsSignedPreKey(signedPreKeyId: Int): Boolean {
-    db.rawQuery("SELECT 1 FROM signed_prekeys WHERE id = ?", arrayOf<Any?>(signedPreKeyId))
+    db.rawQuery("SELECT 1 FROM signed_prekeys WHERE id = ?", arrayOf(signedPreKeyId.toString()))
         .use { cur ->
           return cur.moveToFirst()
         }
@@ -160,7 +164,7 @@ class SqlCipherSignalProtocolStore(
   override fun loadSession(address: SignalProtocolAddress): SessionRecord {
     db.rawQuery(
             "SELECT record FROM sessions WHERE name = ? AND device_id = ?",
-            arrayOf<Any?>(address.name, address.deviceId))
+            arrayOf(address.name, address.deviceId.toString()))
         .use { cur ->
           // Per contract: return a fresh empty SessionRecord rather than
           // null when no session exists yet (matches InMemorySessionStore).
@@ -176,7 +180,7 @@ class SqlCipherSignalProtocolStore(
     for (addr in addresses) {
       db.rawQuery(
               "SELECT record FROM sessions WHERE name = ? AND device_id = ?",
-              arrayOf<Any?>(addr.name, addr.deviceId))
+              arrayOf(addr.name, addr.deviceId.toString()))
           .use { cur ->
             if (!cur.moveToFirst()) {
               throw NoSessionException("no session for ${addr.name}.${addr.deviceId}")
@@ -193,7 +197,7 @@ class SqlCipherSignalProtocolStore(
             // Spec convention (Signal): primary device is id 1, return only
             // the secondaries.
             "SELECT device_id FROM sessions WHERE name = ? AND device_id != 1",
-            arrayOf<Any?>(name))
+            arrayOf(name))
         .use { cur ->
           while (cur.moveToNext()) out += cur.getInt(0)
         }
@@ -209,7 +213,7 @@ class SqlCipherSignalProtocolStore(
   override fun containsSession(address: SignalProtocolAddress): Boolean {
     db.rawQuery(
             "SELECT 1 FROM sessions WHERE name = ? AND device_id = ?",
-            arrayOf<Any?>(address.name, address.deviceId))
+            arrayOf(address.name, address.deviceId.toString()))
         .use { cur ->
           return cur.moveToFirst()
         }
@@ -257,7 +261,7 @@ class SqlCipherSignalProtocolStore(
   ): SenderKeyRecord? {
     db.rawQuery(
             "SELECT record FROM sender_keys WHERE name = ? AND device_id = ? AND distribution_id = ?",
-            arrayOf<Any?>(sender.name, sender.deviceId, distributionId.toString()))
+            arrayOf(sender.name, sender.deviceId.toString(), distributionId.toString()))
         .use { cur ->
           if (!cur.moveToFirst()) return null
           return SenderKeyRecord(cur.getBlob(0))
