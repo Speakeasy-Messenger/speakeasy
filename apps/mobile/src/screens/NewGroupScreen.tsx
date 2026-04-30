@@ -15,6 +15,7 @@ import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
 import { api } from '../services.js';
 import { ApiError } from '../api/client.js';
+import { diag } from '../diag/log.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 
 interface Props {
@@ -80,18 +81,33 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
     }
     setError(undefined);
     setBusy(true);
+    diag('group', 'create: start', { name: trimmedName, memberCount: members.length });
     try {
       const deviceToken = useIdentity.getState().deviceToken;
       if (!deviceToken) {
+        diag('group', 'create: no deviceToken');
         setError('Sign in again — device token missing.');
         return;
       }
+      diag('group', 'create: api.createGroup');
       const { group_id } = await api.createGroup(deviceToken);
-      // Add members serially. Phase 5e doesn't model partial-failure UI;
-      // any individual failure aborts (the group exists server-side
-      // with whatever members we managed to add before the failure).
+      diag('group', 'create: createGroup OK', { group_id });
       for (const member of members) {
-        await api.addGroupMember(deviceToken, group_id, member);
+        diag('group', 'create: addGroupMember', { group_id, member });
+        try {
+          await api.addGroupMember(deviceToken, group_id, member);
+          diag('group', 'create: addGroupMember OK', { group_id, member });
+        } catch (memberErr) {
+          const e = memberErr as { code?: string; status?: number; message?: string };
+          diag('group', 'create: addGroupMember FAILED', {
+            group_id,
+            member,
+            code: e.code,
+            status: e.status,
+            message: e.message,
+          });
+          throw memberErr;
+        }
       }
       upsertGroup({
         id: group_id,
@@ -99,12 +115,20 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
         members: [myUserId, ...members],
         createdAt: Date.now(),
       });
+      diag('group', 'create: navigating to GroupChat', { group_id });
       onCreated(group_id);
     } catch (err: unknown) {
+      const e = err as { name?: string; message?: string; code?: string; status?: number; stack?: string };
+      diag('group', 'create FAILED', {
+        name: e.name,
+        message: e.message,
+        code: e.code,
+        status: e.status,
+        stack: e.stack?.slice(0, 240),
+      });
       if (err instanceof ApiError) {
         setError(`Server rejected: ${err.code ?? err.status}`);
       } else {
-        const e = err as { message?: string };
         setError(e.message ?? 'Group creation failed.');
       }
     } finally {
