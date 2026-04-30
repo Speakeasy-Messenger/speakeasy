@@ -21,17 +21,28 @@ import { b64ToBytes, bytesToB64, utf8FromBytes, utf8ToBytes } from './bytes.js';
  */
 
 let savedBuffer: typeof globalThis.Buffer | undefined;
+let savedTextEncoder: typeof globalThis.TextEncoder | undefined;
+let savedTextDecoder: typeof globalThis.TextDecoder | undefined;
 
 beforeEach(() => {
+  // Simulate Hermes — none of these exist on the actual on-device runtime.
+  //   - Buffer: Node-only (caused 0.2.1 crash)
+  //   - TextDecoder/TextEncoder: supposedly in Hermes 0.74+, NOT in our
+  //     RN 0.76 build (caused 0.2.4 silent self-DM drop)
   savedBuffer = globalThis.Buffer;
-  // Simulate Hermes — Buffer global does not exist.
-  // @ts-expect-error — runtime-only deletion of a Node global.
+  savedTextEncoder = globalThis.TextEncoder;
+  savedTextDecoder = globalThis.TextDecoder;
+  // @ts-expect-error runtime-only deletion of Node/Web globals.
   delete globalThis.Buffer;
+  // @ts-expect-error runtime-only deletion of Node/Web globals.
+  delete globalThis.TextEncoder;
+  // @ts-expect-error runtime-only deletion of Node/Web globals.
+  delete globalThis.TextDecoder;
 });
 afterEach(() => {
-  if (savedBuffer) {
-    globalThis.Buffer = savedBuffer;
-  }
+  if (savedBuffer) globalThis.Buffer = savedBuffer;
+  if (savedTextEncoder) globalThis.TextEncoder = savedTextEncoder;
+  if (savedTextDecoder) globalThis.TextDecoder = savedTextDecoder;
 });
 
 describe('byte / string / base64 helpers (Hermes-safe)', () => {
@@ -77,10 +88,13 @@ describe('byte / string / base64 helpers (Hermes-safe)', () => {
     }
   });
 
-  it('confirms Buffer is genuinely absent during the test', () => {
+  it('confirms Buffer / TextEncoder / TextDecoder are all genuinely absent during the test', () => {
     // Catches the failure mode where the test infra silently re-injects
-    // Buffer (and the helpers happen to use it).
-    expect(typeof (globalThis as Record<string, unknown>).Buffer).toBe('undefined');
+    // any of these (and the helpers happen to use them).
+    const g = globalThis as Record<string, unknown>;
+    expect(typeof g.Buffer).toBe('undefined');
+    expect(typeof g.TextEncoder).toBe('undefined');
+    expect(typeof g.TextDecoder).toBe('undefined');
   });
 
   it('utf8 + base64 composed: text → bytes → b64 → bytes → text', () => {
