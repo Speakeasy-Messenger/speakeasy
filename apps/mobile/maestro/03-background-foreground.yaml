@@ -1,10 +1,4 @@
 # Tier B flow #3 — background/foreground lifecycle.
-#
-# Reproduces the user-reported bug: app crashes when brought back from
-# the background. Verifies the app survives a stopApp + reopen and
-# preserves identity (AsyncStorage hydration).
-#
-# Assumes 02-self-dm just ran so we land on Conversations.
 
 appId: xyz.speakeasyapp.app
 ---
@@ -13,12 +7,11 @@ appId: xyz.speakeasyapp.app
 - pressKey: Home
 - waitForAnimationToEnd
 - launchApp:
-    # Don't wipe state — we want to see the same identity restored.
     clearState: false
-- assertVisible:
-    id: "conversations-userid"
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
     timeout: 10000
-# The previous self-DM should still appear in the list.
-- assertVisible:
-    text: "yo from maestro"
+- extendedWaitUntil:
+    visible: "yo from maestro"
     timeout: 5000

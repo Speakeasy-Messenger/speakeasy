@@ -1,7 +1,4 @@
-# Tier B flow #4 — peer-not-found surfaces at chat-open, not at first send.
-#
-# Verifies: typing a non-existent userId in NewChatScreen and tapping
-# Start chat shows an inline error and does NOT navigate to ChatScreen.
+# Tier B flow #4 — peer-not-found surfaces at chat-open.
 
 appId: xyz.speakeasyapp.app
 ---
@@ -16,10 +13,8 @@ appId: xyz.speakeasyapp.app
 - inputText: "definitely-fake-userid"
 - tapOn:
     id: "new-chat-start"
-# Should see an inline error containing "No such user" and stay on this
-# screen (chat-input is from ChatScreen, must NOT appear).
-- assertVisible:
-    text: "No such user.*"
+- extendedWaitUntil:
+    visible: "No such user.*"
     timeout: 8000
 - assertNotVisible:
     id: "chat-input"
