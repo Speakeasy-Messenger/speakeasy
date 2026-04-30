@@ -32,9 +32,10 @@ appId: xyz.speakeasyapp.app
     id: "new-chat-peer-id-input"
 - tapOn:
     id: "new-chat-peer-id-input"
-# `MAESTRO_COPIED_TEXT` is Maestro's auto-bound variable for the most
-# recent `copyTextFrom` value — works without any runScript glue.
-- inputText: ${MAESTRO_COPIED_TEXT}
+# `pasteText` (no args) pastes the most recent `copyTextFrom` value
+# from the device clipboard. Cleaner than env-var substitution, which
+# Maestro doesn't auto-bind from copyTextFrom.
+- pasteText
 - tapOn:
     id: "new-chat-start"
 - extendedWaitUntil:

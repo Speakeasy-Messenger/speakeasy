@@ -27,7 +27,7 @@ appId: xyz.speakeasyapp.app
     id: "conversations-new-chat"
 - tapOn:
     id: "new-chat-peer-id-input"
-- inputText: ${MAESTRO_COPIED_TEXT}
+- pasteText
 - tapOn:
     id: "new-chat-start"
 - extendedWaitUntil:
