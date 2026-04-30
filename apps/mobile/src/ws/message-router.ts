@@ -98,57 +98,116 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         return;
 
       case 'message': {
-        const ciphertext = bytesFromB64(frame.ciphertext);
+        // Bulletproof wrapper — every step gets a diag breadcrumb so a
+        // silent failure inside the IIFE can be pinpointed from the
+        // on-device diagnostics screen. The previous version had only
+        // diags AROUND `conversationIdFor`; if anything BEFORE it threw
+        // (b64 decode, utf8 decode, signal decrypt) the unhandled
+        // promise rejection was swallowed by the WS subscriber's outer
+        // try/catch, leaving zero on-device evidence of where it died.
+        const frameDesc = {
+          msgId: frame.message_id,
+          from: frame.from,
+          msgType: frame.msg_type,
+          ctLen: typeof frame.ciphertext === 'string' ? frame.ciphertext.length : -1,
+        };
+        diag('router', 'message: enter', frameDesc);
+        let ciphertext: Uint8Array;
+        try {
+          ciphertext = bytesFromB64(frame.ciphertext);
+        } catch (err) {
+          diag('router', 'b64ToBytes THREW', { ...frameDesc, err: String(err) });
+          return;
+        }
+        diag('router', 'message: b64 decoded', { ...frameDesc, bytes: ciphertext.length });
         if (frame.msg_type === 'direct') {
           void (async () => {
-            let bubble: string;
-            // Self-DM round-trip — sender already has the plaintext on
-            // the optimistic bubble; the wire payload was utf-8 (no
-            // libsignal encrypt). Decode directly instead of running
-            // decrypt against a self-paired session that may not exist.
-            if (frame.from === deps.myUserId) {
-              bubble = utf8FromBytes(ciphertext);
-            } else {
-              try {
-                const plaintext = await deps.signalProtocol.decrypt(frame.from, ciphertext);
-                bubble = utf8FromBytes(plaintext);
-              } catch (err) {
-                bubble = decodeBubble(err as Error);
+            try {
+              let bubble: string;
+              // Self-DM round-trip — sender already has the plaintext on
+              // the optimistic bubble; the wire payload was utf-8 (no
+              // libsignal encrypt). Decode directly instead of running
+              // decrypt against a self-paired session that may not exist.
+              if (frame.from === deps.myUserId) {
+                bubble = utf8FromBytes(ciphertext);
+                diag('router', 'message: self-DM utf8 decoded', {
+                  ...frameDesc,
+                  textPreview: bubble.slice(0, 24),
+                });
+              } else {
+                try {
+                  const plaintext = await deps.signalProtocol.decrypt(
+                    frame.from,
+                    ciphertext,
+                  );
+                  bubble = utf8FromBytes(plaintext);
+                  diag('router', 'message: signal decrypted', {
+                    ...frameDesc,
+                    textPreview: bubble.slice(0, 24),
+                  });
+                } catch (err) {
+                  bubble = decodeBubble(err as Error);
+                  diag('router', 'message: signal decrypt FAILED → bubble', {
+                    ...frameDesc,
+                    bubble,
+                  });
+                }
               }
-            }
-            let conversationId: string;
-            try {
-              conversationId = deps.conversationIdFor(
-                'direct',
-                frame.from,
-                deps.myUserId,
-              );
-            } catch (err) {
-              diag('router', 'conversationIdFor THREW', {
+              let conversationId: string;
+              try {
+                conversationId = deps.conversationIdFor(
+                  'direct',
+                  frame.from,
+                  deps.myUserId,
+                );
+              } catch (err) {
+                diag('router', 'conversationIdFor THREW', {
+                  ...frameDesc,
+                  me: deps.myUserId,
+                  err: String(err),
+                });
+                return;
+              }
+              diag('router', 'add direct to conversation', {
+                convId: conversationId,
                 from: frame.from,
-                me: deps.myUserId,
-                err: String(err),
+                isSelf: frame.from === deps.myUserId,
+                textPreview: bubble.slice(0, 24),
               });
-              return;
-            }
-            diag('router', 'add direct to conversation', {
-              convId: conversationId,
-              from: frame.from,
-              isSelf: frame.from === deps.myUserId,
-              textPreview: bubble.slice(0, 24),
-            });
-            deps.addToConversation(conversationId, {
-              id: frame.message_id,
-              from: frame.from,
-              text: bubble,
-              kind: 'direct',
-              sentAt: Date.now(),
-              stage: 'sent',
-            });
-            try {
-              deps.ws.send({ type: 'ack', message_id: frame.message_id });
-            } catch {
-              /* socket may be reconnecting; server retries on reconnect */
+              try {
+                deps.addToConversation(conversationId, {
+                  id: frame.message_id,
+                  from: frame.from,
+                  text: bubble,
+                  kind: 'direct',
+                  sentAt: Date.now(),
+                  stage: 'sent',
+                });
+                diag('router', 'addToConversation OK', { convId: conversationId });
+              } catch (err) {
+                diag('router', 'addToConversation THREW', {
+                  convId: conversationId,
+                  err: String(err),
+                });
+                return;
+              }
+              try {
+                deps.ws.send({ type: 'ack', message_id: frame.message_id });
+                diag('router', 'ack sent', { msgId: frame.message_id });
+              } catch (err) {
+                diag('router', 'ack send FAILED', {
+                  msgId: frame.message_id,
+                  err: String(err),
+                });
+              }
+            } catch (err) {
+              // Catch-all so unhandled rejections never disappear into
+              // the WS subscriber's outer try/catch.
+              diag('router', 'direct IIFE CRASHED', {
+                ...frameDesc,
+                err: String(err),
+                stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
+              });
             }
           })();
         } else if (frame.msg_type === 'group') {
