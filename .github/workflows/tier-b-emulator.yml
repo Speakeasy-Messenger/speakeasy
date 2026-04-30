@@ -140,26 +140,30 @@ jobs:
 
       - name: Dump diagnostics on failure
         if: failure()
+        # Hard-timeout each step so a hung adb / offline emulator can't
+        # hang the whole job. The reactivecircus action sometimes leaves
+        # the emulator process alive but the adb daemon disconnected,
+        # which makes `adb shell` block indefinitely.
+        timeout-minutes: 3
         run: |
+          set +e
           echo "::group::api server log"
           cat /tmp/api-server.log || true
           echo "::endgroup::"
           echo "::group::view hierarchy"
-          # If Maestro left a debug-output dir, the most recent flow's
-          # commands.json + screenshots are there.
           ls -la /tmp/maestro-* 2>/dev/null || true
           for d in /tmp/maestro-*; do
             echo "=== $d ==="
             ls -la "$d" 2>/dev/null || true
-            cat "$d/commands.json" 2>/dev/null | head -200 || true
+            head -200 "$d/commands.json" 2>/dev/null || true
           done
           echo "::endgroup::"
           echo "::group::on-device crash files"
-          adb shell "ls /sdcard/Download/speakeasy_crash_*.txt 2>/dev/null" || true
-          adb shell "for f in /sdcard/Download/speakeasy_crash_*.txt; do echo \"=== \$f\"; cat \$f; done" || true
+          timeout 15 adb shell "ls /sdcard/Download/speakeasy_crash_*.txt 2>/dev/null" || true
+          timeout 30 adb shell "for f in /sdcard/Download/speakeasy_crash_*.txt; do echo \"=== \$f\"; cat \$f; done" || true
           echo "::endgroup::"
-          echo "::group::adb logcat (last 200 lines)"
-          adb logcat -d -t 200 ReactNativeJS:V AndroidRuntime:E *:S 2>/dev/null || true
+          echo "::group::adb logcat (last 300 lines)"
+          timeout 15 adb logcat -d -t 300 2>/dev/null || true
           echo "::endgroup::"
 
       - name: Upload Maestro debug artifacts
