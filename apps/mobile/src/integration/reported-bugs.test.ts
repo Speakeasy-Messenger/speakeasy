@@ -7,6 +7,7 @@ import {
   sendDirect,
 } from './harness.js';
 import { useIdentity } from '../store/identity.js';
+import { useConversations } from '../store/conversations.js';
 import { __resetAsyncStorageMock } from '../__mocks__/async-storage.js';
 import { conversationIdForDirect } from '@speakeasy/shared';
 
@@ -97,6 +98,40 @@ describe('reported bug #2 — self-DM should round-trip back to the sender', () 
     expect(bubble.text).toBe('note to self');
     expect(bubble.kind).toBe('direct');
     alice.close();
+  });
+
+  it('a self-DM also surfaces in the global useConversations store with peerUserId set, so ConversationsScreen lists it (regression: 0.2.6 alpha — bubble visible inside chat but no row in list)', async () => {
+    // The 0.2.6 alpha showed a self-DM round-trip working inside the
+    // chat screen but the conversation row vanished from the list as
+    // soon as you backed out. Root cause: the inbound `add()` path on
+    // the conversations store fell through to `emptyConversation()`
+    // which leaves peerUserId undefined; the list filter requires it.
+    // The store's `add()` now derives peerUserId from msg.from on
+    // direct messages when the entry didn't already have one. This
+    // test locks the fix in.
+    useConversations.getState().reset();
+    const alice = await makeClient(h, {
+      token: 'dvt_alice',
+      userId: 'alice-blue-fox',
+    });
+    // Drive the actual store, mirroring what the App.tsx-mounted router
+    // does: addToConversation routes into useConversations.add().
+    const selfConvId = conversationIdForDirect(alice.userId, alice.userId);
+    useConversations.getState().add(selfConvId, {
+      id: 'm1',
+      from: alice.userId, // inbound from-self echo
+      text: 'note to self',
+      kind: 'direct',
+      sentAt: Date.now(),
+      stage: 'sent',
+    });
+    const stored = useConversations.getState().byId[selfConvId];
+    expect(stored).toBeDefined();
+    expect(stored!.kind).toBe('direct');
+    expect(stored!.peerUserId).toBe(alice.userId);
+    expect(stored!.messages).toHaveLength(1);
+    alice.close();
+    useConversations.getState().reset();
   });
 });
 

@@ -131,39 +131,30 @@ export function ChatScreen({ peerId, onBack }: Props) {
     });
     void (async () => {
       try {
-        // Reuse the deviceToken minted at signup. Falling back to verify()
-        // here only fires if the identity store was wiped without a
-        // sign-out (shouldn't happen in normal operation).
         let deviceToken = useIdentity.getState().deviceToken;
         if (!deviceToken) {
+          diag('chat', 'send: no deviceToken, calling vouchflow.verify');
           const r = await vouchflow.verify({ context: 'login' });
           useIdentity.getState().setDeviceToken(r.deviceToken);
           deviceToken = r.deviceToken;
         }
-        // Self-DM bypasses libsignal — self-paired Signal sessions are
-        // implementation-dependent on the native bridge and not worth
-        // the alpha-debug cost for a "Notes to self" / round-trip test
-        // feature. The plaintext bytes go on the wire directly; the
-        // server is opaque to ciphertext anyway, and the message router
-        // on the receive side recognises self-from and skips decrypt.
         const isSelf = peerId === myUserId;
         let ciphertext: Uint8Array;
         if (isSelf) {
           ciphertext = utf8ToBytes(trimmed);
         } else {
+          diag('chat', 'send: ensureSessionWithPeer', { peerId });
           await ensureSessionWithPeer({
             api,
             signalProtocol,
             deviceToken,
             peerUserId: peerId,
           });
+          diag('chat', 'send: ensureSessionWithPeer OK', { peerId });
           ciphertext = await signalProtocol.encrypt(peerId, utf8ToBytes(trimmed));
+          diag('chat', 'send: encrypt OK', { peerId, ctLen: ciphertext.length });
         }
         const ws = getWsClient(async () => deviceToken);
-        // ChatScreen can mount before the WS finishes its auth handshake
-        // (App.tsx kicked off connect, but it's network-bound). Without
-        // this wait, ws.send throws "cannot send in state=authenticating"
-        // and the user sees an opaque [send failed].
         await ws.waitForAuthed();
         ws.send({
           type: 'message',
@@ -171,13 +162,19 @@ export function ChatScreen({ peerId, onBack }: Props) {
           ciphertext: bytesToB64(ciphertext),
           msg_type: 'direct',
         });
+        diag('chat', 'send: ws.send OK', { peerId });
       } catch (err) {
-        // Outbound queue isn't here yet — surface failure on the bubble
-        // so the user knows to retry. Same fail-mode for ApiError (peer
-        // bundle fetch failed) and SignalClientError (untrusted identity,
-        // encryption failure). Generic Error gets its message rendered
-        // verbatim so we can diagnose without a logcat.
-        const e = err as { name?: string; message?: string };
+        const e = err as { name?: string; message?: string; reason?: string; code?: string; status?: number; stack?: string };
+        diag('chat', 'send FAILED', {
+          peerId,
+          isSelf: peerId === myUserId,
+          name: e.name,
+          message: e.message,
+          reason: e.reason,
+          code: e.code,
+          status: e.status,
+          stack: e.stack?.slice(0, 240),
+        });
         const reason =
           err instanceof SignalClientError
             ? `[encrypt failed: ${err.reason}]`

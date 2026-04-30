@@ -101,9 +101,29 @@ export const useConversations = create<ConversationsState>((set, get) => ({
 
   add: (conversationId, msg) =>
     set((s) => {
-      const c = s.byId[conversationId] ?? emptyConversation(msg.kind);
+      const existing = s.byId[conversationId];
+      const c = existing ?? emptyConversation(msg.kind);
+      // For inbound direct messages, ensure peerUserId is set so the
+      // ConversationsScreen list can render this row. The router calls
+      // add() before any explicit openDirect() may have happened (e.g.
+      // self-DM, or a fresh peer messaging us first). Without this the
+      // row exists in byId but is filtered out of the list view because
+      // it has no peerUserId. `msg.from === 'me'` only happens for the
+      // local optimistic echo in ChatScreen.handleSend; the inbound
+      // path from the router always carries the actual sender id.
+      let peerUserId = c.peerUserId;
+      if (msg.kind === 'direct' && !peerUserId && msg.from !== 'me') {
+        peerUserId = msg.from;
+      }
       return {
-        byId: { ...s.byId, [conversationId]: { ...c, messages: [...c.messages, msg] } },
+        byId: {
+          ...s.byId,
+          [conversationId]: {
+            ...c,
+            peerUserId,
+            messages: [...c.messages, msg],
+          },
+        },
       };
     }),
 
