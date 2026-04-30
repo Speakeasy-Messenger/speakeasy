@@ -1,16 +1,40 @@
 # Tier B flow #2 — self-DM round-trip.
+#
+# Self-contained: enrolls a fresh user, copies the userId, pastes it
+# into NewChat, sends, asserts the bubble + that the conversation row
+# survives a back-out. Avoids cross-flow state-passing (which was
+# brittle — `${MAESTRO_USERID}` was treated as a literal string by
+# Maestro instead of resolved from the prior flow's output map).
 
 appId: xyz.speakeasyapp.app
 ---
-- assertVisible:
-    id: "conversations-userid"
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- assertVisible: "Continue"
+- tapOn:
+    id: "onboarding-continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-userid"
+    timeout: 15000
+- copyTextFrom:
+    id: "id-reveal-userid"
+- tapOn:
+    id: "id-reveal-get-started"
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 5000
 - tapOn:
     id: "conversations-new-chat"
 - assertVisible:
     id: "new-chat-peer-id-input"
 - tapOn:
     id: "new-chat-peer-id-input"
-- inputText: ${MAESTRO_USERID}
+# `MAESTRO_COPIED_TEXT` is Maestro's auto-bound variable for the most
+# recent `copyTextFrom` value — works without any runScript glue.
+- inputText: ${MAESTRO_COPIED_TEXT}
 - tapOn:
     id: "new-chat-start"
 - extendedWaitUntil:

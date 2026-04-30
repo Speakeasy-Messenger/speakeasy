@@ -2,8 +2,21 @@
 
 appId: xyz.speakeasyapp.app
 ---
-- assertVisible:
-    id: "conversations-userid"
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn:
+    id: "onboarding-continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-get-started"
+    timeout: 15000
+- tapOn:
+    id: "id-reveal-get-started"
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 5000
 - tapOn:
     id: "conversations-new-chat"
 - assertVisible:
@@ -18,4 +31,3 @@ appId: xyz.speakeasyapp.app
     timeout: 8000
 - assertNotVisible:
     id: "chat-input"
-- back

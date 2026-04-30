@@ -2,8 +2,6 @@
 #
 # Verifies: app launches, onboarding renders, "Continue" mints a userId
 # via the mock Vouchflow + InMemory user repo, IdRevealScreen shows it.
-# We capture the userId via copyTextFrom + a runScript that writes it
-# to maestro's output map; later flows pick it up via ${MAESTRO_USERID}.
 
 appId: xyz.speakeasyapp.app
 ---
@@ -17,9 +15,6 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "id-reveal-userid"
     timeout: 15000
-- copyTextFrom:
-    id: "id-reveal-userid"
-- runScript: capture-userid.js
 - tapOn:
     id: "id-reveal-get-started"
 - extendedWaitUntil:

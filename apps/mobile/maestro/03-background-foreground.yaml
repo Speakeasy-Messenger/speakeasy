@@ -1,9 +1,50 @@
 # Tier B flow #3 — background/foreground lifecycle.
+#
+# Enrolls fresh, sends a self-DM (so there's a row to look for after
+# relaunch), backgrounds + relaunches the app, asserts identity + the
+# row are restored.
 
 appId: xyz.speakeasyapp.app
 ---
-- assertVisible:
-    id: "conversations-userid"
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- tapOn:
+    id: "onboarding-continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-userid"
+    timeout: 15000
+- copyTextFrom:
+    id: "id-reveal-userid"
+- tapOn:
+    id: "id-reveal-get-started"
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 5000
+- tapOn:
+    id: "conversations-new-chat"
+- tapOn:
+    id: "new-chat-peer-id-input"
+- inputText: ${MAESTRO_COPIED_TEXT}
+- tapOn:
+    id: "new-chat-start"
+- extendedWaitUntil:
+    visible:
+      id: "chat-input"
+    timeout: 10000
+- tapOn:
+    id: "chat-input"
+- inputText: "before background"
+- tapOn:
+    id: "chat-send"
+- extendedWaitUntil:
+    visible: "before background"
+    timeout: 10000
+- back
+# Background + relaunch (clearState: false so AsyncStorage persistence
+# is exercised — this is the actual behavior under test).
 - pressKey: Home
 - waitForAnimationToEnd
 - launchApp:
@@ -13,5 +54,5 @@ appId: xyz.speakeasyapp.app
       id: "conversations-userid"
     timeout: 10000
 - extendedWaitUntil:
-    visible: "yo from maestro"
+    visible: "before background"
     timeout: 5000
