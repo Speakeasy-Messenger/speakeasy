@@ -10,5 +10,11 @@
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
         <domain includeSubdomains="false">65.21.224.209</domain>
+        <!-- 10.0.2.2 is the Android emulator's loopback to the host
+             machine. Used by Tier B CI to route requests from the
+             emulator-resident app to the api server running on the
+             same GitHub Actions runner. Reachable only from within
+             an emulator; harmless on a real device. -->
+        <domain includeSubdomains="false">10.0.2.2</domain>
     </domain-config>
 </network-security-config>
