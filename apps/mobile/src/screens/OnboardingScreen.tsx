@@ -114,7 +114,13 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       </View>
       <View style={styles.bottom}>
         {error ? <Text style={styles.error}>{error}</Text> : null}
-        <Button label="Continue" onPress={handleContinue} loading={busy} tone="primary" />
+        <Button
+          label="Continue"
+          onPress={handleContinue}
+          loading={busy}
+          tone="primary"
+          testID="onboarding-continue"
+        />
       </View>
     </SafeAreaView>
   );

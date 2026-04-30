@@ -17,6 +17,8 @@ export interface ButtonProps {
   /** primary (purple bg, cream text) | ghost (cream bg, ink text) */
   tone?: 'primary' | 'ghost';
   style?: StyleProp<ViewStyle>;
+  /** Stable selector for end-to-end (Maestro) tests. */
+  testID?: string;
 }
 
 export function Button({
@@ -26,6 +28,7 @@ export function Button({
   disabled = false,
   tone = 'primary',
   style,
+  testID,
 }: ButtonProps) {
   const isPrimary = tone === 'primary';
   const bg = isPrimary ? colors.primary : colors.cream;
@@ -35,6 +38,7 @@ export function Button({
   return (
     <Pressable
       accessibilityRole="button"
+      testID={testID}
       onPress={isInert ? undefined : onPress}
       style={({ pressed }) => [
         styles.base,

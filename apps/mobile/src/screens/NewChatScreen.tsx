@@ -122,6 +122,7 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
             doesn’t publish a directory.
           </Text>
           <TextInput
+            testID="new-chat-peer-id-input"
             style={styles.input}
             value={input}
             onChangeText={(s) => {
@@ -141,6 +142,7 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
 
         <View style={styles.bottom}>
           <Pressable
+            testID="new-chat-start"
             onPress={handleStart}
             style={[styles.startBtn, busy && styles.startBtnDisabled]}
             disabled={busy}

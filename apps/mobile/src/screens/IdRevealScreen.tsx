@@ -85,7 +85,15 @@ export function IdRevealScreen({ userId, onContinue }: Props) {
         <Text style={styles.tagline}>Say it & leave.</Text>
       </View>
       <View style={styles.bottom}>
-        <Button label="Get started" onPress={onContinue} tone="primary" />
+        <Text testID="id-reveal-userid" style={{ height: 0, opacity: 0 }}>
+          {userId}
+        </Text>
+        <Button
+          label="Get started"
+          onPress={onContinue}
+          tone="primary"
+          testID="id-reveal-get-started"
+        />
       </View>
     </SafeAreaView>
   );

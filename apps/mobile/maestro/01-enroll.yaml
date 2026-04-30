@@ -1,0 +1,27 @@
+# Tier B flow #1 — enrollment.
+#
+# Verifies: app launches, onboarding screen renders, "Continue" mints a
+# new userId via the mock Vouchflow + InMemory user repo, and
+# IdRevealScreen shows the userId. The captured userId is written to
+# 01-enroll.userid via Maestro's `runScript` (read by later flows).
+
+appId: xyz.speakeasyapp.app
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- assertVisible: "Continue"
+- tapOn:
+    id: "onboarding-continue"
+- assertVisible:
+    id: "id-reveal-userid"
+    timeout: 15000
+- copyTextFrom:
+    id: "id-reveal-userid"
+- runScript:
+    file: ./capture-userid.js
+- tapOn:
+    id: "id-reveal-get-started"
+- assertVisible:
+    id: "conversations-userid"
+    timeout: 5000

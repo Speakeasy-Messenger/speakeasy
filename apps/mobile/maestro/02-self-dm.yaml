@@ -1,0 +1,43 @@
+# Tier B flow #2 — self-DM round-trip.
+#
+# Reproduces the user-reported bug class: paste your own userId in
+# NewChatScreen, send "yo", verify the bubble appears AND the
+# conversation row exists in the list when you back out.
+#
+# Inputs: MAESTRO_USERID (from the 01-enroll flow output).
+
+appId: xyz.speakeasyapp.app
+---
+- assertVisible:
+    id: "conversations-userid"
+- tapOn:
+    id: "conversations-new-chat"
+- assertVisible:
+    id: "new-chat-peer-id-input"
+- tapOn:
+    id: "new-chat-peer-id-input"
+- inputText: ${MAESTRO_USERID}
+- tapOn:
+    id: "new-chat-start"
+# Land on the chat screen for self-DM.
+- assertVisible:
+    id: "chat-input"
+    timeout: 10000
+- tapOn:
+    id: "chat-input"
+- inputText: "yo from maestro"
+- tapOn:
+    id: "chat-send"
+# Wait for the echo bubble. Both the optimistic (right-side "me") and
+# the round-trip echo (left-side <userId>) should now exist. We check
+# for the round-trip text appearing twice.
+- assertVisible:
+    text: "yo from maestro"
+    timeout: 10000
+# Back to Conversations — the row should be visible (was the bug).
+- back
+- assertVisible:
+    id: "conversations-userid"
+- assertVisible:
+    text: "yo from maestro"
+    timeout: 5000

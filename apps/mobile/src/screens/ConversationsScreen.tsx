@@ -87,7 +87,9 @@ export function ConversationsScreen({
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
-        <Text style={[text.heroBody, styles.you]}>{userId}</Text>
+        <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
+          {userId}
+        </Text>
         <Pressable onPress={onOpenDiagnostics} hitSlop={8}>
           <Text style={[text.footnote, styles.status]}>
             connection · {wsState} · tap for diagnostics
@@ -132,7 +134,11 @@ export function ConversationsScreen({
       />
 
       <View style={styles.bottom}>
-        <Pressable onPress={onNewChat} style={styles.newBtn}>
+        <Pressable
+          testID="conversations-new-chat"
+          onPress={onNewChat}
+          style={styles.newBtn}
+        >
           <Text style={styles.newBtnText}>+ New chat</Text>
         </Pressable>
         <Pressable onPress={onNewGroup} style={styles.newGroupBtn}>

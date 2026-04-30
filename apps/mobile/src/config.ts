@@ -1,9 +1,13 @@
 /**
- * Build-time config. In a real app these come from env / a config plugin.
+ * Build-time config.
  *
- * Alpha (Phase 5e): pointed at the dev sandbox server on the Linux box's
- * public IP. Will move to `https://sandbox.api.speakeasyapp.xyz` once
- * Fly + DNS are up.
+ * Defaults below match the alpha sandbox server. CI's tier-b-emulator
+ * workflow swaps the file via `scripts/write-test-config.mjs` BEFORE
+ * `assembleRelease` so the in-CI emulator points at the api server
+ * running on the same runner (10.0.2.2 = the host loopback from inside
+ * the Android emulator).
+ *
+ * For production / local dev, leave alone.
  */
 export const config = {
   /** Speakeasy API base URL. */

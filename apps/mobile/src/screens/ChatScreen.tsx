@@ -242,6 +242,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
             <Text style={styles.ttlText}>⏱ {ttl}</Text>
           </Pressable>
           <TextInput
+            testID="chat-input"
             style={styles.input}
             value={input}
             onChangeText={setInput}
@@ -250,7 +251,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
             onSubmitEditing={handleSend}
             returnKeyType="send"
           />
-          <Pressable onPress={handleSend} style={styles.send}>
+          <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
             <Text style={styles.sendText}>Send</Text>
           </Pressable>
         </View>
