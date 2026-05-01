@@ -150,12 +150,21 @@ jobs:
           echo "::group::api server log"
           cat /tmp/api-server.log || true
           echo "::endgroup::"
-          echo "::group::view hierarchy"
-          ls -la /tmp/maestro-* 2>/dev/null || true
+          echo "::group::maestro debug tree"
+          # Maestro writes to <debug-output>/.maestro/tests/<timestamp>/
+          # with screenshots + commands.json. Walk one level deeper.
           for d in /tmp/maestro-*; do
             echo "=== $d ==="
-            ls -la "$d" 2>/dev/null || true
-            head -200 "$d/commands.json" 2>/dev/null || true
+            find "$d" -maxdepth 5 -type f 2>/dev/null | head -30
+          done
+          # Print the failing flow's commands.json + state snapshot.
+          for f in /tmp/maestro-*/.maestro/tests/*/commands.json; do
+            echo "=== $f ==="
+            head -200 "$f" 2>/dev/null || true
+          done
+          for f in /tmp/maestro-*/.maestro/tests/*/maestro-output.txt; do
+            echo "=== $f ==="
+            head -100 "$f" 2>/dev/null || true
           done
           echo "::endgroup::"
           echo "::group::on-device crash files"
@@ -171,6 +180,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: maestro-debug-${{ github.sha }}
-          path: |
-            /tmp/maestro-*
+          # `/tmp/maestro-*` directories. Trailing /** so subfiles
+          # (screenshots + commands.json under .maestro/tests/<ts>/)
+          # actually land in the artifact.
+          path: /tmp/maestro-*/**
           retention-days: 7
+          if-no-files-found: warn

@@ -50,8 +50,12 @@ appId: xyz.speakeasyapp.app
 - extendedWaitUntil:
     visible: "yo from maestro"
     timeout: 10000
+# Snapshot inside ChatScreen + after back. Maestro saves to
+# --debug-output dir; the workflow uploads the dir as an artifact.
+- takeScreenshot: 01-chat-before-back
 - back
 - waitForAnimationToEnd
+- takeScreenshot: 02-after-back
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
