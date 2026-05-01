@@ -11,7 +11,10 @@ appId: xyz.speakeasyapp.app
 - launchApp:
     clearState: true
     clearKeychain: true
-- assertVisible: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-continue"
+    timeout: 30000
 - tapOn:
     id: "onboarding-continue"
 - extendedWaitUntil:

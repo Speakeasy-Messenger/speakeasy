@@ -8,7 +8,16 @@ appId: xyz.speakeasyapp.app
 - launchApp:
     clearState: true
     clearKeychain: true
-- assertVisible: "Continue"
+# GHA emulator is slow + unaccelerated. The app's launch work
+# (AsyncStorage hydrate, Vouchflow native init, font load) routinely
+# takes longer than Android's 5s ANR threshold and the system shows
+# a "System UI isn't responding" overlay. extendedWaitUntil keeps
+# polling — once the JS thread frees up, the overlay dismisses
+# automatically and the Continue button becomes tappable.
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-continue"
+    timeout: 30000
 - tapOn:
     id: "onboarding-continue"
 - extendedWaitUntil:
