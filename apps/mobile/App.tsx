@@ -17,12 +17,15 @@ export default function App() {
   const userId = useIdentity((s) => s.userId);
   const hydrated = useIdentity((s) => s.hydrated);
 
-  // Pull persisted identity off disk on first mount. Renders a blank
-  // screen until done so the navigator doesn't briefly show Onboarding
-  // (no userId yet) and then snap to Conversations (userId arrived).
+  // Pull persisted identity AND conversations off disk on first mount.
+  // Renders a blank screen until both are done so the navigator doesn't
+  // briefly show Onboarding (no userId yet) and then snap to
+  // Conversations (userId arrived) — and so the chat list is populated
+  // from disk before the user can interact with it.
   useEffect(() => {
     if (!hydrated) {
       void useIdentity.getState().hydrate();
+      void useConversations.getState().hydrate();
     }
   }, [hydrated]);
 

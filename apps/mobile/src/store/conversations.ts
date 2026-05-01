@@ -1,3 +1,4 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 import {
   DEFAULT_TTL_SECONDS,
@@ -10,9 +11,16 @@ import type { DisappearingStage } from '../components/DisappearingMessageBubble.
 
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
- * Phase 3 scope: in-memory only; real persistence lands with SQLCipher when
- * native shells are scaffolded (spec §4c).
+ *
+ * Persisted to AsyncStorage so chat history survives app restarts
+ * (matches user expectation; Tier B run 25213896438 caught the gap).
+ * Spec §5 still says messages disappear by default — that's the local
+ * TTL engine's job; persistence here just keeps undisappeared messages
+ * across cold starts. Real SQLCipher migration lands when the native
+ * shells are scaffolded (§4c).
  */
+
+const STORAGE_KEY = 'speakeasy.conversations.v1';
 
 export interface ChatMessage {
   /** Server-assigned message id (ULID). */
@@ -56,6 +64,8 @@ export interface ConversationState {
 
 interface ConversationsState {
   byId: Record<string, ConversationState>;
+  /** True once `hydrate()` has run (loaded from disk on startup). */
+  hydrated: boolean;
   /**
    * Open (or refresh) a 1:1 conversation with `peerUserId`. Idempotent —
    * doesn't reset messages or settings if the conversation already exists.
@@ -69,7 +79,9 @@ interface ConversationsState {
   setPersistence: (conversationId: string, on: boolean) => void;
   /** Resolved TTL in seconds, or `null` if `off` / persistence is on. */
   ttlSecondsFor: (conversationId: string) => number | null;
-  reset: () => void;
+  /** Read persisted state from disk. Idempotent. */
+  hydrate: () => Promise<void>;
+  reset: () => Promise<void>;
 }
 
 function emptyConversation(kind: ConversationKind): ConversationState {
@@ -82,8 +94,18 @@ function emptyConversation(kind: ConversationKind): ConversationState {
   };
 }
 
+async function persist(byId: Record<string, ConversationState>): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(byId));
+  } catch {
+    // Persistence failure is non-fatal — in-memory state is the source
+    // of truth for the current session.
+  }
+}
+
 export const useConversations = create<ConversationsState>((set, get) => ({
   byId: {},
+  hydrated: false,
 
   openDirect: (myUserId, peerUserId) => {
     const id = conversationIdForDirect(myUserId, peerUserId);
@@ -96,21 +118,14 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         },
       };
     });
+    void persist(get().byId);
     return id;
   },
 
-  add: (conversationId, msg) =>
+  add: (conversationId, msg) => {
     set((s) => {
       const existing = s.byId[conversationId];
       const c = existing ?? emptyConversation(msg.kind);
-      // For inbound direct messages, ensure peerUserId is set so the
-      // ConversationsScreen list can render this row. The router calls
-      // add() before any explicit openDirect() may have happened (e.g.
-      // self-DM, or a fresh peer messaging us first). Without this the
-      // row exists in byId but is filtered out of the list view because
-      // it has no peerUserId. `msg.from === 'me'` only happens for the
-      // local optimistic echo in ChatScreen.handleSend; the inbound
-      // path from the router always carries the actual sender id.
       let peerUserId = c.peerUserId;
       if (msg.kind === 'direct' && !peerUserId && msg.from !== 'me') {
         peerUserId = msg.from;
@@ -125,7 +140,9 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           },
         },
       };
-    }),
+    });
+    void persist(get().byId);
+  },
 
   setStage: (conversationId, msgId, stage) =>
     set((s) => {
@@ -142,7 +159,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       };
     }),
 
-  remove: (conversationId, msgId) =>
+  remove: (conversationId, msgId) => {
     set((s) => {
       const c = s.byId[conversationId];
       if (!c) return s;
@@ -155,21 +172,27 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           },
         },
       };
-    }),
+    });
+    void persist(get().byId);
+  },
 
-  setTtl: (conversationId, ttl) =>
+  setTtl: (conversationId, ttl) => {
     set((s) => {
       const c = s.byId[conversationId] ?? emptyConversation('direct');
       return { byId: { ...s.byId, [conversationId]: { ...c, ttl } } };
-    }),
+    });
+    void persist(get().byId);
+  },
 
-  setPersistence: (conversationId, persistenceEnabled) =>
+  setPersistence: (conversationId, persistenceEnabled) => {
     set((s) => {
       const c = s.byId[conversationId] ?? emptyConversation('direct');
       return {
         byId: { ...s.byId, [conversationId]: { ...c, persistenceEnabled } },
       };
-    }),
+    });
+    void persist(get().byId);
+  },
 
   ttlSecondsFor: (conversationId) => {
     const c = get().byId[conversationId];
@@ -178,5 +201,42 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     return TTL_OPTIONS[c.ttl];
   },
 
-  reset: () => set({ byId: {} }),
+  hydrate: async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, ConversationState>;
+        // Drop any messages whose TTL has already expired (the local
+        // disappearing-message engine would have removed them mid-
+        // session; same policy on cold start so the user doesn't see
+        // resurrected expired bubbles).
+        const now = Date.now();
+        const filtered: Record<string, ConversationState> = {};
+        for (const [id, c] of Object.entries(parsed)) {
+          if (c.persistenceEnabled) {
+            filtered[id] = c;
+            continue;
+          }
+          const ttlSec = TTL_OPTIONS[c.ttl];
+          const ttlMs = ttlSec === null ? Infinity : ttlSec * 1000;
+          const aliveMessages = c.messages.filter((m) => now - m.sentAt < ttlMs);
+          filtered[id] = { ...c, messages: aliveMessages };
+        }
+        set({ byId: filtered });
+      }
+    } catch {
+      // Corrupt / missing → keep empty state.
+    } finally {
+      set({ hydrated: true });
+    }
+  },
+
+  reset: async () => {
+    set({ byId: {} });
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  },
 }));
