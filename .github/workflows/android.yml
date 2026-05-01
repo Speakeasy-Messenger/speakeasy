@@ -65,7 +65,9 @@ jobs:
 
       - name: Build debug APK
         working-directory: apps/mobile/android
-        run: ./gradlew assembleDebug --no-daemon
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        run: ./gradlew assembleDebug --no-daemon -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
 
       - name: Upload APK
         uses: actions/upload-artifact@v4

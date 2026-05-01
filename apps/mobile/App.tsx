@@ -11,12 +11,9 @@ class AppErrorBoundaryInner extends Component<
   { children: ReactNode },
   { hasError: boolean }
 > {
-  declare state: { hasError: boolean };
-
-  constructor(props: { children: ReactNode }) {
-    super(props);
-    this.state = { hasError: false };
-  }
+  // Initial state — must be a simple property (Hermes/Metro doesn't
+  // support 'declare' class fields).
+  override state: { hasError: boolean } = { hasError: false };
 
   static getDerivedStateFromError(): { hasError: boolean } {
     return { hasError: true };
