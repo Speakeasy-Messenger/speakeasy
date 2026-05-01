@@ -151,22 +151,30 @@ jobs:
           cat /tmp/api-server.log || true
           echo "::endgroup::"
           echo "::group::maestro debug tree"
-          # Maestro writes to <debug-output>/.maestro/tests/<timestamp>/
-          # with screenshots + commands.json. Walk one level deeper.
           for d in /tmp/maestro-*; do
             echo "=== $d ==="
             find "$d" -maxdepth 5 -type f 2>/dev/null | head -30
           done
-          # Print the failing flow's commands.json + state snapshot.
-          for f in /tmp/maestro-*/.maestro/tests/*/commands.json; do
+          echo "::endgroup::"
+          echo "::group::maestro.log (full Maestro output)"
+          for f in /tmp/maestro-*/.maestro/tests/*/maestro.log; do
             echo "=== $f ==="
-            head -200 "$f" 2>/dev/null || true
-          done
-          for f in /tmp/maestro-*/.maestro/tests/*/maestro-output.txt; do
-            echo "=== $f ==="
-            head -100 "$f" 2>/dev/null || true
+            cat "$f" 2>/dev/null | tail -200 || true
           done
           echo "::endgroup::"
+          # Stage screenshots into a flat dir for upload-artifact (its
+          # glob support is limited; a single dir at a known path works).
+          mkdir -p /tmp/maestro-staging
+          for f in /tmp/maestro-*/.maestro/tests/*/*.png; do
+            cp -v "$f" /tmp/maestro-staging/ 2>/dev/null || true
+          done
+          for f in /tmp/maestro-*/.maestro/tests/*/maestro.log; do
+            # Prefix with the parent dir name so logs from different
+            # flows don't collide.
+            base="$(basename "$(dirname "$f")")"
+            cp -v "$f" "/tmp/maestro-staging/$base-maestro.log" 2>/dev/null || true
+          done
+          ls -la /tmp/maestro-staging/ 2>/dev/null || true
           echo "::group::on-device crash files"
           timeout 15 adb shell "ls /sdcard/Download/speakeasy_crash_*.txt 2>/dev/null" || true
           timeout 30 adb shell "for f in /sdcard/Download/speakeasy_crash_*.txt; do echo \"=== \$f\"; cat \$f; done" || true
@@ -180,9 +188,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: maestro-debug-${{ github.sha }}
-          # `/tmp/maestro-*` directories. Trailing /** so subfiles
-          # (screenshots + commands.json under .maestro/tests/<ts>/)
-          # actually land in the artifact.
-          path: /tmp/maestro-*/**
+          # /tmp/maestro-staging is populated by the Dump diagnostics
+          # step (which `cp`s all PNGs + maestro.log into a flat dir).
+          # The single-dir form survives upload-artifact's glob quirks.
+          path: /tmp/maestro-staging/
           retention-days: 7
           if-no-files-found: warn
