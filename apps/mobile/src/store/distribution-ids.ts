@@ -1,21 +1,25 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 /**
  * Per-group SenderKey distributionId allocator. Each (local-sender, group)
  * has one UUID v4; allocated lazily on first send to the group.
  *
- * # Persistence
- *
- * In-memory only for the moment. A cold start re-allocates new UUIDs,
- * which forces a one-time SKDM re-fan-out per group — wasteful but
- * correct. Moves to SQLCipher when conversation persistence lands
- * (Phase 5e), at which point the same UUID survives reboots and the
- * SKDM is sent exactly once per (sender, group) lifetime.
+ * Persisted to AsyncStorage so distribution IDs survive app restarts.
+ * This avoids unnecessary SKDM re-fan-out per group after a cold start.
  */
+
+const STORAGE_KEY = 'speakeasy-distribution-ids';
+
 export interface DistributionIdsState {
   byGroup: Record<string, string>;
+  /** True once `hydrate()` has run (loaded from disk on startup). */
+  hydrated: boolean;
   getOrCreate: (groupId: string) => string;
-  reset: () => void;
+  /** Read persisted state from disk. Idempotent. */
+  hydrate: () => Promise<void>;
+  /** Wipe distribution IDs locally AND on disk. */
+  reset: () => Promise<void>;
 }
 
 function uuidv4(): string {
@@ -35,14 +39,49 @@ function uuidv4(): string {
   return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
+async function persist(byGroup: Record<string, string>): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(byGroup));
+  } catch {
+    // Persistence failure is non-fatal — in-memory state is the source
+    // of truth for the current session.
+  }
+}
+
 export const useDistributionIds = create<DistributionIdsState>((set, get) => ({
   byGroup: {},
+  hydrated: false,
+
   getOrCreate: (groupId: string) => {
     const existing = get().byGroup[groupId];
     if (existing) return existing;
     const fresh = uuidv4();
-    set((s) => ({ byGroup: { ...s.byGroup, [groupId]: fresh } }));
+    const newByGroup = { ...get().byGroup, [groupId]: fresh };
+    set({ byGroup: newByGroup });
+    void persist(newByGroup);
     return fresh;
   },
-  reset: () => set({ byGroup: {} }),
+
+  hydrate: async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, string>;
+        set({ byGroup: parsed });
+      }
+    } catch {
+      // Corrupt / missing → keep empty state.
+    } finally {
+      set({ hydrated: true });
+    }
+  },
+
+  reset: async () => {
+    set({ byGroup: {}, hydrated: false });
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  },
 }));

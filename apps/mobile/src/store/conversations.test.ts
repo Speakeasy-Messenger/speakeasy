@@ -116,4 +116,31 @@ describe('useConversations', () => {
       .openDirect('silent-golden-hawk', 'alice-blue-fox');
     expect(a).toBe(b);
   });
+
+  it('unreadCountFor returns 0 for unknown conversation', () => {
+    expect(useConversations.getState().unreadCountFor('dm-unknown')).toBe(0);
+  });
+
+  it('unreadCountFor returns message count when nothing has been read', () => {
+    useConversations.getState().add(CONV, baseMsg('m1'));
+    useConversations.getState().add(CONV, { ...baseMsg('m2'), sentAt: 2_000 });
+    expect(useConversations.getState().unreadCountFor(CONV)).toBe(2);
+  });
+
+  it('markRead sets lastReadAt; subsequent messages are unread', () => {
+    const now = Date.now();
+    useConversations.getState().add(CONV, { ...baseMsg('m1'), sentAt: now - 2000 });
+    useConversations.getState().markRead(CONV);
+    useConversations.getState().add(CONV, { ...baseMsg('m2'), sentAt: now + 1000 });
+    useConversations.getState().add(CONV, { ...baseMsg('m3'), sentAt: now + 2000 });
+    expect(useConversations.getState().unreadCountFor(CONV)).toBe(2);
+  });
+
+  it('markRead marks all existing messages as read', () => {
+    const now = Date.now();
+    useConversations.getState().add(CONV, { ...baseMsg('m1'), sentAt: now - 2000 });
+    useConversations.getState().add(CONV, { ...baseMsg('m2'), sentAt: now - 1000 });
+    useConversations.getState().markRead(CONV);
+    expect(useConversations.getState().unreadCountFor(CONV)).toBe(0);
+  });
 });

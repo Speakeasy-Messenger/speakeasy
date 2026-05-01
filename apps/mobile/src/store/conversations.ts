@@ -60,6 +60,12 @@ export interface ConversationState {
    * conversation. Server-side TTL behavior is unchanged (spec §5).
    */
   persistenceEnabled: boolean;
+  /**
+   * Wall-clock ms of the last message the user has seen in this
+   * conversation. Messages with sentAt > lastReadAt are "unread".
+   * Undefined / 0 means nothing has been read yet.
+   */
+  lastReadAt?: number;
 }
 
 interface ConversationsState {
@@ -79,6 +85,10 @@ interface ConversationsState {
   setPersistence: (conversationId: string, on: boolean) => void;
   /** Resolved TTL in seconds, or `null` if `off` / persistence is on. */
   ttlSecondsFor: (conversationId: string) => number | null;
+  /** Mark a conversation as read up to the current time. */
+  markRead: (conversationId: string) => void;
+  /** Count of unread messages in a conversation. */
+  unreadCountFor: (conversationId: string) => number;
   /** Read persisted state from disk. Idempotent. */
   hydrate: () => Promise<void>;
   reset: () => Promise<void>;
@@ -199,6 +209,24 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     if (!c) return DEFAULT_TTL_SECONDS;
     if (c.persistenceEnabled) return null;
     return TTL_OPTIONS[c.ttl];
+  },
+
+  markRead: (conversationId) => {
+    set((s) => {
+      const c = s.byId[conversationId];
+      if (!c) return s;
+      return {
+        byId: { ...s.byId, [conversationId]: { ...c, lastReadAt: Date.now() } },
+      };
+    });
+    void persist(get().byId);
+  },
+
+  unreadCountFor: (conversationId) => {
+    const c = get().byId[conversationId];
+    if (!c) return 0;
+    if (!c.lastReadAt) return c.messages.length;
+    return c.messages.filter((m) => m.sentAt > c.lastReadAt!).length;
   },
 
   hydrate: async () => {

@@ -64,6 +64,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
   const setTtl = useConversations((s) => s.setTtl);
   const setPersistence = useConversations((s) => s.setPersistence);
   const openDirect = useConversations((s) => s.openDirect);
+  const markRead = useConversations((s) => s.markRead);
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);
@@ -74,7 +75,8 @@ export function ChatScreen({ peerId, onBack }: Props) {
   // show this thread.
   useEffect(() => {
     openDirect(myUserId, peerId);
-  }, [myUserId, peerId, openDirect]);
+    markRead(conversationId);
+  }, [myUserId, peerId, openDirect, conversationId, markRead]);
 
   // Inbound direct frames now flow through the App-level message router
   // (see App.tsx) which adds them to the conversations store and acks

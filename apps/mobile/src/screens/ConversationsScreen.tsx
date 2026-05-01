@@ -19,6 +19,8 @@ interface DirectRow {
   peerUserId: string;
   preview: string;
   sortKey: number;
+  unread: number;
+  lastActivityAt: number;
 }
 interface GroupRow {
   kind: 'group';
@@ -27,6 +29,8 @@ interface GroupRow {
   memberCount: number;
   preview: string;
   sortKey: number;
+  unread: number;
+  lastActivityAt: number;
 }
 type Row = DirectRow | GroupRow;
 
@@ -36,24 +40,26 @@ interface Props {
   onNewChat: () => void;
   onNewGroup: () => void;
   onOpenDiagnostics: () => void;
+  onOpenSettings: () => void;
 }
 
 /**
  * Phase 5e: combined conversations list — direct chats + groups, sorted
- * by most-recent activity. Groups render with a `#` prefix per spec §14
- * so they're trivially distinguishable from a peer id.
+ * by most-recent activity. Spec §14: color-pale cards, rounded-square
+ * avatars, timer pills, unread badges, relative timestamps.
  */
 export function ConversationsScreen({
   onOpenChat,
   onOpenGroup,
   onNewChat,
   onNewGroup,
-  onOpenDiagnostics,
+  onOpenSettings,
 }: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
   const conversationsById = useConversations((s) => s.byId);
   const groupsById = useGroups((s) => s.byId);
+  const unreadCountFor = useConversations((s) => s.unreadCountFor);
 
   const directRows: DirectRow[] = Object.entries(conversationsById)
     .filter(([_, c]) => c.kind === 'direct' && !!c.peerUserId)
@@ -63,8 +69,10 @@ export function ConversationsScreen({
         kind: 'direct' as const,
         conversationId,
         peerUserId: c.peerUserId!,
-        preview: last?.text ?? '(no messages yet)',
+        preview: last?.text ?? 'No messages yet',
         sortKey: last?.sentAt ?? c.createdAt,
+        unread: unreadCountFor(conversationId),
+        lastActivityAt: last?.sentAt ?? c.createdAt,
       };
     });
 
@@ -76,8 +84,10 @@ export function ConversationsScreen({
       groupId,
       name: g.name,
       memberCount: g.members.length,
-      preview: last?.text ?? '(no messages yet)',
+      preview: last?.text ?? 'No messages yet',
       sortKey: last?.sentAt ?? g.createdAt,
+      unread: conv ? unreadCountFor(groupId) : 0,
+      lastActivityAt: last?.sentAt ?? g.createdAt,
     };
   });
 
@@ -86,15 +96,20 @@ export function ConversationsScreen({
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
-        <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
-        <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
-          {userId}
+        <View style={styles.headerTop}>
+          <View style={styles.headerLeft}>
+            <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
+            <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
+              {userId}
+            </Text>
+          </View>
+          <Pressable onPress={onOpenSettings} hitSlop={8} style={styles.gearBtn}>
+            <Text style={styles.gearIcon}>⚙️</Text>
+          </Pressable>
+        </View>
+        <Text style={[text.footnote, styles.status]}>
+          {wsState === 'open' ? '●' : '○'} {wsState}
         </Text>
-        <Pressable onPress={onOpenDiagnostics} hitSlop={8}>
-          <Text style={[text.footnote, styles.status]}>
-            connection · {wsState} · tap for diagnostics
-          </Text>
-        </Pressable>
       </View>
 
       <FlatList
@@ -106,27 +121,45 @@ export function ConversationsScreen({
         }
         renderItem={({ item }) =>
           item.kind === 'direct' ? (
-            <Pressable onPress={() => onOpenChat(item.peerUserId)} style={styles.row}>
+            <Pressable onPress={() => onOpenChat(item.peerUserId)} style={styles.card}>
               <View style={styles.avatar}>
                 <Text style={styles.avatarText}>{initials(item.peerUserId)}</Text>
               </View>
               <View style={styles.rowBody}>
-                <Text style={styles.rowName} numberOfLines={1}>{item.peerUserId}</Text>
-                <Text style={styles.rowPreview} numberOfLines={1}>{item.preview}</Text>
+                <View style={styles.rowTop}>
+                  <Text style={styles.rowName} numberOfLines={1}>{item.peerUserId}</Text>
+                  <Text style={styles.timestamp}>{relativeTime(item.lastActivityAt)}</Text>
+                </View>
+                <View style={styles.rowBottom}>
+                  <Text style={styles.rowPreview} numberOfLines={1}>{item.preview}</Text>
+                  {item.unread > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </Pressable>
           ) : (
-            <Pressable onPress={() => onOpenGroup(item.groupId)} style={styles.row}>
+            <Pressable onPress={() => onOpenGroup(item.groupId)} style={styles.card}>
               <View style={[styles.avatar, styles.avatarGroup]}>
                 <Text style={styles.avatarGroupText}>#</Text>
               </View>
               <View style={styles.rowBody}>
-                <Text style={styles.rowName} numberOfLines={1}>
-                  # {item.name}
-                </Text>
-                <Text style={styles.rowPreview} numberOfLines={1}>
-                  {item.memberCount} member{item.memberCount === 1 ? '' : 's'} · {item.preview}
-                </Text>
+                <View style={styles.rowTop}>
+                  <Text style={styles.rowName} numberOfLines={1}># {item.name}</Text>
+                  <Text style={styles.timestamp}>{relativeTime(item.lastActivityAt)}</Text>
+                </View>
+                <View style={styles.rowBottom}>
+                  <Text style={styles.rowPreview} numberOfLines={1}>
+                    {item.memberCount} member{item.memberCount === 1 ? '' : 's'} · {item.preview}
+                  </Text>
+                  {item.unread > 0 && (
+                    <View style={styles.badge}>
+                      <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
+                    </View>
+                  )}
+                </View>
               </View>
             </Pressable>
           )
@@ -161,28 +194,46 @@ function initials(userId: string): string {
   return first + last;
 }
 
+function relativeTime(ms: number): string {
+  const diff = Date.now() - ms;
+  const seconds = Math.floor(diff / 1000);
+  if (seconds < 60) return 'now';
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  const days = Math.floor(hours / 24);
+  if (days < 7) return `${days}d`;
+  return `${Math.floor(days / 7)}w`;
+}
+
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.chatListBg },
+  root: { flex: 1, backgroundColor: colors.cream },
   header: { gap: space.xs, padding: space.lg, paddingBottom: space.md },
+  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
+  headerLeft: { gap: space.xs, flex: 1 },
   label: { color: colors.slate },
   you: { color: colors.ink, fontFamily: fonts.inter500 },
   status: { color: colors.slate },
+  gearBtn: { padding: space.sm },
+  gearIcon: { fontSize: 20 },
   listContent: { paddingHorizontal: space.md, paddingBottom: space.xl, gap: space.xs },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: colors.slate },
-  row: {
+  card: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
     paddingVertical: space.sm,
-    paddingHorizontal: space.sm,
+    paddingHorizontal: space.md,
     borderRadius: radius.avatar,
+    backgroundColor: colors.pale,
   },
   avatar: {
     width: 44,
     height: 44,
     borderRadius: radius.avatar,
-    backgroundColor: colors.pale,
+    backgroundColor: colors.soft,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -199,15 +250,39 @@ const styles = StyleSheet.create({
     color: colors.cream,
   },
   rowBody: { flex: 1, gap: 2 },
+  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
   rowName: {
     color: colors.ink,
     fontFamily: fonts.inter500,
     fontSize: 14,
+    flex: 1,
   },
+  timestamp: {
+    color: colors.slate,
+    fontFamily: fonts.inter300,
+    fontSize: 11,
+    marginLeft: space.sm,
+  },
+  rowBottom: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   rowPreview: {
     color: colors.slate,
     fontFamily: fonts.inter400,
     fontSize: 12,
+    flex: 1,
+  },
+  badge: {
+    backgroundColor: colors.primary,
+    borderRadius: radius.pill,
+    minWidth: 20,
+    height: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 6,
+  },
+  badgeText: {
+    color: colors.cream,
+    fontFamily: fonts.inter500,
+    fontSize: 11,
   },
   bottom: { padding: space.lg, gap: space.sm },
   newBtn: {

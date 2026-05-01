@@ -1,17 +1,14 @@
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 /**
  * Per-process knowledge of groups the local user is a member of.
  *
- * Phase 5e: in-memory only — created groups + groups we're added to are
- * tracked here so the conversations list can render them and the
- * GroupChatScreen knows the member set. Persistence (so groups survive
- * cold starts) lands when the conversation store moves to SQLCipher;
- * for now a relaunch loses the local group registry, but server-side
- * membership and the on-disk Sender Keys (SQLCipher) are intact, so the
- * recovery path is "the user re-adds the group locally" or "the next
- * group message arriving teaches the client about it again."
+ * Persisted to AsyncStorage so groups survive app restarts.
+ * Each group has an id, display name, member list, and creation timestamp.
  */
+
+const STORAGE_KEY = 'speakeasy-groups';
 
 export interface Group {
   id: string;
@@ -25,15 +22,30 @@ export interface Group {
 
 interface GroupsState {
   byId: Record<string, Group>;
+  /** True once `hydrate()` has run (loaded from disk on startup). */
+  hydrated: boolean;
   /** Insert or merge a group entry. Member set unioned, name preserved if unset. */
   upsert: (group: Group) => void;
   /** Add a single member to an existing group (no-op if missing). */
   addMember: (groupId: string, userId: string) => void;
-  reset: () => void;
+  /** Read persisted state from disk. Idempotent. */
+  hydrate: () => Promise<void>;
+  /** Wipe groups locally AND on disk. */
+  reset: () => Promise<void>;
 }
 
-export const useGroups = create<GroupsState>((set) => ({
+async function persist(byId: Record<string, Group>): Promise<void> {
+  try {
+    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(byId));
+  } catch {
+    // Persistence failure is non-fatal — in-memory state is the source
+    // of truth for the current session.
+  }
+}
+
+export const useGroups = create<GroupsState>((set, get) => ({
   byId: {},
+  hydrated: false,
 
   upsert: (group) =>
     set((s) => {
@@ -48,7 +60,9 @@ export const useGroups = create<GroupsState>((set) => ({
             members: Array.from(new Set([...existing.members, ...group.members])),
           }
         : group;
-      return { byId: { ...s.byId, [group.id]: merged } };
+      const newById = { ...s.byId, [group.id]: merged };
+      void persist(newById);
+      return { byId: newById };
     }),
 
   addMember: (groupId, userId) =>
@@ -56,10 +70,31 @@ export const useGroups = create<GroupsState>((set) => ({
       const g = s.byId[groupId];
       if (!g) return s;
       if (g.members.includes(userId)) return s;
-      return {
-        byId: { ...s.byId, [groupId]: { ...g, members: [...g.members, userId] } },
-      };
+      const newById = { ...s.byId, [groupId]: { ...g, members: [...g.members, userId] } };
+      void persist(newById);
+      return { byId: newById };
     }),
 
-  reset: () => set({ byId: {} }),
+  hydrate: async () => {
+    try {
+      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      if (raw) {
+        const parsed = JSON.parse(raw) as Record<string, Group>;
+        set({ byId: parsed });
+      }
+    } catch {
+      // Corrupt / missing → keep empty state.
+    } finally {
+      set({ hydrated: true });
+    }
+  },
+
+  reset: async () => {
+    set({ byId: {}, hydrated: false });
+    try {
+      await AsyncStorage.removeItem(STORAGE_KEY);
+    } catch {
+      /* ignore */
+    }
+  },
 }));

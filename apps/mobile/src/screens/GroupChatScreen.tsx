@@ -60,6 +60,12 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
   const remove = useConversations((s) => s.remove);
   const setTtl = useConversations((s) => s.setTtl);
   const setPersistence = useConversations((s) => s.setPersistence);
+  const markRead = useConversations((s) => s.markRead);
+
+  // Mark group conversation as read on open
+  useEffect(() => {
+    markRead(groupId);
+  }, [groupId, markRead]);
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);

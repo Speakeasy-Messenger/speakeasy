@@ -5,6 +5,7 @@ import { conversationIdForCommunity, conversationIdForDirect, conversationIdForG
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
 import { useConversations } from './src/store/conversations.js';
+import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
@@ -26,6 +27,8 @@ export default function App() {
     if (!hydrated) {
       void useIdentity.getState().hydrate();
       void useConversations.getState().hydrate();
+      void useGroups.getState().hydrate();
+      void useDistributionIds.getState().hydrate();
     }
   }, [hydrated]);
 
