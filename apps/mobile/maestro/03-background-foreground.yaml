@@ -9,6 +9,11 @@ appId: xyz.speakeasyapp.app
 - launchApp:
     clearState: true
     clearKeychain: true
+- runFlow:
+    when:
+      visible: "Wait"
+    commands:
+      - tapOn: "Wait"
 - extendedWaitUntil:
     visible:
       id: "onboarding-continue"
@@ -55,6 +60,11 @@ appId: xyz.speakeasyapp.app
 - waitForAnimationToEnd
 - launchApp:
     clearState: false
+- runFlow:
+    when:
+      visible: "Wait"
+    commands:
+      - tapOn: "Wait"
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"

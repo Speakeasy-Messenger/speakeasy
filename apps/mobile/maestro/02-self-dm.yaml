@@ -11,6 +11,11 @@ appId: xyz.speakeasyapp.app
 - launchApp:
     clearState: true
     clearKeychain: true
+- runFlow:
+    when:
+      visible: "Wait"
+    commands:
+      - tapOn: "Wait"
 - extendedWaitUntil:
     visible:
       id: "onboarding-continue"

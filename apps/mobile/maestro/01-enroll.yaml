@@ -8,12 +8,15 @@ appId: xyz.speakeasyapp.app
 - launchApp:
     clearState: true
     clearKeychain: true
-# GHA emulator is slow + unaccelerated. The app's launch work
-# (AsyncStorage hydrate, Vouchflow native init, font load) routinely
-# takes longer than Android's 5s ANR threshold and the system shows
-# a "System UI isn't responding" overlay. extendedWaitUntil keeps
-# polling — once the JS thread frees up, the overlay dismisses
-# automatically and the Continue button becomes tappable.
+# GHA emulator is slow + unaccelerated; Pixel Launcher / SystemUI
+# routinely ANR on cold boot, putting up a "Wait | Close app" dialog
+# that blocks Maestro's view-hierarchy walker even though our app is
+# fine underneath. Tap "Wait" if visible to dismiss the dialog.
+- runFlow:
+    when:
+      visible: "Wait"
+    commands:
+      - tapOn: "Wait"
 - extendedWaitUntil:
     visible:
       id: "onboarding-continue"
