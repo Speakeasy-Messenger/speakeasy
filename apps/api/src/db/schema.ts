@@ -142,8 +142,12 @@ export const messages = pgTable(
     senderId: text('sender_id')
       .notNull()
       .references(() => users.id),
+    recipientId: text('recipient_id').notNull(),
     ciphertext: bytea('ciphertext').notNull(),
     msgType: text('msg_type').notNull(),
+    skdmGroupId: text('skdm_group_id'),
+    targetDevices: jsonb('target_devices').notNull().$type<string[]>().default([]),
+    deliveredToDevices: jsonb('delivered_to_devices').notNull().$type<string[]>().default([]),
     delivered: boolean('delivered').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
@@ -151,5 +155,6 @@ export const messages = pgTable(
   (t) => ({
     conversationIdx: index('messages_conversation_idx').on(t.conversation, t.createdAt),
     expiresIdx: index('messages_expires_idx').on(t.expiresAt),
+    recipientIdx: index('messages_recipient_idx').on(t.recipientId),
   }),
 );

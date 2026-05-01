@@ -11,6 +11,11 @@ import { DrizzleUserRepo } from './db/users.drizzle.js';
 import { InMemoryUserRepo } from './db/users.memory.js';
 import type { UserRepo } from './db/users.js';
 import { InMemoryPreKeyRepo } from './db/prekeys.memory.js';
+import { DrizzlePreKeyRepo } from './db/prekeys.drizzle.js';
+import { DrizzleGroupRepo } from './db/groups.drizzle.js';
+import { DrizzleCommunityRepo } from './db/communities.drizzle.js';
+import { DrizzleMessagesRepo } from './db/messages.drizzle.js';
+import { DrizzleDevicesRepo } from './db/devices.drizzle.js';
 import { registerEnrollRoutes } from './routes/enroll.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerPreKeyRoutes } from './routes/prekeys.js';
@@ -140,13 +145,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     opts.userNotifier ??
     (connections ? defaultUserNotifier(connections, instanceId) : new NoopUserNotifier());
 
-  // UserRepo: Drizzle by default, but fall back to InMemory when there's
-  // no DATABASE_URL (sandbox / dev). The other repos (messages, groups,
-  // communities, devices, prekeys) already default to InMemory and don't
-  // require Postgres; the user repo was the lone holdout.
+  // When DATABASE_URL is set, all repos use Drizzle (Postgres).
+  // Otherwise fall back to InMemory implementations for sandbox / dev.
+  const hasDb = !!process.env.DATABASE_URL;
   const repo =
     opts.userRepo ??
-    (process.env.DATABASE_URL ? new DrizzleUserRepo() : new InMemoryUserRepo());
+    (hasDb ? new DrizzleUserRepo() : new InMemoryUserRepo());
   // Sandbox / dev mode hook: the LocalDevValidator needs the
   // (deviceToken, userId) pair after a fresh mint so subsequent verifies
   // (login, WS auth) recognize the user. Real VouchflowValidator ignores
@@ -167,29 +171,21 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     onUserMinted,
   });
   await registerUserRoutes(app, { repo });
-  // Default prekey repo: when we're already using the in-memory user repo
-  // (no DATABASE_URL), wire the in-memory prekey repo against the same
-  // user store so prekey bundle fetch / replenish work for the alpha
-  // sandbox. Production (Drizzle) still requires an explicit opts.preKeyRepo.
   const preKeyRepo =
     opts.preKeyRepo ??
-    (repo instanceof InMemoryUserRepo ? new InMemoryPreKeyRepo(repo) : undefined);
-  if (preKeyRepo) {
-    await registerPreKeyRoutes(app, {
-      repo: preKeyRepo,
-      limiter,
-      notifier: userNotifier,
-    });
-  }
-  if (opts.groupRepo) {
-    await registerGroupRoutes(app, { repo: opts.groupRepo });
-  }
-  if (opts.communityRepo) {
-    await registerCommunityRoutes(app, { repo: opts.communityRepo, limiter });
-  }
+    (hasDb ? new DrizzlePreKeyRepo() : new InMemoryPreKeyRepo(repo as InMemoryUserRepo));
+  await registerPreKeyRoutes(app, {
+    repo: preKeyRepo,
+    limiter,
+    notifier: userNotifier,
+  });
+  const groups = opts.groupRepo ?? (hasDb ? new DrizzleGroupRepo() : new InMemoryGroupRepo());
+  const communities = opts.communityRepo ?? (hasDb ? new DrizzleCommunityRepo() : new InMemoryCommunityRepo());
+  await registerGroupRoutes(app, { repo: groups });
+  await registerCommunityRoutes(app, { repo: communities, limiter });
   // Devices repo is needed for both the push-token route and the WS handler.
   // Resolve it once so both paths share the same instance.
-  const devices = opts.devicesRepo ?? new InMemoryDevicesRepo();
+  const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
   await registerDeviceRoutes(app, { devices });
 
   app.get('/healthz', async () => ({ ok: true }));
@@ -200,9 +196,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       ? { presence: opts.presence, redis: undefined as Redis | undefined }
       : defaultPresence(app.log);
     // instanceId already computed above for the user notifier.
-    const messages = opts.messagesRepo ?? new InMemoryMessagesRepo();
-    const groups = opts.groupRepo ?? new InMemoryGroupRepo();
-    const communities = opts.communityRepo ?? new InMemoryCommunityRepo();
+    const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
     const push = opts.push ?? defaultPushProvider(devices, app.log);
 
