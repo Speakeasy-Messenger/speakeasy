@@ -101,6 +101,8 @@ export function OnboardingScreen({ onEnrolled }: Props) {
     } catch (err: unknown) {
       // Surface the actual error reason on screen — debugging on a real
       // device without USB/adb is otherwise opaque.
+      const msg = err instanceof Error ? err.message : String(err);
+      const name = err instanceof Error ? err.name : 'Error';
       if (err instanceof VouchflowClientError) {
         setError(`${messageForVouchflowError(err.reason)} [${err.reason}]`);
       } else if (err instanceof SignalClientError) {
@@ -108,8 +110,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       } else if (err instanceof ApiError) {
         setError(`Enrollment failed (${err.status}${err.code ? ` ${err.code}` : ''}).`);
       } else {
-        const e = err as { message?: string; name?: string };
-        setError(`Unexpected: ${e.name ?? 'Error'} — ${e.message ?? String(err)}`);
+        setError(`Unexpected: ${name} — ${msg}`);
       }
     } finally {
       setBusy(false);

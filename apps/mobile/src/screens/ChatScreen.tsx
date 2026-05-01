@@ -165,7 +165,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
           msg_type: 'direct',
         });
         diag('chat', 'send: ws.send OK', { peerId });
-      } catch (err) {
+      } catch (err: unknown) {
         const e = err as { name?: string; message?: string; reason?: string; code?: string; status?: number; stack?: string };
         diag('chat', 'send FAILED', {
           peerId,

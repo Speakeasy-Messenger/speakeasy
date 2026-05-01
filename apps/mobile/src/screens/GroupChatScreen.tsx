@@ -152,7 +152,7 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
           selfUserId: myUserId!,
           plaintext: utf8ToBytes(trimmed),
         });
-      } catch (err) {
+      } catch (err: unknown) {
         const e = err as { name?: string; message?: string };
         const reason =
           err instanceof SignalClientError
