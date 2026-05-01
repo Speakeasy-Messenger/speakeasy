@@ -41,20 +41,23 @@ export function RootNavigator() {
           <Stack.Screen name="Onboarding">
             {({ navigation }: NativeStackScreenProps<RootStack, 'Onboarding'>) => (
               <OnboardingScreen
+                // Side-effect of enrollment is `useIdentity.setUserId()`,
+                // which flips this stack to the authed Group below; the
+                // Group's initial route is Conversations. The `replace`
+                // here is a no-op once the stacks swap, but kept for
+                // clarity that the intended UX is post-enroll → IdReveal.
+                // (IdReveal is a one-time celebration; if missed via the
+                // race, it's accessible from a future "show my id" link.)
                 onEnrolled={(id) => navigation.replace('IdReveal', { userId: id })}
               />
             )}
           </Stack.Screen>
         ) : (
-          <>
-            <Stack.Screen name="IdReveal">
-              {({ navigation, route }: NativeStackScreenProps<RootStack, 'IdReveal'>) => (
-                <IdRevealScreen
-                  userId={route.params?.userId ?? userId}
-                  onContinue={() => navigation.replace('Conversations')}
-                />
-              )}
-            </Stack.Screen>
+          // Initial route is Conversations: re-launches with a hydrated
+          // identity should go straight there, not back through IdReveal
+          // (which is a one-time post-enroll celebration). Onboarding's
+          // onEnrolled explicitly navigates to IdReveal for fresh enrolls.
+          <Stack.Group screenOptions={{}}>
             <Stack.Screen name="Conversations">
               {({ navigation }: NativeStackScreenProps<RootStack, 'Conversations'>) => (
                 <ConversationsScreen
@@ -63,6 +66,14 @@ export function RootNavigator() {
                   onNewChat={() => navigation.navigate('NewChat')}
                   onNewGroup={() => navigation.navigate('NewGroup')}
                   onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="IdReveal">
+              {({ navigation, route }: NativeStackScreenProps<RootStack, 'IdReveal'>) => (
+                <IdRevealScreen
+                  userId={route.params?.userId ?? userId}
+                  onContinue={() => navigation.replace('Conversations')}
                 />
               )}
             </Stack.Screen>
@@ -112,7 +123,7 @@ export function RootNavigator() {
                 />
               )}
             </Stack.Screen>
-          </>
+          </Stack.Group>
         )}
       </Stack.Navigator>
     </NavigationContainer>

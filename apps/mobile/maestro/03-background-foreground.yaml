@@ -20,18 +20,13 @@ appId: xyz.speakeasyapp.app
     timeout: 30000
 - tapOn:
     id: "onboarding-continue"
-- extendedWaitUntil:
-    visible:
-      id: "id-reveal-userid"
-    timeout: 15000
-- copyTextFrom:
-    id: "id-reveal-userid"
-- tapOn:
-    id: "id-reveal-get-started"
+# Enroll lands on Conversations directly. Capture userId from header.
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
-    timeout: 5000
+    timeout: 15000
+- copyTextFrom:
+    id: "conversations-userid"
 - tapOn:
     id: "conversations-new-chat"
 - tapOn:

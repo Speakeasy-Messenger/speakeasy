@@ -18,14 +18,8 @@ appId: xyz.speakeasyapp.app
     id: "onboarding-continue"
 - extendedWaitUntil:
     visible:
-      id: "id-reveal-get-started"
-    timeout: 15000
-- tapOn:
-    id: "id-reveal-get-started"
-- extendedWaitUntil:
-    visible:
       id: "conversations-userid"
-    timeout: 5000
+    timeout: 15000
 - tapOn:
     id: "conversations-new-chat"
 - assertVisible:
