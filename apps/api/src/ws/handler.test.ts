@@ -9,6 +9,7 @@ import { InMemoryPresence } from '../presence/memory.js';
 import { InMemoryMessagesRepo } from '../db/messages.memory.js';
 import { InMemoryGroupRepo } from '../db/groups.memory.js';
 import { InMemoryCommunityRepo } from '../db/communities.memory.js';
+import { InMemoryDevicesRepo } from '../db/devices.memory.js';
 import { MockPushProvider } from '../push/push.mock.js';
 
 /**
@@ -47,6 +48,7 @@ let messagesRepo: InMemoryMessagesRepo;
 let groupRepo: InMemoryGroupRepo;
 let communityRepo: InMemoryCommunityRepo;
 let pushProvider: MockPushProvider;
+let devicesRepo: InMemoryDevicesRepo;
 const openSockets = new Set<WebSocket>();
 
 function makeValidator(): MockValidator {
@@ -72,9 +74,11 @@ beforeEach(async () => {
   groupRepo = new InMemoryGroupRepo();
   communityRepo = new InMemoryCommunityRepo();
   pushProvider = new MockPushProvider();
+  devicesRepo = new InMemoryDevicesRepo();
   app = await buildServer({
     validator: makeValidator(),
     userRepo: new InMemoryUserRepo(),
+    devicesRepo,
     connections,
     presence,
     messagesRepo,
@@ -990,5 +994,105 @@ describe('ws messaging — 1:1 direct invariants', () => {
     const b2 = await authedSocket('bob-red-bear');
     // No further messages should arrive on the second connection.
     await expect(b2.q.next(150)).rejects.toThrow(/timeout/);
+  });
+});
+
+describe('ws messaging — Phase 5d push-token integration', () => {
+  async function authedSocket(
+    userId: string,
+  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+    const ws = await open();
+    const q = new MsgQueue(ws);
+    ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
+    const authed = (await q.next()) as { type: string };
+    expect(authed.type).toBe('authed');
+    return { ws, q };
+  }
+
+  it('push fires for offline recipient with registered push token', async () => {
+    // Alice connects, sends to Carol (offline). Carol's device was seen
+    // (via a previous WS auth) and has a push token registered.
+    const alice = await authedSocket('alice-blue-fox');
+
+    // Simulate Carol having previously authed (creates the device row)
+    // and registered a push token.
+    await devicesRepo.upsertOnSeen({
+      deviceToken: 'dvt_carol-pink-owl',
+      userId: 'carol-pink-owl',
+    });
+    await devicesRepo.setPushToken({
+      deviceToken: 'dvt_carol-pink-owl',
+      pushToken: 'fcm-carol-device',
+      platform: 'android',
+    });
+
+    // Alice sends to offline Carol.
+    alice.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'carol-pink-owl',
+        ciphertext: 'Q0M=',
+        msg_type: 'direct',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+
+    // Push should have fired with Carol's userId and the conversation id.
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(pushProvider.calls[0]).toMatchObject({
+      userId: 'carol-pink-owl',
+      msgType: 'direct',
+    });
+    expect(pushProvider.calls[0]!.conversationId).toMatch(/^dm-[0-9a-f]{16}$/);
+
+    // Verify the device record has the push token (FcmApnsPushProvider
+    // would look this up to send the actual FCM message).
+    const carolDevices = await devicesRepo.listForUser('carol-pink-owl');
+    expect(carolDevices.some((d) => d.pushToken === 'fcm-carol-device')).toBe(true);
+  });
+
+  it('push-token can be updated and the new token is available', async () => {
+    // Device must exist first (simulates previous WS auth).
+    await devicesRepo.upsertOnSeen({
+      deviceToken: 'dvt_carol-pink-owl',
+      userId: 'carol-pink-owl',
+    });
+    await devicesRepo.setPushToken({
+      deviceToken: 'dvt_carol-pink-owl',
+      pushToken: 'old-token',
+      platform: 'android',
+    });
+    await devicesRepo.setPushToken({
+      deviceToken: 'dvt_carol-pink-owl',
+      pushToken: 'new-token',
+      platform: 'android',
+    });
+    const devices = await devicesRepo.listForUser('carol-pink-owl');
+    expect(devices[0]!.pushToken).toBe('new-token');
+  });
+
+  it('no push when recipient is online even with push token', async () => {
+    const alice = await authedSocket('alice-blue-fox');
+    const bob = await authedSocket('bob-red-bear');
+
+    // Bob has a push token registered.
+    await devicesRepo.setPushToken({
+      deviceToken: 'dvt_bob-red-bear',
+      pushToken: 'fcm-bob-device',
+      platform: 'android',
+    });
+
+    // Alice sends to online Bob — no push.
+    alice.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'Q0M=',
+        msg_type: 'direct',
+      }),
+    );
+    await bob.q.next(); // message delivered via WS
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(0);
   });
 });

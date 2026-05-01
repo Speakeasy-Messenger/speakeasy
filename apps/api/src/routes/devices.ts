@@ -1,0 +1,47 @@
+import { FastifyInstance } from 'fastify';
+import { requireAuth } from '../auth/vouchflow.js';
+import type { DevicesRepo } from '../db/devices.js';
+
+interface PushTokenBody {
+  push_token: string;
+  platform: 'ios' | 'android';
+}
+
+/**
+ * Spec §11 Phase 5d: mobile client registers its FCM/APNs push token
+ * after enrollment so the server can wake the device when a message
+ * arrives while it has no live WebSocket.
+ */
+export async function registerDeviceRoutes(
+  app: FastifyInstance,
+  opts: { devices: DevicesRepo },
+): Promise<void> {
+  app.post<{ Body: PushTokenBody }>(
+    '/v1/devices/push-token',
+    {
+      preHandler: [requireAuth],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['push_token', 'platform'],
+          properties: {
+            push_token: { type: 'string', minLength: 1 },
+            platform: { type: 'string', enum: ['ios', 'android'] },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const deviceToken = request.auth?.deviceToken;
+      if (!deviceToken) {
+        return reply.code(403).send({ error: 'not_enrolled' });
+      }
+      await opts.devices.setPushToken({
+        deviceToken,
+        pushToken: request.body.push_token,
+        platform: request.body.platform,
+      });
+      return reply.code(200).send({ ok: true });
+    },
+  );
+}

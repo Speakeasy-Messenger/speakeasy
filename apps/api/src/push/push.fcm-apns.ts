@@ -1,18 +1,59 @@
+import * as admin from 'firebase-admin';
 import type { PushDeliveryNotice, PushProvider } from './push.js';
+import type { DevicesRepo } from '../db/devices.js';
 
 /**
- * Production placeholder. Real impl wraps `firebase-admin` (FCM) and
- * `@parse/node-apn` (APNs), routes to the appropriate one based on the
- * device's platform, and lands when:
- *   - mobile native shells exist and register push tokens with Vouchflow
- *   - a `devices` row exists per user (Phase 4 multi-device)
+ * Production push provider — FCM (Android) + APNs (iOS).
  *
- * Throws loudly until then so misconfigured prod builds fail fast.
+ * Notify-only per spec §11: payloads carry no message content. Just a
+ * data-only FCM message so the device wakes and drains buffered messages
+ * via the WS reconnect path.
  */
 export class FcmApnsPushProvider implements PushProvider {
-  async notifyDelivery(_notice: PushDeliveryNotice): Promise<void> {
-    throw new Error(
-      'FcmApnsPushProvider: not yet wired (Phase 4 carry-over — needs FCM/APNs creds + device push tokens)',
+  private app: admin.app.App;
+
+  constructor(
+    private readonly devices: DevicesRepo,
+    opts?: { credential?: admin.ServiceAccount },
+  ) {
+    this.app = admin.initializeApp(
+      {
+        credential: admin.credential.cert(
+          opts?.credential ?? {
+            projectId: process.env.FCM_PROJECT_ID,
+            clientEmail: process.env.FCM_CLIENT_EMAIL,
+            privateKey: process.env.FCM_PRIVATE_KEY?.replace(/\\n/g, '\n'),
+          },
+        ),
+      },
+      'speakeasy-push',
     );
+  }
+
+  async notifyDelivery(notice: PushDeliveryNotice): Promise<void> {
+    const userDevices = await this.devices.listForUser(notice.userId);
+    const withPush = userDevices.filter((d) => d.pushToken);
+    if (withPush.length === 0) return;
+
+    // Send a data-only message (no notification key = no visible banner;
+    // the app's background handler wakes and opens a WS connection).
+    const payload: admin.messaging.MulticastMessage = {
+      data: {
+        conversation_id: notice.conversationId,
+        msg_type: notice.msgType,
+      },
+      tokens: withPush.map((d) => d.pushToken!),
+    };
+
+    const response = await admin.messaging(this.app).sendEachForMulticast(payload);
+    if (response.failureCount > 0) {
+      // Log failures but don't throw — one bad token shouldn't block others.
+      const failed = response.responses.filter((r) => !r.success);
+      // eslint-disable-next-line no-console
+      console.warn(
+        { failures: failed.map((f) => f.error?.message) },
+        'FCM push: some deliveries failed',
+      );
+    }
   }
 }

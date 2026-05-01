@@ -20,4 +20,6 @@ export interface DevicesRepo {
   listForUser(userId: string): Promise<DeviceRecord[]>;
   /** Detach a device — used for sign-out / loss-of-trust. */
   remove(deviceToken: string): Promise<'removed' | 'not_found'>;
+  /** Store or update the push notification token for a device. */
+  setPushToken(args: { deviceToken: string; pushToken: string; platform: 'ios' | 'android' }): Promise<void>;
 }

@@ -5,6 +5,7 @@ import { IconMark } from '../components/IconMark.js';
 import { Wordmark } from '../components/Wordmark.js';
 import { useIdentity } from '../store/identity.js';
 import { api, signalProtocol, vouchflow } from '../services.js';
+import { pushNotifications } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../native/vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
@@ -80,6 +81,23 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       useIdentity.getState().setDeviceToken(verifyResult.deviceToken);
       useIdentity.getState().setUserId(user_id);
       onEnrolled(user_id);
+
+      // Phase 5d: best-effort push token registration. If the device
+      // doesn't support push (no Play Services, permission denied), we
+      // simply skip — messages still arrive via the buffered-delivery
+      // path on next WS connect.
+      try {
+        const pushResult = await pushNotifications.getToken();
+        if (pushResult) {
+          await api.registerPushToken(
+            verifyResult.deviceToken,
+            pushResult.pushToken,
+            pushResult.platform,
+          );
+        }
+      } catch {
+        // Non-fatal — push is a convenience, not a requirement.
+      }
     } catch (err: unknown) {
       // Surface the actual error reason on screen — debugging on a real
       // device without USB/adb is otherwise opaque.

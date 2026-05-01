@@ -24,4 +24,14 @@ export class InMemoryDevicesRepo implements DevicesRepo {
   async remove(deviceToken: string): Promise<'removed' | 'not_found'> {
     return this.devices.delete(deviceToken) ? 'removed' : 'not_found';
   }
+
+  async setPushToken(args: { deviceToken: string; pushToken: string; platform: 'ios' | 'android' }): Promise<void> {
+    const device = this.devices.get(args.deviceToken);
+    if (device) {
+      device.pushToken = args.pushToken;
+      device.platform = args.platform;
+    }
+    // If device doesn't exist yet, silently ignore — the device must
+    // have been seen via upsertOnSeen first (auth handshake).
+  }
 }

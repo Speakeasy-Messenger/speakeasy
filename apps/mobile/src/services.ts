@@ -13,6 +13,10 @@ import {
 } from '@speakeasy/crypto';
 import { SpeakeasyWsClient } from './ws/client.js';
 import { useConnection } from './store/connection.js';
+import {
+  NativePushNotificationService,
+  type PushNotificationService,
+} from './push/push-notifications.js';
 
 /**
  * Module-level service singletons. Wires real implementations in the app.
@@ -61,6 +65,14 @@ export const signalProtocol: SignalProtocolModule = config.useMockSignalProtocol
 export const groupMessaging: GroupMessagingModule = config.useMockSignalProtocol
   ? new MockGroupMessagingClient()
   : new NativeGroupMessagingModule();
+
+/**
+ * Push notification service (Phase 5d). Acquires FCM/APNs token and
+ * uploads to server so offline recipients can be woken. Gracefully
+ * degrades — if the device lacks Play Services or the user denies
+ * notification permission, push is simply unavailable.
+ */
+export const pushNotifications: PushNotificationService = new NativePushNotificationService();
 
 let _ws: SpeakeasyWsClient | undefined;
 

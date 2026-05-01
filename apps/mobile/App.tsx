@@ -6,7 +6,7 @@ import { RootNavigator } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
 import { useConversations } from './src/store/conversations.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
-import { api, getWsClient, groupMessaging, signalProtocol, vouchflow } from './src/services.js';
+import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
@@ -45,6 +45,16 @@ export default function App() {
     };
     const ws = getWsClient(getToken);
     ws.connect();
+
+    // Phase 5d: register push token on every app start. Token can
+    // rotate (FCM invalidates on app reinstall, OS update). Best-effort.
+    getToken().then((dt) => {
+      pushNotifications.getToken().then((pushResult) => {
+        if (pushResult) {
+          void api.registerPushToken(dt, pushResult.pushToken, pushResult.platform);
+        }
+      });
+    });
 
     // Replenisher dedupes concurrent prekey-low signals onto a single
     // in-flight round.

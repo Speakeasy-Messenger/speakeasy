@@ -42,8 +42,10 @@ import { InMemoryAckRouter, type AckRouter } from './ws/ack-router.js';
 import { RedisAckRouter } from './ws/ack-router.redis.js';
 import { RedisUserNotifier } from './ws/user-notifier.redis.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
+import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
+import { registerDeviceRoutes } from './routes/devices.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -185,6 +187,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   if (opts.communityRepo) {
     await registerCommunityRoutes(app, { repo: opts.communityRepo, limiter });
   }
+  // Devices repo is needed for both the push-token route and the WS handler.
+  // Resolve it once so both paths share the same instance.
+  const devices = opts.devicesRepo ?? new InMemoryDevicesRepo();
+  await registerDeviceRoutes(app, { devices });
 
   app.get('/healthz', async () => ({ ok: true }));
 
@@ -198,8 +204,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const groups = opts.groupRepo ?? new InMemoryGroupRepo();
     const communities = opts.communityRepo ?? new InMemoryCommunityRepo();
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
-    const push = opts.push ?? new NoopPushProvider((msg, ctx) => app.log.debug(ctx ?? {}, msg));
-    const devices = opts.devicesRepo ?? new InMemoryDevicesRepo();
+    const push = opts.push ?? defaultPushProvider(devices, app.log);
+
     attachWebsocket(app, {
       validator,
       connections,
@@ -270,6 +276,18 @@ function defaultUserNotifier(connections: Connections, instanceId: string): User
   const pub = new Redis(url, { lazyConnect: false });
   const sub = new Redis(url, { lazyConnect: false });
   return new RedisUserNotifier(connections, pub, sub, instanceId);
+}
+
+function defaultPushProvider(
+  devices: DevicesRepo,
+  log: import('fastify').FastifyBaseLogger,
+): PushProvider {
+  if (process.env.FCM_PROJECT_ID) {
+    log.info('FCM_PROJECT_ID set — using FcmApnsPushProvider');
+    return new FcmApnsPushProvider(devices);
+  }
+  log.info('FCM_PROJECT_ID not set — using NoopPushProvider (no push notifications)');
+  return new NoopPushProvider((msg, ctx) => log.debug(ctx ?? {}, msg));
 }
 
 const isMain = import.meta.url === `file://${process.argv[1]}`;
