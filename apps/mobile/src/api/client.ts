@@ -96,10 +96,13 @@ export class ApiClient {
    * `addGroupMember`. Returns the assigned `group_id`.
    */
   async createGroup(deviceToken: string): Promise<{ group_id: string }> {
+    // No body. We DON'T send `content-type: application/json` because
+    // Fastify with that header tries to parse the (empty) body as JSON
+    // and fails with 400 Bad Request. The route doesn't read a body
+    // anyway — caller is identified via the auth header.
     const res = await this.doFetch(`${this.baseUrl}/v1/groups`, {
       method: 'POST',
       headers: {
-        'content-type': 'application/json',
         authorization: `Bearer ${deviceToken}`,
       },
     });

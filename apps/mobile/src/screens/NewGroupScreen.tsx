@@ -154,6 +154,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
         <ScrollView contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
           <Text style={[text.subtitle, styles.label]}>Name</Text>
           <TextInput
+            testID="new-group-name-input"
             style={styles.input}
             value={name}
             onChangeText={(s) => {
@@ -172,6 +173,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
             One ID per line. Format: word-word-word.
           </Text>
           <TextInput
+            testID="new-group-members-input"
             style={[styles.input, styles.textarea]}
             value={membersInput}
             onChangeText={(s) => {
@@ -196,6 +198,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
 
         <View style={styles.bottom}>
           <Pressable
+            testID="new-group-create"
             onPress={handleCreate}
             style={[styles.startBtn, busy && styles.startBtnDisabled]}
             disabled={busy}

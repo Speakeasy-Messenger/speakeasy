@@ -141,7 +141,11 @@ export function ConversationsScreen({
         >
           <Text style={styles.newBtnText}>+ New chat</Text>
         </Pressable>
-        <Pressable onPress={onNewGroup} style={styles.newGroupBtn}>
+        <Pressable
+          testID="conversations-new-group"
+          onPress={onNewGroup}
+          style={styles.newGroupBtn}
+        >
           <Text style={styles.newGroupBtnText}># New group</Text>
         </Pressable>
       </View>

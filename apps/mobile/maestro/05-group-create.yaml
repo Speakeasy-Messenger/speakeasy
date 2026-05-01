@@ -1,0 +1,54 @@
+# Tier B flow #5 — group create + send.
+#
+# Reproduces the user-reported "creating group chat doesn't work" bug
+# (0.2.8 alpha — root cause was api.createGroup sending content-type
+# application/json with no body, Fastify 400'd parsing). Also exercises
+# the GroupChatScreen mount.
+#
+# Self-contained: enrolls fresh, opens NewGroup, names the group, adds
+# self as the only "member" (single emulator can't host two users), tries
+# to create. Self-as-member is rejected client-side (parseMembers drops
+# the local userId), so we use a bogus peer id — server's addMember
+# accepts unenrolled peers (intended: groups can be pre-populated with
+# people who haven't installed yet).
+
+appId: xyz.speakeasyapp.app
+---
+- launchApp:
+    clearState: true
+    clearKeychain: true
+- runFlow:
+    when:
+      visible: "Wait"
+    commands:
+      - tapOn: "Wait"
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-continue"
+    timeout: 30000
+- tapOn:
+    id: "onboarding-continue"
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 15000
+- tapOn:
+    id: "conversations-new-group"
+- extendedWaitUntil:
+    visible:
+      id: "new-group-name-input"
+    timeout: 5000
+- tapOn:
+    id: "new-group-name-input"
+- inputText: "weekend plans"
+- tapOn:
+    id: "new-group-members-input"
+- inputText: "silent-golden-hawk"
+- tapOn:
+    id: "new-group-create"
+# Successful create → navigated to GroupChat. Header shows "# weekend plans".
+- extendedWaitUntil:
+    visible: "# weekend plans"
+    timeout: 20000
+- assertVisible:
+    id: "chat-input"
