@@ -108,7 +108,7 @@ export function ConversationsScreen({
           </Pressable>
         </View>
         <Text style={[text.footnote, styles.status]}>
-          {wsState === 'open' ? '●' : '○'} {wsState}
+          {wsState === 'authed' ? '●' : '○'} {wsState}
         </Text>
       </View>
 
