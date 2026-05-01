@@ -1,6 +1,53 @@
-import React, { useEffect } from 'react';
-import { AppState, StatusBar, View } from 'react-native';
+import React, { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
+import { AppState, StatusBar, View, Text } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
+
+/**
+ * Catch-all error boundary. Prevents unhandled JS errors from crashing
+ * the entire app — shows a minimal "tap to reload" screen instead.
+ */
+// eslint-disable-next-line @typescript-eslint/no-extraneous-class
+class AppErrorBoundaryInner extends Component<
+  { children: ReactNode },
+  { hasError: boolean }
+> {
+  declare state: { hasError: boolean };
+
+  constructor(props: { children: ReactNode }) {
+    super(props);
+    this.state = { hasError: false };
+  }
+
+  static getDerivedStateFromError(): { hasError: boolean } {
+    return { hasError: true };
+  }
+
+  override componentDidCatch(error: Error, info: ErrorInfo): void {
+    // eslint-disable-next-line no-console
+    console.error('[AppErrorBoundary]', error, info.componentStack);
+  }
+
+  override render(): ReactNode {
+    if (this.state.hasError) {
+      return (
+        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
+          <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Something went wrong</Text>
+          <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24 }}>
+            Tap below to reload the app.
+          </Text>
+          <Text
+            style={{ fontSize: 16, color: '#6B21A8', fontWeight: '600' }}
+            onPress={() => this.setState({ hasError: false })}
+          >
+            Reload
+          </Text>
+        </View>
+      );
+    }
+    return this.props.children;
+  }
+}
+const AppErrorBoundary = AppErrorBoundaryInner;
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
@@ -13,6 +60,20 @@ import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
 import { diag } from './src/diag/log.js';
 import { colors } from './src/theme/index.js';
+
+// Global unhandled-rejection handler — prevents promise rejections
+// from crashing the RN host on Android.
+type ErrorUtilsGlobal = {
+  ErrorUtils?: {
+    getGlobalHandler?: () => ((e: Error, isFatal?: boolean) => void) | undefined;
+    setGlobalHandler?: (h: (e: Error, isFatal?: boolean) => void) => void;
+  };
+};
+const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandler?.();
+(globalThis as ErrorUtilsGlobal).ErrorUtils?.setGlobalHandler?.((e: Error, isFatal?: boolean) => {
+  diag('app', 'global error', { message: e.message, isFatal: String(isFatal) });
+  if (typeof _origHandler === 'function') _origHandler(e, isFatal);
+});
 
 export default function App() {
   const userId = useIdentity((s) => s.userId);
@@ -51,12 +112,15 @@ export default function App() {
 
     // Phase 5d: register push token on every app start. Token can
     // rotate (FCM invalidates on app reinstall, OS update). Best-effort.
+    // Errors are non-fatal — push is a nice-to-have, not a blocker.
     getToken().then((dt) => {
-      pushNotifications.getToken().then((pushResult) => {
+      return pushNotifications.getToken().then((pushResult) => {
         if (pushResult) {
-          void api.registerPushToken(dt, pushResult.pushToken, pushResult.platform);
+          void api.registerPushToken(dt, pushResult.pushToken, pushResult.platform).catch(() => {});
         }
       });
+    }).catch((err) => {
+      diag('app', 'push token registration failed (non-fatal)', { err: String(err) });
     });
 
     // Replenisher dedupes concurrent prekey-low signals onto a single
@@ -131,6 +195,7 @@ export default function App() {
   }, [userId]);
 
   return (
+    <AppErrorBoundary>
     <SafeAreaProvider>
       <StatusBar
         barStyle="dark-content"
@@ -142,5 +207,6 @@ export default function App() {
         <View style={{ flex: 1, backgroundColor: colors.cream }} />
       )}
     </SafeAreaProvider>
+    </AppErrorBoundary>
   );
 }
