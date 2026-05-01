@@ -42,7 +42,9 @@ appId: xyz.speakeasyapp.app
 - extendedWaitUntil:
     visible: "before background"
     timeout: 10000
-- back
+- tapOn:
+    id: "chat-back"
+- waitForAnimationToEnd
 # Background + relaunch (clearState: false so AsyncStorage persistence
 # is exercised — this is the actual behavior under test).
 - pressKey: Home

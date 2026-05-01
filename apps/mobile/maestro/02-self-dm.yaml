@@ -50,10 +50,13 @@ appId: xyz.speakeasyapp.app
 - extendedWaitUntil:
     visible: "yo from maestro"
     timeout: 10000
-# Snapshot inside ChatScreen + after back. Maestro saves to
-# --debug-output dir; the workflow uploads the dir as an artifact.
+# Tap the in-app "‹ Back" button — Maestro's `back` action triggers
+# Android system back which react-native-screens doesn't reliably
+# consume on the modal-presented Chat route. The artifact screenshot
+# from run 25202433373 confirmed system back was a no-op.
 - takeScreenshot: 01-chat-before-back
-- back
+- tapOn:
+    id: "chat-back"
 - waitForAnimationToEnd
 - takeScreenshot: 02-after-back
 - extendedWaitUntil:

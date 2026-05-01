@@ -176,7 +176,7 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
         {onBack ? (
-          <Pressable onPress={onBack} style={styles.back}>
+          <Pressable testID="group-chat-back" onPress={onBack} style={styles.back}>
             <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
           </Pressable>
         ) : null}
