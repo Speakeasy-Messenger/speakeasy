@@ -31,7 +31,7 @@ kill_timeout = "30s"
 # routing through Redis pub/sub depends on at least one peer being live.
 [deploy]
   strategy = "rolling"
-  release_command = "echo 'no migrations on release; run via npm run migrate from a one-shot'"
+  release_command = "npm run db:migrate"
 
 [[services]]
   protocol = "tcp"
@@ -79,8 +79,8 @@ kill_timeout = "30s"
   cpus = 2
   memory_mb = 1024
 
-# Metrics endpoint Prometheus can scrape — Fastify doesn't expose one by
-# default; wire @fastify/metrics in a future revision and update this.
-# [metrics]
-#   port = 9091
-#   path = "/metrics"
+# Metrics endpoint — enable with METRICS_ENABLED=1 on the Fly app.
+# fastify-metrics serves /metrics on the main HTTP listener, same port
+# as the app. No separate port needed.
+[env]
+  METRICS_ENABLED = "1"

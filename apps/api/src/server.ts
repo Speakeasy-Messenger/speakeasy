@@ -190,6 +190,15 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   app.get('/healthz', async () => ({ ok: true }));
 
+  // Prometheus metrics — /metrics on the main listener when enabled.
+  // Set METRICS_ENABLED=1 to activate. Scraped by Fly's internal Prometheus.
+  if (process.env.METRICS_ENABLED === '1') {
+    const mod = await import('fastify-metrics');
+    const plugin = mod.default.default ?? mod.default;
+    await app.register(plugin as any, { endpoint: '/metrics' });
+    app.log.info('Prometheus /metrics endpoint enabled');
+  }
+
   if (!opts.skipWebsocket) {
     if (!connections) throw new Error('connections must be defined when WS enabled');
     const { presence, redis } = opts.presence
