@@ -25,14 +25,23 @@ export interface PushNotificationService {
 
 /**
  * Production implementation — requires `@react-native-firebase/messaging`.
- * The native module is conditionally loaded so the test environment
- * (vitest / Node) doesn't crash on import.
+ * Falls back to Noop if the native module isn't available (e.g. CI
+ * emulator without Play Services, or the package isn't linked).
  */
 export class NativePushNotificationService implements PushNotificationService {
   async getToken(): Promise<PushTokenResult | undefined> {
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-      const rn = require('react-native') as { Platform?: { OS?: string } };
+      const { NativeModules, Platform } = require('react-native') as {
+        NativeModules: Record<string, unknown>;
+        Platform: { OS: string };
+      };
+      // Check if the Firebase Messaging native module is linked before
+      // trying to import the JS wrapper — avoids a hard crash in Hermes
+      // when the native module isn't available.
+      if (!NativeModules.RNFBMessagingModule && !NativeModules.RNFirebaseMessaging) {
+        return undefined;
+      }
       // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
       const messaging = require('@react-native-firebase/messaging') as {
         default: {
@@ -44,20 +53,15 @@ export class NativePushNotificationService implements PushNotificationService {
         };
       };
       const m = messaging.default.messaging();
-      // Check / request permission first.
       const authStatus = await m.hasPermission();
-      // FirebaseMessaging.AuthorizationStatus.AUTHORIZED = 1
       if (authStatus !== 1 && authStatus !== 2) {
         const requested = await m.requestPermission();
         if (requested !== 1 && requested !== 2) return undefined;
       }
       const token = await m.getToken();
       if (!token) return undefined;
-      const platform = rn.Platform?.OS === 'ios' ? 'ios' : 'android';
-      return { pushToken: token, platform };
+      return { pushToken: token, platform: Platform.OS === 'ios' ? 'ios' : 'android' };
     } catch {
-      // Native module not available (e.g. on emulator without Play Services)
-      // or permission denied — silently degrade. Push is best-effort.
       return undefined;
     }
   }

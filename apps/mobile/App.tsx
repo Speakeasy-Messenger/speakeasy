@@ -1,50 +1,6 @@
-import React, { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
-import { AppState, StatusBar, View, Text } from 'react-native';
+import React, { useEffect } from 'react';
+import { AppState, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-
-/**
- * Catch-all error boundary. Prevents unhandled JS errors from crashing
- * the entire app — shows a minimal "tap to reload" screen instead.
- */
-// eslint-disable-next-line @typescript-eslint/no-extraneous-class
-class AppErrorBoundaryInner extends Component<
-  { children: ReactNode },
-  { hasError: boolean }
-> {
-  // Initial state — must be a simple property (Hermes/Metro doesn't
-  // support 'declare' class fields).
-  override state: { hasError: boolean } = { hasError: false };
-
-  static getDerivedStateFromError(): { hasError: boolean } {
-    return { hasError: true };
-  }
-
-  override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // eslint-disable-next-line no-console
-    console.error('[AppErrorBoundary]', error, info.componentStack);
-  }
-
-  override render(): ReactNode {
-    if (this.state.hasError) {
-      return (
-        <View style={{ flex: 1, justifyContent: 'center', alignItems: 'center', padding: 32 }}>
-          <Text style={{ fontSize: 18, fontWeight: '600', marginBottom: 8 }}>Something went wrong</Text>
-          <Text style={{ fontSize: 14, color: '#666', textAlign: 'center', marginBottom: 24 }}>
-            Tap below to reload the app.
-          </Text>
-          <Text
-            style={{ fontSize: 16, color: '#6B21A8', fontWeight: '600' }}
-            onPress={() => this.setState({ hasError: false })}
-          >
-            Reload
-          </Text>
-        </View>
-      );
-    }
-    return this.props.children;
-  }
-}
-const AppErrorBoundary = AppErrorBoundaryInner;
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
@@ -192,7 +148,6 @@ export default function App() {
   }, [userId]);
 
   return (
-    <AppErrorBoundary>
     <SafeAreaProvider>
       <StatusBar
         barStyle="dark-content"
@@ -204,6 +159,5 @@ export default function App() {
         <View style={{ flex: 1, backgroundColor: colors.cream }} />
       )}
     </SafeAreaProvider>
-    </AppErrorBoundary>
   );
 }
