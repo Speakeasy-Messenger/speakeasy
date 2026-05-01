@@ -1,7 +1,8 @@
 # Tier B flow #1 — enrollment.
 #
 # Verifies: app launches, onboarding renders, "Continue" mints a userId
-# via the mock Vouchflow + InMemory user repo, IdRevealScreen shows it.
+# via the mock Vouchflow + InMemory user repo, IdRevealScreen shows it,
+# then Conversations appears.
 
 appId: xyz.speakeasyapp.app
 ---
@@ -23,10 +24,16 @@ appId: xyz.speakeasyapp.app
     timeout: 30000
 - tapOn:
     id: "onboarding-continue"
-# Post-0.2.10: enroll lands directly on Conversations (no IdReveal
-# detour) so re-launches with persisted identity show Conversations
-# immediately. The previous IdReveal step would race with the stack
-# swap and was unreliable on cold launch.
+# IdReveal screen shows the new userId — tap "Get started" to proceed.
+# If the app races past IdReveal (e.g. re-enroll with persisted identity),
+# this step is skipped because Conversations is already visible.
+- runFlow:
+    when:
+      visible:
+        id: "id-reveal-get-started"
+    commands:
+      - tapOn:
+          id: "id-reveal-get-started"
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
