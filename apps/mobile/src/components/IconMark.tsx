@@ -31,7 +31,7 @@ export interface IconMarkProps {
  * while rendering at the requested width.
  */
 const LOGO = require('../../assets/logo-mark.png');
-const LOGO_ASPECT_RATIO = 1024 / 1067; // matches the master PNG's dimensions.
+const LOGO_ASPECT_RATIO = 1; // 432×432 — matches the launcher-foreground asset.
 
 export function IconMark({ size = 64, shell = false }: IconMarkProps) {
   const width = size;
