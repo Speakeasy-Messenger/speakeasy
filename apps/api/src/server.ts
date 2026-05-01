@@ -82,7 +82,7 @@ export interface BuildServerOptions {
 function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
   if (process.env.VOUCHFLOW_USE_MOCK === '1') {
     log.warn(
-      'VOUCHFLOW_USE_MOCK=1 — using LocalDevValidator (stateful in-memory). ' +
+      'VOUCHFLOW_USE_MOCK=1 — using LocalDevValidator (persisted to file). ' +
         'Never set this in production.',
     );
     return new LocalDevValidator();

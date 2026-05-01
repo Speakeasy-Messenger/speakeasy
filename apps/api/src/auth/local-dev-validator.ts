@@ -5,7 +5,7 @@ import {
 } from '@speakeasy/vouchflow';
 
 /**
- * Stateful in-memory `Validator` for sandbox / dev mode.
+ * Stateful `Validator` for sandbox / dev mode.
  *
  * Real Vouchflow tracks the (deviceToken → userId) binding inside its
  * own backend, so subsequent verifies after enrollment return the
@@ -20,22 +20,52 @@ import {
  * same `userId`. The binding is written by `bind()` — the enroll route
  * calls it after the user-repo mint succeeds.
  *
+ * Bindings are persisted to `LOCAL_DEV_BINDINGS_FILE` (if set) so they
+ * survive server restarts in sandbox mode.
+ *
  * **Sandbox / dev only.** Production must use {@link VouchflowValidator}
- * against the real Vouchflow API. There's no persistence here — process
- * restart drops every binding, every device must re-enroll.
+ * against the real Vouchflow API.
  */
+import { readFileSync, writeFileSync } from 'node:fs';
+
 export class LocalDevValidator implements Validator {
   private readonly bindings = new Map<string, string>();
+  private readonly persistPath?: string;
+
+  constructor() {
+    this.persistPath = process.env.LOCAL_DEV_BINDINGS_FILE || '.dev-bindings.json';
+    if (this.persistPath) {
+      try {
+        const raw = readFileSync(this.persistPath, 'utf-8');
+        const obj = JSON.parse(raw) as Record<string, string>;
+        for (const [k, v] of Object.entries(obj)) {
+          this.bindings.set(k, v);
+        }
+      } catch {
+        /* file doesn't exist yet — that's fine */
+      }
+    }
+  }
+
+  private save(): void {
+    if (!this.persistPath) return;
+    try {
+      const obj: Record<string, string> = {};
+      for (const [k, v] of this.bindings) obj[k] = v;
+      writeFileSync(this.persistPath, JSON.stringify(obj));
+    } catch {
+      /* best effort */
+    }
+  }
 
   /** Called by the enroll route after a successful mint. */
   bind(deviceToken: string, userId: string): void {
     this.bindings.set(deviceToken, userId);
+    this.save();
   }
 
   async validate(deviceToken: string): Promise<ValidatedAttestation> {
     if (!deviceToken || typeof deviceToken !== 'string') {
-      // The MockValidator pattern is to throw on bad input. We return a
-      // structured failure instead so the route handler can map cleanly.
       throw new Error(`LocalDevValidator: empty deviceToken`);
     }
     const userId = this.bindings.get(deviceToken);
