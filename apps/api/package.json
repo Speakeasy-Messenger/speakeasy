@@ -13,7 +13,8 @@
     "lint": "echo 'no lint configured yet'",
     "db:generate": "drizzle-kit generate",
     "db:migrate": "drizzle-kit migrate",
-    "db:push": "drizzle-kit push"
+    "db:push": "drizzle-kit push",
+    "test:load": "tsx src/ws/load-test.ts"
   },
   "dependencies": {
     "@speakeasy/crypto": "*",
