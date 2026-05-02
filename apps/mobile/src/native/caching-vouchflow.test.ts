@@ -29,6 +29,10 @@ class StubVouchflowClient implements VouchflowClient {
     };
   }
 
+  async getCachedDeviceToken(): Promise<string | null> {
+    return 'dvt_stub';
+  }
+
   async requestFallback(): Promise<never> {
     throw new Error('not implemented in stub');
   }

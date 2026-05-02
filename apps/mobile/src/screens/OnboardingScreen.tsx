@@ -46,10 +46,30 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       // The deviceToken returned here is the same value the SDK persists
       // to AccountManager; SpeakeasyDb derives the SQLCipher key from it
       // (Phase 5c) on the next native-store call.
-      const verifyResult = await vouchflow.verify({
-        context: 'signup',
-        minimumConfidence: 'medium',
-      });
+      // On devices without biometrics (emulators, de-Googled ROMs), verify()
+      // throws BiometricUnavailable — but the device IS enrolled. We fall
+      // back to the cached device token and proceed at low confidence.
+      let deviceToken: string;
+      try {
+        const verifyResult = await vouchflow.verify({
+          context: 'signup',
+          minimumConfidence: 'medium',
+        });
+        deviceToken = verifyResult.deviceToken;
+      } catch (err: unknown) {
+        if (
+          err instanceof VouchflowClientError &&
+          err.reason === 'biometric_unavailable'
+        ) {
+          const cached = await vouchflow.getCachedDeviceToken();
+          if (!cached) {
+            throw err;
+          }
+          deviceToken = cached;
+        } else {
+          throw err;
+        }
+      }
       // 2. Mint (or restore) the device's Signal identity. The native
       // bridge persists into SQLCipher; on a re-launch this returns the
       // same key without re-prompting.
@@ -64,7 +84,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         oneTimePreKeyCount: PREKEY_BATCH_SIZE,
       });
       const { user_id } = await api.enroll({
-        token: verifyResult.deviceToken,
+        token: deviceToken,
         publicKey: identityPublicKey,
         preKeyBundle: {
           registrationId: ownBundle.registrationId,
@@ -78,7 +98,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       // request (WS auth, prekey fetch, send) reads it back from the
       // identity store — no further vouchflow.verify() calls until sign out
       // or the server invalidates the token.
-      useIdentity.getState().setDeviceToken(verifyResult.deviceToken);
+      useIdentity.getState().setDeviceToken(deviceToken);
       useIdentity.getState().setUserId(user_id);
       onEnrolled(user_id);
 
@@ -90,7 +110,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         const pushResult = await pushNotifications.getToken();
         if (pushResult) {
           await api.registerPushToken(
-            verifyResult.deviceToken,
+            deviceToken,
             pushResult.pushToken,
             pushResult.platform,
           );

@@ -51,6 +51,10 @@ export class CachingVouchflowClient implements VouchflowClient {
     return this.inner.submitFallbackOtp(sessionId, otp);
   }
 
+  async getCachedDeviceToken(): Promise<string | null> {
+    return this.inner.getCachedDeviceToken();
+  }
+
   /** Drop the cached deviceToken — call after suspected rotation / sign-out. */
   invalidate(): void {
     this.cached = undefined;

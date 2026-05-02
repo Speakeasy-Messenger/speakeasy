@@ -90,6 +90,8 @@ export interface VouchflowClient {
   requestFallback(email: string, reason?: FallbackReason): Promise<FallbackResult>;
   /** Submit OTP code to complete fallback verification. */
   submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult>;
+  /** Read the cached device token without biometric/network. Null if not enrolled. */
+  getCachedDeviceToken(): Promise<string | null>;
 }
 
 /** Mirrors the Kotlin `VouchflowError` sealed class (SDK 2.0.0). */
@@ -152,6 +154,8 @@ interface NativeVouchflowModule {
       timeToCompleteSeconds: number;
     };
   }>;
+  /** Returns the cached device token (null if never enrolled). */
+  getCachedDeviceToken(): Promise<string | null>;
 }
 
 /**
@@ -237,5 +241,9 @@ export class NativeVouchflowClient implements VouchflowClient {
       const reasonCode = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
       throw new VouchflowClientError(reasonCode, (err as Error).message);
     }
+  }
+
+  async getCachedDeviceToken(): Promise<string | null> {
+    return this.module.getCachedDeviceToken();
   }
 }

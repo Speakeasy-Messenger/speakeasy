@@ -143,6 +143,14 @@ class VouchflowModule: NSObject {
         }
     }
 
+  /// Read the locally-cached device token without triggering biometric or
+  /// network calls. Returns null if the device has never enrolled.
+  @objc(getCachedDeviceToken:rejecter:)
+  func getCachedDeviceToken(_ resolve: RCTPromiseResolveBlock,
+                            rejecter reject: RCTPromiseRejectBlock) {
+    resolve(Vouchflow.shared.cachedDeviceToken)
+  }
+
     // MARK: - Helpers
 
     private func parseContext(_ s: String) -> VerificationContext? {

@@ -206,4 +206,15 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
       }
     }
   }
+
+  /**
+   * Read the locally-cached device token without triggering biometric or
+   * network calls. Returns null if the device has never enrolled.
+   * Useful when biometric is unavailable — the device may still be enrolled.
+   */
+  @ReactMethod
+  fun getCachedDeviceToken(promise: Promise) {
+    val token = Vouchflow.shared.cachedDeviceToken
+    promise.resolve(token)
+  }
 }
