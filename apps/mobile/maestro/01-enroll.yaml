@@ -5,31 +5,34 @@ tags:
 
 ---
 
-# Launch the app
-- launchApp
+- launchApp:
+    clearState: true
+    clearKeychain: true
 
-# Dismiss any ANR dialogs from the emulator
+# Dismiss ANR dialog if present
 - runFlow:
     when:
       visible: "Wait"
     commands:
       - tapOn: "Wait"
 
-# Tap "Continue" on the onboarding screen
-- assertVisible: "Continue"
-- tapOn: "Continue"
-
-# Wait for enrollment to complete — the app should show IdReveal
-# On CI emulators, vouchflow.verify() will fail and the app falls
-# back to CiVouchflowClient. Allow up to 60 seconds for this.
-- extendedWaitUntil:
-    visible: "Get started"
-    timeout: 60000
-
-# Dismiss IdReveal
-- tapOn:
-    id: "id-reveal-get-started"
-
-# Now the conversations screen should be visible
 - assertVisible:
-    id: "conversations-userid"
+    id: onboarding-continue
+    timeout: 30000
+
+- tapOn:
+    id: onboarding-continue
+
+# Wait for enrollment to complete (may take up to 30s on emulator with fallback)
+# First check if IdReveal screen appears
+- assertVisible:
+    text: "Get started"
+    timeout: 45000
+
+- tapOn:
+    id: id-reveal-get-started
+
+# Should now be on conversations screen
+- assertVisible:
+    id: conversations-userid
+    timeout: 10000
