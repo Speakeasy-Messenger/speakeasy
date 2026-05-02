@@ -220,6 +220,7 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
 
   /**
    * Test-only: enroll the device without requiring biometric verification.
+   * Uses SDK 2.0.0 fallback flow: initiate test session → submit OTP.
    * Used by CI emulators that lack biometric hardware.
    * Returns the device token on success.
    */
@@ -227,12 +228,15 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
   fun ensureEnrolledForTesting(promise: Promise) {
     CoroutineScope(Dispatchers.IO).launch {
       try {
-        Vouchflow.shared.enrollmentManager.ensureEnrolled()
-        val token = Vouchflow.shared.cachedDeviceToken
+        val result = Vouchflow.shared.initiateSessionForFallbackTesting()
+        val sessionId = result.sessionId
+        val otp = result.testOtp // SDK provides the OTP for test sessions
+        val fallbackResult = Vouchflow.shared.submitFallbackOtp(sessionId, otp)
+        val token = fallbackResult.deviceToken
         if (token != null) {
           promise.resolve(token)
         } else {
-          promise.reject("enrollment_failed", "Device token is null after enrollment")
+          promise.reject("enrollment_failed", "Device token is null after fallback enrollment")
         }
       } catch (e: Throwable) {
         promise.reject("enrollment_failed", e.message, e)
