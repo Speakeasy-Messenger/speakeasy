@@ -20,4 +20,10 @@ export const config = {
    * shipped builds.
    */
   useMockSignalProtocol: false,
+  /**
+   * If true, the OnboardingScreen uses ensureEnrolledForTesting() instead of
+   * verify(). Needed for CI emulators that lack hardware attestation.
+   * Always false in shipped builds.
+   */
+  useCiVouchflow: false,
 };

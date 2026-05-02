@@ -2,9 +2,8 @@ import { ApiClient } from './api/client.js';
 import { config } from './config.js';
 import { NativeVouchflowClient, type VouchflowClient } from './native/vouchflow.js';
 import { CachingVouchflowClient } from './native/caching-vouchflow.js';
-import { MockSignalProtocolClient } from './native/mock-signal-protocol.js';
+import { CiVouchflowClient } from './native/ci-vouchflow.js';
 import {
-  MockGroupMessagingClient,
   NativeGroupMessagingModule,
   NativeSignalProtocolModule,
   type GroupMessagingModule,
@@ -26,40 +25,29 @@ export const api = new ApiClient({ baseUrl: config.apiBaseUrl });
 
 /**
  * Vouchflow client (SDK 2.0.0). Uses the real native bridge in
- * production. Wrapped in `CachingVouchflowClient` so back-to-back
- * WS reconnects don't trigger a fresh biometric prompt every time.
- * Cache TTL is intentionally below the server's 5-minute freshness
- * window.
+ * production; uses `CiVouchflowClient` on CI emulators where
+ * hardware attestation is unavailable. Wrapped in
+ * `CachingVouchflowClient` so back-to-back WS reconnects don't
+ * trigger a fresh biometric prompt every time.
  */
-export const vouchflow: VouchflowClient = new CachingVouchflowClient(
-  new NativeVouchflowClient(),
-);
+const innerVouchflow = config.useCiVouchflow
+  ? new CiVouchflowClient()
+  : new NativeVouchflowClient();
+
+export const vouchflow: VouchflowClient = new CachingVouchflowClient(innerVouchflow);
 
 /**
- * Signal Protocol client. Real native bridge by default; mock used when
- * `config.useMockSignalProtocol` is true (Storybook host or QA build where
- * libsignal is not linked into the APK).
- *
- * Native impl is `apps/mobile/android/.../signal/SignalProtocolModule.kt`,
- * backed by `org.signal:libsignal-android` and the SQLCipher-backed store
- * (Phase 5c). Identity persists across cold starts; subsequent
- * `generateIdentityKey()` calls return the existing public key rather than
- * minting a fresh one.
+ * Signal Protocol client. Always uses the real native bridge.
+ * Identity persists across cold starts via SQLCipher-backed store.
  */
-export const signalProtocol: SignalProtocolModule = config.useMockSignalProtocol
-  ? new MockSignalProtocolClient()
-  : new NativeSignalProtocolModule();
+export const signalProtocol: SignalProtocolModule = new NativeSignalProtocolModule();
 
 /**
- * Group messaging client (Sender Keys). Mock when
- * `config.useMockSignalProtocol` (kept on the same toggle since they
- * share the underlying SignalProtocolStore — flipping one without the
- * other would mismatch). Group chat UX wiring + server fan-out wire
- * format are deferred — see spec §11 Phase 5b carry-over.
+ * Group messaging client (Sender Keys). Always uses the real native
+ * bridge. Group chat UX wiring + server fan-out wire format are
+ * deferred — see spec §11 Phase 5b carry-over.
  */
-export const groupMessaging: GroupMessagingModule = config.useMockSignalProtocol
-  ? new MockGroupMessagingClient()
-  : new NativeGroupMessagingModule();
+export const groupMessaging: GroupMessagingModule = new NativeGroupMessagingModule();
 
 /**
  * Push notification service (Phase 5d). Acquires FCM/APNs token and
