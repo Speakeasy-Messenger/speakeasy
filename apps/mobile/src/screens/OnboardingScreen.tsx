@@ -52,10 +52,18 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       // back to the cached device token and proceed at low confidence.
       let deviceToken: string;
       try {
-        const verifyResult = await vouchflow.verify({
-          context: 'signup',
-          minimumConfidence: 'medium',
-        });
+        const verifyResult = await Promise.race([
+          vouchflow.verify({
+            context: 'signup',
+            minimumConfidence: 'medium',
+          }),
+          new Promise<never>((_, reject) =>
+            setTimeout(
+              () => reject(new VouchflowClientError('biometric_unavailable', 'Timeout: no biometric hardware')),
+              10_000,
+            ),
+          ),
+        ]);
         deviceToken = verifyResult.deviceToken;
       } catch (err: unknown) {
         if (
