@@ -1,50 +1,35 @@
-# Tier B flow #1 — enrollment.
-#
-# Verifies: app launches, onboarding renders, "Continue" mints a userId
-# via the mock Vouchflow + InMemory user repo, IdRevealScreen shows it,
-# then Conversations appears.
-
 appId: xyz.speakeasyapp.app
+name: Enroll fresh user
+tags:
+  - tier-b
+
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-# GHA emulator is slow + unaccelerated; Pixel Launcher / SystemUI
-# routinely ANR on cold boot, putting up a "Wait | Close app" dialog
-# that blocks Maestro's view-hierarchy walker even though our app is
-# fine underneath. Tap "Wait" if visible to dismiss the dialog.
+
+# Launch the app
+- launchApp
+
+# Dismiss any ANR dialogs from the emulator
 - runFlow:
     when:
       visible: "Wait"
     commands:
       - tapOn: "Wait"
+
+# Tap "Continue" on the onboarding screen
+- assertVisible: "Continue"
+- tapOn: "Continue"
+
+# Wait for enrollment to complete — the app should show IdReveal
+# On CI emulators, vouchflow.verify() will fail and the app falls
+# back to CiVouchflowClient. Allow up to 60 seconds for this.
 - extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn:
-    id: "onboarding-continue"
-# Wait a few seconds for enrollment to proceed, then take a screenshot
-# to see what's on screen (debug enrollment failures)
-- waitForAnimationEnd
-- takeScreenshot: after-continue-tap
-# Check for error message first
-- runFlow:
-    when:
-      visible:
-        id: "onboarding-error"
-    commands:
-      - takeScreenshot: onboarding-error-visible
-      - fail: "Enrollment failed - error visible on onboarding screen"
-# Wait for enrollment to complete (IdReveal "Get started" button)
-- extendedWaitUntil:
-    visible:
-      id: "id-reveal-get-started"
+    visible: "Get started"
     timeout: 60000
-# IdReveal screen shows the new userId — tap "Get started" to proceed.
+
+# Dismiss IdReveal
 - tapOn:
     id: "id-reveal-get-started"
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 30000
+
+# Now the conversations screen should be visible
+- assertVisible:
+    id: "conversations-userid"
