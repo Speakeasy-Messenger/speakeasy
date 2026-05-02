@@ -24,16 +24,25 @@ appId: xyz.speakeasyapp.app
     timeout: 30000
 - tapOn:
     id: "onboarding-continue"
-# IdReveal screen shows the new userId — tap "Get started" to proceed.
-# If the app races past IdReveal (e.g. re-enroll with persisted identity),
-# this step is skipped because Conversations is already visible.
+# Wait for either enrollment success (IdReveal) or error message
+- extendedWaitUntil:
+    anyOf:
+      - id: "id-reveal-get-started"
+      - id: "onboarding-error"
+    timeout: 30000
+# If enrollment failed, take a screenshot and fail
 - runFlow:
     when:
       visible:
-        id: "id-reveal-get-started"
+        id: "onboarding-error"
     commands:
-      - tapOn:
-          id: "id-reveal-get-started"
+      - takeScreenshot: enrollment-error
+      - assertTrue:
+          label: "Enrollment should succeed, but got error"
+          condition: false
+# IdReveal screen shows the new userId — tap "Get started" to proceed.
+- tapOn:
+    id: "id-reveal-get-started"
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"

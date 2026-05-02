@@ -159,7 +159,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         ))}
       </View>
       <View style={styles.bottom}>
-        {error ? <Text style={styles.error}>{error}</Text> : null}
+        {error ? <Text testID="onboarding-error" style={styles.error}>{error}</Text> : null}
         <Button
           label="Continue"
           onPress={handleContinue}
