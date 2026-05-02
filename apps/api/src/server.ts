@@ -3,6 +3,7 @@ import {
   Validator,
   VouchflowApiClient,
   VouchflowValidator,
+  MockValidator,
 } from '@speakeasy/vouchflow';
 
 import { vouchflowPlugin } from './auth/vouchflow.js';
@@ -79,6 +80,10 @@ export interface BuildServerOptions {
 }
 
 function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
+  if (process.env.VOUCHFLOW_USE_MOCK === '1') {
+    log.warn('⚠️  Vouchflow mock validator active — tokens are NOT verified');
+    return MockValidator.alwaysSucceeds();
+  }
   const readKey = process.env.VOUCHFLOW_READ_KEY;
   const baseUrl = process.env.VOUCHFLOW_BASE_URL;
   if (!readKey || !baseUrl) {
