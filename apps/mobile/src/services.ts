@@ -25,13 +25,11 @@ import {
 export const api = new ApiClient({ baseUrl: config.apiBaseUrl });
 
 /**
- * Vouchflow client. Always uses the real native bridge (SDK 2.0.0).
- * Wrapped in `CachingVouchflowClient` so back-to-back WS reconnects
- * don't trigger a fresh biometric prompt every time. Cache TTL is
- * intentionally below the server's 5-minute freshness window.
- *
- * MockVouchflowClient was removed in the SDK 2.0.0 integration — the
- * server now validates real device tokens via the Vouchflow API.
+ * Vouchflow client (SDK 2.0.0). Uses the real native bridge in
+ * production. Wrapped in `CachingVouchflowClient` so back-to-back
+ * WS reconnects don't trigger a fresh biometric prompt every time.
+ * Cache TTL is intentionally below the server's 5-minute freshness
+ * window.
  */
 export const vouchflow: VouchflowClient = new CachingVouchflowClient(
   new NativeVouchflowClient(),

@@ -9,11 +9,6 @@
  *   WS_URL       — required, e.g. ws://10.0.2.2:8080/ws
  *   USE_MOCK_SIGNAL_PROTOCOL — optional, defaults to "1"
  *
- * Vouchflow mock was removed in the SDK 2.0.0 integration — the real
- * native bridge is always used. The emulator can't run Play Integrity,
- * but the SDK gracefully degrades to `low` confidence, and the sandbox
- * validator is configured to accept `low`.
- *
  * libsignal mock remains — Play emulator images don't always have the
  * prebuilt .so for the emulator's ABI.
  */
