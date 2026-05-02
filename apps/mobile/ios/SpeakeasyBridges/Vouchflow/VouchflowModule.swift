@@ -154,14 +154,18 @@ class VouchflowModule: NSObject {
   /// Test-only: enroll the device on Vouchflow's servers without requiring
   /// biometric verification. Produces a device token at `low` confidence.
   /// Must NOT be called in production — gate behind __DEV__ or VOUCHFLOW_USE_MOCK.
+  ///
+  /// SDK 2.0.0: ensureEnrolledForTesting() returns Void. Device token is
+  /// obtained via getCachedDeviceToken() after enrollment.
   @objc(ensureEnrolledForTesting:rejecter:)
   func ensureEnrolledForTesting(_ resolve: @escaping RCTPromiseResolveBlock,
                                 rejecter reject: @escaping RCTPromiseRejectBlock) {
     Task { @MainActor in
       do {
-        let result = try await Vouchflow.shared.ensureEnrolledForTesting()
+        try await Vouchflow.shared.ensureEnrolledForTesting()
+        let token = Vouchflow.shared.cachedDeviceToken ?? ""
         resolve([
-          "deviceToken": result.deviceToken,
+          "deviceToken": token,
           "confidence": "low"
         ])
       } catch let err as VouchflowError {

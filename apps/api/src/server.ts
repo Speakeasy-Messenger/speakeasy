@@ -1,6 +1,5 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import {
-  MockValidator,
   Validator,
   VouchflowApiClient,
   VouchflowValidator,
