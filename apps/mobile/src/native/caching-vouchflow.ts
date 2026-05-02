@@ -57,7 +57,8 @@ export class CachingVouchflowClient implements VouchflowClient {
 
   async ensureEnrolledForTesting(): Promise<string> {
     const token = await this.inner.ensureEnrolledForTesting();
-    this.cached = token;
+    // No cache update — ensureEnrolledForTesting only provisions the device
+    // token; it does NOT produce a VerifyResult we can replay.
     return token;
   }
 
