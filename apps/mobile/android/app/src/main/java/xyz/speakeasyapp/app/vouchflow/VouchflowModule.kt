@@ -114,7 +114,7 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
               putBoolean("fallbackUsed", result.fallbackUsed)
               putInt("deviceAgeDays", result.deviceAgeDays)
               putInt("networkVerifications", result.networkVerifications)
-              putString("firstSeen", result.firstSeen?.format(DateTimeFormatter.ISO_INSTANT))
+              putString("firstSeen", result.firstSeen?.let { DateTimeFormatter.ISO_INSTANT.format(it) })
               putString("context", result.context.name.lowercase())
               putMap("signals", signals)
             }
@@ -166,7 +166,7 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
         val map =
             Arguments.createMap().apply {
               putString("fallbackSessionId", result.fallbackSessionId)
-              putString("expiresAt", result.expiresAt.format(DateTimeFormatter.ISO_INSTANT))
+              putString("expiresAt", DateTimeFormatter.ISO_INSTANT.format(result.expiresAt))
             }
         promise.resolve(map)
       } catch (e: Throwable) {
@@ -188,9 +188,10 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
               putBoolean("ipConsistent", result.fallbackSignals.ipConsistent)
               putBoolean("disposableEmailDomain", result.fallbackSignals.disposableEmailDomain)
               putBoolean("deviceHasPriorVerifications", result.fallbackSignals.deviceHasPriorVerifications)
-              putInt("emailDomainAgeDays", result.fallbackSignals.emailDomainAgeDays)
+              val emailAgeDays = result.fallbackSignals.emailDomainAgeDays
+              if (emailAgeDays != null) putInt("emailDomainAgeDays", emailAgeDays)
               putInt("otpAttempts", result.fallbackSignals.otpAttempts)
-              putDouble("timeToCompleteSeconds", result.fallbackSignals.timeToCompleteSeconds)
+              putDouble("timeToCompleteSeconds", result.fallbackSignals.timeToCompleteSeconds.toDouble())
             }
         val map =
             Arguments.createMap().apply {
