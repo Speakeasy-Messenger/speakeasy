@@ -102,14 +102,12 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
 
-      - name: Boot api server (real Vouchflow sandbox, in-memory repos)
+      - name: Boot api server (mock Vouchflow for CI, in-memory repos)
         env:
           PORT: '8080'
           HOST: '0.0.0.0'
           LOG_LEVEL: 'info'
-          VOUCHFLOW_READ_KEY: ${{ secrets.VOUCHFLOW_READ_KEY }}
-          VOUCHFLOW_BASE_URL: 'https://sandbox.api.vouchflow.dev/v1'
-          VOUCHFLOW_MIN_CONFIDENCE: 'low'
+          VOUCHFLOW_USE_MOCK: '1'
         run: |
           cd apps/api
           nohup node dist/server.js > /tmp/api-server.log 2>&1 &
