@@ -24,22 +24,11 @@ appId: xyz.speakeasyapp.app
     timeout: 30000
 - tapOn:
     id: "onboarding-continue"
-# Wait for either enrollment success (IdReveal) or error message
+# Wait for enrollment to complete (IdReveal "Get started" button)
 - extendedWaitUntil:
-    anyOf:
-      - id: "id-reveal-get-started"
-      - id: "onboarding-error"
+    visible:
+      id: "id-reveal-get-started"
     timeout: 30000
-# If enrollment failed, take a screenshot and fail
-- runFlow:
-    when:
-      visible:
-        id: "onboarding-error"
-    commands:
-      - takeScreenshot: enrollment-error
-      - assertTrue:
-          label: "Enrollment should succeed, but got error"
-          condition: false
 # IdReveal screen shows the new userId — tap "Get started" to proceed.
 - tapOn:
     id: "id-reveal-get-started"
