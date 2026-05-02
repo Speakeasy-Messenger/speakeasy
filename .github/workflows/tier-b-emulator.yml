@@ -83,6 +83,7 @@ jobs:
           # server we boot below listens on 0.0.0.0:8080.
           API_BASE_URL: http://10.0.2.2:8080
           WS_URL: ws://10.0.2.2:8080/ws
+          USE_CI_VOUCHFLOW: "1"
         run: node apps/mobile/scripts/write-test-config.mjs
 
       - name: Build release APK (with mock Vouchflow + signal)
