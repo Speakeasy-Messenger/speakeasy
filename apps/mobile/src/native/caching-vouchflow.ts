@@ -1,4 +1,11 @@
-import type { VerifyOpts, VerifyResult, VouchflowClient } from './vouchflow.js';
+import type {
+  VerifyOpts,
+  VerifyResult,
+  VouchflowClient,
+  FallbackResult,
+  FallbackVerificationResult,
+  FallbackReason,
+} from './vouchflow.js';
 
 /**
  * Wrapper that caches the most recent `verify()` result so back-to-back
@@ -10,6 +17,9 @@ import type { VerifyOpts, VerifyResult, VouchflowClient } from './vouchflow.js';
  *
  * Default: 4 minutes — leaves a 1-minute safety margin against the server's
  * 5-minute freshness window.
+ *
+ * `requestFallback` and `submitFallbackOtp` are passed through directly —
+ * they are not cached because they represent one-time server interactions.
  */
 export class CachingVouchflowClient implements VouchflowClient {
   private cached?: { result: VerifyResult; expiresAt: number };
@@ -31,6 +41,14 @@ export class CachingVouchflowClient implements VouchflowClient {
     const ttl = this.opts.maxAgeMs ?? 4 * 60_000;
     this.cached = { result, expiresAt: this.now() + ttl };
     return result;
+  }
+
+  async requestFallback(email: string, reason?: FallbackReason): Promise<FallbackResult> {
+    return this.inner.requestFallback(email, reason);
+  }
+
+  async submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult> {
+    return this.inner.submitFallbackOtp(sessionId, otp);
   }
 
   /** Drop the cached deviceToken — call after suspected rotation / sign-out. */

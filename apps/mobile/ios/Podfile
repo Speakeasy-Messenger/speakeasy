@@ -25,16 +25,16 @@ target 'Speakeasy' do
 
   # Phase 5b iOS: native dependencies for the four custom bridges. These
   # mirror the Android coordinates in `android/app/build.gradle`:
-  #   dev.vouchflow:android-sdk:1.0.3       → Vouchflow iOS SDK
+  #   dev.vouchflow:android-sdk:2.0.0       → Vouchflow iOS SDK
   #   org.signal:libsignal-android:0.59.0   → LibSignalClient
   #   net.zetetic:sqlcipher-android:4.14.1  → SQLCipher
   #
   # Vouchflow iOS — SPM-only distribution (no podspec on CocoaPods Trunk).
   # Added via Xcode: File → Add Package Dependencies → paste URL:
   #   https://github.com/vouchflow/ios-sdk
-  # **Pin: exact 1.0.3** (matches the Android coordinate
-  # `dev.vouchflow:android-sdk:1.0.3` — required for the cachedDeviceToken
-  # property used by SpeakeasyDb HKDF derivation).
+  # **Pin: exact 2.0.0** (matches the Android coordinate
+  # `dev.vouchflow:android-sdk:2.0.0` — required for fallback OTP,
+  # new VouchflowResult fields, and sessionId on biometric errors).
 
   # libsignal-client iOS — git-based CocoaPods dep (the canonical install
   # path per signalapp/libsignal's swift/README.md). The pod's

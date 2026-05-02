@@ -30,7 +30,7 @@ import { MockPushProvider } from '../push/push.mock.js';
 import type { AckRouter } from './ack-router.js';
 import { Redis } from 'ioredis';
 import { RedisAckRouter } from './ack-router.redis.js';
-import { LocalDevValidator } from '../auth/local-dev-validator.js';
+import { MockValidator, type Validator } from '@speakeasy/vouchflow';
 import type { AddressInfo } from 'net';
 
 const CONCURRENT = 20;
@@ -38,29 +38,19 @@ const MESSAGES_PER_SENDER = 10;
 
 async function main() {
   const ackRouter: AckRouter = await resolveAckRouter();
-  const validator = new LocalDevValidator();
+  const validator = MockValidator.alwaysSucceeds();
 
   const app = await buildInstance(ackRouter, validator);
   const port = (app.server.address() as AddressInfo).port;
   console.log(`Server on :${port}`);
 
-  // Bind sender + recipient tokens
-  const recipientToken = 'dvt_recip';
-  validator.bind(recipientToken, 'load-recip-id');
-
-  // Each sender gets a unique device token
-  const senderTokens = [];
-  for (let i = 0; i < CONCURRENT; i++) {
-    const token = `dvt_sender_${i}`;
-    validator.bind(token, 'load-sender-id');
-    senderTokens.push(token);
-  }
+  // MockValidator.alwaysSucceeds() — every deviceToken passes validation
 
   // Auth recipient first, then N senders
-  const recipientWs = await authedWs(port, recipientToken);
+  const recipientWs = await authedWs(port, `dvt_recip`);
   const senderSockets: WebSocket[] = [];
   for (let i = 0; i < CONCURRENT; i++) {
-    senderSockets.push(await authedWs(port, senderTokens[i]!));
+    senderSockets.push(await authedWs(port, `dvt_sender_${i}`));
   }
   console.log(`${CONCURRENT} senders + 1 recipient connected`);
 
@@ -162,7 +152,7 @@ async function authedWs(port: number, token: string): Promise<WebSocket> {
 
 async function buildInstance(
   ackRouter: AckRouter,
-  validator: LocalDevValidator,
+  validator: Validator,
 ): Promise<FastifyInstance> {
   const repo = new InMemoryUserRepo();
   const app = await buildServer({

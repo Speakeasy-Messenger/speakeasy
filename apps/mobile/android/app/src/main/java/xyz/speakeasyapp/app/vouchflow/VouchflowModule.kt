@@ -7,9 +7,12 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import dev.vouchflow.sdk.Confidence
+import dev.vouchflow.sdk.FallbackReason
 import dev.vouchflow.sdk.VerificationContext
 import dev.vouchflow.sdk.Vouchflow
 import dev.vouchflow.sdk.VouchflowError
+import java.time.Instant
+import java.time.format.DateTimeFormatter
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
@@ -25,14 +28,25 @@ import kotlinx.coroutines.launch
  * Methods:
  *   verify(context, minimumConfidence | null) → Promise<{
  *     verified, confidence, deviceToken, fallbackUsed,
+ *     deviceAgeDays, networkVerifications, firstSeen, context,
  *     signals: { biometricUsed, attestationVerified, persistentToken,
  *                crossAppHistory, anomalyFlags },
+ *   }>
+ *   requestFallback(email, reasonStr | null) → Promise<{
+ *     fallbackSessionId, expiresAt,
+ *   }>
+ *   submitFallbackOtp(sessionId, otp) → Promise<{
+ *     verified, confidence, sessionState,
+ *     fallbackSignals: { ipConsistent, disposableEmailDomain,
+ *       deviceHasPriorVerifications, emailDomainAgeDays, otpAttempts,
+ *       timeToCompleteSeconds },
  *   }>
  *
  * Errors are rejected with codes mirroring `VouchflowError` subtypes:
  *   biometric_cancelled · biometric_failed · biometric_unavailable
  *   minimum_confidence_unmet · network_unavailable · enrollment_failed
- *   no_activity · bad_context · bad_confidence · unknown_error
+ *   account_store_access_denied · no_activity · bad_context
+ *   bad_confidence · bad_fallback_reason · unknown_error
  *
  * `Vouchflow.configure()` is called in MainApplication.onCreate(), not here.
  */
@@ -98,6 +112,10 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
               putString("confidence", result.confidence.name.lowercase())
               putString("deviceToken", result.deviceToken)
               putBoolean("fallbackUsed", result.fallbackUsed)
+              putInt("deviceAgeDays", result.deviceAgeDays)
+              putInt("networkVerifications", result.networkVerifications)
+              putString("firstSeen", result.firstSeen?.format(DateTimeFormatter.ISO_INSTANT))
+              putString("context", result.context.name.lowercase())
               putMap("signals", signals)
             }
         promise.resolve(map)
@@ -113,6 +131,75 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
         promise.reject("network_unavailable", e.message, e)
       } catch (e: VouchflowError.EnrollmentFailed) {
         promise.reject("enrollment_failed", e.message, e)
+      } catch (e: VouchflowError.AccountStoreAccessDenied) {
+        promise.reject("account_store_access_denied", e.message, e)
+      } catch (e: Throwable) {
+        promise.reject("unknown_error", e.message, e)
+      }
+    }
+  }
+
+  /**
+   * Request an OTP fallback verification via email.
+   *
+   * Maps `reasonStr` to `FallbackReason` enum, falling back to
+   * `BIOMETRIC_FAILED` if null/unrecognised.
+   */
+  @ReactMethod
+  fun requestFallback(email: String, reasonStr: String?, promise: Promise) {
+    val reason =
+        when (reasonStr) {
+          "biometric_failed" -> FallbackReason.BIOMETRIC_FAILED
+          "biometric_cancelled" -> FallbackReason.BIOMETRIC_CANCELLED
+          "biometric_unavailable" -> FallbackReason.BIOMETRIC_UNAVAILABLE
+          "attestation_unavailable" -> FallbackReason.ATTESTATION_UNAVAILABLE
+          null -> FallbackReason.BIOMETRIC_FAILED
+          else -> {
+            promise.reject("bad_fallback_reason", "unknown fallback reason: $reasonStr")
+            return
+          }
+        }
+
+    scope.launch {
+      try {
+        val result = Vouchflow.shared.requestFallback(email, reason)
+        val map =
+            Arguments.createMap().apply {
+              putString("fallbackSessionId", result.fallbackSessionId)
+              putString("expiresAt", result.expiresAt.format(DateTimeFormatter.ISO_INSTANT))
+            }
+        promise.resolve(map)
+      } catch (e: Throwable) {
+        promise.reject("unknown_error", e.message, e)
+      }
+    }
+  }
+
+  /**
+   * Submit an OTP code for a fallback verification session.
+   */
+  @ReactMethod
+  fun submitFallbackOtp(sessionId: String, otp: String, promise: Promise) {
+    scope.launch {
+      try {
+        val result = Vouchflow.shared.submitFallbackOtp(sessionId, otp)
+        val fallbackSignals =
+            Arguments.createMap().apply {
+              putBoolean("ipConsistent", result.fallbackSignals.ipConsistent)
+              putBoolean("disposableEmailDomain", result.fallbackSignals.disposableEmailDomain)
+              putBoolean("deviceHasPriorVerifications", result.fallbackSignals.deviceHasPriorVerifications)
+              putInt("emailDomainAgeDays", result.fallbackSignals.emailDomainAgeDays)
+              putInt("otpAttempts", result.fallbackSignals.otpAttempts)
+              putDouble("timeToCompleteSeconds", result.fallbackSignals.timeToCompleteSeconds)
+            }
+        val map =
+            Arguments.createMap().apply {
+              putBoolean("verified", result.verified)
+              putString("confidence", result.confidence.name.lowercase())
+              putString("sessionState", result.sessionState)
+              putMap("fallbackSignals", fallbackSignals)
+            }
+        promise.resolve(map)
       } catch (e: Throwable) {
         promise.reject("unknown_error", e.message, e)
       }

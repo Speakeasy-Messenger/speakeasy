@@ -1,7 +1,6 @@
 import { ApiClient } from './api/client.js';
 import { config } from './config.js';
 import { NativeVouchflowClient, type VouchflowClient } from './native/vouchflow.js';
-import { MockVouchflowClient } from './native/mock-vouchflow.js';
 import { CachingVouchflowClient } from './native/caching-vouchflow.js';
 import { MockSignalProtocolClient } from './native/mock-signal-protocol.js';
 import {
@@ -26,18 +25,16 @@ import {
 export const api = new ApiClient({ baseUrl: config.apiBaseUrl });
 
 /**
- * Vouchflow client. Real native bridge by default; opt into the in-process
- * mock by setting `config.useMockVouchflow = true` (e.g. in a Storybook host
- * or QA build where the device cannot run App Attest / Play Integrity).
+ * Vouchflow client. Always uses the real native bridge (SDK 2.0.0).
+ * Wrapped in `CachingVouchflowClient` so back-to-back WS reconnects
+ * don't trigger a fresh biometric prompt every time. Cache TTL is
+ * intentionally below the server's 5-minute freshness window.
  *
- * Wrapped in `CachingVouchflowClient` (Phase 4) so back-to-back WS
- * reconnects don't trigger a fresh biometric prompt every time. Cache TTL
- * is intentionally below the server's 5-minute freshness window.
+ * MockVouchflowClient was removed in the SDK 2.0.0 integration — the
+ * server now validates real device tokens via the Vouchflow API.
  */
 export const vouchflow: VouchflowClient = new CachingVouchflowClient(
-  config.useMockVouchflow
-    ? new MockVouchflowClient({ deviceToken: 'dvt_mock_dev_device' })
-    : new NativeVouchflowClient(),
+  new NativeVouchflowClient(),
 );
 
 /**

@@ -15,14 +15,9 @@ export const config = {
   /** WebSocket URL. */
   wsUrl: 'ws://65.21.224.209:8080/ws',
   /**
-   * If true, services use MockVouchflowClient instead of the real native
-   * bridge. Useful for QA harnesses, Storybook, or simulators that can't
-   * run App Attest / Play Integrity. Always false in shipped builds.
-   */
-  useMockVouchflow: false,
-  /**
-   * If true, services use MockSignalProtocolClient. Same use cases as the
-   * Vouchflow mock. Always false in shipped builds.
+   * If true, services use MockSignalProtocolClient. Useful for QA harnesses,
+   * Storybook, or simulators that can't run libsignal. Always false in
+   * shipped builds.
    */
   useMockSignalProtocol: false,
 };

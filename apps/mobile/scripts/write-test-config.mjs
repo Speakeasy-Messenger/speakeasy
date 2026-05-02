@@ -1,19 +1,21 @@
 #!/usr/bin/env node
 /**
  * Overwrite apps/mobile/src/config.ts to point at the test server +
- * enable mock Vouchflow + mock signal protocol. Used by Tier B CI so
- * the emulator-resident app can talk to a Fastify server running on
- * the same GitHub Actions runner.
+ * enable mock signal protocol. Used by Tier B CI so the emulator-
+ * resident app can talk to a Fastify server running on the same
+ * GitHub Actions runner.
  *
  *   API_BASE_URL — required, e.g. http://10.0.2.2:8080
  *   WS_URL       — required, e.g. ws://10.0.2.2:8080/ws
- *   USE_MOCK_VOUCHFLOW       — optional, defaults to "1"
  *   USE_MOCK_SIGNAL_PROTOCOL — optional, defaults to "1"
  *
- * The emulator can't run Play Integrity so the real Vouchflow native
- * bridge would fail; mock keeps the test deterministic. Same reason
- * for libsignal — Play emulator images don't always have the prebuilt
- * .so for the emulator's ABI.
+ * Vouchflow mock was removed in the SDK 2.0.0 integration — the real
+ * native bridge is always used. The emulator can't run Play Integrity,
+ * but the SDK gracefully degrades to `low` confidence, and the sandbox
+ * validator is configured to accept `low`.
+ *
+ * libsignal mock remains — Play emulator images don't always have the
+ * prebuilt .so for the emulator's ABI.
  */
 
 import { writeFileSync } from 'node:fs';
@@ -25,7 +27,6 @@ if (!apiBaseUrl || !wsUrl) {
   console.error('write-test-config.mjs: API_BASE_URL + WS_URL are required');
   process.exit(1);
 }
-const useMockVouchflow = (process.env.USE_MOCK_VOUCHFLOW ?? '1') === '1';
 const useMockSignalProtocol = (process.env.USE_MOCK_SIGNAL_PROTOCOL ?? '1') === '1';
 
 const out = `/**
@@ -35,7 +36,6 @@ const out = `/**
 export const config = {
   apiBaseUrl: ${JSON.stringify(apiBaseUrl)},
   wsUrl: ${JSON.stringify(wsUrl)},
-  useMockVouchflow: ${useMockVouchflow},
   useMockSignalProtocol: ${useMockSignalProtocol},
 };
 `;

@@ -11,15 +11,18 @@ import type { Confidence, VerificationContext } from '@speakeasy/vouchflow';
  * Forward `deviceToken` to the Speakeasy server which validates it via
  * `GET /v1/device/{deviceToken}/reputation` (read-scoped key, server-side).
  *
- * Note: `currentConfidence()` was removed in the April 2026 SDK revision —
- * confidence is checked inline by passing `minimumConfidence` to `verify()`,
- * which throws `MinimumConfidenceUnmet` rather than returning a low result.
+ * SDK 2.0.0 adds:
+ *   - VouchflowResult.deviceAgeDays, networkVerifications, firstSeen, context
+ *   - requestFallback(email, reason) → { fallbackSessionId, expiresAt }
+ *   - submitFallbackOtp(sessionId, otp) → FallbackVerificationResult
+ *   - BiometricCancelled/Failed now carry sessionId
+ *   - AccountStoreAccessDenied error (iOS: keychainAccessDenied)
  */
 
 export interface VouchflowSignals {
   biometricUsed: boolean;
   attestationVerified: boolean;
-  /** SDK April 2026 revision: renamed from `keychainPersistent`. */
+  /** SDK 2.0.0: renamed from `keychainPersistent` in Android; iOS bridge remaps. */
   persistentToken: boolean;
   crossAppHistory: boolean;
   anomalyFlags: string[];
@@ -29,6 +32,14 @@ export interface VerifyResult {
   verified: boolean;
   confidence: Confidence;
   deviceToken: string;
+  /** SDK 2.0.0: days since this device token was first enrolled. */
+  deviceAgeDays: number;
+  /** SDK 2.0.0: total verifications in the Vouchflow network. */
+  networkVerifications: number;
+  /** SDK 2.0.0: ISO 8601 timestamp or null. */
+  firstSeen: string | null;
+  /** SDK 2.0.0: the VerificationContext passed to verify(). */
+  context: VerificationContext;
   signals: VouchflowSignals;
   fallbackUsed: boolean;
 }
@@ -39,12 +50,49 @@ export interface VerifyOpts {
   minimumConfidence?: Confidence;
 }
 
+export interface FallbackResult {
+  fallbackSessionId: string;
+  /** ISO 8601 timestamp. */
+  expiresAt: string;
+}
+
+export interface FallbackVerificationResult {
+  verified: boolean;
+  confidence: Confidence;
+  sessionState: string;
+  fallbackSignals: {
+    ipConsistent: boolean;
+    disposableEmailDomain: boolean;
+    deviceHasPriorVerifications: boolean;
+    emailDomainAgeDays: number | null;
+    otpAttempts: number;
+    timeToCompleteSeconds: number;
+  };
+}
+
+export type FallbackReason =
+  | 'attestation_unavailable'
+  | 'attestation_failed'
+  | 'attestation_timeout'
+  | 'biometric_unavailable'
+  | 'biometric_failed'
+  | 'biometric_cancelled'
+  | 'key_invalidated'
+  | 'sdk_error'
+  | 'minimum_confidence_unmet'
+  | 'developer_initiated'
+  | 'enrollment_failed';
+
 export interface VouchflowClient {
   /** Full attestation flow. Returns the `deviceToken` to pass to your server. */
   verify(opts: VerifyOpts): Promise<VerifyResult>;
+  /** Initiate email OTP fallback after biometric failure. */
+  requestFallback(email: string, reason?: FallbackReason): Promise<FallbackResult>;
+  /** Submit OTP code to complete fallback verification. */
+  submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult>;
 }
 
-/** Mirrors the Kotlin `VouchflowError` sealed class (April 2026 revision). */
+/** Mirrors the Kotlin `VouchflowError` sealed class (SDK 2.0.0). */
 export type VouchflowErrorReason =
   | 'biometric_cancelled'
   | 'biometric_failed'
@@ -52,9 +100,11 @@ export type VouchflowErrorReason =
   | 'minimum_confidence_unmet'
   | 'network_unavailable'
   | 'enrollment_failed'
-  | 'no_activity'
+  | 'no_session'
+  | 'account_store_access_denied'
   | 'bad_context'
   | 'bad_confidence'
+  | 'bad_fallback_reason'
   | 'unknown_error';
 
 export class VouchflowClientError extends Error {
@@ -72,16 +122,42 @@ interface NativeVouchflowModule {
     verified: boolean;
     confidence: 'high' | 'medium' | 'low';
     deviceToken: string;
+    deviceAgeDays: number;
+    networkVerifications: number;
+    firstSeen: string | null;
+    context: string;
     fallbackUsed: boolean;
     signals: VouchflowSignals;
+  }>;
+  requestFallback(
+    email: string,
+    reason: string | null,
+  ): Promise<{
+    fallbackSessionId: string;
+    expiresAt: string;
+  }>;
+  submitFallbackOtp(
+    sessionId: string,
+    otp: string,
+  ): Promise<{
+    verified: boolean;
+    confidence: 'high' | 'medium' | 'low';
+    sessionState: string;
+    fallbackSignals: {
+      ipConsistent: boolean;
+      disposableEmailDomain: boolean;
+      deviceHasPriorVerifications: boolean;
+      emailDomainAgeDays: number | null;
+      otpAttempts: number;
+      timeToCompleteSeconds: number;
+    };
   }>;
 }
 
 /**
  * Conditional require of `react-native`. In RN production bundles the module
  * is provided globally by Metro. In Node test envs (vitest) the require
- * throws — callers should use `MockVouchflowClient` for tests, never this
- * class directly.
+ * throws — callers should not use this class directly in tests.
  */
 function loadNativeModule(): NativeVouchflowModule | undefined {
   try {
@@ -94,12 +170,11 @@ function loadNativeModule(): NativeVouchflowModule | undefined {
 }
 
 /**
- * Production wiring — Phase 5b. Calls `NativeModules.Vouchflow.verify()`
- * (Kotlin module under `apps/mobile/android/.../vouchflow/`, wrapping
- * `dev.vouchflow:android-sdk`). Throws `VouchflowClientError` with a
+ * Production wiring — calls `NativeModules.Vouchflow.verify()`,
+ * `requestFallback()`, and `submitFallbackOtp()`
+ * (Kotlin/Swift modules wrapping `dev.vouchflow:android-sdk:2.0.0` /
+ * `VouchflowSDK` 2.0.0). Throws `VouchflowClientError` with a
  * `reason` mirroring the SDK's `VouchflowError` subtypes.
- *
- * 🍎 iOS counterpart bridge is queued — see spec §11 Phase 5b.
  */
 export class NativeVouchflowClient implements VouchflowClient {
   private readonly module: NativeVouchflowModule;
@@ -110,7 +185,7 @@ export class NativeVouchflowClient implements VouchflowClient {
       throw new VouchflowClientError(
         'unknown_error',
         'NativeVouchflowClient: Vouchflow native module not registered. ' +
-          'Are you running on a real device with the Phase 5b APK?',
+          'Are you running on a real device with the SDK 2.0.0 APK?',
       );
     }
     this.module = m;
@@ -123,13 +198,44 @@ export class NativeVouchflowClient implements VouchflowClient {
         verified: r.verified,
         confidence: r.confidence as Confidence,
         deviceToken: r.deviceToken,
+        deviceAgeDays: r.deviceAgeDays,
+        networkVerifications: r.networkVerifications,
+        firstSeen: r.firstSeen,
+        context: r.context as VerificationContext,
         fallbackUsed: r.fallbackUsed,
         signals: r.signals,
       };
     } catch (err) {
-      // RN's NativeModules reject with { code, message } shaped errors.
       const reason = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
       throw new VouchflowClientError(reason, (err as Error).message);
+    }
+  }
+
+  async requestFallback(email: string, reason?: FallbackReason): Promise<FallbackResult> {
+    try {
+      const r = await this.module.requestFallback(email, reason ?? null);
+      return {
+        fallbackSessionId: r.fallbackSessionId,
+        expiresAt: r.expiresAt,
+      };
+    } catch (err) {
+      const reasonCode = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
+      throw new VouchflowClientError(reasonCode, (err as Error).message);
+    }
+  }
+
+  async submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult> {
+    try {
+      const r = await this.module.submitFallbackOtp(sessionId, otp);
+      return {
+        verified: r.verified,
+        confidence: r.confidence as Confidence,
+        sessionState: r.sessionState,
+        fallbackSignals: r.fallbackSignals,
+      };
+    } catch (err) {
+      const reasonCode = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
+      throw new VouchflowClientError(reasonCode, (err as Error).message);
     }
   }
 }

@@ -5,7 +5,7 @@ import {
   VouchflowApiClient,
   VouchflowValidator,
 } from '@speakeasy/vouchflow';
-import { LocalDevValidator } from './auth/local-dev-validator.js';
+
 import { vouchflowPlugin } from './auth/vouchflow.js';
 import { DrizzleUserRepo } from './db/users.drizzle.js';
 import { InMemoryUserRepo } from './db/users.memory.js';
@@ -80,18 +80,11 @@ export interface BuildServerOptions {
 }
 
 function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
-  if (process.env.VOUCHFLOW_USE_MOCK === '1') {
-    log.warn(
-      'VOUCHFLOW_USE_MOCK=1 — using LocalDevValidator (persisted to file). ' +
-        'Never set this in production.',
-    );
-    return new LocalDevValidator();
-  }
   const readKey = process.env.VOUCHFLOW_READ_KEY;
   const baseUrl = process.env.VOUCHFLOW_BASE_URL;
   if (!readKey || !baseUrl) {
     throw new Error(
-      'VOUCHFLOW_READ_KEY and VOUCHFLOW_BASE_URL are required (or set VOUCHFLOW_USE_MOCK=1 for tests). ' +
+      'VOUCHFLOW_READ_KEY and VOUCHFLOW_BASE_URL are required. ' +
         'See apps/api/.env.local.',
     );
   }
@@ -151,14 +144,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const repo =
     opts.userRepo ??
     (hasDb ? new DrizzleUserRepo() : new InMemoryUserRepo());
-  // Sandbox / dev mode hook: the LocalDevValidator needs the
-  // (deviceToken, userId) pair after a fresh mint so subsequent verifies
-  // (login, WS auth) recognize the user. Real VouchflowValidator ignores
-  // this — the binding lives in Vouchflow's backend.
-  const onUserMinted =
-    validator instanceof LocalDevValidator
-      ? (token: string, userId: string) => validator.bind(token, userId)
-      : undefined;
+  const onUserMinted = undefined;
   await registerEnrollRoutes(app, {
     repo,
     generateId: opts.generateId,
