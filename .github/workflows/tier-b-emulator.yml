@@ -83,7 +83,6 @@ jobs:
           # server we boot below listens on 0.0.0.0:8080.
           API_BASE_URL: http://10.0.2.2:8080
           WS_URL: ws://10.0.2.2:8080/ws
-          USE_CI_VOUCHFLOW: "1"
         run: node apps/mobile/scripts/write-test-config.mjs
 
       - name: Build release APK (with mock Vouchflow + signal)
@@ -102,12 +101,14 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
 
-      - name: Boot api server (mock Vouchflow for CI, in-memory repos)
+      - name: Boot api server (real Vouchflow sandbox, in-memory repos)
         env:
           PORT: '8080'
           HOST: '0.0.0.0'
           LOG_LEVEL: 'info'
-          VOUCHFLOW_USE_MOCK: '1'
+          VOUCHFLOW_READ_KEY: ${{ secrets.VOUCHFLOW_READ_KEY }}
+          VOUCHFLOW_BASE_URL: 'https://sandbox.api.vouchflow.dev'
+          VOUCHFLOW_MIN_CONFIDENCE: 'low'
         run: |
           cd apps/api
           nohup node dist/server.js > /tmp/api-server.log 2>&1 &

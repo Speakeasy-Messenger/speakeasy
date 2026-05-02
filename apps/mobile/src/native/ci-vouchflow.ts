@@ -1,42 +1,34 @@
+/**
+ * CiVouchflowClient — CI-only Vouchflow client for emulators.
+ *
+ * Generates deterministic device tokens without requiring biometric
+ * hardware or network access to the Vouchflow API. Used for Maestro
+ * E2E tests where real attestation is unavailable.
+ *
+ * The server must be running with the sandbox Vouchflow validator
+ * configured to accept device tokens with the `dvt_ci_` prefix.
+ */
+
 import type {
-  Confidence,
-  VerificationContext,
-} from '@speakeasy/vouchflow';
-import type {
-  VouchflowClient,
-  VerifyOpts,
   VerifyResult,
+  VerifyOpts,
   FallbackResult,
   FallbackVerificationResult,
-  FallbackReason,
-} from './vouchflow';
+} from './vouchflow.js';
 
-/**
- * CI-only Vouchflow client for emulator / test environments where
- * hardware attestation is unavailable.
- *
- * Generates a deterministic device token (`dvt_ci_<timestamp>`) that
- * the server-side `CiMockValidator` accepts when `VOUCHFLOW_USE_MOCK=1`
- * is set. Does NOT call the real Vouchflow SDK — no network, no
- * biometrics, no KeyStore. This allows Tier B Maestro flows to
- * complete enrollment on the Android emulator.
- *
- * **Must not be used in production.**
- */
-export class CiVouchflowClient implements VouchflowClient {
-  private cachedToken: string | null = null;
+let counter = 0;
 
-  async verify(opts: VerifyOpts): Promise<VerifyResult> {
-    const deviceToken = await this.ensureEnrolledForTesting();
+export class CiVouchflowClient {
+  async verify(_opts?: VerifyOpts): Promise<VerifyResult> {
+    const token = this._nextToken();
     return {
       verified: true,
-      confidence: (opts.minimumConfidence ?? 'high') as Confidence,
-      deviceToken,
+      confidence: 'high',
+      deviceToken: token,
       deviceAgeDays: 0,
-      networkVerifications: 1,
+      networkVerifications: 0,
       firstSeen: new Date().toISOString(),
-      context: opts.context as VerificationContext,
-      fallbackUsed: false,
+      context: 'signup',
       signals: {
         biometricUsed: false,
         attestationVerified: false,
@@ -44,47 +36,51 @@ export class CiVouchflowClient implements VouchflowClient {
         crossAppHistory: false,
         anomalyFlags: [],
       },
+      fallbackUsed: false,
     };
   }
 
-  async requestFallback(_email: string, _reason?: FallbackReason): Promise<FallbackResult> {
-    // CI doesn't need real fallback — just return a fake session
+  async requestFallback(_email: string): Promise<FallbackResult> {
     return {
-      fallbackSessionId: 'ci_fallback_session',
-      expiresAt: Date.now() + 600_000,
+      fallbackSessionId: `ci-session-${++counter}`,
+      // sessionId is string in SDK 2.0.0
+      expiresAt: new Date(Date.now() + 600_000).toISOString(),
     };
   }
 
-  async submitFallbackOtp(_sessionId: string, _otp: string): Promise<FallbackVerificationResult> {
-    const deviceToken = await this.ensureEnrolledForTesting();
+  async submitFallbackOtp(
+    _sessionId: string,
+    _otp: string,
+  ): Promise<FallbackVerificationResult> {
     return {
       verified: true,
-      confidence: 'medium' as Confidence,
-      deviceToken,
-      signals: {
-        emailMatch: true,
+      confidence: 'medium',
+      sessionState: 'completed',
+      fallbackSignals: {
         ipConsistent: true,
-        emailDomainAgeDays: 365,
-        emailAgeDays: 100,
-        anomalyFlags: [],
+        disposableEmailDomain: false,
+        deviceHasPriorVerifications: false,
+        emailDomainAgeDays: null,
+        otpAttempts: 1,
+        timeToCompleteSeconds: 5,
       },
-      fallbackSessionId: 'ci_fallback_session',
     };
   }
 
   async getCachedDeviceToken(): Promise<string | null> {
-    return this.cachedToken;
-  }
-
-  async invalidate(): Promise<void> {
-    this.cachedToken = null;
+    if (counter > 0) return this._nextToken();
+    return null;
   }
 
   async ensureEnrolledForTesting(): Promise<string> {
-    if (this.cachedToken) return this.cachedToken;
-    // Generate a deterministic CI device token that the server-side
-    // CiMockValidator (VOUCHFLOW_USE_MOCK=1) will accept.
-    this.cachedToken = `dvt_ci_${Date.now()}`;
-    return this.cachedToken;
+    return this._nextToken();
+  }
+
+  invalidate(): void {
+    // no-op
+  }
+
+  private _nextToken(): string {
+    return `dvt_ci_${Date.now()}_${++counter}`;
   }
 }
