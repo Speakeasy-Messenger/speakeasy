@@ -66,16 +66,13 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         ]);
         deviceToken = verifyResult.deviceToken;
       } catch (err: unknown) {
-        if (
-          err instanceof VouchflowClientError &&
-          err.reason === 'biometric_unavailable'
-        ) {
-          // Device was enrolled by verify() before biometric step; try cached token
+        // Any Vouchflow error on CI/test devices → fall back to CI client
+        // (emulators lack biometric hardware, SDK may throw various errors)
+        if (err instanceof VouchflowClientError) {
           const cached = await vouchflow.getCachedDeviceToken();
           if (cached) {
             deviceToken = cached;
           } else {
-            // Emulator/test: no cached token, generate a CI device token in JS
             const { CiVouchflowClient } = await import(
               '../native/ci-vouchflow.js'
             );
