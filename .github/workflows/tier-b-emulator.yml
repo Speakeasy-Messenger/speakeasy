@@ -86,19 +86,22 @@ jobs:
           USE_CI_VOUCHFLOW: "1"
         run: node apps/mobile/scripts/write-test-config.mjs
 
-      - name: Build release APK (with mock Vouchflow + signal)
+      - name: Build release APK (with CI Vouchflow + signal)
         working-directory: apps/mobile/android
         env:
           # Real Vouchflow can't run in the emulator (no Play Integrity).
           # The build-time guard in app/build.gradle still requires a
-          # non-placeholder key, so feed it the secret. The mock
-          # validator on the server side accepts any token.
+          # non-placeholder key, so feed it the secret. CiVouchflowClient
+          # in JS bypasses the native SDK entirely.
           VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
         run: |
           if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
             echo "::error::VOUCHFLOW_WRITE_KEY secret is not set"
             exit 1
           fi
+          # Clear Metro cache to ensure write-test-config changes are picked up
+          rm -rf ../../node_modules/.cache/metro
+          rm -rf /tmp/metro-*
           ./gradlew :app:assembleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
 

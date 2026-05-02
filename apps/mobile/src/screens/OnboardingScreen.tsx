@@ -8,6 +8,7 @@ import { api, signalProtocol, vouchflow } from '../services.js';
 import { pushNotifications } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../native/vouchflow.js';
+import { CiVouchflowClient } from '../native/ci-vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { colors, fonts, space, text } from '../theme/index.js';
 
@@ -66,12 +67,16 @@ export function OnboardingScreen({ onEnrolled }: Props) {
           if (cached) {
             deviceToken = cached;
           } else {
-            // Emulator/test: no cached token, use test enrollment
-            try {
-              deviceToken = await vouchflow.ensureEnrolledForTesting();
-            } catch {
-              throw err;
-            }
+            // Emulator/test: no cached token, generate a CI device token in JS
+            const { CiVouchflowClient } = await import(
+              '../native/ci-vouchflow.js'
+            );
+            const ci = new CiVouchflowClient();
+            const ciResult = await ci.verify({
+              context: 'signup',
+              minimumConfidence: 'medium',
+            });
+            deviceToken = ciResult.deviceToken;
           }
         } else {
           throw err;
