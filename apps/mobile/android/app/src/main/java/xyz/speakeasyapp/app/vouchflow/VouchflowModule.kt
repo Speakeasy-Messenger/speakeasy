@@ -217,4 +217,26 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
     val token = Vouchflow.shared.cachedDeviceToken
     promise.resolve(token)
   }
+
+  /**
+   * Test-only: enroll the device without requiring biometric verification.
+   * Used by CI emulators that lack biometric hardware.
+   * Returns the device token on success.
+   */
+  @ReactMethod
+  fun ensureEnrolledForTesting(promise: Promise) {
+    CoroutineScope(Dispatchers.IO).launch {
+      try {
+        Vouchflow.shared.enrollmentManager.ensureEnrolled()
+        val token = Vouchflow.shared.cachedDeviceToken
+        if (token != null) {
+          promise.resolve(token)
+        } else {
+          promise.reject("enrollment_failed", "Device token is null after enrollment")
+        }
+      } catch (e: Throwable) {
+        promise.reject("enrollment_failed", e.message, e)
+      }
+    }
+  }
 }

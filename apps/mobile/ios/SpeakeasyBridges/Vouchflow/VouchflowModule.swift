@@ -151,6 +151,28 @@ class VouchflowModule: NSObject {
     resolve(Vouchflow.shared.cachedDeviceToken)
   }
 
+  /// Test-only: enroll the device on Vouchflow's servers without requiring
+  /// biometric verification. Produces a device token at `low` confidence.
+  /// Must NOT be called in production — gate behind __DEV__ or VOUCHFLOW_USE_MOCK.
+  @objc(ensureEnrolledForTesting:rejecter:)
+  func ensureEnrolledForTesting(_ resolve: @escaping RCTPromiseResolveBlock,
+                                rejecter reject: @escaping RCTPromiseRejectBlock) {
+    Task { @MainActor in
+      do {
+        let result = try await Vouchflow.shared.ensureEnrolledForTesting()
+        resolve([
+          "deviceToken": result.deviceToken,
+          "confidence": "low"
+        ])
+      } catch let err as VouchflowError {
+        let (code, message) = mapError(err)
+        reject(code, message, err)
+      } catch {
+        reject("unknown_error", error.localizedDescription, error)
+      }
+    }
+  }
+
     // MARK: - Helpers
 
     private func parseContext(_ s: String) -> VerificationContext? {

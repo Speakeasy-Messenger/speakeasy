@@ -55,6 +55,12 @@ export class CachingVouchflowClient implements VouchflowClient {
     return this.inner.getCachedDeviceToken();
   }
 
+  async ensureEnrolledForTesting(): Promise<string> {
+    const token = await this.inner.ensureEnrolledForTesting();
+    this.cached = token;
+    return token;
+  }
+
   /** Drop the cached deviceToken — call after suspected rotation / sign-out. */
   invalidate(): void {
     this.cached = undefined;

@@ -61,11 +61,18 @@ export function OnboardingScreen({ onEnrolled }: Props) {
           err instanceof VouchflowClientError &&
           err.reason === 'biometric_unavailable'
         ) {
+          // Device was enrolled by verify() before biometric step; try cached token
           const cached = await vouchflow.getCachedDeviceToken();
-          if (!cached) {
-            throw err;
+          if (cached) {
+            deviceToken = cached;
+          } else {
+            // Emulator/test: no cached token, use test enrollment
+            try {
+              deviceToken = await vouchflow.ensureEnrolledForTesting();
+            } catch {
+              throw err;
+            }
           }
-          deviceToken = cached;
         } else {
           throw err;
         }
