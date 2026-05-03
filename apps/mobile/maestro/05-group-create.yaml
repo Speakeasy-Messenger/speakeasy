@@ -17,34 +17,28 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-continue"
     timeout: 30000
-- tapOn:
-    id: "onboarding-continue"
+- tapOn: "onboarding-continue"
 # Handle IdReveal if it appears (fresh enroll).
 - runFlow:
     when:
       visible:
         id: "id-reveal-get-started"
     commands:
-      - tapOn:
-          id: "id-reveal-get-started"
+      - tapOn: "id-reveal-get-started"
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
     timeout: 15000
-- tapOn:
-    id: "conversations-new-group"
+- tapOn: "conversations-new-group"
 - extendedWaitUntil:
     visible:
       id: "new-group-name-input"
     timeout: 5000
-- tapOn:
-    id: "new-group-name-input"
+- tapOn: "new-group-name-input"
 - inputText: "weekend plans"
-- tapOn:
-    id: "new-group-members-input"
+- tapOn: "new-group-members-input"
 - inputText: "silent-golden-hawk"
-- tapOn:
-    id: "new-group-create"
+- tapOn: "new-group-create"
 # Successful create → navigated to GroupChat. Header shows "# weekend plans".
 - extendedWaitUntil:
     visible: "# weekend plans"

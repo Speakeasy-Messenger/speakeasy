@@ -14,21 +14,24 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-continue"
     timeout: 30000
-- tapOn:
-    id: "onboarding-continue"
+- tapOn: "onboarding-continue"
+# Handle IdReveal if it appears
+- runFlow:
+    when:
+      visible:
+        id: "id-reveal-get-started"
+    commands:
+      - tapOn: "id-reveal-get-started"
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
     timeout: 15000
-- tapOn:
-    id: "conversations-new-chat"
+- tapOn: "conversations-new-chat"
 - assertVisible:
     id: "new-chat-peer-id-input"
-- tapOn:
-    id: "new-chat-peer-id-input"
+- tapOn: "new-chat-peer-id-input"
 - inputText: "definitely-fake-userid"
-- tapOn:
-    id: "new-chat-start"
+- tapOn: "new-chat-start"
 - extendedWaitUntil:
     visible: "No such user.*"
     timeout: 8000

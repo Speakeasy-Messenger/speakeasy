@@ -140,7 +140,7 @@ jobs:
           # continuations don't survive. Single line with `&&` chaining
           # works; so does `set -e` + bare lines via the `bash` runner.
           # We use the single-line form for clarity.
-          script: adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04
+          script: adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
 
       - name: Dump diagnostics on failure
         if: failure()

@@ -1,16 +1,6 @@
 # Tier B flow #6 — push token registration.
 #
-# Verifies that after enrollment, the app successfully registers an
-# FCM push token with the server. Since we can't verify actual FCM
-# delivery on the emulator (no Play Services), we verify the
-# registration endpoint is reachable and accepted by checking that
-# the app doesn't crash or show an error.
-#
-# The real push delivery path (offline recipient → FCM → wake) is
-# covered by Tier A integration tests with MockPushProvider. This
-# flow guarantees the mobile-side wiring is correct end-to-end.
-#
-# Self-contained: enrolls, then verifies the app is still functional
+# Verifies that after enrollment, the app is still functional
 # (no crash from the push registration attempt). On emulator without
 # Play Services, NativePushNotificationService.getToken() returns
 # undefined (caught gracefully), so push is skipped — that's the
@@ -30,11 +20,16 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-continue"
     timeout: 30000
-- tapOn:
-    id: "onboarding-continue"
+- tapOn: "onboarding-continue"
+# Handle IdReveal if it appears
+- runFlow:
+    when:
+      visible:
+        id: "id-reveal-get-started"
+    commands:
+      - tapOn: "id-reveal-get-started"
 # Enrollment completes → lands on Conversations. Push token registration
 # happens automatically after enrollment (best-effort, non-blocking).
-# If push registration crashed, we'd never reach this screen.
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
@@ -43,22 +38,17 @@ appId: xyz.speakeasyapp.app
 # proving the post-enrollment push-registration didn't break anything.
 - copyTextFrom:
     id: "conversations-userid"
-- tapOn:
-    id: "conversations-new-chat"
-- tapOn:
-    id: "new-chat-peer-id-input"
+- tapOn: "conversations-new-chat"
+- tapOn: "new-chat-peer-id-input"
 - pasteText
-- tapOn:
-    id: "new-chat-start"
+- tapOn: "new-chat-start"
 - extendedWaitUntil:
     visible:
       id: "chat-input"
     timeout: 10000
-- tapOn:
-    id: "chat-input"
+- tapOn: "chat-input"
 - inputText: "push still works"
-- tapOn:
-    id: "chat-send"
+- tapOn: "chat-send"
 - extendedWaitUntil:
     visible: "push still works"
     timeout: 10000

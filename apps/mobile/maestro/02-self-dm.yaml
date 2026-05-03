@@ -2,9 +2,7 @@
 #
 # Self-contained: enrolls a fresh user, copies the userId, pastes it
 # into NewChat, sends, asserts the bubble + that the conversation row
-# survives a back-out. Avoids cross-flow state-passing (which was
-# brittle — `${MAESTRO_USERID}` was treated as a literal string by
-# Maestro instead of resolved from the prior flow's output map).
+# survives a back-out.
 
 appId: xyz.speakeasyapp.app
 ---
@@ -20,47 +18,39 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-continue"
     timeout: 30000
-- tapOn:
-    id: "onboarding-continue"
-# Enroll lands on Conversations directly. Capture the userId from the
-# Conversations header instead of IdReveal.
+- tapOn: "onboarding-continue"
+# Enroll may land on IdReveal first — handle it
+- runFlow:
+    when:
+      visible:
+        id: "id-reveal-get-started"
+    commands:
+      - tapOn: "id-reveal-get-started"
+# Enroll lands on Conversations. Capture the userId.
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
     timeout: 15000
 - copyTextFrom:
     id: "conversations-userid"
-- tapOn:
-    id: "conversations-new-chat"
+- tapOn: "conversations-new-chat"
 - assertVisible:
     id: "new-chat-peer-id-input"
-- tapOn:
-    id: "new-chat-peer-id-input"
-# `pasteText` (no args) pastes the most recent `copyTextFrom` value
-# from the device clipboard. Cleaner than env-var substitution, which
-# Maestro doesn't auto-bind from copyTextFrom.
+- tapOn: "new-chat-peer-id-input"
 - pasteText
-- tapOn:
-    id: "new-chat-start"
+- tapOn: "new-chat-start"
 - extendedWaitUntil:
     visible:
       id: "chat-input"
     timeout: 10000
-- tapOn:
-    id: "chat-input"
+- tapOn: "chat-input"
 - inputText: "yo from maestro"
-- tapOn:
-    id: "chat-send"
+- tapOn: "chat-send"
 - extendedWaitUntil:
     visible: "yo from maestro"
     timeout: 10000
-# Tap the in-app "‹ Back" button — Maestro's `back` action triggers
-# Android system back which react-native-screens doesn't reliably
-# consume on the modal-presented Chat route. The artifact screenshot
-# from run 25202433373 confirmed system back was a no-op.
 - takeScreenshot: 01-chat-before-back
-- tapOn:
-    id: "chat-back"
+- tapOn: "chat-back"
 - waitForAnimationToEnd
 - takeScreenshot: 02-after-back
 - extendedWaitUntil:
