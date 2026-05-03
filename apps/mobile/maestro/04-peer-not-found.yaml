@@ -1,39 +1,39 @@
-# Tier B flow #4 — peer-not-found surfaces at chat-open.
-
 appId: xyz.speakeasyapp.app
+name: Peer not found
+tags:
+  - tier-b
+
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
+
+# Run enrollment first
+- runFlow: 01-enroll.yaml
+
+# Start new chat
+- tapOn:
+    text: "+ New chat"
+
 - extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn: "onboarding-continue"
-# Handle IdReveal if it appears
-- runFlow:
-    when:
-      visible:
-        id: "id-reveal-get-started"
-    commands:
-      - tapOn: "id-reveal-get-started"
+    id: new-chat-input
+    timeout: 5000
+
+- tapOn:
+    id: new-chat-input
+
+- inputText: "nonexistent-ghost-phantom"
+
+- tapOn:
+    text: "Start"
+
+# Wait for error - peer not found
 - extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 15000
-- tapOn: "conversations-new-chat"
+    id: chat-error
+    timeout: 10000
+
 - assertVisible:
-    id: "new-chat-peer-id-input"
-- tapOn: "new-chat-peer-id-input"
-- inputText: "definitely-fake-userid"
-- tapOn: "new-chat-start"
-- extendedWaitUntil:
-    visible: "No such user.*"
-    timeout: 8000
-- assertNotVisible:
-    id: "chat-input"
+    id: chat-error
+
+- copyTextFrom:
+    id: chat-error
+
+- assertTrue:
+    condition: "${maestro.copiedText} =~ /not found/"

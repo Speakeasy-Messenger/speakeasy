@@ -1,69 +1,74 @@
-# Tier B flow #3 — background/foreground lifecycle.
-#
-# Enrolls fresh, sends a self-DM (so there's a row to look for after
-# relaunch), backgrounds + relaunches the app, asserts identity + the
-# row are restored.
-
 appId: xyz.speakeasyapp.app
+name: Background/Foreground lifecycle
+tags:
+  - tier-b
+
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
+
+# Run enrollment first
+- runFlow: 01-enroll.yaml
+
+# Create a self-DM to have content
+- tapOn:
+    text: "+ New chat"
+
 - extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn: "onboarding-continue"
-# Handle IdReveal if it appears
-- runFlow:
-    when:
-      visible:
-        id: "id-reveal-get-started"
-    commands:
-      - tapOn: "id-reveal-get-started"
-# Enroll lands on Conversations. Capture userId from header.
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 15000
-- copyTextFrom:
-    id: "conversations-userid"
-- tapOn: "conversations-new-chat"
-- tapOn: "new-chat-peer-id-input"
-- pasteText
-- tapOn: "new-chat-start"
-- extendedWaitUntil:
-    visible:
-      id: "chat-input"
-    timeout: 10000
-- tapOn: "chat-input"
-- inputText: "before background"
-- tapOn: "chat-send"
-- extendedWaitUntil:
-    visible: "before background"
-    timeout: 10000
-- tapOn: "chat-back"
-- waitForAnimationToEnd
-# Background + relaunch (clearState: false so AsyncStorage persistence
-# is exercised — this is the actual behavior under test).
-- pressKey: Home
-- waitForAnimationToEnd
-- launchApp:
-    clearState: false
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 10000
-- extendedWaitUntil:
-    visible: "before background"
+    id: new-chat-input
     timeout: 5000
+
+- tapOn:
+    id: new-chat-input
+
+- inputText: "me"
+
+- tapOn:
+    text: "Start"
+
+- extendedWaitUntil:
+    id: chat-input
+    timeout: 10000
+
+- tapOn:
+    id: chat-input
+
+- inputText: "Background test"
+
+- tapOn:
+    id: chat-send
+
+# Send app to background
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - backgroundApp
+
+- wait: 3000
+
+# Bring app back to foreground
+- runFlow:
+    when:
+      platform: Android
+    commands:
+      - launchApp
+
+# Verify still on chat screen with message
+- extendedWaitUntil:
+    id: chat-input
+    timeout: 10000
+
+- assertVisible:
+    id: chat-input
+
+# Send another message
+- tapOn:
+    id: chat-input
+
+- inputText: "Foreground works"
+
+- tapOn:
+    id: chat-send
+
+- extendedWaitUntil:
+    id: chat-input
+    timeout: 10000

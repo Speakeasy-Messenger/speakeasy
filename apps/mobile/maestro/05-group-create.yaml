@@ -1,47 +1,49 @@
-# Tier B flow #5 — group create + send.
-#
-# Self-contained: enrolls fresh, opens NewGroup, names the group, adds
-# a bogus peer id, creates, and verifies the GroupChatScreen appears.
-
 appId: xyz.speakeasyapp.app
+name: Group create
+tags:
+  - tier-b
+
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
+
+# Run enrollment first
+- runFlow: 01-enroll.yaml
+
+# Start new group
+- tapOn:
+    text: "# New group"
+
 - extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn: "onboarding-continue"
-# Handle IdReveal if it appears (fresh enroll).
-- runFlow:
-    when:
-      visible:
-        id: "id-reveal-get-started"
-    commands:
-      - tapOn: "id-reveal-get-started"
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 15000
-- tapOn: "conversations-new-group"
-- extendedWaitUntil:
-    visible:
-      id: "new-group-name-input"
+    id: group-name-input
     timeout: 5000
-- tapOn: "new-group-name-input"
+
+- tapOn:
+    id: group-name-input
+
 - inputText: "weekend plans"
-- tapOn: "new-group-members-input"
+
+# Add a member
+- tapOn:
+    id: member-id-input
+
 - inputText: "silent-golden-hawk"
-- tapOn: "new-group-create"
-# Successful create → navigated to GroupChat. Header shows "# weekend plans".
+
+- tapOn:
+    text: "Add"
+
+# Create the group
+- tapOn:
+    text: "Create"
+
+# Verify group chat screen appears
 - extendedWaitUntil:
-    visible: "# weekend plans"
-    timeout: 20000
+    id: group-chat-header
+    timeout: 10000
+
 - assertVisible:
-    id: "chat-input"
+    id: group-chat-header
+
+- assertVisible:
+    id: chat-input
+
+- assertVisible:
+    id: chat-send

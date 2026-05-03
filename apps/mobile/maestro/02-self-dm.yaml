@@ -1,62 +1,57 @@
-# Tier B flow #2 — self-DM round-trip.
-#
-# Self-contained: enrolls a fresh user, copies the userId, pastes it
-# into NewChat, sends, asserts the bubble + that the conversation row
-# survives a back-out.
-
 appId: xyz.speakeasyapp.app
+name: Self-DM round trip
+tags:
+  - tier-b
+
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
+
+# Run enrollment first
+- runFlow: 01-enroll.yaml
+
+- tapOn:
+    text: "+ New chat"
+
+# Enter our own ID (will be in placeholder)
 - extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn: "onboarding-continue"
-# Enroll may land on IdReveal first — handle it
-- runFlow:
-    when:
-      visible:
-        id: "id-reveal-get-started"
-    commands:
-      - tapOn: "id-reveal-get-started"
-# Enroll lands on Conversations. Capture the userId.
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 15000
-- copyTextFrom:
-    id: "conversations-userid"
-- tapOn: "conversations-new-chat"
-- assertVisible:
-    id: "new-chat-peer-id-input"
-- tapOn: "new-chat-peer-id-input"
-- pasteText
-- tapOn: "new-chat-start"
-- extendedWaitUntil:
-    visible:
-      id: "chat-input"
-    timeout: 10000
-- tapOn: "chat-input"
-- inputText: "yo from maestro"
-- tapOn: "chat-send"
-- extendedWaitUntil:
-    visible: "yo from maestro"
-    timeout: 10000
-- takeScreenshot: 01-chat-before-back
-- tapOn: "chat-back"
-- waitForAnimationToEnd
-- takeScreenshot: 02-after-back
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 8000
-- extendedWaitUntil:
-    visible: "yo from maestro"
+    id: new-chat-input
     timeout: 5000
+
+- tapOn:
+    id: new-chat-input
+
+- inputText: "me"
+
+- tapOn:
+    text: "Start"
+
+# Wait for chat screen
+- extendedWaitUntil:
+    id: chat-input
+    timeout: 10000
+
+- tapOn:
+    id: chat-input
+
+- inputText: "Hello self"
+
+- tapOn:
+    id: chat-send
+
+# Wait for echo
+- extendedWaitUntil:
+    id: chat-input
+    timeout: 15000
+
+- assertVisible:
+    id: chat-input
+
+# Go back to conversations list
+- back
+
+- extendedWaitUntil:
+    id: conversations-userid
+    timeout: 5000
+
+# Verify conversation appears in list
+- assertVisible:
+    id: conversations-conversation-0

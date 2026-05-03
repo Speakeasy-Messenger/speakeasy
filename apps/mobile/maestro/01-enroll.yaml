@@ -14,21 +14,23 @@ tags:
     when:
       visible: "Wait"
     commands:
-      - tapOn: "Wait"
+      - tapOn:
+          text: "Wait"
 
 - extendedWaitUntil:
     id: onboarding-continue
     timeout: 30000
 
-- tapOn: "onboarding-continue"
+- tapOn:
+    text: "Continue"
 
-# Wait for enrollment to complete (may take up to 30s on emulator with fallback)
-# Check for IdReveal screen "Get started" button
+# Wait for enrollment to complete — IdReveal shows "Get started"
 - extendedWaitUntil:
-    text: "Get started"
+    id: id-reveal-get-started
     timeout: 45000
 
-- tapOn: "id-reveal-get-started"
+- tapOn:
+    text: "Get started"
 
 # Should now be on conversations screen
 - extendedWaitUntil:
