@@ -1,49 +1,45 @@
-appId: xyz.speakeasyapp.app
-name: Group create
-tags:
-  - tier-b
+# Maestro flow: Create a group chat
+# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
+appId: com.speakeasy.app
 ---
-
-# Run enrollment first
+# First run enrollment flow
 - runFlow: 01-enroll.yaml
 
-# Start new group
+# Tap # New group button
 - tapOn:
     text: "# New group"
 
-- extendedWaitUntil:
-    id: group-name-input
-    timeout: 5000
+# Wait for new group screen
+- assertVisible:
+    id: "new-group-screen"
 
+# Enter group name
 - tapOn:
-    id: group-name-input
+    text: "weekend plans"
+- inputText: "Test Group"
 
-- inputText: "weekend plans"
-
-# Add a member
+# Add a member (use test peer ID)
 - tapOn:
-    id: member-id-input
+    text: "silent-golden-hawk"
+- inputText: "test-peer-123"
 
-- inputText: "silent-golden-hawk"
-
-- tapOn:
-    text: "Add"
-
-# Create the group
+# Tap Create button
 - tapOn:
     text: "Create"
 
 # Verify group chat screen appears
-- extendedWaitUntil:
-    id: group-chat-header
-    timeout: 10000
-
 - assertVisible:
-    id: group-chat-header
+    id: "group-chat-screen"
 
-- assertVisible:
-    id: chat-input
+# Send a message to the group
+- tapOn:
+    text: "Say it…"
+- inputText: "Hello group!"
 
-- assertVisible:
-    id: chat-send
+# Tap send button
+- tapOn:
+    id: "chat-send"
+
+# Verify message appears
+- assertVisible: "Hello group!"

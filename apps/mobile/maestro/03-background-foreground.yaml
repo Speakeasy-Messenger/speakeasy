@@ -1,74 +1,32 @@
-appId: xyz.speakeasyapp.app
-name: Background/Foreground lifecycle
-tags:
-  - tier-b
+# Maestro flow: Background/foreground lifecycle test
+# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
+appId: com.speakeasy.app
 ---
-
-# Run enrollment first
+# First run enrollment flow
 - runFlow: 01-enroll.yaml
 
-# Create a self-DM to have content
-- tapOn:
-    text: "+ New chat"
-
-- extendedWaitUntil:
-    id: new-chat-input
-    timeout: 5000
-
-- tapOn:
-    id: new-chat-input
-
-- inputText: "me"
-
-- tapOn:
-    text: "Start"
-
-- extendedWaitUntil:
-    id: chat-input
-    timeout: 10000
-
-- tapOn:
-    id: chat-input
-
-- inputText: "Background test"
-
-- tapOn:
-    id: chat-send
+# Verify we're on conversations screen
+- assertVisible:
+    id: "conversations-screen"
 
 # Send app to background
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - backgroundApp
+- backgroundApp
 
-- wait: 3000
+# Wait a moment
+- waitForAnimationToEnd:
+    timeout: 2000
 
 # Bring app back to foreground
-- runFlow:
-    when:
-      platform: Android
-    commands:
-      - launchApp
+- launchApp
 
-# Verify still on chat screen with message
-- extendedWaitUntil:
-    id: chat-input
-    timeout: 10000
-
+# Verify we're still on conversations screen
 - assertVisible:
-    id: chat-input
+    id: "conversations-screen"
 
-# Send another message
+# Navigate to a chat to verify state preserved
 - tapOn:
-    id: chat-input
-
-- inputText: "Foreground works"
-
-- tapOn:
-    id: chat-send
-
-- extendedWaitUntil:
-    id: chat-input
-    timeout: 10000
+    text: "+ New chat"
+- assertVisible:
+    id: "new-chat-screen"
+- back

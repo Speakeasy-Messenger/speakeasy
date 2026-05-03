@@ -1,55 +1,35 @@
-appId: xyz.speakeasyapp.app
-name: Push token registration
-tags:
-  - tier-b
+# Maestro flow: Verify push token registration after enrollment
+# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
+appId: com.speakeasy.app
 ---
-
-# Run enrollment first
+# First run enrollment flow
 - runFlow: 01-enroll.yaml
 
-# Send a self DM to verify app is functional
+# Verify we're on conversations screen
+- assertVisible:
+    id: "conversations-screen"
+
+# Send a self-DM to ensure app is fully functional
 - tapOn:
     text: "+ New chat"
-
-- extendedWaitUntil:
-    id: peer-id-input
-    timeout: 5000
-
+- assertVisible:
+    id: "new-chat-screen"
 - tapOn:
-    id: peer-id-input
-
-- inputText: "silent-golden-hawk"
-
+    text: "silent-golden-hawk"
+- inputText: "myself"
 - tapOn:
     text: "Start"
-
-- extendedWaitUntil:
-    id: chat-input
-    timeout: 10000
-
-- tapOn:
-    id: chat-input
-
-- inputText: "push test message"
-
-- tapOn:
-    id: chat-send
-
-# Verify message appears
-- extendedWaitUntil:
-    id: chat-messages
-    timeout: 10000
-
 - assertVisible:
-    id: chat-messages
+    id: "chat-screen"
+- tapOn:
+    text: "Say it…"
+- inputText: "Push test"
+- tapOn:
+    id: "chat-send"
+- assertVisible: "Push test"
 
-# Go back to conversations
+# Navigate back to conversations
 - back
-
-- extendedWaitUntil:
-    id: conversations-list
-    timeout: 5000
-
 - assertVisible:
-    id: conversations-list
+    id: "conversations-screen"

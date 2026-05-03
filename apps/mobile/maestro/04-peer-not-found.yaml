@@ -1,39 +1,34 @@
-appId: xyz.speakeasyapp.app
-name: Peer not found
-tags:
-  - tier-b
+# Maestro flow: Peer not found error handling
+# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
+appId: com.speakeasy.app
 ---
-
-# Run enrollment first
+# First run enrollment flow
 - runFlow: 01-enroll.yaml
 
-# Start new chat
+# Tap + New chat button
 - tapOn:
     text: "+ New chat"
 
-- extendedWaitUntil:
-    id: new-chat-input
-    timeout: 5000
+# Wait for new chat screen
+- assertVisible:
+    id: "new-chat-screen"
 
+# Enter a non-existent peer ID
 - tapOn:
-    id: new-chat-input
+    text: "silent-golden-hawk"
+- inputText: "nonexistent-ghost-xyz"
 
-- inputText: "nonexistent-ghost-phantom"
-
+# Tap Start
 - tapOn:
     text: "Start"
 
-# Wait for error - peer not found
-- extendedWaitUntil:
-    id: chat-error
-    timeout: 10000
+# Verify error message appears
+- assertVisible: "Peer not found"
 
+# Navigate back
+- back
+
+# Verify we're back on conversations screen
 - assertVisible:
-    id: chat-error
-
-- copyTextFrom:
-    id: chat-error
-
-- assertTrue:
-    condition: "${maestro.copiedText} =~ /not found/"
+    id: "conversations-screen"
