@@ -1,33 +1,38 @@
-# Enroll fresh user
 appId: xyz.speakeasyapp.app
+name: Enroll fresh user (Tier B)
+
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-# On Android 34 emulator we sometimes get an ANR dialog on first launch
+
+# Clear state for fresh start
+- clearState
+- clearKeychain
+
+# Launch app
+- launchApp
+
+# Dismiss any ANR dialogs that may appear
 - tapOn:
     text: "Wait"
     optional: true
-# Wait for onboarding screen to be ready (the Continue button)
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
+
+# Wait for and tap Continue on onboarding
+- waitForVisible:
+    text: "Continue"
+    timeout: 15000
 - tapOn:
     text: "Continue"
-# Wait for IdReveal screen to appear
-- extendedWaitUntil:
-    visible:
-      id: "id-reveal-userid"
-    timeout: 60000
-- extendedWaitUntil:
-    visible:
-      id: "id-reveal-get-started"
-    timeout: 10000
+
+# Wait for enrollment to complete (Vouchflow + key generation + API call)
+# Then IdRevealScreen appears showing the user ID
+- waitForVisible:
+    id: id-reveal-userid
+    timeout: 30000
+
+# Tap Get started to proceed to conversations
 - tapOn:
     text: "Get started"
-# Wait for Conversations screen to appear
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 60000
+
+# Wait for conversations screen to appear
+- waitForVisible:
+    id: conversations-userid
+    timeout: 10000
