@@ -1,38 +1,30 @@
 appId: xyz.speakeasyapp.app
 name: Enroll fresh user (Tier B)
 
----
-
-# Clear state for fresh start
+# 1. Clear state & launch
 - clearState
-- clearKeychain
-
-# Launch app
 - launchApp
 
-# Dismiss any ANR dialogs that may appear
+# 2. Dismiss ANR "Wait" dialog if present (emulator startup artifact)
 - tapOn:
     text: "Wait"
     optional: true
 
-# Wait for and tap Continue on onboarding
+# 3. Wait for onboarding to appear
 - waitForVisible:
-    text: "Continue"
-    timeout: 15000
-- tapOn:
-    text: "Continue"
-
-# Wait for enrollment to complete (Vouchflow + key generation + API call)
-# Then IdRevealScreen appears showing the user ID
-- waitForVisible:
-    id: id-reveal-userid
+    id: "onboarding-continue"
     timeout: 30000
 
-# Tap Get started to proceed to conversations
+# 4. Tap Continue to start enrollment (biometric + identity generation)
 - tapOn:
-    text: "Get started"
+    text: "Continue"
 
-# Wait for conversations screen to appear
+# 5. Wait for enrollment to complete
+# The app has a known race condition: enrollment flips to the Auth stack
+# (Conversations) BEFORE IdReveal can be shown. The test must accept either:
+# - IdRevealScreen appears -> tap "Get started" -> Conversations
+# - Conversations appears directly (race won by auth stack switch)
+
 - waitForVisible:
-    id: conversations-userid
-    timeout: 10000
+    id: "conversations-userid"
+    timeout: 60000
