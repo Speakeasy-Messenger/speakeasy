@@ -1,29 +1,32 @@
-# Maestro flow: enroll fresh user (Tier B)
+# Enroll fresh user
 appId: xyz.speakeasyapp.app
 ---
-- clearState
-- clearKeychain
-- launchApp
-# Dismiss ANR dialogs (common on fresh emulator)
-- repeat:
-    times: 3
-    commands:
-      - tapOn:
-          text: "Wait"
-          optional: true
-# Wait for onboarding screen
-- assertVisible:
-    id: "onboarding-id-input"
+- launchApp:
+    clearState: true
+    clearKeychain: true
+# On Android 34 emulator we sometimes get an ANR dialog on first launch
+- tapOn:
+    text: "Wait"
+    optional: true
+# Wait for onboarding screen to be ready (the Continue button)
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-continue"
+    timeout: 30000
 - tapOn:
     text: "Continue"
-# Wait for ID reveal animation
+# Wait for IdReveal screen to appear
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-userid"
+    timeout: 60000
 - extendedWaitUntil:
     visible:
       id: "id-reveal-get-started"
-    timeout: 20000
+    timeout: 10000
 - tapOn:
     text: "Get started"
-# Wait for enrollment to complete
+# Wait for Conversations screen to appear
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
