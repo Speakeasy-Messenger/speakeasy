@@ -16,7 +16,7 @@ tags:
     commands:
       - tapOn: "Wait"
 
-- assertVisible:
+- extendedWaitUntil:
     id: onboarding-continue
     timeout: 30000
 
@@ -25,7 +25,7 @@ tags:
 
 # Wait for enrollment to complete (may take up to 30s on emulator with fallback)
 # First check if IdReveal screen appears
-- assertVisible:
+- extendedWaitUntil:
     text: "Get started"
     timeout: 45000
 
@@ -33,6 +33,6 @@ tags:
     id: id-reveal-get-started
 
 # Should now be on conversations screen
-- assertVisible:
+- extendedWaitUntil:
     id: conversations-userid
     timeout: 10000
