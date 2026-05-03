@@ -1,7 +1,7 @@
 # Maestro flow: Verify push token registration after enrollment
 # Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
-appId: com.speakeasy.app
+appId: xyz.speakeasyapp.app
 ---
 # First run enrollment flow
 - runFlow: 01-enroll.yaml

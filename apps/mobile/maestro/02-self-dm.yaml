@@ -1,4 +1,4 @@
-appId: com.speakeasy.app
+appId: xyz.speakeasyapp.app
 ---
 # Self-DM round-trip test
 - launchApp
