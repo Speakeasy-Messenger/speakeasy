@@ -18,36 +18,36 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-continue"
     timeout: 30000
-- tapOn:
-    id: "onboarding-continue"
-# Enroll lands on Conversations directly. Capture userId from header.
+- tapOn: "onboarding-continue"
+# Handle IdReveal if it appears
+- runFlow:
+    when:
+      visible:
+        id: "id-reveal-get-started"
+    commands:
+      - tapOn: "id-reveal-get-started"
+# Enroll lands on Conversations. Capture userId from header.
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
     timeout: 15000
 - copyTextFrom:
     id: "conversations-userid"
-- tapOn:
-    id: "conversations-new-chat"
-- tapOn:
-    id: "new-chat-peer-id-input"
+- tapOn: "conversations-new-chat"
+- tapOn: "new-chat-peer-id-input"
 - pasteText
-- tapOn:
-    id: "new-chat-start"
+- tapOn: "new-chat-start"
 - extendedWaitUntil:
     visible:
       id: "chat-input"
     timeout: 10000
-- tapOn:
-    id: "chat-input"
+- tapOn: "chat-input"
 - inputText: "before background"
-- tapOn:
-    id: "chat-send"
+- tapOn: "chat-send"
 - extendedWaitUntil:
     visible: "before background"
     timeout: 10000
-- tapOn:
-    id: "chat-back"
+- tapOn: "chat-back"
 - waitForAnimationToEnd
 # Background + relaunch (clearState: false so AsyncStorage persistence
 # is exercised — this is the actual behavior under test).
