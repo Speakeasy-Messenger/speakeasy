@@ -1,32 +1,56 @@
-# Maestro flow: Background/foreground lifecycle test
-# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
+# Maestro flow: Background/foreground lifecycle (Tier B)
+# Tests app state persistence after backgrounding
 
 appId: xyz.speakeasyapp.app
 ---
-# First run enrollment flow
-- runFlow: 01-enroll.yaml
+# Clear state and enroll fresh
+- clearState
+- clearKeychain
+- launchApp
 
-# Verify we're on conversations screen
-- assertVisible:
-    id: "conversations-screen"
+# Dismiss ANR dialog if present
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: "Wait"
 
-# Send app to background
+# Navigate through onboarding
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+- tapOn:
+    text: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-screen"
+    timeout: 10000
+- tapOn:
+    text: "Get started"
+
+# Wait for enrollment to complete
+- extendedWaitUntil:
+    visible:
+      id: "conversations-screen"
+    timeout: 30000
+
+# Remember the user ID
+- copyTextFrom:
+    id: "conversations-userid"
+
+# Background the app
 - backgroundApp
 
-# Wait a moment
+# Wait 2 seconds
 - waitForAnimationToEnd:
     timeout: 2000
 
-# Bring app back to foreground
+# Foreground the app
 - launchApp
 
-# Verify we're still on conversations screen
+# Verify state is preserved - should see same user ID
 - assertVisible:
-    id: "conversations-screen"
-
-# Navigate to a chat to verify state preserved
-- tapOn:
-    text: "+ New chat"
+    id: "conversations-userid"
 - assertVisible:
-    id: "new-chat-screen"
-- back
+    text: "${COPY_TEXT}"

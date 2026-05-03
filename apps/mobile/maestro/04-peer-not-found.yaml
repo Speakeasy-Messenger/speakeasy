@@ -1,34 +1,57 @@
-# Maestro flow: Peer not found error handling
-# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
+# Maestro flow: Peer not found (Tier B)
+# Tests error handling when trying to chat with non-existent user
 
 appId: xyz.speakeasyapp.app
 ---
-# First run enrollment flow
-- runFlow: 01-enroll.yaml
+# Clear state and enroll fresh
+- clearState
+- clearKeychain
+- launchApp
 
-# Tap + New chat button
+# Dismiss ANR dialog if present
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: "Wait"
+
+# Navigate through onboarding
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+- tapOn:
+    text: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-screen"
+    timeout: 10000
+- tapOn:
+    text: "Get started"
+
+# Wait for enrollment to complete
+- extendedWaitUntil:
+    visible:
+      id: "conversations-screen"
+    timeout: 30000
+
+# Navigate to new chat
 - tapOn:
     text: "+ New chat"
 
 # Wait for new chat screen
-- assertVisible:
-    id: "new-chat-screen"
+- extendedWaitUntil:
+    visible:
+      id: "new-chat-screen"
+    timeout: 10000
 
-# Enter a non-existent peer ID
-- tapOn:
-    text: "silent-golden-hawk"
-- inputText: "nonexistent-ghost-xyz"
+# Enter a valid-format but non-existent peer ID
+- inputText: "quiet-empty-mountain"
 
-# Tap Start
+# Tap start (should fail with "No such user")
 - tapOn:
     text: "Start"
 
 # Verify error message appears
-- assertVisible: "Peer not found"
-
-# Navigate back
-- back
-
-# Verify we're back on conversations screen
 - assertVisible:
-    id: "conversations-screen"
+    text: "No such user"

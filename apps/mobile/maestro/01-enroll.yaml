@@ -1,29 +1,30 @@
-# Enroll fresh user (Tier B)
+# Maestro flow: enroll fresh user (Tier B)
 appId: xyz.speakeasyapp.app
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-# Dismiss any ANR "Wait" dialog from previous run
-- runFlow:
-    when:
-      visible: "Wait"
+- clearState
+- clearKeychain
+- launchApp
+# Dismiss ANR dialogs (common on fresh emulator)
+- repeat:
+    times: 3
     commands:
-      - tapOn: "Wait"
-# Wait for and tap the Continue button on onboarding
-- extendedWaitUntil:
-    id: onboarding-continue
-    timeout: 30000
+      - tapOn:
+          text: "Wait"
+          optional: true
+# Wait for onboarding screen
+- assertVisible:
+    id: "onboarding-id-input"
 - tapOn:
-    id: onboarding-continue
-# Wait for enrollment to complete and IdReveal to appear
+    text: "Continue"
+# Wait for ID reveal animation
 - extendedWaitUntil:
-    id: id-reveal-get-started
+    visible:
+      id: "id-reveal-get-started"
+    timeout: 20000
+- tapOn:
+    text: "Get started"
+# Wait for enrollment to complete
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
     timeout: 60000
-# Tap "Get started" to proceed to conversations
-- tapOn:
-    id: id-reveal-get-started
-# Wait for conversations screen to appear
-- extendedWaitUntil:
-    id: conversations-userid
-    timeout: 10000

@@ -1,35 +1,68 @@
-# Maestro flow: Verify push token registration after enrollment
-# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
+# Maestro flow: Verify push token registration doesn't break app (Tier B)
+# After enrollment, send a self-DM to confirm app remains functional
 
 appId: xyz.speakeasyapp.app
 ---
-# First run enrollment flow
-- runFlow: 01-enroll.yaml
+# Clear state and enroll fresh
+- clearState
+- clearKeychain
+- launchApp
 
-# Verify we're on conversations screen
-- assertVisible:
-    id: "conversations-screen"
+# Dismiss ANR dialog if present
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: "Wait"
 
-# Send a self-DM to ensure app is fully functional
+# Navigate through onboarding
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+- tapOn:
+    text: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-screen"
+    timeout: 10000
+- tapOn:
+    text: "Get started"
+
+# Wait for enrollment to complete
+- extendedWaitUntil:
+    visible:
+      id: "conversations-screen"
+    timeout: 30000
+
+# Copy user's own ID
+- copyTextFrom:
+    id: "conversations-userid"
+
+# Navigate to new chat
 - tapOn:
     text: "+ New chat"
-- assertVisible:
-    id: "new-chat-screen"
+
+# Paste own ID and start chat (self-DM)
 - tapOn:
-    text: "silent-golden-hawk"
-- inputText: "myself"
+    placeholder: "silent-golden-hawk"
+- inputText: "${COPY_TEXT}"
 - tapOn:
     text: "Start"
-- assertVisible:
-    id: "chat-screen"
-- tapOn:
-    text: "Say it…"
-- inputText: "Push test"
-- tapOn:
-    id: "chat-send"
-- assertVisible: "Push test"
 
-# Navigate back to conversations
-- back
-- assertVisible:
-    id: "conversations-screen"
+# Send a message
+- extendedWaitUntil:
+    visible:
+      id: "chat-screen"
+    timeout: 10000
+- tapOn:
+    placeholder: "Say it…"
+- inputText: "Testing push registration"
+- tapOn:
+    text: "Send"
+
+# Verify message appears
+- extendedWaitUntil:
+    visible:
+      text: "Testing push registration"
+    timeout: 5000

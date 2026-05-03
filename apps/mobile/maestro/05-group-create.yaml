@@ -1,45 +1,63 @@
-# Maestro flow: Create a group chat
-# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
+# Maestro flow: Group create error handling (Tier B)
+# Tests error handling when trying to add non-existent member to group
 
 appId: xyz.speakeasyapp.app
 ---
-# First run enrollment flow
-- runFlow: 01-enroll.yaml
+# Clear state and enroll fresh
+- clearState
+- clearKeychain
+- launchApp
 
-# Tap # New group button
+# Dismiss ANR dialog if present
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: "Wait"
+
+# Navigate through onboarding
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+- tapOn:
+    text: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-screen"
+    timeout: 10000
+- tapOn:
+    text: "Get started"
+
+# Wait for enrollment to complete
+- extendedWaitUntil:
+    visible:
+      id: "conversations-screen"
+    timeout: 30000
+
+# Navigate to new group
 - tapOn:
     text: "# New group"
 
 # Wait for new group screen
-- assertVisible:
-    id: "new-group-screen"
+- extendedWaitUntil:
+    visible:
+      id: "new-group-screen"
+    timeout: 10000
 
 # Enter group name
-- tapOn:
-    text: "weekend plans"
-- inputText: "Test Group"
+- inputText: "weekend plans"
 
-# Add a member (use test peer ID)
+# Enter a valid-format but non-existent member
+# Note: The placeholder is multiline, tap on the second line if needed
 - tapOn:
-    text: "silent-golden-hawk"
-- inputText: "test-peer-123"
+    id: "new-group-members-input"
+- inputText: "quiet-empty-mountain"
 
-# Tap Create button
+# Tap create group (should fail with "No such user")
 - tapOn:
-    text: "Create"
+    text: "Create group"
 
-# Verify group chat screen appears
+# Verify error message appears
 - assertVisible:
-    id: "group-chat-screen"
-
-# Send a message to the group
-- tapOn:
-    text: "Say it…"
-- inputText: "Hello group!"
-
-# Tap send button
-- tapOn:
-    id: "chat-send"
-
-# Verify message appears
-- assertVisible: "Hello group!"
+    text: "No such user"

@@ -1,41 +1,81 @@
+# Maestro flow: Self-DM round-trip (Tier B)
+# Tests sending a message to yourself and verifying conversation persistence
+
 appId: xyz.speakeasyapp.app
 ---
-# Self-DM round-trip test
+# Clear state and enroll fresh
+- clearState
+- clearKeychain
 - launchApp
 
+# Dismiss ANR dialog if present
+- retry:
+    maxRetries: 3
+    commands:
+      - tapOn:
+          text: "Wait"
+
+# Navigate through onboarding
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+- tapOn:
+    text: "Continue"
+- extendedWaitUntil:
+    visible:
+      id: "id-reveal-screen"
+    timeout: 10000
+- tapOn:
+    text: "Get started"
+
+# Wait for enrollment to complete
+- extendedWaitUntil:
+    visible:
+      id: "conversations-screen"
+    timeout: 30000
+
+# Copy user's own ID from header
+- copyTextFrom:
+    id: "conversations-userid"
+
 # Navigate to new chat
-- assertVisible:
-    text: "+ New chat"
 - tapOn:
     text: "+ New chat"
 
-# Wait for new chat screen
-- assertVisible:
-    id: "new-chat-input"
-- assertVisible:
-    text: "Start"
-
-# Enter own ID - need to first get our own ID
-# For now, tap start with empty input (should show error or self-DM)
+# Paste own ID into the input (self-DM)
+- tapOn:
+    placeholder: "silent-golden-hawk"
+- inputText: "${COPY_TEXT}"
 - tapOn:
     text: "Start"
 
-# If we're on chat screen, send a message
-- assertVisible:
-    id: "chat-input"
+# Verify chat screen appears
+- extendedWaitUntil:
+    visible:
+      id: "chat-screen"
+    timeout: 10000
+
+# Send a message
 - tapOn:
-    id: "chat-input"
-- inputText: "Hello self!"
+    placeholder: "Say it…"
+- inputText: "Hello self"
 - tapOn:
     text: "Send"
 
-# Verify message appears
-- assertVisible:
-    text: "Hello self!"
+# Wait for message to appear
+- extendedWaitUntil:
+    visible:
+      text: "Hello self"
+    timeout: 5000
 
-# Go back to conversations
+# Navigate back to conversations list
 - back
 
-# Verify conversation appears in list
+# Verify the conversation row exists
+- extendedWaitUntil:
+    visible:
+      id: "conversations-screen"
+    timeout: 5000
 - assertVisible:
-    id: "conversations-screen"
+    text: "Hello self"
