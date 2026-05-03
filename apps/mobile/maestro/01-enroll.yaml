@@ -1,36 +1,33 @@
-appId: xyz.speakeasyapp.app
-name: Enroll fresh user
-tags:
-  - tier-b
-
+appId: com.speakeasy.app
 ---
-
 - launchApp:
     clearState: true
-    clearKeychain: true
+    stopApp: true
 
-# Dismiss ANR dialog if present
+# Dismiss any ANR dialogs
 - runFlow:
     when:
       visible: "Wait"
     commands:
-      - tapOn: "Wait"
+      - tapOn:
+          text: "Wait"
 
-- extendedWaitUntil:
-    id: onboarding-continue
-    timeout: 30000
+# Wait for onboarding screen
+- assertVisible:
+    id: "onboarding-id-input"
+- assertVisible:
+    text: "Continue"
 
-- tapOn: "onboarding-continue"
+# Tap the continue button (enrollment happens automatically)
+- tapOn:
+    text: "Continue"
 
-# Wait for enrollment to complete (may take up to 30s on emulator with fallback)
-# Check for IdReveal screen "Get started" button
-- extendedWaitUntil:
-    text: "Get started"
-    timeout: 45000
+# Wait for ID reveal animation (can take a moment)
+- waitForAnimationToEnd:
+    timeout: 5000
 
-- tapOn: "id-reveal-get-started"
-
-# Should now be on conversations screen
-- extendedWaitUntil:
-    id: conversations-userid
-    timeout: 10000
+# Wait for conversations screen
+- assertVisible:
+    id: "conversations-screen"
+- assertVisible:
+    text: "Conversations"

@@ -1,47 +1,45 @@
-# Tier B flow #5 — group create + send.
-#
-# Self-contained: enrolls fresh, opens NewGroup, names the group, adds
-# a bogus peer id, creates, and verifies the GroupChatScreen appears.
+# Maestro flow: Create a group chat
+# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
-appId: xyz.speakeasyapp.app
+appId: com.speakeasy.app
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn: "onboarding-continue"
-# Handle IdReveal if it appears (fresh enroll).
-- runFlow:
-    when:
-      visible:
-        id: "id-reveal-get-started"
-    commands:
-      - tapOn: "id-reveal-get-started"
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 15000
-- tapOn: "conversations-new-group"
-- extendedWaitUntil:
-    visible:
-      id: "new-group-name-input"
-    timeout: 5000
-- tapOn: "new-group-name-input"
-- inputText: "weekend plans"
-- tapOn: "new-group-members-input"
-- inputText: "silent-golden-hawk"
-- tapOn: "new-group-create"
-# Successful create → navigated to GroupChat. Header shows "# weekend plans".
-- extendedWaitUntil:
-    visible: "# weekend plans"
-    timeout: 20000
+# First run enrollment flow
+- runFlow: 01-enroll.yaml
+
+# Tap # New group button
+- tapOn:
+    text: "# New group"
+
+# Wait for new group screen
 - assertVisible:
-    id: "chat-input"
+    id: "new-group-screen"
+
+# Enter group name
+- tapOn:
+    text: "weekend plans"
+- inputText: "Test Group"
+
+# Add a member (use test peer ID)
+- tapOn:
+    text: "silent-golden-hawk"
+- inputText: "test-peer-123"
+
+# Tap Create button
+- tapOn:
+    text: "Create"
+
+# Verify group chat screen appears
+- assertVisible:
+    id: "group-chat-screen"
+
+# Send a message to the group
+- tapOn:
+    text: "Say it…"
+- inputText: "Hello group!"
+
+# Tap send button
+- tapOn:
+    id: "chat-send"
+
+# Verify message appears
+- assertVisible: "Hello group!"

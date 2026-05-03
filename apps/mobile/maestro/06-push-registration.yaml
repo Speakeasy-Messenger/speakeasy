@@ -1,55 +1,35 @@
-# Tier B flow #6 — push token registration.
-#
-# Verifies that after enrollment, the app is still functional
-# (no crash from the push registration attempt). On emulator without
-# Play Services, NativePushNotificationService.getToken() returns
-# undefined (caught gracefully), so push is skipped — that's the
-# expected path in CI.
+# Maestro flow: Verify push token registration after enrollment
+# Uses explicit text: selectors for tapOn (Maestro 2.5.1 compatibility)
 
-appId: xyz.speakeasyapp.app
+appId: com.speakeasy.app
 ---
-- launchApp:
-    clearState: true
-    clearKeychain: true
-- runFlow:
-    when:
-      visible: "Wait"
-    commands:
-      - tapOn: "Wait"
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 30000
-- tapOn: "onboarding-continue"
-# Handle IdReveal if it appears
-- runFlow:
-    when:
-      visible:
-        id: "id-reveal-get-started"
-    commands:
-      - tapOn: "id-reveal-get-started"
-# Enrollment completes → lands on Conversations. Push token registration
-# happens automatically after enrollment (best-effort, non-blocking).
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 15000
-# App is still alive — verify we can navigate and send a self-DM,
-# proving the post-enrollment push-registration didn't break anything.
-- copyTextFrom:
-    id: "conversations-userid"
-- tapOn: "conversations-new-chat"
-- tapOn: "new-chat-peer-id-input"
-- pasteText
-- tapOn: "new-chat-start"
-- extendedWaitUntil:
-    visible:
-      id: "chat-input"
-    timeout: 10000
-- tapOn: "chat-input"
-- inputText: "push still works"
-- tapOn: "chat-send"
-- extendedWaitUntil:
-    visible: "push still works"
-    timeout: 10000
-- takeScreenshot: 06-push-registration-ok
+# First run enrollment flow
+- runFlow: 01-enroll.yaml
+
+# Verify we're on conversations screen
+- assertVisible:
+    id: "conversations-screen"
+
+# Send a self-DM to ensure app is fully functional
+- tapOn:
+    text: "+ New chat"
+- assertVisible:
+    id: "new-chat-screen"
+- tapOn:
+    text: "silent-golden-hawk"
+- inputText: "myself"
+- tapOn:
+    text: "Start"
+- assertVisible:
+    id: "chat-screen"
+- tapOn:
+    text: "Say it…"
+- inputText: "Push test"
+- tapOn:
+    id: "chat-send"
+- assertVisible: "Push test"
+
+# Navigate back to conversations
+- back
+- assertVisible:
+    id: "conversations-screen"
