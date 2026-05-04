@@ -92,8 +92,6 @@ export interface VouchflowClient {
   submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult>;
   /** Read the cached device token without biometric/network. Null if not enrolled. */
   getCachedDeviceToken(): Promise<string | null>;
-  /** CI-only: enroll without biometric verification. @internal */
-  ensureEnrolledForTesting(): Promise<string>;
 }
 
 /** Mirrors the Kotlin `VouchflowError` sealed class (SDK 2.0.0). */
@@ -119,8 +117,6 @@ export class VouchflowClientError extends Error {
 }
 
 interface NativeVouchflowModule {
-  /** CI-only: enroll without biometric verification. @internal */
-  ensureEnrolledForTesting(): Promise<string>;
   verify(
     context: string,
     minimumConfidence: string | null,
@@ -249,9 +245,5 @@ export class NativeVouchflowClient implements VouchflowClient {
 
   async getCachedDeviceToken(): Promise<string | null> {
     return this.module.getCachedDeviceToken();
-  }
-
-  async ensureEnrolledForTesting(): Promise<string> {
-    return this.module.ensureEnrolledForTesting();
   }
 }

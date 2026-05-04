@@ -6,5 +6,4 @@ export const config = {
   apiBaseUrl: "http://10.0.2.2:8080",
   wsUrl: "ws://10.0.2.2:8080/ws",
   useMockSignalProtocol: true,
-  useCiVouchflow: true,
 };

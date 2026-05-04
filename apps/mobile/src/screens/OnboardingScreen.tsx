@@ -8,7 +8,6 @@ import { api, signalProtocol, vouchflow } from '../services.js';
 import { pushNotifications } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../native/vouchflow.js';
-import { CiVouchflowClient } from '../native/ci-vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { colors, fonts, space, text } from '../theme/index.js';
 
@@ -44,46 +43,24 @@ export function OnboardingScreen({ onEnrolled }: Props) {
     setError(undefined);
     try {
       // 1. Vouchflow verify — minimumConfidence enforced inside the SDK.
-      // On CI emulators (no biometric hardware) or devices where verify()
-      // fails, fall back to CiVouchflowClient which returns a deterministic
-      // test token that the sandbox server accepts.
-      let deviceToken: string;
-      try {
-        const verifyResult = await Promise.race([
-          vouchflow.verify({
-            context: 'signup',
-            minimumConfidence: 'medium',
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new VouchflowClientError('biometric_unavailable', 'Timeout: no biometric hardware')),
-              10_000,
-            ),
+      // Tier B builds use sandbox keys against sandbox.api.vouchflow.dev;
+      // sandbox supports emulators per Vouchflow docs and records a
+      // confidence: medium verify. The 60s ceiling allows for a real
+      // biometric prompt + sandbox round-trip while still surfacing a
+      // hung SDK as a real error rather than a frozen UI.
+      const verifyResult = await Promise.race([
+        vouchflow.verify({
+          context: 'signup',
+          minimumConfidence: 'medium',
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new VouchflowClientError('biometric_unavailable', 'Timeout: verify did not complete in 60s')),
+            60_000,
           ),
-        ]);
-        deviceToken = verifyResult.deviceToken;
-      } catch (err: unknown) {
-        // Any error during verify on emulators → use CI client.
-        // The native SDK may throw VouchflowClientError, a plain Error,
-        // or even a non-Error from the bridge. Regardless of the error
-        // type, we fall back to the CI client on sandbox servers.
-        let cached: string | null = null;
-        try {
-          cached = await vouchflow.getCachedDeviceToken();
-        } catch { /* ignore */ }
-        if (cached) {
-          deviceToken = cached;
-        } else {
-          // CI client returns a deterministic token the sandbox server's
-          // VouchflowValidator will accept.
-          const ci = new CiVouchflowClient();
-          const ciResult = await ci.verify({
-            context: 'signup',
-            minimumConfidence: 'medium',
-          });
-          deviceToken = ciResult.deviceToken;
-        }
-      }
+        ),
+      ]);
+      const deviceToken = verifyResult.deviceToken;
       // 2. Mint (or restore) the device's Signal identity. The native
       // bridge persists into SQLCipher; on a re-launch this returns the
       // same key without re-prompting.
