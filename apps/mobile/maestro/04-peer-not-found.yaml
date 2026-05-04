@@ -49,6 +49,11 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Start chat"
 
-# Verify error message appears
-- assertVisible:
-    text: "No such user"
+# Verify error message appears. The error doesn't render until the
+# Start chat → fetchPreKeyBundle round-trip finishes, so we need a
+# wait window — bare assertVisible has no timeout and races the
+# API response.
+- extendedWaitUntil:
+    visible:
+      text: "No such user"
+    timeout: 10000
