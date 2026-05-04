@@ -21,13 +21,11 @@ name: Enroll fresh user (Tier B)
 - tapOn:
     text: "Continue"
 
-# 4a. Diagnostic: snapshot the screen ~5s after Continue. If a
-#     BiometricPrompt is showing, the screenshot will be black/empty
-#     (secure window) but the post-failure uiautomator dump will reveal
-#     the dialog. If the screen still shows the onboarding view, the
-#     SDK is hanging silently and we're chasing a different bug.
-- takeScreenshot: post-continue-5s
-- waitForAnimationToEnd
+# 4a. Vouchflow's verify() shows BiometricPrompt; emulator has a PIN
+#     but no fingerprint, so Android falls back to PIN entry from
+#     com.android.systemui. Type 0000 to dismiss.
+- runFlow: _unlock-biometric-prompt.yaml
+
 # 5. Wait for enrollment to complete
 #    NOTE: Race condition — after setUserId(), the navigator flips
 #    to the Auth stack (initialRoute: Conversations). The

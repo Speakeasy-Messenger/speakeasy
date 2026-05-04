@@ -22,6 +22,8 @@ appId: xyz.speakeasyapp.app
     timeout: 30000
 - tapOn:
     text: "Continue"
+# Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
+- runFlow: _unlock-biometric-prompt.yaml
 - extendedWaitUntil:
     visible:
       id: "id-reveal-screen"

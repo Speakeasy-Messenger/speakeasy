@@ -1,0 +1,29 @@
+appId: xyz.speakeasyapp.app
+name: Unlock BiometricPrompt PIN fallback (Tier B helper)
+---
+
+# Vouchflow's verify() calls BiometricPrompt with allowedAuthenticators
+# = BIOMETRIC_WEAK | DEVICE_CREDENTIAL. With a screen-lock PIN set
+# (locksettings set-pin 0000 in the workflow) but no fingerprint
+# enrolled, Android skips straight to the SystemUI PIN-entry dialog.
+#
+# This subflow no-ops if the prompt isn't visible — flows that reach
+# Conversations directly (no fresh enrollment) won't trigger it.
+#
+# Called by every primary flow immediately after `tapOn: Continue`
+# on the OnboardingScreen.
+
+- extendedWaitUntil:
+    visible:
+      id: "com.android.systemui:id/lockPassword"
+    timeout: 15000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "com.android.systemui:id/lockPassword"
+    commands:
+      - tapOn:
+          id: "com.android.systemui:id/lockPassword"
+      - inputText: "0000"
+      - pressKey: Enter

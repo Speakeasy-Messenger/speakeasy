@@ -21,6 +21,9 @@ name: Self-DM round-trip (Tier B)
 - tapOn:
     text: "Continue"
 
+# 4a. Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
+- runFlow: _unlock-biometric-prompt.yaml
+
 # 5. Wait for enrollment to complete (race condition — see 01-enroll.yaml)
 - extendedWaitUntil:
     visible:
