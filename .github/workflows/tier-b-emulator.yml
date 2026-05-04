@@ -148,55 +148,34 @@ jobs:
           # whole block to `sh -c "..."` via env var; with `set -e` and
           # bare lines, it behaves like a normal script.
           #
+          # IMPORTANT: the action runs each LINE of `script: |` as a
+          # separate `sh -c` invocation — shell variables do NOT persist
+          # across lines. A previous iteration tried multi-line bash with
+          # rc=$? capture and `if [ $rc -ne 0 ]; then exit ...; fi`, but
+          # `$rc` was undefined on the next line, the gate became a no-op,
+          # and broken flow 01 silently let flow 02 run anyway.
+          # `&&` chaining within ONE line is the only reliable pattern.
+          #
           # Why each step:
           #   * `locksettings set-pin 0000` — Vouchflow's hardware-backed
           #     keystore key has setUserAuthenticationRequired(true);
           #     AndroidKeyStore refuses to generate such a key on a
-          #     device with no secure lock screen (throws
-          #     IllegalStateException via KeyStore2ParameterUtils.getRootSid).
-          #   * `svc power stayon true` + `screen_off_timeout` —
+          #     device with no secure lock screen.
+          #   * `svc power stayon true` + `screen_off_timeout 1800000` —
           #     prevent the screen from going off (which would re-engage
           #     the keyguard).
           #   * Per-flow `wm dismiss-keyguard` — `clearState` /
           #     `am force-stop` re-engages the keyguard on a device that
           #     has any credential set. Dismiss right before each
           #     maestro test (smallest possible gap to keyguard re-fire).
-          #     A continuous watchdog approach was tried in an earlier
-          #     iteration but caused adb-daemon contention with maestro
-          #     that hung the run for 52 min straight.
           #   * `timeout 300 maestro test` — caps each flow at 5 min so
           #     a hung flow fails fast (with artifact) instead of eating
-          #     the workflow's 60-min ceiling and leaving us blind.
-          #   * Background logcat — survives the device going offline at
+          #     the workflow's 60-min ceiling.
+          #   * Background logcat — survives device going offline at
           #     end-of-run; tag filter drops Maestro's accessibility-tree
-          #     spam.
-          #   * `uiautomator dump` after flow 01 — captures BiometricPrompt
-          #     / system overlays that screenshots can't (secure window).
-          script: |
-            set -e
-            adb shell locksettings set-pin 0000
-            adb shell svc power stayon true
-            adb shell settings put system screen_off_timeout 1800000
-            adb shell input keyevent KEYCODE_WAKEUP
-            adb logcat -c
-            ( nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 & )
-            adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
-            rc=0
-            adb shell wm dismiss-keyguard || true
-            timeout 300 maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 || rc=$?
-            adb shell uiautomator dump /sdcard/ui-after-01.xml || true
-            adb pull /sdcard/ui-after-01.xml /tmp/ui-after-01.xml 2>/dev/null || true
-            if [ $rc -ne 0 ]; then exit $rc; fi
-            adb shell wm dismiss-keyguard || true
-            timeout 300 maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02
-            adb shell wm dismiss-keyguard || true
-            timeout 300 maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03
-            adb shell wm dismiss-keyguard || true
-            timeout 300 maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04
-            adb shell wm dismiss-keyguard || true
-            timeout 300 maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05
-            adb shell wm dismiss-keyguard || true
-            timeout 300 maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
+          #     spam. `uiautomator dump` on failure runs from the global
+          #     "Dump diagnostics on failure" step further down.
+          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
 
       - name: Dump diagnostics on failure
         if: failure()
