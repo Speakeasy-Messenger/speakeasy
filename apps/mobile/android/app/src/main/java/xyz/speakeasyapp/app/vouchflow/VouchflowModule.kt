@@ -138,18 +138,30 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
         Log.e(TAG, "verify: network_unavailable", e)
         promise.reject("network_unavailable", e.message, e)
       } catch (e: VouchflowError.EnrollmentFailed) {
-        // Print the cause chain explicitly — EnrollmentFailed often
-        // wraps an HTTP / attestation error whose message is what we
-        // actually need to debug Tier B sandbox enrollment failures.
-        Log.e(TAG, "verify: enrollment_failed; message=${e.message}; toString=${e}", e)
-        var cause: Throwable? = e.cause
-        var depth = 0
-        while (cause != null && depth < 8) {
-          Log.e(TAG, "verify: enrollment_failed cause[$depth] (${cause.javaClass.name}): ${cause.message}", cause)
-          cause = cause.cause
-          depth++
+        // EnrollmentFailed in SDK 2.0.0 carries the original exception
+        // in `enrollmentCause: Throwable?` (NOT in the standard
+        // Throwable.cause chain). Network and ServerError rejections
+        // throw their own subtypes — so an EnrollmentFailed here means
+        // local key-generation/attestation failed, typically on
+        // emulators that don't expose AndroidKeyStore EC properly.
+        // Per Vouchflow SDK engineering: log enrollmentCause to learn
+        // the actual class (KeyStoreException / ProviderException /
+        // IllegalStateException etc).
+        Log.e(TAG, "verify: enrollment_failed; message=${e.message}", e)
+        val rootCause = e.enrollmentCause
+        if (rootCause != null) {
+          Log.e(TAG, "verify: enrollment_failed enrollmentCause (${rootCause.javaClass.name}): ${rootCause.message}", rootCause)
+          var c: Throwable? = rootCause.cause
+          var depth = 0
+          while (c != null && depth < 8) {
+            Log.e(TAG, "verify: enrollment_failed enrollmentCause.cause[$depth] (${c.javaClass.name}): ${c.message}", c)
+            c = c.cause
+            depth++
+          }
+        } else {
+          Log.e(TAG, "verify: enrollment_failed has null enrollmentCause")
         }
-        promise.reject("enrollment_failed", e.message ?: e.toString(), e)
+        promise.reject("enrollment_failed", rootCause?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: e.message ?: e.toString(), e)
       } catch (e: VouchflowError.AccountStoreAccessDenied) {
         Log.e(TAG, "verify: account_store_access_denied", e)
         promise.reject("account_store_access_denied", e.message, e)
