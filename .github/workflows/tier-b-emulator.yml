@@ -167,7 +167,7 @@ jobs:
           #   * `uiautomator dump` after flow 01 — captures BiometricPrompt
           #     / system overlays that screenshots can't (secure window).
           script: |
-            set -eo pipefail
+            set -e
             adb shell locksettings set-pin 0000
             adb shell svc power stayon true
             adb shell settings put system screen_off_timeout 1800000
