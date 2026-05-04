@@ -15,9 +15,7 @@ function bundle() {
 
 async function makeApp() {
   const repo = new InMemoryUserRepo();
-  await repo.tryCreate({
-    userId: 'silent-golden-hawk',
-    publicKey: Buffer.from('hawk-pk'),
+  await repo.tryCreate({ userId: 'silent-golden-hawk', deviceToken: 'dvt_silent-golden-hawk', publicKey: Buffer.from('hawk-pk'),
     bundle: bundle(),
   });
   const app = await buildServer({

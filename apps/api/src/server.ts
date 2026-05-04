@@ -124,7 +124,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   });
 
   const validator = opts.validator ?? defaultValidator(app.log);
-  await app.register(vouchflowPlugin, { validator });
+
+  // When DATABASE_URL is set, all repos use Drizzle (Postgres).
+  // Otherwise fall back to InMemory implementations for sandbox / dev.
+  // The user repo is registered with the vouchflow plugin so requireAuth
+  // can resolve deviceToken→userId when the validator doesn't carry it
+  // (real Vouchflow doesn't track our internal id).
+  const hasDb = !!process.env.DATABASE_URL;
+  const repo =
+    opts.userRepo ??
+    (hasDb ? new DrizzleUserRepo() : new InMemoryUserRepo());
+  await app.register(vouchflowPlugin, { validator, userRepo: repo });
 
   const limiter = opts.rateLimiter ?? defaultRateLimiter();
 
@@ -142,12 +152,6 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     opts.userNotifier ??
     (connections ? defaultUserNotifier(connections, instanceId) : new NoopUserNotifier());
 
-  // When DATABASE_URL is set, all repos use Drizzle (Postgres).
-  // Otherwise fall back to InMemory implementations for sandbox / dev.
-  const hasDb = !!process.env.DATABASE_URL;
-  const repo =
-    opts.userRepo ??
-    (hasDb ? new DrizzleUserRepo() : new InMemoryUserRepo());
   const onUserMinted = undefined;
   await registerEnrollRoutes(app, {
     repo,

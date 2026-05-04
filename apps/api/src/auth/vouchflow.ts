@@ -4,11 +4,18 @@ import {
   Validator,
   VouchflowValidationError,
 } from '@speakeasy/vouchflow';
+import type { UserRepo } from '../db/users.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
     /** Configured Vouchflow validator. */
     vouchflow: Validator;
+    /**
+     * Used by `requireAuth` to resolve `deviceToken → userId` when the
+     * validator's `ValidatedAttestation.userId` is absent (real
+     * Vouchflow doesn't track our internal id; we own that binding).
+     */
+    userRepo: UserRepo;
   }
   interface FastifyRequest {
     /** Set by `requireAuth`. Absent on unauthenticated routes. */
@@ -25,15 +32,18 @@ declare module 'fastify' {
 
 interface Options {
   validator: Validator;
+  userRepo: UserRepo;
 }
 
 /**
- * Registers the validator on the Fastify instance and exposes a
- * `requireAuth` preHandler. Routes opt in by adding it to their preHandler
- * chain — there is no global gate so /healthz and /v1/enroll stay open.
+ * Registers the validator + user repo on the Fastify instance and
+ * exposes a `requireAuth` preHandler. Routes opt in by adding it to
+ * their preHandler chain — there is no global gate so /healthz and
+ * /v1/enroll stay open.
  */
 export const vouchflowPlugin = fp<Options>(async (app, opts) => {
   app.decorate('vouchflow', opts.validator);
+  app.decorate('userRepo', opts.userRepo);
 });
 
 /**
@@ -57,8 +67,18 @@ export async function requireAuth(
 
   try {
     const v = await this.vouchflow.validate(token);
+    // Real Vouchflow's ValidatedAttestation has no userId field — Vouchflow
+    // tracks attestation/risk/age, not our internal Speakeasy id. The mock
+    // dev-validator does carry it (set via the enroll route's onUserMinted
+    // hook). When the validator returns no userId, fall back to our own
+    // user repo's deviceToken→userId index, which the enroll route has
+    // populated.
+    let userId = v.userId;
+    if (!userId) {
+      userId = await this.userRepo.findUserIdByDeviceToken(v.deviceToken);
+    }
     request.auth = {
-      userId: v.userId,
+      userId,
       deviceToken: v.deviceToken,
       confidence: v.confidence,
       token: v.token,
@@ -67,7 +87,7 @@ export async function requireAuth(
     };
     if (v.anomalyFlags.length > 0) {
       request.log.warn(
-        { userId: v.userId, deviceToken: v.deviceToken, anomalyFlags: v.anomalyFlags },
+        { userId, deviceToken: v.deviceToken, anomalyFlags: v.anomalyFlags },
         'vouchflow anomaly flags present',
       );
     }

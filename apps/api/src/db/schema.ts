@@ -16,11 +16,23 @@ const bytea = customType<{ data: Buffer; default: false }>({
   },
 });
 
-export const users = pgTable('users', {
-  id: text('id').primaryKey(),
-  publicKey: bytea('public_key').notNull(),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const users = pgTable(
+  'users',
+  {
+    id: text('id').primaryKey(),
+    publicKey: bytea('public_key').notNull(),
+    /**
+     * Vouchflow deviceToken from /enroll. Used to resolve
+     * authenticated requests back to the Speakeasy userId, since
+     * real Vouchflow doesn't track our internal id.
+     */
+    deviceToken: text('device_token').notNull(),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    deviceTokenIdx: index('users_device_token_idx').on(t.deviceToken),
+  }),
+);
 
 export const prekeyBundles = pgTable('prekey_bundles', {
   userId: text('user_id')

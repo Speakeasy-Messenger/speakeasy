@@ -92,18 +92,14 @@ const openSockets = new Set<WebSocket>();
 
 beforeEach(async () => {
   userRepo = new InMemoryUserRepo();
-  await userRepo.tryCreate({
-    userId: 'alice-blue-fox',
-    publicKey: Buffer.from('alice-id-pub'),
+  await userRepo.tryCreate({ userId: 'alice-blue-fox', deviceToken: 'dvt_alice-blue-fox', publicKey: Buffer.from('alice-id-pub'),
     bundle: freshBundle('alice'),
   });
   // 30 OTPKs for the happy-path test (above the 10-key low_water
   // threshold so the bundle fetch doesn't surface a `prekeys_low` frame
   // mid-conversation). Tests that exercise low_water explicitly rebuild
   // the user with fewer keys.
-  await userRepo.tryCreate({
-    userId: 'bob-red-bear',
-    publicKey: Buffer.from('bob-id-pub'),
+  await userRepo.tryCreate({ userId: 'bob-red-bear', deviceToken: 'dvt_bob-red-bear', publicKey: Buffer.from('bob-id-pub'),
     bundle: freshBundle('bob', 30),
   });
   preKeyRepo = new InMemoryPreKeyRepo(userRepo);
@@ -281,14 +277,10 @@ describe('1:1 end-to-end (prekey fetch → session → encrypted send → ack �
     // notifier can reach him.
     await app.close();
     userRepo = new InMemoryUserRepo();
-    await userRepo.tryCreate({
-      userId: 'alice-blue-fox',
-      publicKey: Buffer.from('alice-id-pub'),
+    await userRepo.tryCreate({ userId: 'alice-blue-fox', deviceToken: 'dvt_alice-blue-fox', publicKey: Buffer.from('alice-id-pub'),
       bundle: freshBundle('alice'),
     });
-    await userRepo.tryCreate({
-      userId: 'bob-red-bear',
-      publicKey: Buffer.from('bob-id-pub'),
+    await userRepo.tryCreate({ userId: 'bob-red-bear', deviceToken: 'dvt_bob-red-bear', publicKey: Buffer.from('bob-id-pub'),
       bundle: freshBundle('bob', 5),
     });
     preKeyRepo = new InMemoryPreKeyRepo(userRepo);
