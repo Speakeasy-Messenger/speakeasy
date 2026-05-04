@@ -144,40 +144,51 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          # The action passes `script` to `sh -c` line by line — backslash
-          # continuations don't survive. Single line with `&&` chaining
-          # works; so does `set -e` + bare lines via the `bash` runner.
-          # We use the single-line form for clarity.
+          # Multi-line bash. The action's script: parameter passes the
+          # whole block to `sh -c "..."` via env var; with `set -e` and
+          # bare lines, it behaves like a normal script.
           #
-          # Logcat is streamed to /tmp/logcat.txt in the background BEFORE
-          # any maestro flow starts. The reactivecircus action terminates
-          # the emulator on script exit, which makes a post-failure
-          # `adb logcat` race with `device offline`. A host-side file
-          # survives the device dying, so we always have logs to read.
-          #
-          # Tag filter: keeps app + SDK + RN runtime at verbose, plus all
-          # ERROR-level lines from any tag (`*:E`). Drops Maestro's
-          # accessibility-tree spam that previously buried the actual
-          # SDK errors past the artifact tail window.
-          #
-          # `locksettings set-pin 0000` enrolls a device-credential PIN
-          # before the SDK runs. Vouchflow's hardware-backed keystore key
-          # has setUserAuthenticationRequired(true), and AndroidKeyStore
-          # refuses to generate such a key on a device with no secure
-          # lock screen (throws IllegalStateException via
-          # KeyStore2ParameterUtils.getRootSid). The emulator boots
-          # without one. A PIN satisfies that requirement.
-          #
-          # Setting a PIN turns on Android's keyguard, which auto-engages
-          # after the default ~30s screen_off_timeout. APK install + first
-          # launch comfortably exceed that on slower CI runners, so by
-          # the time Maestro starts the app's UI is hidden behind a lock
-          # screen. `svc power stayon true` keeps the screen on while
-          # USB-connected (always-true on the emulator) and the explicit
-          # screen_off_timeout setting is belt-and-suspenders. The wakeup
-          # + dismiss-keyguard pair handles the case where the keyguard
-          # is already up before we get this far.
-          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb shell wm dismiss-keyguard && adb logcat -c && (nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 &) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && (maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01; rc=$?; adb shell uiautomator dump /sdcard/ui-after-01.xml; adb pull /sdcard/ui-after-01.xml /tmp/ui-after-01.xml 2>/dev/null; exit $rc) && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
+          # Why each step:
+          #   * `locksettings set-pin 0000` — Vouchflow's hardware-backed
+          #     keystore key has setUserAuthenticationRequired(true);
+          #     AndroidKeyStore refuses to generate such a key on a
+          #     device with no secure lock screen (throws
+          #     IllegalStateException via KeyStore2ParameterUtils.getRootSid).
+          #   * `svc power stayon true` + `screen_off_timeout` —
+          #     prevent the screen from going off (which would re-engage
+          #     the keyguard).
+          #   * Background keyguard-dismiss watchdog — `clearState` /
+          #     `am force-stop` re-engages the keyguard on a device that
+          #     has any credential set, so a one-shot dismiss isn't
+          #     enough. The watchdog dismisses every 3s for the duration.
+          #   * Background logcat — survives the device going offline at
+          #     end-of-run; tag filter drops Maestro's accessibility-tree
+          #     spam.
+          #   * `uiautomator dump` after flow 01 — captures BiometricPrompt
+          #     / system overlays that screenshots can't (secure window).
+          script: |
+            set -eo pipefail
+            adb shell locksettings set-pin 0000
+            adb shell svc power stayon true
+            adb shell settings put system screen_off_timeout 1800000
+            adb shell input keyevent KEYCODE_WAKEUP
+            adb shell wm dismiss-keyguard
+            ( while sleep 3; do adb shell wm dismiss-keyguard >/dev/null 2>&1 || true; done ) &
+            KEYGUARD_PID=$!
+            trap 'kill $KEYGUARD_PID 2>/dev/null || true' EXIT
+            adb logcat -c
+            ( nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 & )
+            adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+            rc=0
+            maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 || rc=$?
+            adb shell uiautomator dump /sdcard/ui-after-01.xml || true
+            adb pull /sdcard/ui-after-01.xml /tmp/ui-after-01.xml 2>/dev/null || true
+            if [ $rc -ne 0 ]; then exit $rc; fi
+            maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02
+            maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03
+            maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04
+            maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05
+            maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
 
       - name: Dump diagnostics on failure
         if: failure()
