@@ -8,12 +8,10 @@ appId: xyz.speakeasyapp.app
 - clearKeychain
 - launchApp
 
-# Dismiss ANR dialog if present
-- retry:
-    maxRetries: 3
-    commands:
-      - tapOn:
-          text: "Wait"
+# Dismiss cold-boot ANR dialog if present
+- tapOn:
+    text: "Wait"
+    optional: true
 
 # Navigate through onboarding
 - extendedWaitUntil:
@@ -22,12 +20,11 @@ appId: xyz.speakeasyapp.app
     timeout: 30000
 - tapOn:
     text: "Continue"
-- extendedWaitUntil:
-    visible:
-      id: "id-reveal-screen"
-    timeout: 10000
-- tapOn:
-    text: "Get started"
+# Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
+- runFlow: _unlock-biometric-prompt.yaml
+# OnboardingScreen race: navigator flips to Auth stack (initialRoute:
+# Conversations) before navigation.replace("IdReveal") fires, so IdReveal
+# is usually skipped. Wait directly for Conversations (matches 01-enroll).
 
 # Wait for enrollment to complete
 - extendedWaitUntil:
@@ -39,8 +36,9 @@ appId: xyz.speakeasyapp.app
 - copyTextFrom:
     id: "conversations-userid"
 
-# Background the app
-- backgroundApp
+# Background the app (Maestro 2.x: `backgroundApp` was removed; press
+# Home to send the activity to the background instead).
+- pressKey: Home
 
 # Wait 2 seconds
 - waitForAnimationToEnd:
@@ -53,4 +51,4 @@ appId: xyz.speakeasyapp.app
 - assertVisible:
     id: "conversations-userid"
 - assertVisible:
-    text: "${COPY_TEXT}"
+    text: "${maestro.copiedText}"

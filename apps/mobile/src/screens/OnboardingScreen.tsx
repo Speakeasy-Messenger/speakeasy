@@ -8,7 +8,6 @@ import { api, signalProtocol, vouchflow } from '../services.js';
 import { pushNotifications } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../native/vouchflow.js';
-import { CiVouchflowClient } from '../native/ci-vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { colors, fonts, space, text } from '../theme/index.js';
 
@@ -44,46 +43,24 @@ export function OnboardingScreen({ onEnrolled }: Props) {
     setError(undefined);
     try {
       // 1. Vouchflow verify — minimumConfidence enforced inside the SDK.
-      // On CI emulators (no biometric hardware) or devices where verify()
-      // fails, fall back to CiVouchflowClient which returns a deterministic
-      // test token that the sandbox server accepts.
-      let deviceToken: string;
-      try {
-        const verifyResult = await Promise.race([
-          vouchflow.verify({
-            context: 'signup',
-            minimumConfidence: 'medium',
-          }),
-          new Promise<never>((_, reject) =>
-            setTimeout(
-              () => reject(new VouchflowClientError('biometric_unavailable', 'Timeout: no biometric hardware')),
-              10_000,
-            ),
+      // Tier B builds use sandbox keys against sandbox.api.vouchflow.dev;
+      // sandbox supports emulators per Vouchflow docs and records a
+      // confidence: medium verify. The 60s ceiling allows for a real
+      // biometric prompt + sandbox round-trip while still surfacing a
+      // hung SDK as a real error rather than a frozen UI.
+      const verifyResult = await Promise.race([
+        vouchflow.verify({
+          context: 'signup',
+          minimumConfidence: 'medium',
+        }),
+        new Promise<never>((_, reject) =>
+          setTimeout(
+            () => reject(new VouchflowClientError('biometric_unavailable', 'Timeout: verify did not complete in 60s')),
+            60_000,
           ),
-        ]);
-        deviceToken = verifyResult.deviceToken;
-      } catch (err: unknown) {
-        // Any error during verify on emulators → use CI client.
-        // The native SDK may throw VouchflowClientError, a plain Error,
-        // or even a non-Error from the bridge. Regardless of the error
-        // type, we fall back to the CI client on sandbox servers.
-        let cached: string | null = null;
-        try {
-          cached = await vouchflow.getCachedDeviceToken();
-        } catch { /* ignore */ }
-        if (cached) {
-          deviceToken = cached;
-        } else {
-          // CI client returns a deterministic token the sandbox server's
-          // VouchflowValidator will accept.
-          const ci = new CiVouchflowClient();
-          const ciResult = await ci.verify({
-            context: 'signup',
-            minimumConfidence: 'medium',
-          });
-          deviceToken = ciResult.deviceToken;
-        }
-      }
+        ),
+      ]);
+      const deviceToken = verifyResult.deviceToken;
       // 2. Mint (or restore) the device's Signal identity. The native
       // bridge persists into SQLCipher; on a re-launch this returns the
       // same key without re-prompting.
@@ -133,12 +110,26 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         // Non-fatal — push is a convenience, not a requirement.
       }
     } catch (err: unknown) {
+      // Mirror the full error to logcat so Tier B post-mortem captures
+      // it via the ReactNativeJS tag (the on-screen string is necessarily
+      // truncated and loses cause chain / stack).
+      const errAny = err as { cause?: unknown; stack?: string };
+      console.error(
+        '[onboarding] verify+enroll failed',
+        err,
+        'cause:', errAny?.cause,
+        'stack:', errAny?.stack,
+      );
       // Surface the actual error reason on screen — debugging on a real
       // device without USB/adb is otherwise opaque.
       const msg = err instanceof Error ? err.message : String(err);
       const name = err instanceof Error ? err.name : 'Error';
       if (err instanceof VouchflowClientError) {
-        setError(`${messageForVouchflowError(err.reason)} [${err.reason}]`);
+        // Surface the SDK's underlying message alongside the friendly
+        // reason so device-only debugging (no adb access) can see what
+        // the native SDK actually rejected on.
+        const detail = err.message && err.message !== err.reason ? ` — ${err.message}` : '';
+        setError(`${messageForVouchflowError(err.reason)} [${err.reason}]${detail}`);
       } else if (err instanceof SignalClientError) {
         setError(`Identity key gen failed: ${err.reason}${err.message && err.message !== err.reason ? ` — ${err.message}` : ''}`);
       } else if (err instanceof ApiError) {
@@ -152,7 +143,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="onboarding-screen" style={styles.root}>
       <View style={styles.header}>
         <IconMark size={120} animate />
         <Wordmark variant="hero" subtitle={SLOGAN_PLACEHOLDER} />

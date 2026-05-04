@@ -1,5 +1,6 @@
 package xyz.speakeasyapp.app.vouchflow
 
+import android.util.Log
 import androidx.fragment.app.FragmentActivity
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -17,6 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+
+private const val TAG = "VouchflowModule"
 
 /**
  * RN bridge for the Vouchflow Android SDK (`dev.vouchflow:android-sdk`).
@@ -120,21 +123,51 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
             }
         promise.resolve(map)
       } catch (e: VouchflowError.BiometricCancelled) {
+        Log.e(TAG, "verify: biometric_cancelled", e)
         promise.reject("biometric_cancelled", e.message, e)
       } catch (e: VouchflowError.BiometricFailed) {
+        Log.e(TAG, "verify: biometric_failed", e)
         promise.reject("biometric_failed", e.message, e)
       } catch (e: VouchflowError.BiometricUnavailable) {
+        Log.e(TAG, "verify: biometric_unavailable", e)
         promise.reject("biometric_unavailable", e.message, e)
       } catch (e: VouchflowError.MinimumConfidenceUnmet) {
+        Log.e(TAG, "verify: minimum_confidence_unmet", e)
         promise.reject("minimum_confidence_unmet", e.message, e)
       } catch (e: VouchflowError.NetworkUnavailable) {
+        Log.e(TAG, "verify: network_unavailable", e)
         promise.reject("network_unavailable", e.message, e)
       } catch (e: VouchflowError.EnrollmentFailed) {
-        promise.reject("enrollment_failed", e.message, e)
+        // EnrollmentFailed in SDK 2.0.0 carries the original exception
+        // in `enrollmentCause: Throwable?` (NOT in the standard
+        // Throwable.cause chain). Network and ServerError rejections
+        // throw their own subtypes — so an EnrollmentFailed here means
+        // local key-generation/attestation failed, typically on
+        // emulators that don't expose AndroidKeyStore EC properly.
+        // Per Vouchflow SDK engineering: log enrollmentCause to learn
+        // the actual class (KeyStoreException / ProviderException /
+        // IllegalStateException etc).
+        Log.e(TAG, "verify: enrollment_failed; message=${e.message}", e)
+        val rootCause = e.enrollmentCause
+        if (rootCause != null) {
+          Log.e(TAG, "verify: enrollment_failed enrollmentCause (${rootCause.javaClass.name}): ${rootCause.message}", rootCause)
+          var c: Throwable? = rootCause.cause
+          var depth = 0
+          while (c != null && depth < 8) {
+            Log.e(TAG, "verify: enrollment_failed enrollmentCause.cause[$depth] (${c.javaClass.name}): ${c.message}", c)
+            c = c.cause
+            depth++
+          }
+        } else {
+          Log.e(TAG, "verify: enrollment_failed has null enrollmentCause")
+        }
+        promise.reject("enrollment_failed", rootCause?.let { "${it.javaClass.simpleName}: ${it.message}" } ?: e.message ?: e.toString(), e)
       } catch (e: VouchflowError.AccountStoreAccessDenied) {
+        Log.e(TAG, "verify: account_store_access_denied", e)
         promise.reject("account_store_access_denied", e.message, e)
       } catch (e: Throwable) {
-        promise.reject("unknown_error", e.message, e)
+        Log.e(TAG, "verify: unknown_error (${e.javaClass.name})", e)
+        promise.reject("unknown_error", e.message ?: e.toString(), e)
       }
     }
   }
@@ -216,37 +249,5 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
   fun getCachedDeviceToken(promise: Promise) {
     val token = Vouchflow.shared.cachedDeviceToken
     promise.resolve(token)
-  }
-
-  /**
-   * Test-only: enroll the device without requiring biometric verification.
-   * Uses SDK 2.0.0 fallback test flow:
-   *   1. initiateSessionForFallbackTesting() → sessionId (String)
-   *   2. submitFallbackOtp(sessionId, otp) → FallbackCompleteResponse
-   *   3. getCachedDeviceToken() → device token
-   * Used by CI emulators that lack biometric hardware.
-   * Returns the device token on success.
-   */
-  @ReactMethod
-  fun ensureEnrolledForTesting(promise: Promise) {
-    CoroutineScope(Dispatchers.IO).launch {
-      try {
-        val sessionId = Vouchflow.shared.initiateSessionForFallbackTesting()
-        // Test sessions accept the session ID itself as the OTP
-        val fallbackResult = Vouchflow.shared.submitFallbackOtp(sessionId, sessionId)
-        if (!fallbackResult.verified) {
-          promise.reject("enrollment_failed", "Fallback verification not verified")
-          return@launch
-        }
-        val token = Vouchflow.shared.cachedDeviceToken
-        if (token != null) {
-          promise.resolve(token)
-        } else {
-          promise.reject("enrollment_failed", "Device token is null after fallback enrollment")
-        }
-      } catch (e: Throwable) {
-        promise.reject("enrollment_failed", e.message, e)
-      }
-    }
   }
 }

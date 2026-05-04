@@ -2,7 +2,6 @@ import { ApiClient } from './api/client.js';
 import { config } from './config.js';
 import { NativeVouchflowClient, type VouchflowClient } from './native/vouchflow.js';
 import { CachingVouchflowClient } from './native/caching-vouchflow.js';
-import { CiVouchflowClient } from './native/ci-vouchflow.js';
 import {
   NativeGroupMessagingModule,
   NativeSignalProtocolModule,
@@ -24,17 +23,16 @@ import {
 export const api = new ApiClient({ baseUrl: config.apiBaseUrl });
 
 /**
- * Vouchflow client (SDK 2.0.0). Uses the real native bridge in
- * production; uses `CiVouchflowClient` on CI emulators where
- * hardware attestation is unavailable. Wrapped in
- * `CachingVouchflowClient` so back-to-back WS reconnects don't
- * trigger a fresh biometric prompt every time.
+ * Vouchflow client (SDK 2.0.0). Always uses the real native bridge.
+ * Tier B builds use sandbox keys + sandbox endpoint, where the SDK
+ * supports emulators and records `confidence: medium` verifies without
+ * hardware attestation. Wrapped in `CachingVouchflowClient` so
+ * back-to-back WS reconnects don't trigger a fresh biometric prompt
+ * every time.
  */
-const innerVouchflow = config.useCiVouchflow
-  ? new CiVouchflowClient()
-  : new NativeVouchflowClient();
-
-export const vouchflow: VouchflowClient = new CachingVouchflowClient(innerVouchflow);
+export const vouchflow: VouchflowClient = new CachingVouchflowClient(
+  new NativeVouchflowClient(),
+);
 
 /**
  * Signal Protocol client. Always uses the real native bridge.

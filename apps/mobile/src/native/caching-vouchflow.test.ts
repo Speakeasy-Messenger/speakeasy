@@ -40,10 +40,6 @@ class StubVouchflowClient implements VouchflowClient {
   async submitFallbackOtp(): Promise<never> {
     throw new Error('not implemented in stub');
   }
-
-  async ensureEnrolledForTesting(): Promise<string> {
-    return 'dvt_stub';
-  }
 }
 
 describe('CachingVouchflowClient', () => {

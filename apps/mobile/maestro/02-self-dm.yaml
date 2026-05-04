@@ -21,6 +21,9 @@ name: Self-DM round-trip (Tier B)
 - tapOn:
     text: "Continue"
 
+# 4a. Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
+- runFlow: _unlock-biometric-prompt.yaml
+
 # 5. Wait for enrollment to complete (race condition — see 01-enroll.yaml)
 - extendedWaitUntil:
     visible:
@@ -37,8 +40,8 @@ name: Self-DM round-trip (Tier B)
 
 # 8. Enter our own ID as recipient
 - tapOn:
-    id: "new-chat-input"
-- inputText: "${COPY_TEXT}"
+    id: "new-chat-peer-id-input"
+- inputText: "${maestro.copiedText}"
 
 # 9. Start chat
 - tapOn:

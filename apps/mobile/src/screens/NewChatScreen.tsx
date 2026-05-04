@@ -101,7 +101,7 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="new-chat-screen" style={styles.root}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.body}

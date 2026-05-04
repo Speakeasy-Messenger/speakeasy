@@ -83,16 +83,15 @@ jobs:
           # server we boot below listens on 0.0.0.0:8080.
           API_BASE_URL: http://10.0.2.2:8080
           WS_URL: ws://10.0.2.2:8080/ws
-          USE_CI_VOUCHFLOW: "1"
         run: node apps/mobile/scripts/write-test-config.mjs
 
-      - name: Build release APK (with CI Vouchflow + signal)
+      - name: Build release APK (sandbox Vouchflow keys)
         working-directory: apps/mobile/android
         env:
-          # Real Vouchflow can't run in the emulator (no Play Integrity).
-          # The build-time guard in app/build.gradle still requires a
-          # non-placeholder key, so feed it the secret. CiVouchflowClient
-          # in JS bypasses the native SDK entirely.
+          # Sandbox write key (vsk_sandbox_write_*). Sandbox supports
+          # emulators per Vouchflow docs — returns confidence: medium
+          # without requiring hardware attestation. Keep this in sync
+          # with the api server's VOUCHFLOW_BASE_URL below.
           VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
         run: |
           if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
@@ -105,13 +104,22 @@ jobs:
           ./gradlew :app:assembleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
 
-      - name: Boot api server (MockValidator for CI, in-memory repos)
+      - name: Boot api server (sandbox Vouchflow validator, in-memory repos)
         env:
           PORT: '8080'
           HOST: '0.0.0.0'
           LOG_LEVEL: 'info'
-          VOUCHFLOW_USE_MOCK: '1'
+          # Real sandbox Vouchflow — server-side validates tokens via
+          # GET /v1/device/{token}/reputation against sandbox.api.vouchflow.dev.
+          # Server's defaultValidator() detects "sandbox" in the URL and
+          # relaxes minConfidence to "low" automatically.
+          VOUCHFLOW_READ_KEY: ${{ secrets.VOUCHFLOW_READ_KEY }}
+          VOUCHFLOW_BASE_URL: 'https://sandbox.api.vouchflow.dev/v1'
         run: |
+          if [ -z "$VOUCHFLOW_READ_KEY" ]; then
+            echo "::error::VOUCHFLOW_READ_KEY secret is not set"
+            exit 1
+          fi
           cd apps/api
           nohup node dist/server.js > /tmp/api-server.log 2>&1 &
           # Wait for healthz; fail fast if it never comes up.
@@ -136,11 +144,38 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none
           disable-animations: true
-          # The action passes `script` to `sh -c` line by line — backslash
-          # continuations don't survive. Single line with `&&` chaining
-          # works; so does `set -e` + bare lines via the `bash` runner.
-          # We use the single-line form for clarity.
-          script: adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
+          # Multi-line bash. The action's script: parameter passes the
+          # whole block to `sh -c "..."` via env var; with `set -e` and
+          # bare lines, it behaves like a normal script.
+          #
+          # IMPORTANT: the action runs each LINE of `script: |` as a
+          # separate `sh -c` invocation — shell variables do NOT persist
+          # across lines. A previous iteration tried multi-line bash with
+          # rc=$? capture and `if [ $rc -ne 0 ]; then exit ...; fi`, but
+          # `$rc` was undefined on the next line, the gate became a no-op,
+          # and broken flow 01 silently let flow 02 run anyway.
+          # `&&` chaining within ONE line is the only reliable pattern.
+          #
+          # Why each step:
+          #   * `locksettings set-pin 0000` — Vouchflow's hardware-backed
+          #     keystore key has setUserAuthenticationRequired(true);
+          #     AndroidKeyStore refuses to generate such a key on a
+          #     device with no secure lock screen.
+          #   * `svc power stayon true` + `screen_off_timeout 1800000` —
+          #     prevent the screen from going off (which would re-engage
+          #     the keyguard).
+          #   * Per-flow `wm dismiss-keyguard` — `clearState` /
+          #     `am force-stop` re-engages the keyguard on a device that
+          #     has any credential set. Dismiss right before each
+          #     maestro test (smallest possible gap to keyguard re-fire).
+          #   * `timeout 300 maestro test` — caps each flow at 5 min so
+          #     a hung flow fails fast (with artifact) instead of eating
+          #     the workflow's 60-min ceiling.
+          #   * Background logcat — survives device going offline at
+          #     end-of-run; tag filter drops Maestro's accessibility-tree
+          #     spam. `uiautomator dump` on failure runs from the global
+          #     "Dump diagnostics on failure" step further down.
+          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && adb shell wm dismiss-keyguard && timeout 300 maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
 
       - name: Dump diagnostics on failure
         if: failure()
@@ -178,6 +213,28 @@ jobs:
             base="$(basename "$(dirname "$f")")"
             cp -v "$f" "/tmp/maestro-staging/$base-maestro.log" 2>/dev/null || true
           done
+          # Logcat captured during the run survives the emulator going
+          # offline because it's a host-side file (started in the maestro
+          # script's background). The capture filter (Vouchflow:V +
+          # ReactNativeJS:V + *:E etc.) keeps the file small enough to
+          # ship as-is — tailing risks dropping the SDK init we care
+          # about most.
+          if [ -f /tmp/logcat.txt ]; then
+            cp /tmp/logcat.txt /tmp/maestro-staging/logcat.txt || true
+            wc -l /tmp/maestro-staging/logcat.txt || true
+          else
+            echo "no /tmp/logcat.txt — background logcat capture failed"
+          fi
+          # uiautomator dumps capture system overlays (BiometricPrompt,
+          # Keyguard, OS dialogs) that the regular Maestro screenshot can
+          # miss because they live on a secure window.
+          for f in /tmp/ui-after-*.xml; do
+            cp -v "$f" /tmp/maestro-staging/ 2>/dev/null || true
+          done
+          # Try one more uiautomator dump in case the per-flow dump failed
+          # — useful if the device is still reachable.
+          timeout 15 adb shell uiautomator dump /sdcard/ui-final.xml 2>/dev/null || true
+          timeout 15 adb pull /sdcard/ui-final.xml /tmp/maestro-staging/ui-final.xml 2>/dev/null || true
           ls -la /tmp/maestro-staging/ 2>/dev/null || true
           echo "::group::on-device crash files"
           timeout 15 adb shell "ls /sdcard/Download/speakeasy_crash_*.txt 2>/dev/null" || true

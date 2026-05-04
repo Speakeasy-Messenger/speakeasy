@@ -1,0 +1,36 @@
+appId: xyz.speakeasyapp.app
+name: Post-Continue overlay handlers (Tier B helper)
+---
+
+# 1. BiometricPrompt PIN fallback.
+#    Vouchflow's verify() calls BiometricPrompt with allowedAuthenticators
+#    = BIOMETRIC_WEAK | DEVICE_CREDENTIAL. With a screen-lock PIN set
+#    (locksettings set-pin 0000 in the workflow) but no fingerprint
+#    enrolled, Android skips straight to the SystemUI PIN-entry dialog.
+#    No-op if the prompt isn't visible.
+- extendedWaitUntil:
+    visible:
+      id: "com.android.systemui:id/lockPassword"
+    timeout: 15000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "com.android.systemui:id/lockPassword"
+    commands:
+      - tapOn:
+          id: "com.android.systemui:id/lockPassword"
+      - inputText: "0000"
+      - pressKey: Enter
+
+# 2. Pixel Launcher ANR dialog ("Pixel Launcher isn't responding").
+#    Intermittent on GHA emulator — appears AFTER Continue triggers
+#    the heavy Vouchflow + libsignal init burst (system threads
+#    contend with the launcher process). The dialog covers the
+#    Conversations screen and blocks Maestro's view-tree assertion
+#    even though the app under it has navigated correctly. Dismissing
+#    via the dialog's "Wait" button preserves the app's foreground
+#    state. (See HANDOFF.md §"Recent surfaced bugs" #4.)
+- tapOn:
+    text: "Wait"
+    optional: true

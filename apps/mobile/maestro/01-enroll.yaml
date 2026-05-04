@@ -21,6 +21,11 @@ name: Enroll fresh user (Tier B)
 - tapOn:
     text: "Continue"
 
+# 4a. Vouchflow's verify() shows BiometricPrompt; emulator has a PIN
+#     but no fingerprint, so Android falls back to PIN entry from
+#     com.android.systemui. Type 0000 to dismiss.
+- runFlow: _unlock-biometric-prompt.yaml
+
 # 5. Wait for enrollment to complete
 #    NOTE: Race condition — after setUserId(), the navigator flips
 #    to the Auth stack (initialRoute: Conversations). The
