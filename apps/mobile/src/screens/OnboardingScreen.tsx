@@ -115,7 +115,11 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       const msg = err instanceof Error ? err.message : String(err);
       const name = err instanceof Error ? err.name : 'Error';
       if (err instanceof VouchflowClientError) {
-        setError(`${messageForVouchflowError(err.reason)} [${err.reason}]`);
+        // Surface the SDK's underlying message alongside the friendly
+        // reason so device-only debugging (no adb access) can see what
+        // the native SDK actually rejected on.
+        const detail = err.message && err.message !== err.reason ? ` — ${err.message}` : '';
+        setError(`${messageForVouchflowError(err.reason)} [${err.reason}]${detail}`);
       } else if (err instanceof SignalClientError) {
         setError(`Identity key gen failed: ${err.reason}${err.message && err.message !== err.reason ? ` — ${err.message}` : ''}`);
       } else if (err instanceof ApiError) {

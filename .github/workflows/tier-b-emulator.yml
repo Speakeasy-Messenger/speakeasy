@@ -148,7 +148,13 @@ jobs:
           # continuations don't survive. Single line with `&&` chaining
           # works; so does `set -e` + bare lines via the `bash` runner.
           # We use the single-line form for clarity.
-          script: adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
+          #
+          # Logcat is streamed to /tmp/logcat.txt in the background BEFORE
+          # any maestro flow starts. The reactivecircus action terminates
+          # the emulator on script exit, which makes a post-failure
+          # `adb logcat` race with `device offline`. A host-side file
+          # survives the device dying, so we always have logs to read.
+          script: adb logcat -c && (nohup adb logcat -v time > /tmp/logcat.txt 2>&1 &) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01 && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
 
       - name: Dump diagnostics on failure
         if: failure()
@@ -186,6 +192,16 @@ jobs:
             base="$(basename "$(dirname "$f")")"
             cp -v "$f" "/tmp/maestro-staging/$base-maestro.log" 2>/dev/null || true
           done
+          # Logcat captured during the run survives the emulator going
+          # offline because it's a host-side file (started in the maestro
+          # script's background). Trim to the last 5k lines to keep the
+          # artifact small while still covering the full enroll path.
+          if [ -f /tmp/logcat.txt ]; then
+            tail -n 5000 /tmp/logcat.txt > /tmp/maestro-staging/logcat.txt || true
+            wc -l /tmp/logcat.txt /tmp/maestro-staging/logcat.txt || true
+          else
+            echo "no /tmp/logcat.txt — background logcat capture failed"
+          fi
           ls -la /tmp/maestro-staging/ 2>/dev/null || true
           echo "::group::on-device crash files"
           timeout 15 adb shell "ls /sdcard/Download/speakeasy_crash_*.txt 2>/dev/null" || true
