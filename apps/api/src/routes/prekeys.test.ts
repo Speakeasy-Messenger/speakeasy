@@ -28,9 +28,7 @@ class CapturingNotifier implements UserNotifier {
 
 async function makeApp(initialPreKeys = 3, notifier?: UserNotifier) {
   const userRepo = new InMemoryUserRepo();
-  await userRepo.tryCreate({
-    userId: 'silent-golden-hawk',
-    publicKey: Buffer.from('pk'),
+  await userRepo.tryCreate({ userId: 'silent-golden-hawk', deviceToken: 'dvt_silent-golden-hawk', publicKey: Buffer.from('pk'),
     bundle: bundle(initialPreKeys),
   });
   const preKeyRepo = new InMemoryPreKeyRepo(userRepo);

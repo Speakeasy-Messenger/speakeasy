@@ -95,6 +95,7 @@ export async function registerEnrollRoutes(
         const userId = generateId();
         const created = await repo.tryCreate({
           userId,
+          deviceToken: token,
           publicKey: publicKeyBuf,
           bundle: preKeyBundle,
         });

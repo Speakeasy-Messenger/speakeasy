@@ -6,6 +6,7 @@ import type { PreKeyBundleInput, UserRepo, UserSummary } from './users.js';
 export class DrizzleUserRepo implements UserRepo {
   async tryCreate(args: {
     userId: string;
+    deviceToken: string;
     publicKey: Buffer;
     bundle: PreKeyBundleInput;
   }): Promise<boolean> {
@@ -13,7 +14,11 @@ export class DrizzleUserRepo implements UserRepo {
     return db.transaction(async (tx) => {
       const inserted = await tx
         .insert(users)
-        .values({ id: args.userId, publicKey: args.publicKey })
+        .values({
+          id: args.userId,
+          publicKey: args.publicKey,
+          deviceToken: args.deviceToken,
+        })
         .onConflictDoNothing()
         .returning({ id: users.id });
       if (inserted.length === 0) return false;
@@ -43,5 +48,15 @@ export class DrizzleUserRepo implements UserRepo {
       .limit(1);
     const row = rows[0];
     return row ? { id: row.id, publicKey: row.publicKey, createdAt: row.createdAt } : undefined;
+  }
+
+  async findUserIdByDeviceToken(deviceToken: string): Promise<string | undefined> {
+    const db = getDb();
+    const rows = await db
+      .select({ id: users.id })
+      .from(users)
+      .where(eq(users.deviceToken, deviceToken))
+      .limit(1);
+    return rows[0]?.id;
   }
 }

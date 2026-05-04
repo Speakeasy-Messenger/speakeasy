@@ -22,9 +22,7 @@ function bundle() {
 describe('InMemoryUserRepo.findById', () => {
   it('returns the stored summary', async () => {
     const repo = new InMemoryUserRepo();
-    await repo.tryCreate({
-      userId: 'silent-golden-hawk',
-      publicKey: Buffer.from('pk'),
+    await repo.tryCreate({ userId: 'silent-golden-hawk', deviceToken: 'dvt_silent-golden-hawk', publicKey: Buffer.from('pk'),
       bundle: bundle(),
     });
     const u = await repo.findById('silent-golden-hawk');
@@ -40,7 +38,7 @@ describe('InMemoryUserRepo.findById', () => {
 describe('InMemoryPreKeyRepo', () => {
   it('fetchBundleConsume hands out one-time keys then exhausts', async () => {
     const users = new InMemoryUserRepo();
-    await users.tryCreate({ userId: 'u', publicKey: Buffer.from('pk'), bundle: bundle() });
+    await users.tryCreate({ userId: 'u', deviceToken: 'dvt_u', publicKey: Buffer.from('pk'), bundle: bundle() });
     const repo = new InMemoryPreKeyRepo(users);
 
     const b1 = await repo.fetchBundleConsume('u');
@@ -65,7 +63,7 @@ describe('InMemoryPreKeyRepo', () => {
 
   it('replenish replaces inventory', async () => {
     const users = new InMemoryUserRepo();
-    await users.tryCreate({ userId: 'u', publicKey: Buffer.from('pk'), bundle: bundle() });
+    await users.tryCreate({ userId: 'u', deviceToken: 'dvt_u', publicKey: Buffer.from('pk'), bundle: bundle() });
     const repo = new InMemoryPreKeyRepo(users);
     await repo.replenish({
       userId: 'u',
