@@ -45,7 +45,7 @@ appId: xyz.speakeasyapp.app
     placeholder: "silent-golden-hawk"
 - inputText: "${maestro.copiedText}"
 - tapOn:
-    text: "Start"
+    text: "Start chat"
 
 # Send a message
 - extendedWaitUntil:

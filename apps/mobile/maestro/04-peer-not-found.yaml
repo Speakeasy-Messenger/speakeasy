@@ -47,7 +47,7 @@ appId: xyz.speakeasyapp.app
 
 # Tap start (should fail with "No such user")
 - tapOn:
-    text: "Start"
+    text: "Start chat"
 
 # Verify error message appears
 - assertVisible:
