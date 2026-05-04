@@ -48,7 +48,7 @@ appId: xyz.speakeasyapp.app
 # Paste own ID and start chat (self-DM)
 - tapOn:
     placeholder: "silent-golden-hawk"
-- inputText: "${COPY_TEXT}"
+- inputText: "${maestro.copiedText}"
 - tapOn:
     text: "Start"
 

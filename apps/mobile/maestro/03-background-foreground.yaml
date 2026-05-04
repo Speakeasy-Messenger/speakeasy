@@ -55,4 +55,4 @@ appId: xyz.speakeasyapp.app
 - assertVisible:
     id: "conversations-userid"
 - assertVisible:
-    text: "${COPY_TEXT}"
+    text: "${maestro.copiedText}"

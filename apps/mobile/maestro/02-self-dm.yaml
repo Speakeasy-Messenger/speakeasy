@@ -41,7 +41,7 @@ name: Self-DM round-trip (Tier B)
 # 8. Enter our own ID as recipient
 - tapOn:
     id: "new-chat-peer-id-input"
-- inputText: "${COPY_TEXT}"
+- inputText: "${maestro.copiedText}"
 
 # 9. Start chat
 - tapOn:
