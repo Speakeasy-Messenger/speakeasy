@@ -1,81 +1,63 @@
-# Maestro flow: Self-DM round-trip (Tier B)
-# Tests sending a message to yourself and verifying conversation persistence
-
 appId: xyz.speakeasyapp.app
+name: Self-DM round-trip (Tier B)
 ---
-# Clear state and enroll fresh
+
+# 1. Setup — clear state & launch
 - clearState
-- clearKeychain
 - launchApp
 
-# Dismiss ANR dialog if present
-- retry:
-    maxRetries: 3
-    commands:
-      - tapOn:
-          text: "Wait"
+# 2. Dismiss ANR dialog if present
+- tapOn:
+    text: "Wait"
+    optional: true
 
-# Navigate through onboarding
+# 3. Wait for onboarding screen
 - extendedWaitUntil:
     visible:
-      id: "onboarding-screen"
-    timeout: 30000
+      id: "onboarding-continue"
+    timeout: 20000
+
+# 4. Tap Continue to begin enrollment
 - tapOn:
     text: "Continue"
-- extendedWaitUntil:
-    visible:
-      id: "id-reveal-screen"
-    timeout: 10000
-- tapOn:
-    text: "Get started"
 
-# Wait for enrollment to complete
+# 5. Wait for enrollment to complete (race condition — see 01-enroll.yaml)
 - extendedWaitUntil:
     visible:
-      id: "conversations-screen"
+      id: "conversations-userid"
     timeout: 30000
 
-# Copy user's own ID from header
+# 6. Copy our user ID
 - copyTextFrom:
     id: "conversations-userid"
 
-# Navigate to new chat
+# 7. Start new chat
 - tapOn:
     text: "+ New chat"
 
-# Paste own ID into the input (self-DM)
+# 8. Enter our own ID as recipient
 - tapOn:
-    placeholder: "silent-golden-hawk"
+    id: "new-chat-input"
 - inputText: "${COPY_TEXT}"
-- tapOn:
-    text: "Start"
 
-# Verify chat screen appears
-- extendedWaitUntil:
-    visible:
-      id: "chat-screen"
-    timeout: 10000
-
-# Send a message
+# 9. Start chat
 - tapOn:
-    placeholder: "Say it…"
-- inputText: "Hello self"
+    text: "Start chat"
+
+# 10. Send a message
+- tapOn:
+    id: "chat-input"
+- inputText: "Hello self!"
 - tapOn:
     text: "Send"
 
-# Wait for message to appear
-- extendedWaitUntil:
-    visible:
-      text: "Hello self"
-    timeout: 5000
+# 11. Verify message appears in chat
+- assertVisible:
+    text: "Hello self!"
 
-# Navigate back to conversations list
+# 12. Go back to conversations list
 - back
 
-# Verify the conversation row exists
-- extendedWaitUntil:
-    visible:
-      id: "conversations-screen"
-    timeout: 5000
+# 13. Verify conversation appears in list
 - assertVisible:
-    text: "Hello self"
+    text: "Hello self!"

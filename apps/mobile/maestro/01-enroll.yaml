@@ -1,30 +1,32 @@
 appId: xyz.speakeasyapp.app
 name: Enroll fresh user (Tier B)
+---
 
 # 1. Clear state & launch
 - clearState
 - launchApp
 
-# 2. Dismiss ANR "Wait" dialog if present (emulator startup artifact)
+# 2. Dismiss ANR dialog if present
 - tapOn:
     text: "Wait"
     optional: true
 
-# 3. Wait for onboarding to appear
-- waitForVisible:
-    id: "onboarding-continue"
-    timeout: 30000
+# 3. Wait for onboarding screen
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-continue"
+    timeout: 20000
 
-# 4. Tap Continue to start enrollment (biometric + identity generation)
+# 4. Tap Continue to begin enrollment
 - tapOn:
     text: "Continue"
 
 # 5. Wait for enrollment to complete
-# The app has a known race condition: enrollment flips to the Auth stack
-# (Conversations) BEFORE IdReveal can be shown. The test must accept either:
-# - IdRevealScreen appears -> tap "Get started" -> Conversations
-# - Conversations appears directly (race won by auth stack switch)
-
-- waitForVisible:
-    id: "conversations-userid"
-    timeout: 60000
+#    NOTE: Race condition — after setUserId(), the navigator flips
+#    to the Auth stack (initialRoute: Conversations). The
+#    navigation.replace('IdReveal') in OnboardingScreen may lose
+#    the race, so we skip IdReveal and wait directly for Conversations.
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 30000
