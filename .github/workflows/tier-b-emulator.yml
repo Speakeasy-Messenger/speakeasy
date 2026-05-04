@@ -167,7 +167,17 @@ jobs:
           # lock screen (throws IllegalStateException via
           # KeyStore2ParameterUtils.getRootSid). The emulator boots
           # without one. A PIN satisfies that requirement.
-          script: adb shell locksettings set-pin 0000 && adb logcat -c && (nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 &) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && (maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01; rc=$?; adb shell uiautomator dump /sdcard/ui-after-01.xml; adb pull /sdcard/ui-after-01.xml /tmp/ui-after-01.xml 2>/dev/null; exit $rc) && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
+          #
+          # Setting a PIN turns on Android's keyguard, which auto-engages
+          # after the default ~30s screen_off_timeout. APK install + first
+          # launch comfortably exceed that on slower CI runners, so by
+          # the time Maestro starts the app's UI is hidden behind a lock
+          # screen. `svc power stayon true` keeps the screen on while
+          # USB-connected (always-true on the emulator) and the explicit
+          # screen_off_timeout setting is belt-and-suspenders. The wakeup
+          # + dismiss-keyguard pair handles the case where the keyguard
+          # is already up before we get this far.
+          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb shell wm dismiss-keyguard && adb logcat -c && (nohup adb logcat -v time Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V SpeakeasyApp:V BiometricPrompt:V Auth:V Authenticators:V KeyguardManager:V Keystore2:V '*:E' > /tmp/logcat.txt 2>&1 &) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && (maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01; rc=$?; adb shell uiautomator dump /sdcard/ui-after-01.xml; adb pull /sdcard/ui-after-01.xml /tmp/ui-after-01.xml 2>/dev/null; exit $rc) && maestro test apps/mobile/maestro/02-self-dm.yaml --debug-output /tmp/maestro-02 && maestro test apps/mobile/maestro/03-background-foreground.yaml --debug-output /tmp/maestro-03 && maestro test apps/mobile/maestro/04-peer-not-found.yaml --debug-output /tmp/maestro-04 && maestro test apps/mobile/maestro/05-group-create.yaml --debug-output /tmp/maestro-05 && maestro test apps/mobile/maestro/06-push-registration.yaml --debug-output /tmp/maestro-06
 
       - name: Dump diagnostics on failure
         if: failure()
