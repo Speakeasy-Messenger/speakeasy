@@ -41,8 +41,9 @@ appId: xyz.speakeasyapp.app
 - copyTextFrom:
     id: "conversations-userid"
 
-# Background the app
-- backgroundApp
+# Background the app (Maestro 2.x: `backgroundApp` was removed; press
+# Home to send the activity to the background instead).
+- pressKey: Home
 
 # Wait 2 seconds
 - waitForAnimationToEnd:
