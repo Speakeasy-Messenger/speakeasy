@@ -14,6 +14,11 @@ import {
   subscribeDiag,
   type DiagEntry,
 } from '../diag/log.js';
+import {
+  clearLastJsCrash,
+  readLastJsCrash,
+  type CapturedCrash,
+} from '../diag/install-error-handler.js';
 import { colors, fonts, radius, space } from '../theme/index.js';
 
 interface Props {
@@ -32,11 +37,18 @@ interface Props {
  */
 export function DiagnosticsScreen({ onBack }: Props) {
   const [entries, setEntries] = useState<DiagEntry[]>(() => getDiagSnapshot());
+  const [lastCrash, setLastCrash] = useState<CapturedCrash | null>(null);
 
   useEffect(() => {
     const off = subscribeDiag((e) => setEntries(e.slice()));
+    void readLastJsCrash().then(setLastCrash);
     return off;
   }, []);
+
+  function handleClearCrash() {
+    setLastCrash(null);
+    void clearLastJsCrash();
+  }
 
   return (
     <SafeAreaView style={styles.root}>
@@ -52,6 +64,38 @@ export function DiagnosticsScreen({ onBack }: Props) {
       </View>
 
       <ScrollView style={styles.scroll} contentContainerStyle={styles.scrollContent}>
+        {lastCrash ? (
+          <View style={styles.crashCard}>
+            <View style={styles.crashHeader}>
+              <Text style={styles.crashTitle}>
+                Last crash {lastCrash.isFatal ? '(fatal)' : ''}
+              </Text>
+              <Pressable onPress={handleClearCrash} hitSlop={8}>
+                <Text style={styles.crashClear}>Dismiss</Text>
+              </Pressable>
+            </View>
+            <Text selectable style={styles.crashMeta}>
+              {lastCrash.capturedAt}
+            </Text>
+            <Text selectable style={styles.crashError}>
+              {lastCrash.errorName}: {lastCrash.errorMessage}
+            </Text>
+            {lastCrash.errorStack ? (
+              <Text selectable style={styles.crashStack}>
+                {lastCrash.errorStack}
+              </Text>
+            ) : null}
+            {lastCrash.diagLog ? (
+              <>
+                <Text style={styles.crashSubsection}>diag log at crash time:</Text>
+                <Text selectable style={styles.crashStack}>
+                  {lastCrash.diagLog}
+                </Text>
+              </>
+            ) : null}
+          </View>
+        ) : null}
+
         {entries.length === 0 ? (
           <Text style={styles.empty}>No diagnostic events yet.</Text>
         ) : (
@@ -100,6 +144,32 @@ const styles = StyleSheet.create({
     fontFamily: fonts.inter400,
     fontSize: 11,
     lineHeight: 16,
+  },
+  crashCard: {
+    backgroundColor: '#fff4f4',
+    borderColor: '#e57373',
+    borderWidth: 1,
+    borderRadius: radius.bubble,
+    padding: space.md,
+    marginBottom: space.md,
+    gap: space.xs,
+  },
+  crashHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  crashTitle: { color: colors.ink, fontFamily: fonts.inter500, fontSize: 14 },
+  crashClear: { color: colors.primary, fontFamily: fonts.inter500, fontSize: 12 },
+  crashMeta: { color: colors.slate, fontFamily: fonts.inter400, fontSize: 11 },
+  crashError: { color: colors.ink, fontFamily: fonts.inter500, fontSize: 12 },
+  crashSubsection: {
+    color: colors.slate,
+    fontFamily: fonts.inter500,
+    fontSize: 11,
+    marginTop: space.sm,
+  },
+  crashStack: {
+    color: colors.ink,
+    fontFamily: fonts.inter400,
+    fontSize: 10,
+    lineHeight: 14,
   },
   bottom: { padding: space.lg, gap: space.sm },
   btn: {
