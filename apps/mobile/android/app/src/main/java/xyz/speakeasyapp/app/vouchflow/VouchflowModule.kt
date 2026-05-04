@@ -1,5 +1,6 @@
 package xyz.speakeasyapp.app.vouchflow
 
+import android.util.Log
 import androidx.fragment.app.FragmentActivity
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -17,6 +18,8 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+
+private const val TAG = "VouchflowModule"
 
 /**
  * RN bridge for the Vouchflow Android SDK (`dev.vouchflow:android-sdk`).
@@ -120,21 +123,39 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
             }
         promise.resolve(map)
       } catch (e: VouchflowError.BiometricCancelled) {
+        Log.e(TAG, "verify: biometric_cancelled", e)
         promise.reject("biometric_cancelled", e.message, e)
       } catch (e: VouchflowError.BiometricFailed) {
+        Log.e(TAG, "verify: biometric_failed", e)
         promise.reject("biometric_failed", e.message, e)
       } catch (e: VouchflowError.BiometricUnavailable) {
+        Log.e(TAG, "verify: biometric_unavailable", e)
         promise.reject("biometric_unavailable", e.message, e)
       } catch (e: VouchflowError.MinimumConfidenceUnmet) {
+        Log.e(TAG, "verify: minimum_confidence_unmet", e)
         promise.reject("minimum_confidence_unmet", e.message, e)
       } catch (e: VouchflowError.NetworkUnavailable) {
+        Log.e(TAG, "verify: network_unavailable", e)
         promise.reject("network_unavailable", e.message, e)
       } catch (e: VouchflowError.EnrollmentFailed) {
-        promise.reject("enrollment_failed", e.message, e)
+        // Print the cause chain explicitly — EnrollmentFailed often
+        // wraps an HTTP / attestation error whose message is what we
+        // actually need to debug Tier B sandbox enrollment failures.
+        Log.e(TAG, "verify: enrollment_failed; message=${e.message}; toString=${e}", e)
+        var cause: Throwable? = e.cause
+        var depth = 0
+        while (cause != null && depth < 8) {
+          Log.e(TAG, "verify: enrollment_failed cause[$depth] (${cause.javaClass.name}): ${cause.message}", cause)
+          cause = cause.cause
+          depth++
+        }
+        promise.reject("enrollment_failed", e.message ?: e.toString(), e)
       } catch (e: VouchflowError.AccountStoreAccessDenied) {
+        Log.e(TAG, "verify: account_store_access_denied", e)
         promise.reject("account_store_access_denied", e.message, e)
       } catch (e: Throwable) {
-        promise.reject("unknown_error", e.message, e)
+        Log.e(TAG, "verify: unknown_error (${e.javaClass.name})", e)
+        promise.reject("unknown_error", e.message ?: e.toString(), e)
       }
     }
   }

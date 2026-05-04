@@ -110,6 +110,16 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         // Non-fatal — push is a convenience, not a requirement.
       }
     } catch (err: unknown) {
+      // Mirror the full error to logcat so Tier B post-mortem captures
+      // it via the ReactNativeJS tag (the on-screen string is necessarily
+      // truncated and loses cause chain / stack).
+      const errAny = err as { cause?: unknown; stack?: string };
+      console.error(
+        '[onboarding] verify+enroll failed',
+        err,
+        'cause:', errAny?.cause,
+        'stack:', errAny?.stack,
+      );
       // Surface the actual error reason on screen — debugging on a real
       // device without USB/adb is otherwise opaque.
       const msg = err instanceof Error ? err.message : String(err);
