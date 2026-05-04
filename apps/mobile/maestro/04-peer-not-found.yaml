@@ -8,12 +8,10 @@ appId: xyz.speakeasyapp.app
 - clearKeychain
 - launchApp
 
-# Dismiss ANR dialog if present
-- retry:
-    maxRetries: 3
-    commands:
-      - tapOn:
-          text: "Wait"
+# Dismiss cold-boot ANR dialog if present
+- tapOn:
+    text: "Wait"
+    optional: true
 
 # Navigate through onboarding
 - extendedWaitUntil:
