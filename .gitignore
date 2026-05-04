@@ -62,3 +62,11 @@ apps/mobile/ios/Speakeasy.xcworkspace/xcuserdata/
 # this entry.
 CLAUDE.md
 forgoose.txt
+
+# Local audit trail of replaced asset bundles (icons, splash, etc.).
+# Created by Claude when overwriting tracked binary assets.
+backups/
+
+# Intermediate output of the app-icon generator. The committed icons
+# under apps/mobile/{ios,android}/... are the source of truth.
+generated/
