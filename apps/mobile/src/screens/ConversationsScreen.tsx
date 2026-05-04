@@ -94,7 +94,7 @@ export function ConversationsScreen({
   const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="conversations-screen" style={styles.root}>
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>

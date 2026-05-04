@@ -202,7 +202,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="chat-screen" style={styles.root}>
       <View style={styles.header}>
         {onBack ? (
           <Pressable testID="chat-back" onPress={onBack} style={styles.back}>

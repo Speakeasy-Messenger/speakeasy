@@ -139,7 +139,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
   const parsedMembers = parseMembers(membersInput);
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="new-group-screen" style={styles.root}>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.body}

@@ -143,7 +143,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
   }
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="onboarding-screen" style={styles.root}>
       <View style={styles.header}>
         <IconMark size={120} animate />
         <Wordmark variant="hero" subtitle={SLOGAN_PLACEHOLDER} />

@@ -49,7 +49,7 @@ export function IdRevealScreen({ userId, onContinue }: Props) {
   }, [wordAnims, sepAnims, words]);
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView testID="id-reveal-screen" style={styles.root}>
       <View style={styles.center}>
         <Text style={[text.introLabel, styles.intro]}>INTRODUCING</Text>
         <View style={styles.stack}>

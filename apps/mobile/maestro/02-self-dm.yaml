@@ -40,7 +40,7 @@ name: Self-DM round-trip (Tier B)
 
 # 8. Enter our own ID as recipient
 - tapOn:
-    id: "new-chat-input"
+    id: "new-chat-peer-id-input"
 - inputText: "${COPY_TEXT}"
 
 # 9. Start chat
