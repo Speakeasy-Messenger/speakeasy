@@ -76,8 +76,13 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
   // state.
   useEffect(() => {
     openGroup(groupId);
+  }, [groupId, openGroup]);
+
+  // Mark read on open AND every time a new inbound message lands while
+  // the screen is mounted — see ChatScreen for the rationale.
+  useEffect(() => {
     markRead(groupId);
-  }, [groupId, openGroup, markRead]);
+  }, [groupId, markRead, messages.length]);
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);

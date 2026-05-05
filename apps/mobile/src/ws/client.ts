@@ -45,6 +45,15 @@ export class SpeakeasyWsClient {
   private readonly Ws: typeof WebSocket;
   private readonly subscribers = new Set<Subscriber>();
   private readonly stateSubscribers = new Set<(state: WsState) => void>();
+  // Acks the server is waiting for. If the WS isn't `authed` when an
+  // ack would otherwise be sent (e.g. a buffer drain handed us a
+  // message and the socket flapped before we could reply), the msgId
+  // sits here until the next `authed` transition flushes it. Without
+  // this, a dropped ack means the server keeps the row, redelivers on
+  // reconnect, libsignal's ratchet has already advanced for that
+  // ciphertext, and the user sees a stream of `[decrypt failed:
+  // decrypt_failed]` bubbles.
+  private readonly pendingAcks = new Set<string>();
 
   constructor(private readonly opts: SpeakeasyWsClientOptions) {
     const Ws = opts.webSocketImpl ?? (globalThis as unknown as { WebSocket?: typeof WebSocket }).WebSocket;
@@ -78,6 +87,31 @@ export class SpeakeasyWsClient {
       throw new Error(`cannot send in state=${this.state}`);
     }
     this.socket.send(JSON.stringify(msg));
+  }
+
+  /**
+   * Send an `ack` for `messageId`, queueing if the WS isn't authed yet.
+   * Idempotent — duplicate calls for the same id collapse, and the id
+   * stays in the queue across reconnects until the server actually
+   * receives the ack.
+   */
+  enqueueAck(messageId: string): void {
+    this.pendingAcks.add(messageId);
+    this.flushAcks();
+  }
+
+  private flushAcks(): void {
+    if (this.state !== 'authed' || !this.socket) return;
+    for (const id of [...this.pendingAcks]) {
+      try {
+        this.socket.send(JSON.stringify({ type: 'ack', message_id: id }));
+        this.pendingAcks.delete(id);
+      } catch {
+        // Mid-flush close — keep the id queued; the next 'authed'
+        // transition tries again.
+        return;
+      }
+    }
   }
 
   /**
@@ -166,6 +200,7 @@ export class SpeakeasyWsClient {
       this.setState('authed');
       this.reconnectAttempts = 0;
       this.startPingLoop();
+      this.flushAcks();
     }
     this.opts.onMessage?.(msg);
     for (const sub of this.subscribers) {

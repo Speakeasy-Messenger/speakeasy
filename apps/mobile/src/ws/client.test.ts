@@ -202,4 +202,53 @@ describe('SpeakeasyWsClient', () => {
     vi.advanceTimersByTime(60);
     await expect(wait).rejects.toThrow(/timeout/);
   });
+
+  it('enqueueAck queues acks across reconnects and flushes on next authed', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    first.message({ type: 'authed', user_id: 'me' });
+
+    // Drop the socket *before* the ack goes out. With the old `send`-
+    // throws-on-not-authed path the ack was lost; the server kept the
+    // row, redelivered, libsignal's ratchet had already advanced, and
+    // the user got a stream of `decrypt_failed` bubbles.
+    first.close();
+    expect(client.getState()).toBe('reconnecting');
+    client.enqueueAck('msg-1');
+    client.enqueueAck('msg-2');
+
+    vi.advanceTimersByTime(100);
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    second.message({ type: 'authed', user_id: 'me' });
+
+    const acks = second.sent
+      .map((s) => JSON.parse(s))
+      .filter((m) => m.type === 'ack')
+      .map((m) => m.message_id);
+    expect(acks).toEqual(['msg-1', 'msg-2']);
+  });
+
+  it('enqueueAck dedupes while queued (multiple calls before authed → one ack)', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const sock = FakeSocket.instances[0]!;
+    sock.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Not yet authed — these should coalesce into one queued entry.
+    client.enqueueAck('msg-1');
+    client.enqueueAck('msg-1');
+    client.enqueueAck('msg-1');
+    sock.message({ type: 'authed', user_id: 'me' });
+
+    const acks = sock.sent.map((s) => JSON.parse(s)).filter((m) => m.type === 'ack');
+    expect(acks).toEqual([{ type: 'ack', message_id: 'msg-1' }]);
+  });
 });

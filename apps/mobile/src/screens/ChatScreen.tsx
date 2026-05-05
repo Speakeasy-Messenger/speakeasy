@@ -83,8 +83,15 @@ export function ChatScreen({ peerId, onBack }: Props) {
   // show this thread.
   useEffect(() => {
     openDirect(myUserId, peerId);
+  }, [myUserId, peerId, openDirect]);
+
+  // Mark read on open AND every time a new inbound message lands while
+  // the screen is mounted — being on the chat means the user has seen
+  // whatever just arrived, so the list-screen unread badge should stay
+  // at 0 instead of bumping to 1+ on each delivery.
+  useEffect(() => {
     markRead(conversationId);
-  }, [myUserId, peerId, openDirect, conversationId, markRead]);
+  }, [conversationId, markRead, messages.length]);
 
   // Inbound direct frames now flow through the App-level message router
   // (see App.tsx) which adds them to the conversations store and acks

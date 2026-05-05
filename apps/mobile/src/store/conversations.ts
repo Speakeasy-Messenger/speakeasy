@@ -154,6 +154,16 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     set((s) => {
       const existing = s.byId[conversationId];
       const c = existing ?? emptyConversation(msg.kind);
+      // Dedupe by message id. The server may redeliver a message whose
+      // ack we sent but didn't reach (e.g. WS flap mid-flush). Without
+      // this guard, every redelivery of the same ciphertext re-runs
+      // libsignal decrypt against an already-advanced ratchet, fails,
+      // and pushes a fresh "[decrypt failed]" bubble. Sender ids are
+      // server-assigned ULIDs for inbound (handler.ts:directMessageId)
+      // and client-generated ULIDs for the optimistic local echo —
+      // they live in disjoint id spaces so this dedupe never drops a
+      // legitimately distinct message.
+      if (c.messages.some((m) => m.id === msg.id)) return s;
       let peerUserId = c.peerUserId;
       if (msg.kind === 'direct' && !peerUserId && msg.from !== 'me') {
         peerUserId = msg.from;
