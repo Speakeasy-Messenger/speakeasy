@@ -193,7 +193,11 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
             </Text>
           )}
 
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? (
+            <Text testID="new-group-error" style={styles.error}>
+              {error}
+            </Text>
+          ) : null}
         </ScrollView>
 
         <View style={styles.bottom}>

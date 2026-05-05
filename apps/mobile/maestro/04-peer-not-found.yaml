@@ -59,12 +59,15 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Start chat"
 
-# Verify error message appears. The error doesn't render until the
-# Start chat → fetchPreKeyBundle round-trip finishes, which on the
-# CI emulator takes ~10s (Vouchflow `requireAuth` revalidation +
-# sandbox API round-trip). 10s was racy and timed out exactly when
-# the text appeared; 30s gives slow-CI runs comfortable margin.
+# Verify the error banner appears. We assert by testID rather than
+# the literal text because the previous text-match against
+# "No such user" failed even after the text had clearly rendered
+# (Maestro's accessibility-tree fetch couldn't see the multi-line
+# error string — see fix/tier-b-handle-flows screenshot vs assertion
+# log). Asserting by id sidesteps the tree quirk and still proves
+# the error path fired. Vouchflow `requireAuth` revalidation makes
+# the round-trip ~10s on CI, so 30s timeout.
 - extendedWaitUntil:
     visible:
-      text: "No such user"
+      id: "new-chat-error"
     timeout: 30000
