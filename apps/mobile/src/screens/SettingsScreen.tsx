@@ -5,6 +5,7 @@ import {
   SafeAreaView,
   ScrollView,
   StyleSheet,
+  Switch,
   Text,
   View,
 } from 'react-native';
@@ -12,6 +13,7 @@ import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useIdentity } from '../store/identity.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
+import { useSettings } from '../store/settings.js';
 
 interface Props {
   onBack: () => void;
@@ -24,6 +26,8 @@ export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
   const resetIdentity = useIdentity((s) => s.reset);
   const resetConversations = useConversations((s) => s.reset);
   const wsState = useConnection((s) => s.state);
+  const inAppNotificationsEnabled = useSettings((s) => s.inAppNotificationsEnabled);
+  const setInAppNotificationsEnabled = useSettings((s) => s.setInAppNotificationsEnabled);
 
   const handleCopyId = () => {
     if (!userId) return;
@@ -40,6 +44,7 @@ export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
         onPress: () => {
           void resetIdentity();
           void resetConversations();
+          void useSettings.getState().reset();
         },
       },
     ]);
@@ -69,6 +74,25 @@ export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
           <Pressable onPress={onShowId} style={styles.primaryBtn}>
             <Text style={styles.primaryBtnText}>Show My ID</Text>
           </Pressable>
+        </View>
+
+        {/* ── Notifications ── */}
+        <Text style={[text.sectionLabel, styles.sectionLabel]}>NOTIFICATIONS</Text>
+        <View style={styles.card}>
+          <View style={styles.toggleRow}>
+            <View style={styles.toggleLabelWrap}>
+              <Text style={styles.toggleLabel}>In-app banners</Text>
+              <Text style={styles.toggleHint}>
+                Show a top banner with sender + preview when a message
+                arrives while you're using the app.
+              </Text>
+            </View>
+            <Switch
+              value={inAppNotificationsEnabled}
+              onValueChange={setInAppNotificationsEnabled}
+              testID="settings-in-app-notifications"
+            />
+          </View>
         </View>
 
         {/* ── Connection ── */}
@@ -186,6 +210,24 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.slate,
     textTransform: 'capitalize',
+  },
+
+  toggleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+  },
+  toggleLabelWrap: { flex: 1 },
+  toggleLabel: {
+    fontFamily: fonts.inter500,
+    fontSize: 14,
+    color: colors.ink,
+  },
+  toggleHint: {
+    fontFamily: fonts.inter400,
+    fontSize: 12,
+    color: colors.slate,
+    marginTop: 2,
   },
 
   divider: {

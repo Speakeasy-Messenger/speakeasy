@@ -1,9 +1,11 @@
 import React from 'react';
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, type NavigationContainerRef } from '@react-navigation/native';
 import {
   createNativeStackNavigator,
   type NativeStackScreenProps,
 } from '@react-navigation/native-stack';
+import { InAppBanner } from '../components/InAppBanner.js';
+import type { BannerData } from '../store/banner.js';
 import { OnboardingScreen } from '../screens/OnboardingScreen.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
@@ -30,12 +32,18 @@ export type RootStack = {
 
 const Stack = createNativeStackNavigator<RootStack>();
 
-export function RootNavigator() {
+interface RootNavigatorProps {
+  navRef: React.RefObject<NavigationContainerRef<RootStack>>;
+  onBannerTap: (target: BannerData['target']) => void;
+}
+
+export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
   const userId = useIdentity((s) => s.userId);
   const openDirect = useConversations((s) => s.openDirect);
 
   return (
-    <NavigationContainer>
+    <NavigationContainer ref={navRef}>
+      <InAppBanner onTap={onBannerTap} />
       <Stack.Navigator
         screenOptions={{ headerShown: false, animation: 'fade', animationDuration: 400 }}
       >

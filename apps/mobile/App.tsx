@@ -1,12 +1,17 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { AppState, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
+import type { NavigationContainerRef } from '@react-navigation/native';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
+import type { RootStack } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
 import { useConversations } from './src/store/conversations.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
+import { useSettings } from './src/store/settings.js';
+import { useUiState } from './src/store/ui.js';
+import { useBanner } from './src/store/banner.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
@@ -31,6 +36,7 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
 export default function App() {
   const userId = useIdentity((s) => s.userId);
   const hydrated = useIdentity((s) => s.hydrated);
+  const navRef = useRef<NavigationContainerRef<RootStack>>(null);
 
   // Pull persisted identity AND conversations off disk on first mount.
   // Renders a blank screen until both are done so the navigator doesn't
@@ -43,6 +49,7 @@ export default function App() {
       void useConversations.getState().hydrate();
       void useGroups.getState().hydrate();
       void useDistributionIds.getState().hydrate();
+      void useSettings.getState().hydrate();
     }
   }, [hydrated]);
 
@@ -92,6 +99,13 @@ export default function App() {
         useDistributionIds.getState().getOrCreate(groupId),
     });
 
+    // Set of msgIds we've already shown a banner for. Survives WS
+    // flaps so a server redelivery doesn't fire a duplicate banner.
+    // (`useConversations.add` dedupes the bubble; this dedupes the
+    // notification too.) Bounded by message volume per session —
+    // pruned only on app restart.
+    const notifiedMsgIds = new Set<string>();
+
     // Single ws.subscribe wired to the unified router. Every screen
     // (ChatScreen, GroupChatScreen, future CommunityScreen) reads from
     // the conversations store; nobody owns the ws subscription anymore.
@@ -114,6 +128,24 @@ export default function App() {
           case 'community':
             return conversationIdForCommunity(to);
         }
+      },
+      notifyInbound: ({ msgId, from, text, target }) => {
+        if (notifiedMsgIds.has(msgId)) return;
+        notifiedMsgIds.add(msgId);
+        if (!useSettings.getState().inAppNotificationsEnabled) return;
+        // Suppress when the user is already on this conversation's screen.
+        const activeConv = useUiState.getState().activeConversationId;
+        const targetConv =
+          target.kind === 'direct'
+            ? conversationIdForDirect(userId, target.peerId)
+            : conversationIdForGroup(target.groupId);
+        if (activeConv === targetConv) return;
+        useBanner.getState().show({
+          id: msgId,
+          sender: from,
+          text,
+          target,
+        });
       },
     });
 
@@ -154,7 +186,16 @@ export default function App() {
         backgroundColor={colors.cream}
       />
       {hydrated ? (
-        <RootNavigator />
+        <RootNavigator
+          navRef={navRef}
+          onBannerTap={(target) => {
+            if (target.kind === 'direct') {
+              navRef.current?.navigate('Chat', { peerId: target.peerId });
+            } else {
+              navRef.current?.navigate('GroupChat', { groupId: target.groupId });
+            }
+          }}
+        />
       ) : (
         <View style={{ flex: 1, backgroundColor: colors.cream }} />
       )}

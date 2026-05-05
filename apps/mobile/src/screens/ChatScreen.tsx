@@ -14,6 +14,7 @@ import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
+import { useUiState } from '../store/ui.js';
 import { useIdentity } from '../store/identity.js';
 import { api, getWsClient, signalProtocol, vouchflow } from '../services.js';
 import { ApiError } from '../api/client.js';
@@ -92,6 +93,13 @@ export function ChatScreen({ peerId, onBack }: Props) {
   useEffect(() => {
     markRead(conversationId);
   }, [conversationId, markRead, messages.length]);
+
+  // Track the active conversation so the in-app message banner can
+  // suppress itself when the user is already staring at this chat.
+  useEffect(() => {
+    useUiState.getState().setActiveConversation(conversationId);
+    return () => useUiState.getState().setActiveConversation(undefined);
+  }, [conversationId]);
 
   // Inbound direct frames now flow through the App-level message router
   // (see App.tsx) which adds them to the conversations store and acks
