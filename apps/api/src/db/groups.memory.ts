@@ -1,8 +1,9 @@
-import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo } from './groups.js';
+import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo, type GroupSummary } from './groups.js';
 
 interface Group {
   createdBy: string;
   members: Set<string>;
+  avatarB64?: string;
 }
 
 export class InMemoryGroupRepo implements GroupRepo {
@@ -42,5 +43,17 @@ export class InMemoryGroupRepo implements GroupRepo {
 
   async listMembers(groupId: string): Promise<string[]> {
     return Array.from(this.groups.get(groupId)?.members ?? []);
+  }
+
+  async findById(groupId: string): Promise<GroupSummary | undefined> {
+    const g = this.groups.get(groupId);
+    if (!g) return undefined;
+    return { id: groupId, createdBy: g.createdBy, avatarB64: g.avatarB64 };
+  }
+
+  async setAvatar(groupId: string, avatarB64: string | undefined): Promise<void> {
+    const g = this.groups.get(groupId);
+    if (!g) return;
+    g.avatarB64 = avatarB64;
   }
 }

@@ -103,6 +103,69 @@ export class ApiClient {
   }
 
   /**
+   * Fetch group metadata (creator + avatar). Member-only; outsiders
+   * get 403. The mobile UI uses this to lazy-load the avatar and to
+   * decide whether to show the "Change photo" affordance (creator
+   * only).
+   */
+  async fetchGroup(
+    deviceToken: string,
+    groupId: string,
+  ): Promise<{ id: string; created_by: string; avatar_b64: string | null }> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}`,
+      { headers: { authorization: `Bearer ${deviceToken}` } },
+    );
+    if (res.status !== 200) {
+      let code: string | undefined;
+      try {
+        const j = (await res.json()) as { error?: string };
+        code = j?.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+    return (await res.json()) as {
+      id: string;
+      created_by: string;
+      avatar_b64: string | null;
+    };
+  }
+
+  /**
+   * Set or clear the group's avatar. Server enforces creator-only;
+   * a non-creator member gets `ApiError(403, 'not_creator')`.
+   */
+  async setGroupAvatar(
+    deviceToken: string,
+    groupId: string,
+    b64: string | null,
+  ): Promise<void> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}/avatar`,
+      {
+        method: 'PUT',
+        headers: {
+          authorization: `Bearer ${deviceToken}`,
+          'content-type': 'application/json',
+        },
+        body: JSON.stringify({ avatar_b64: b64 }),
+      },
+    );
+    if (res.status !== 204) {
+      let code: string | undefined;
+      try {
+        const j = (await res.json()) as { error?: string };
+        code = j?.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+  }
+
+  /**
    * Set or clear the caller's avatar. `b64` is a base64-encoded JPEG;
    * pass `null` (or empty) to clear. Server caps payload at 200KB on
    * the wire — the picker downsizes to ~256px well under that.

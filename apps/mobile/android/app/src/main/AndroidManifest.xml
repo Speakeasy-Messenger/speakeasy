@@ -1,6 +1,11 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Optional. Used by the InviteFriendsScreen to populate a list
+         of contacts the user can tap to share their @handle with.
+         Discovery (matching contacts to existing speakeasy users) is
+         deliberately NOT done — contact data never leaves the device. -->
+    <uses-permission android:name="android.permission.READ_CONTACTS" />
 
     <application
       android:name=".MainApplication"

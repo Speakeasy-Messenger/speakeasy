@@ -22,9 +22,10 @@ import { api } from '../services.js';
 interface Props {
   onBack: () => void;
   onOpenDiagnostics: () => void;
+  onInviteFriends: () => void;
 }
 
-export function SettingsScreen({ onBack, onOpenDiagnostics }: Props) {
+export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: Props) {
   const userId = useIdentity((s) => s.userId);
   const resetIdentity = useIdentity((s) => s.reset);
   const resetConversations = useConversations((s) => s.reset);
@@ -198,6 +199,14 @@ export function SettingsScreen({ onBack, onOpenDiagnostics }: Props) {
         {/* ── Actions ── */}
         <Text style={[text.sectionLabel, styles.sectionLabel]}>ACTIONS</Text>
         <View style={styles.card}>
+          <Pressable
+            onPress={onInviteFriends}
+            style={styles.primaryBtn}
+            testID="settings-invite-friends"
+          >
+            <Text style={styles.primaryBtnText}>Invite friends</Text>
+          </Pressable>
+          <View style={styles.divider} />
           <Pressable onPress={onOpenDiagnostics} style={styles.primaryBtn}>
             <Text style={styles.primaryBtnText}>Diagnostics</Text>
           </Pressable>
