@@ -15,6 +15,7 @@ import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
+import { useUiState } from '../store/ui.js';
 import { useGroups } from '../store/groups.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
 import { useIdentity } from '../store/identity.js';
@@ -83,6 +84,13 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
   useEffect(() => {
     markRead(groupId);
   }, [groupId, markRead, messages.length]);
+
+  // Track the active conversation so the in-app message banner suppresses
+  // itself when the user is already on this group.
+  useEffect(() => {
+    useUiState.getState().setActiveConversation(groupId);
+    return () => useUiState.getState().setActiveConversation(undefined);
+  }, [groupId]);
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);

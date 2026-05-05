@@ -41,6 +41,22 @@ export interface MessageRouterDeps {
     senderId: string,
     to: string,
   ) => string;
+  /**
+   * Fires for each successfully-decrypted inbound message. Caller is
+   * responsible for whatever foreground-notification UX it wants
+   * (in-app banner, OS notification, ignore on the active chat, etc.)
+   * — the router just hands over the decoded text + routing target.
+   * Skipped on decrypt failures (the bubble already says
+   * `[decrypt failed: …]`; surfacing that as a notification is noise).
+   */
+  notifyInbound?: (n: {
+    msgId: string;
+    from: string;
+    text: string;
+    target:
+      | { kind: 'direct'; peerId: string }
+      | { kind: 'group'; groupId: string };
+  }) => void;
   /** Optional structured logger; defaults to console. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
@@ -135,6 +151,10 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           void (async () => {
             try {
               let bubble: string;
+              // `decryptedOk` gates the inbound notification — we don't
+              // want to drop "[decrypt failed: …]" placeholders into a
+              // banner toast.
+              let decryptedOk = false;
               // Self-DM round-trip — sender already has the plaintext on
               // the optimistic bubble; the wire payload was utf-8 (no
               // libsignal encrypt). Decode directly instead of running
@@ -152,6 +172,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                     ciphertext,
                   );
                   bubble = utf8FromBytes(plaintext);
+                  decryptedOk = true;
                   diag('router', 'message: signal decrypted', {
                     ...frameDesc,
                     textPreview: bubble.slice(0, 24),
@@ -204,6 +225,14 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               }
               deps.ws.enqueueAck(frame.message_id);
               diag('router', 'ack queued', { msgId: frame.message_id });
+              if (decryptedOk && frame.from !== deps.myUserId) {
+                deps.notifyInbound?.({
+                  msgId: frame.message_id,
+                  from: frame.from,
+                  text: bubble,
+                  target: { kind: 'direct', peerId: frame.from },
+                });
+              }
             } catch (err) {
               // Catch-all so unhandled rejections never disappear into
               // the WS subscriber's outer try/catch.
@@ -220,12 +249,14 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           // ciphertext envelope). Bucket directly into that group.
           void (async () => {
             let bubble: string;
+            let decryptedOk = false;
             try {
               const plaintext = await deps.groupMessaging.decryptFromGroupMember(
                 frame.from,
                 ciphertext,
               );
               bubble = utf8FromBytes(plaintext);
+              decryptedOk = true;
             } catch (err) {
               bubble = decodeBubble(err as Error);
             }
@@ -238,6 +269,14 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               stage: 'sent',
             });
             deps.ws.enqueueAck(frame.message_id);
+            if (decryptedOk && frame.from !== deps.myUserId) {
+              deps.notifyInbound?.({
+                msgId: frame.message_id,
+                from: frame.from,
+                text: bubble,
+                target: { kind: 'group', groupId: frame.conversation_id },
+              });
+            }
           })();
         } else {
           // community — not yet wired into a screen; ack so the buffer drains.
