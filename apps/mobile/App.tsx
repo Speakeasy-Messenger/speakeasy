@@ -10,6 +10,7 @@ import { useConversations } from './src/store/conversations.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
+import { useProfiles } from './src/store/profiles.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
@@ -50,6 +51,7 @@ export default function App() {
       void useGroups.getState().hydrate();
       void useDistributionIds.getState().hydrate();
       void useSettings.getState().hydrate();
+      void useProfiles.getState().hydrate();
     }
   }, [hydrated]);
 

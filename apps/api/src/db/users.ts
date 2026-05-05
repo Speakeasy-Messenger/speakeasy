@@ -17,6 +17,8 @@ export interface UserSummary {
   id: string;
   publicKey: Buffer;
   createdAt: Date;
+  /** base64 JPEG, ~256px square, plaintext. Undefined = no avatar set. */
+  avatarB64?: string;
 }
 
 export interface UserRepo {
@@ -43,4 +45,11 @@ export interface UserRepo {
    * that binding here). Returns undefined if no user has this token.
    */
   findUserIdByDeviceToken(deviceToken: string): Promise<string | undefined>;
+
+  /**
+   * Set or clear (`undefined`) the user's avatar. Caller is
+   * responsible for size + content sniff before calling. Idempotent;
+   * always upserts.
+   */
+  setAvatar(userId: string, avatarB64: string | undefined): Promise<void>;
 }

@@ -1,6 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
+import { Avatar } from './Avatar.js';
 import { colors, fonts, radius, space } from '../theme/index.js';
 import { useBanner } from '../store/banner.js';
 
@@ -67,11 +68,7 @@ export function InAppBanner({ onTap }: Props) {
         style={styles.card}
         testID="in-app-banner"
       >
-        <View style={styles.avatar}>
-          <Text style={styles.avatarText}>
-            {current.sender.slice(0, 1).toUpperCase()}
-          </Text>
-        </View>
+        <Avatar userId={current.sender} size={36} />
         <View style={styles.body}>
           <Text style={styles.sender} numberOfLines={1}>
             @{current.sender}

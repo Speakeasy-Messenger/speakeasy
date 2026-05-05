@@ -27,6 +27,13 @@ export const users = pgTable(
      * real Vouchflow doesn't track our internal id.
      */
     deviceToken: text('device_token').notNull(),
+    /**
+     * Optional avatar — base64-encoded JPEG, square, downsized client-
+     * side to ~256px. Plaintext for the alpha (per-user profile-key
+     * encryption is a separate v2 effort). Nullable so users without
+     * one render initials.
+     */
+    avatarB64: text('avatar_b64'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -51,6 +58,8 @@ export const groups = pgTable('groups', {
   createdBy: text('created_by')
     .notNull()
     .references(() => users.id),
+  /** See `users.avatar_b64` — plaintext base64 JPEG, nullable. */
+  avatarB64: text('avatar_b64'),
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

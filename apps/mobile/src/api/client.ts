@@ -103,6 +103,67 @@ export class ApiClient {
   }
 
   /**
+   * Set or clear the caller's avatar. `b64` is a base64-encoded JPEG;
+   * pass `null` (or empty) to clear. Server caps payload at 200KB on
+   * the wire — the picker downsizes to ~256px well under that.
+   */
+  async setAvatar(deviceToken: string, b64: string | null): Promise<void> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/users/me/avatar`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${deviceToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ avatar_b64: b64 }),
+    });
+    if (res.status !== 204) {
+      let code: string | undefined;
+      try {
+        const j = (await res.json()) as { error?: string };
+        code = j?.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+  }
+
+  /**
+   * Fetch a peer's public-key + avatar etc. The conversations list
+   * uses this to lazy-load other users' avatars (the data is
+   * server-side, plaintext for the alpha).
+   */
+  async fetchUser(
+    deviceToken: string,
+    userId: string,
+  ): Promise<{
+    id: string;
+    public_key: string;
+    created_at: string;
+    avatar_b64: string | null;
+  }> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/users/${encodeURIComponent(userId)}`, {
+      headers: { authorization: `Bearer ${deviceToken}` },
+    });
+    if (res.status !== 200) {
+      let code: string | undefined;
+      try {
+        const j = (await res.json()) as { error?: string };
+        code = j?.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+    return (await res.json()) as {
+      id: string;
+      public_key: string;
+      created_at: string;
+      avatar_b64: string | null;
+    };
+  }
+
+  /**
    * Check whether a candidate handle is available for enrollment.
    * Returns the same shape as the server: `{available, reason?}` where
    * `reason` is one of `'invalid' | 'reserved' | 'taken'`.

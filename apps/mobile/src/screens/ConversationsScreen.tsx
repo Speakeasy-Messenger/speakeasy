@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { Avatar } from '../components/Avatar.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
@@ -122,9 +123,7 @@ export function ConversationsScreen({
         renderItem={({ item }) =>
           item.kind === 'direct' ? (
             <Pressable onPress={() => onOpenChat(item.peerUserId)} style={styles.card}>
-              <View style={styles.avatar}>
-                <Text style={styles.avatarText}>{initials(item.peerUserId)}</Text>
-              </View>
+              <Avatar userId={item.peerUserId} size={40} />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
                   <Text style={styles.rowName} numberOfLines={1}>@{item.peerUserId}</Text>
