@@ -97,7 +97,6 @@ export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
               {({ navigation }: NativeStackScreenProps<RootStack, 'Settings'>) => (
                 <SettingsScreen
                   onBack={() => navigation.goBack()}
-                  onShowId={() => navigation.navigate('IdReveal', { userId: userId! })}
                   onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
                 />
               )}
