@@ -1,5 +1,14 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Platform,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  TextInput,
+  View,
+} from 'react-native';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../components/Button.js';
 import { IconMark } from '../components/IconMark.js';
@@ -211,64 +220,80 @@ export function OnboardingScreen({ onEnrolled }: Props) {
 
   return (
     <SafeAreaView testID="onboarding-screen" style={styles.root}>
-      <View style={styles.header}>
-        <IconMark size={120} animate />
-        <Wordmark variant="hero" subtitle={SLOGAN_PLACEHOLDER} />
-      </View>
-      <View style={styles.principles}>
-        {PRINCIPLES.map((p) => (
-          <View key={p} style={styles.principleRow}>
-            <View style={styles.bullet} />
-            <Text style={[text.subtitle, styles.principleText]}>{p}</Text>
-          </View>
-        ))}
-      </View>
-      <View style={styles.handleSection}>
-        <Text style={styles.handleLabel}>Choose your handle</Text>
-        <View
-          style={[
-            styles.handleRow,
-            availability.kind === 'available' && styles.handleRowOk,
-            (availability.kind === 'taken' ||
-              availability.kind === 'reserved' ||
-              availability.kind === 'localInvalid') &&
-              styles.handleRowBad,
-          ]}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
+      >
+        {/* Top section scrolls when the keyboard pinches the screen, so the
+            handle input + status text + Continue button never overlap each
+            other (alpha-0.4.8 had a `flex: 1, justifyContent: 'flex-end'`
+            on the bottom row that drew Continue on top of the status). */}
+        <ScrollView
+          contentContainerStyle={styles.scrollContent}
+          keyboardShouldPersistTaps="handled"
         >
-          <Text style={styles.atPrefix}>@</Text>
-          <TextInput
-            value={handle}
-            onChangeText={(t) => setHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
-            placeholder="yourname"
-            placeholderTextColor={colors.slate}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoComplete="off"
-            spellCheck={false}
-            maxLength={20}
-            editable={!busy}
-            style={styles.handleInput}
-            testID="onboarding-handle"
+          <View style={styles.header}>
+            <IconMark size={120} animate />
+            <Wordmark variant="hero" subtitle={SLOGAN_PLACEHOLDER} />
+          </View>
+          <View style={styles.principles}>
+            {PRINCIPLES.map((p) => (
+              <View key={p} style={styles.principleRow}>
+                <View style={styles.bullet} />
+                <Text style={[text.subtitle, styles.principleText]}>{p}</Text>
+              </View>
+            ))}
+          </View>
+          <View style={styles.handleSection}>
+            <Text style={styles.handleLabel}>Choose your handle</Text>
+            <View
+              style={[
+                styles.handleRow,
+                availability.kind === 'available' && styles.handleRowOk,
+                (availability.kind === 'taken' ||
+                  availability.kind === 'reserved' ||
+                  availability.kind === 'localInvalid') &&
+                  styles.handleRowBad,
+              ]}
+            >
+              <Text style={styles.atPrefix}>@</Text>
+              <TextInput
+                value={handle}
+                onChangeText={(t) =>
+                  setHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, ''))
+                }
+                placeholder="yourname"
+                placeholderTextColor={colors.slate}
+                autoCapitalize="none"
+                autoCorrect={false}
+                autoComplete="off"
+                spellCheck={false}
+                maxLength={20}
+                editable={!busy}
+                style={styles.handleInput}
+                testID="onboarding-handle"
+              />
+            </View>
+            <Text
+              style={[styles.handleStatus, statusColor(availability)]}
+              testID="onboarding-handle-status"
+            >
+              {statusMessage(availability, handle)}
+            </Text>
+          </View>
+        </ScrollView>
+        <View style={styles.bottom}>
+          {error ? <Text testID="onboarding-error" style={styles.error}>{error}</Text> : null}
+          <Button
+            label="Continue"
+            onPress={handleContinue}
+            loading={busy}
+            disabled={availability.kind !== 'available' || busy}
+            tone="primary"
+            testID="onboarding-continue"
           />
         </View>
-        <Text
-          style={[styles.handleStatus, statusColor(availability)]}
-          testID="onboarding-handle-status"
-        >
-          {statusMessage(availability, handle)}
-        </Text>
-      </View>
-      <View style={styles.bottom}>
-        {error ? <Text testID="onboarding-error" style={styles.error}>{error}</Text> : null}
-        <Button
-          label="Continue"
-          onPress={handleContinue}
-          loading={busy}
-          disabled={availability.kind !== 'available' || busy}
-          tone="primary"
-          testID="onboarding-continue"
-        />
-      </View>
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -320,8 +345,15 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.cream, padding: space.lg },
-  header: { alignItems: 'center', gap: space.md, marginTop: space.xl },
+  root: { flex: 1, backgroundColor: colors.cream },
+  flex: { flex: 1 },
+  scrollContent: {
+    flexGrow: 1,
+    paddingHorizontal: space.lg,
+    paddingTop: space.lg,
+    paddingBottom: space.md,
+  },
+  header: { alignItems: 'center', gap: space.md, marginTop: space.lg },
   principles: { gap: space.sm, paddingHorizontal: space.md, marginTop: space.lg },
   principleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   bullet: {
@@ -331,7 +363,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   principleText: { color: colors.ink, flex: 1 },
-  handleSection: { gap: space.xs, marginTop: space.xl, paddingHorizontal: space.md },
+  handleSection: { gap: space.xs, marginTop: space.lg, paddingHorizontal: space.md },
   handleLabel: {
     fontFamily: fonts.inter500,
     fontSize: 13,
@@ -367,7 +399,12 @@ const styles = StyleSheet.create({
     fontSize: 12,
     paddingHorizontal: space.xs,
   },
-  bottom: { flex: 1, justifyContent: 'flex-end', gap: space.sm },
+  bottom: {
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.lg,
+    gap: space.sm,
+  },
   error: {
     color: colors.ink,
     fontFamily: fonts.inter400,

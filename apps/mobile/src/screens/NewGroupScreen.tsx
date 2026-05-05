@@ -44,13 +44,13 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
 
   function parseMembers(raw: string): string[] {
-    // Lowercase + canonicalise hyphens; split on any whitespace, comma,
-    // or semicolon; drop self; dedupe.
+    // Split on any whitespace, comma, semicolon, or `@` (so a paste of
+    // `@alice @bob` works the same as `alice bob`). Lowercase, drop a
+    // leading `@` if the user typed it explicitly, drop self, dedupe.
     const tokens = raw
       .toLowerCase()
-      .replace(/\s+/g, ' ')
       .split(/[,\s;]+/)
-      .map((t) => t.trim())
+      .map((t) => t.trim().replace(/^@+/, ''))
       .filter((t) => t.length > 0);
     const seen = new Set<string>();
     const out: string[] = [];
@@ -76,7 +76,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
     }
     const members = parseMembers(membersInput);
     if (members.length === 0) {
-      setError('Add at least one member by their three-word ID.');
+      setError('Add at least one member by their @handle.');
       return;
     }
     setError(undefined);
@@ -170,7 +170,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
 
           <Text style={[text.subtitle, styles.label, styles.labelGap]}>Members</Text>
           <Text style={[text.footnote, styles.hint]}>
-            One ID per line. Format: word-word-word.
+            One handle per line. Spaces, commas, or `@` separators all work.
           </Text>
           <TextInput
             testID="new-group-members-input"
@@ -180,7 +180,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
               setMembersInput(s);
               if (error) setError(undefined);
             }}
-            placeholder={'silent-golden-hawk\nplanetary-timid-mire'}
+            placeholder={'@alice\n@bob'}
             placeholderTextColor={colors.slate}
             autoCapitalize="none"
             autoCorrect={false}

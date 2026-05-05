@@ -17,11 +17,10 @@ import { useSettings } from '../store/settings.js';
 
 interface Props {
   onBack: () => void;
-  onShowId: () => void;
   onOpenDiagnostics: () => void;
 }
 
-export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
+export function SettingsScreen({ onBack, onOpenDiagnostics }: Props) {
   const userId = useIdentity((s) => s.userId);
   const resetIdentity = useIdentity((s) => s.reset);
   const resetConversations = useConversations((s) => s.reset);
@@ -71,9 +70,6 @@ export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
               <Text style={styles.copyBtnText}>Copy ID</Text>
             </Pressable>
           </View>
-          <Pressable onPress={onShowId} style={styles.primaryBtn}>
-            <Text style={styles.primaryBtnText}>Show My ID</Text>
-          </Pressable>
         </View>
 
         {/* ── Notifications ── */}
