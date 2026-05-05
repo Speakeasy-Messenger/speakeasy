@@ -89,6 +89,19 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
     set.add(peer);
   }
 
+  // The SKDM bootstrap path runs an HTTP `ensureSessionWithPeer` per
+  // peer (~10s on sandbox), and that gap is plenty of time for the WS
+  // to flap. Re-confirming `authed` immediately before each `ws.send`
+  // means a transient drop turns into a brief wait instead of a thrown
+  // "cannot send in state=reconnecting" that bubbles up as a failed
+  // user message bubble.
+  async function sendOrWait(msg: Parameters<typeof deps.ws.send>[0]): Promise<void> {
+    if (deps.ws.getState() !== 'authed') {
+      await deps.ws.waitForAuthed();
+    }
+    deps.ws.send(msg);
+  }
+
   return {
     async sendGroupMessage(opts: SendGroupMessageOpts): Promise<void> {
       const distributionId = deps.getOrCreateDistributionId(opts.groupId);
@@ -112,7 +125,7 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
             peerUserId: peer,
           });
           const wrapped = await deps.signalProtocol.encrypt(peer, skdm);
-          deps.ws.send({
+          await sendOrWait({
             type: 'skdm',
             to: peer,
             group_id: opts.groupId,
@@ -124,7 +137,7 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
 
       // Now the actual group message.
       const ciphertext = await deps.groupMessaging.encryptForGroup(distributionId, opts.plaintext);
-      deps.ws.send({
+      await sendOrWait({
         type: 'message',
         to: opts.groupId,
         ciphertext: bytesToB64(ciphertext),
@@ -138,8 +151,10 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
       const skdmBytes = await deps.signalProtocol.decrypt(frame.from, wrapped);
       // Install the SenderKey for (sender, distributionId).
       await deps.groupMessaging.processSenderKeyDistribution(frame.from, skdmBytes);
-      // Ack so the server deletes the buffered row.
-      deps.ws.send({ type: 'ack', message_id: frame.message_id });
+      // Ack so the server deletes the buffered row. Use the WS
+      // client's queued-ack path so a flap mid-handle doesn't lose
+      // the ack and trigger a server redelivery loop.
+      deps.ws.enqueueAck(frame.message_id);
     },
 
     reset(): void {

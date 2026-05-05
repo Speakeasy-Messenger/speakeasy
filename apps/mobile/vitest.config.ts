@@ -28,5 +28,12 @@ export default defineConfig({
   test: {
     include: ['src/**/*.test.ts'],
     environment: 'node',
+    // The aliased AsyncStorage stub keeps state in a module-level
+    // `memory` Map. Vitest's default `isolate: true` re-imports
+    // modules per test file so each file starts with a fresh stub —
+    // pinning it explicitly so a future config tweak doesn't silently
+    // turn it off and re-introduce flake between `store/*.test.ts`
+    // and `integration/reported-bugs.test.ts`.
+    isolate: true,
   },
 });

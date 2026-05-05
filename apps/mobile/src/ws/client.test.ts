@@ -115,6 +115,65 @@ describe('SpeakeasyWsClient', () => {
     expect(JSON.parse(second.sent[0]!)).toEqual({ type: 'auth', token: 'tok-1' });
   });
 
+  it('connect() during reconnecting is a no-op (lets the pending timer fire)', async () => {
+    // alpha-0.4.7 reproducer: server's `connections.add` kicked an
+    // existing socket whenever the client opened a fresh one mid-
+    // reconnect, and the close-event handler scheduled YET ANOTHER
+    // reconnect on the orphaned socket. End state was a 1Hz
+    // replace-loop visible in the server log. The fix: connect()
+    // must not double-up while a reconnect timer is pending.
+    const { client } = makeClient();
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    first.message({ type: 'authed', user_id: 'me' });
+    first.close();
+    expect(client.getState()).toBe('reconnecting');
+
+    // External code calls connect() again (e.g. AppState 'active'
+    // event). Pre-fix this opened a new socket immediately while the
+    // reconnect timer was still pending → two parallel sockets.
+    client.connect();
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    // The pending reconnect timer fires normally and opens exactly
+    // one new socket.
+    vi.advanceTimersByTime(100);
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it('a stale socket close is ignored once a newer socket exists', async () => {
+    // Defense in depth for the same alpha-0.4.7 issue: even if a
+    // stale socket's close fires after `this.socket` already points
+    // somewhere else (e.g. server kicked an old one with code 4000
+    // 'replaced' and the message arrived after we'd already opened a
+    // fresh socket), we must NOT nuke the new socket's state or
+    // schedule a reconnect.
+    const { client } = makeClient();
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    first.message({ type: 'authed', user_id: 'me' });
+    first.close();
+    vi.advanceTimersByTime(100);
+
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    second.message({ type: 'authed', user_id: 'me' });
+    expect(client.getState()).toBe('authed');
+
+    // Late close from `first` arrives — the listener should ignore it
+    // because `this.socket` no longer points at `first`.
+    first.fire('close', {});
+    expect(client.getState()).toBe('authed');
+  });
+
   it('does not reconnect after explicit close()', async () => {
     const { client } = makeClient();
     client.connect();
