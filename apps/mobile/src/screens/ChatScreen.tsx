@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
+import { Avatar } from '../components/Avatar.js';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
@@ -235,6 +236,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
             <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
           </Pressable>
         ) : null}
+        <Avatar userId={peerId} size={32} />
         <Text style={[text.heroBody, styles.peer]}>@{peerId}</Text>
       </View>
       <KeyboardAvoidingView

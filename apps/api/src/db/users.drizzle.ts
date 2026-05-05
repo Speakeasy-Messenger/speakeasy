@@ -42,12 +42,20 @@ export class DrizzleUserRepo implements UserRepo {
         id: users.id,
         publicKey: users.publicKey,
         createdAt: users.createdAt,
+        avatarB64: users.avatarB64,
       })
       .from(users)
       .where(eq(users.id, userId))
       .limit(1);
     const row = rows[0];
-    return row ? { id: row.id, publicKey: row.publicKey, createdAt: row.createdAt } : undefined;
+    return row
+      ? {
+          id: row.id,
+          publicKey: row.publicKey,
+          createdAt: row.createdAt,
+          avatarB64: row.avatarB64 ?? undefined,
+        }
+      : undefined;
   }
 
   async findUserIdByDeviceToken(deviceToken: string): Promise<string | undefined> {
@@ -58,5 +66,13 @@ export class DrizzleUserRepo implements UserRepo {
       .where(eq(users.deviceToken, deviceToken))
       .limit(1);
     return rows[0]?.id;
+  }
+
+  async setAvatar(userId: string, avatarB64: string | undefined): Promise<void> {
+    const db = getDb();
+    await db
+      .update(users)
+      .set({ avatarB64: avatarB64 ?? null })
+      .where(eq(users.id, userId));
   }
 }
