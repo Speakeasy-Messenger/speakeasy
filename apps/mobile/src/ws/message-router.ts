@@ -202,15 +202,8 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 });
                 return;
               }
-              try {
-                deps.ws.send({ type: 'ack', message_id: frame.message_id });
-                diag('router', 'ack sent', { msgId: frame.message_id });
-              } catch (err) {
-                diag('router', 'ack send FAILED', {
-                  msgId: frame.message_id,
-                  err: String(err),
-                });
-              }
+              deps.ws.enqueueAck(frame.message_id);
+              diag('router', 'ack queued', { msgId: frame.message_id });
             } catch (err) {
               // Catch-all so unhandled rejections never disappear into
               // the WS subscriber's outer try/catch.
@@ -244,19 +237,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               sentAt: Date.now(),
               stage: 'sent',
             });
-            try {
-              deps.ws.send({ type: 'ack', message_id: frame.message_id });
-            } catch {
-              /* ignore */
-            }
+            deps.ws.enqueueAck(frame.message_id);
           })();
         } else {
           // community — not yet wired into a screen; ack so the buffer drains.
-          try {
-            deps.ws.send({ type: 'ack', message_id: frame.message_id });
-          } catch {
-            /* ignore */
-          }
+          deps.ws.enqueueAck(frame.message_id);
           log('dropping community message — UI not yet wired', {
             from: frame.from,
             messageId: frame.message_id,

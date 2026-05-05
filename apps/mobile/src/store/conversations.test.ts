@@ -32,6 +32,19 @@ describe('useConversations', () => {
     ]);
   });
 
+  it('add dedupes by message id (server redelivery should not duplicate)', () => {
+    // Server may redeliver a message whose ack was lost in a WS flap.
+    // Without dedupe, each redelivery decrypts against an already-
+    // advanced ratchet, fails, and pushes a fresh "[decrypt failed]"
+    // bubble — the alpha-0.4.4 reproducer that motivated this guard.
+    useConversations.getState().add(CONV, baseMsg('m1'));
+    useConversations.getState().add(CONV, { ...baseMsg('m1'), text: 'redelivery' });
+    useConversations.getState().add(CONV, { ...baseMsg('m1'), text: 'another redelivery' });
+    const msgs = useConversations.getState().byId[CONV]!.messages;
+    expect(msgs).toHaveLength(1);
+    expect(msgs[0]!.text).toBe('hi');
+  });
+
   it('setStage updates a single message', () => {
     useConversations.getState().add(CONV, baseMsg('m1'));
     useConversations.getState().add(CONV, baseMsg('m2'));
