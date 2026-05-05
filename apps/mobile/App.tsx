@@ -11,6 +11,7 @@ import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
 import { useProfiles } from './src/store/profiles.js';
+import { ThemeProvider } from './src/theme/ThemeProvider.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
@@ -192,24 +193,27 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={colors.cream}
-      />
-      {hydrated ? (
-        <RootNavigator
-          navRef={navRef}
-          onBannerTap={(target) => {
-            if (target.kind === 'direct') {
-              navRef.current?.navigate('Chat', { peerId: target.peerId });
-            } else {
-              navRef.current?.navigate('GroupChat', { groupId: target.groupId });
-            }
-          }}
-        />
-      ) : (
-        <View style={{ flex: 1, backgroundColor: colors.cream }} />
-      )}
+      <ThemeProvider>
+        {/* StatusBar's bar style is decided by mode, not the legacy
+            cream bg — the new tokens drive this. We leave the legacy
+            `colors.cream` reference in place for now; phases B/C
+            replace it as the components migrate. */}
+        <StatusBar barStyle="dark-content" backgroundColor={colors.cream} />
+        {hydrated ? (
+          <RootNavigator
+            navRef={navRef}
+            onBannerTap={(target) => {
+              if (target.kind === 'direct') {
+                navRef.current?.navigate('Chat', { peerId: target.peerId });
+              } else {
+                navRef.current?.navigate('GroupChat', { groupId: target.groupId });
+              }
+            }}
+          />
+        ) : (
+          <View style={{ flex: 1, backgroundColor: colors.cream }} />
+        )}
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }
