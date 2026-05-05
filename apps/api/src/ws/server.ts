@@ -10,6 +10,7 @@ import type { CommunityRepo } from '../db/communities.js';
 import type { AckRouter } from './ack-router.js';
 import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
+import type { UserRepo } from '../db/users.js';
 
 export interface AttachWsOptions {
   validator: Validator;
@@ -22,6 +23,7 @@ export interface AttachWsOptions {
   ackRouter: AckRouter;
   push: PushProvider;
   devices: DevicesRepo;
+  users: UserRepo;
   /** Path on which to accept upgrades. Default: /ws */
   path?: string;
 }
@@ -60,6 +62,7 @@ export function attachWebsocket(
         ackRouter: opts.ackRouter,
         push: opts.push,
         devices: opts.devices,
+        users: opts.users,
         log: app.log,
       });
     });

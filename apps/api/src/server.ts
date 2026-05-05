@@ -214,6 +214,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       ackRouter,
       push,
       devices,
+      users: repo,
     });
     if (redis) {
       app.addHook('onClose', async () => {

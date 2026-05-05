@@ -59,12 +59,23 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
   }
 
   return (frame: WsServerMsg) => {
-    diag('router', `frame: ${frame.type}`, {
-      ...((frame as { from?: string }).from ? { from: (frame as { from: string }).from } : {}),
-      ...((frame as { msg_type?: string }).msg_type
-        ? { msg_type: (frame as { msg_type: string }).msg_type }
-        : {}),
-    });
+    const breadcrumb: Record<string, unknown> = {};
+    const f = frame as {
+      from?: string;
+      msg_type?: string;
+      code?: string;
+      message?: string;
+    };
+    if (f.from) breadcrumb.from = f.from;
+    if (f.msg_type) breadcrumb.msg_type = f.msg_type;
+    // Surface server-side error reasons on the on-device Diagnostics
+    // screen — without these, error frames showed up as `error {}` and
+    // gave the user nothing to act on (or report).
+    if (frame.type === 'error') {
+      breadcrumb.code = f.code;
+      breadcrumb.message = f.message;
+    }
+    diag('router', `frame: ${frame.type}`, breadcrumb);
     switch (frame.type) {
       case 'authed':
       case 'pong':

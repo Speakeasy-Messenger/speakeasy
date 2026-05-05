@@ -49,6 +49,7 @@ let groupRepo: InMemoryGroupRepo;
 let communityRepo: InMemoryCommunityRepo;
 let pushProvider: MockPushProvider;
 let devicesRepo: InMemoryDevicesRepo;
+let userRepo: InMemoryUserRepo;
 const openSockets = new Set<WebSocket>();
 
 function makeValidator(): MockValidator {
@@ -75,9 +76,10 @@ beforeEach(async () => {
   communityRepo = new InMemoryCommunityRepo();
   pushProvider = new MockPushProvider();
   devicesRepo = new InMemoryDevicesRepo();
+  userRepo = new InMemoryUserRepo();
   app = await buildServer({
     validator: makeValidator(),
-    userRepo: new InMemoryUserRepo(),
+    userRepo,
     devicesRepo,
     connections,
     presence,
@@ -141,6 +143,33 @@ describe('ws auth handshake', () => {
     ws.send(JSON.stringify({ type: 'auth', token: 'dvt_unenrolled' }));
     const err = (await nextMsg(ws)) as { type: string; code: string };
     expect(err.code).toBe('not_enrolled');
+  });
+
+  // Real Vouchflow's ValidatedAttestation has no userId — the same is
+  // true for `MockValidator.alwaysSucceeds()` used by the alpha sandbox
+  // (VOUCHFLOW_USE_MOCK=1). HTTP requireAuth resolves the binding via
+  // the user repo's deviceToken→userId index; the WS handler must do
+  // the same, otherwise WS auth always fails `not_enrolled` even
+  // though HTTP works and the alpha client spins in a reconnect loop.
+  it('falls back to userRepo when validator returns no userId', async () => {
+    await userRepo.tryCreate({
+      userId: 'enrolled-user-id',
+      deviceToken: 'dvt_unenrolled',
+      publicKey: Buffer.from([0]),
+      bundle: {
+        registrationId: 1,
+        signedPreKeyId: 1,
+        signedPreKey: '',
+        signedPreKeySig: '',
+        preKeys: [],
+      },
+    });
+    const ws = await open();
+    ws.send(JSON.stringify({ type: 'auth', token: 'dvt_unenrolled' }));
+    const ok = (await nextMsg(ws)) as { type: string; user_id: string };
+    expect(ok.type).toBe('authed');
+    expect(ok.user_id).toBe('enrolled-user-id');
+    expect(connections.getDevices('enrolled-user-id')).toHaveLength(1);
   });
 
   it('accepts a valid token and registers the connection', async () => {
