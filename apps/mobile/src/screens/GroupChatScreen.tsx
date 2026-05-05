@@ -14,7 +14,7 @@ import { newMessageId } from '@speakeasy/shared';
 import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
-import { useConversations } from '../store/conversations.js';
+import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
 import { useIdentity } from '../store/identity.js';
@@ -28,6 +28,13 @@ interface Props {
   groupId: string;
   onBack?: () => void;
 }
+
+// Stable fallback for the messages selector. A fresh `[]` literal here
+// would make the useSyncExternalStore snapshot non-idempotent and trip
+// React's "Maximum update depth exceeded" loop the first time you open
+// a group you created but haven't messaged in yet (no conversations-store
+// entry exists for it, so the `?? []` branch fires).
+const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
  * Group chat screen — Phase 5e.
@@ -52,7 +59,7 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
     throw new Error('GroupChatScreen rendered without an enrolled identity');
   }
   const group = useGroups((s) => s.byId[groupId]);
-  const messages = useConversations((s) => s.byId[groupId]?.messages ?? []);
+  const messages = useConversations((s) => s.byId[groupId]?.messages ?? EMPTY_MESSAGES);
   const ttl = useConversations((s) => s.byId[groupId]?.ttl ?? 'week');
   const ttlSecondsFor = useConversations((s) => s.ttlSecondsFor);
   const add = useConversations((s) => s.add);
@@ -61,11 +68,16 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
   const setTtl = useConversations((s) => s.setTtl);
   const setPersistence = useConversations((s) => s.setPersistence);
   const markRead = useConversations((s) => s.markRead);
+  const openGroup = useConversations((s) => s.openGroup);
 
-  // Mark group conversation as read on open
+  // Ensure the conversations-store entry exists *before* markRead, which
+  // is a no-op when `byId[groupId]` is undefined. Without this, opening a
+  // freshly-created group (no messages yet) would never clear its unread
+  // state.
   useEffect(() => {
+    openGroup(groupId);
     markRead(groupId);
-  }, [groupId, markRead]);
+  }, [groupId, openGroup, markRead]);
 
   const [input, setInput] = useState('');
   const listRef = useRef<FlatList>(null);

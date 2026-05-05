@@ -117,6 +117,39 @@ describe('useConversations', () => {
     expect(a).toBe(b);
   });
 
+  it('openGroup creates a group conversation entry', () => {
+    const groupId = 'grp-0123456789abcdef';
+    useConversations.getState().openGroup(groupId);
+    const c = useConversations.getState().byId[groupId]!;
+    expect(c.kind).toBe('group');
+    expect(c.peerUserId).toBeUndefined();
+    expect(c.messages).toEqual([]);
+  });
+
+  it('openGroup is idempotent — preserves messages + ttl on re-open', () => {
+    const groupId = 'grp-0123456789abcdef';
+    useConversations.getState().openGroup(groupId);
+    useConversations.getState().add(groupId, { ...baseMsg('m1'), kind: 'group' });
+    useConversations.getState().setTtl(groupId, 'hour');
+
+    useConversations.getState().openGroup(groupId);
+    const c = useConversations.getState().byId[groupId]!;
+    expect(c.messages).toHaveLength(1);
+    expect(c.ttl).toBe('hour');
+  });
+
+  it('openGroup unblocks markRead for a freshly-created group', () => {
+    const groupId = 'grp-0123456789abcdef';
+    // markRead alone is a no-op when the entry doesn't exist — it must
+    // not silently swallow the read intent for a brand-new group.
+    useConversations.getState().markRead(groupId);
+    expect(useConversations.getState().byId[groupId]).toBeUndefined();
+
+    useConversations.getState().openGroup(groupId);
+    useConversations.getState().markRead(groupId);
+    expect(useConversations.getState().byId[groupId]?.lastReadAt).toBeGreaterThan(0);
+  });
+
   it('unreadCountFor returns 0 for unknown conversation', () => {
     expect(useConversations.getState().unreadCountFor('dm-unknown')).toBe(0);
   });

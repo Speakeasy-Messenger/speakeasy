@@ -78,6 +78,14 @@ interface ConversationsState {
    * Returns the conversationId for navigation.
    */
   openDirect: (myUserId: string, peerUserId: string) => string;
+  /**
+   * Ensure a `group` conversation entry exists. Idempotent — preserves
+   * messages + settings if the group has already been opened. Lets
+   * `markRead` (and the messages selector) operate on a stable entry
+   * the first time a freshly-created group is opened, before any
+   * message has been sent or received.
+   */
+  openGroup: (groupId: string) => void;
   add: (conversationId: string, msg: ChatMessage) => void;
   setStage: (conversationId: string, msgId: string, stage: DisappearingStage) => void;
   remove: (conversationId: string, msgId: string) => void;
@@ -130,6 +138,16 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     });
     void persist(get().byId);
     return id;
+  },
+
+  openGroup: (groupId) => {
+    set((s) => {
+      if (s.byId[groupId]) return s; // idempotent — preserve messages + settings
+      return {
+        byId: { ...s.byId, [groupId]: emptyConversation('group') },
+      };
+    });
+    void persist(get().byId);
   },
 
   add: (conversationId, msg) => {

@@ -13,7 +13,7 @@ import {
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
-import { useConversations } from '../store/conversations.js';
+import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 import { api, getWsClient, signalProtocol, vouchflow } from '../services.js';
 import { ApiError } from '../api/client.js';
@@ -28,6 +28,14 @@ interface Props {
   peerId: string;
   onBack?: () => void;
 }
+
+// Stable fallback for the messages selector. A fresh `[]` literal in the
+// selector would make the useSyncExternalStore snapshot non-idempotent
+// and trip "Maximum update depth exceeded" — see GroupChatScreen for the
+// reproducer that motivated this. ChatScreen happens to always have a
+// conversations entry created via `openDirect` before navigation, but
+// the stable fallback keeps the snapshot safe regardless of caller order.
+const EMPTY_MESSAGES: ChatMessage[] = [];
 
 /**
  * 1:1 chat screen. Wires the WS client to send / receive frames, runs
@@ -55,7 +63,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
     throw new Error('ChatScreen rendered without an enrolled identity');
   }
   const conversationId = conversationIdForDirect(myUserId, peerId);
-  const messages = useConversations((s) => s.byId[conversationId]?.messages ?? []);
+  const messages = useConversations((s) => s.byId[conversationId]?.messages ?? EMPTY_MESSAGES);
   const ttl = useConversations((s) => s.byId[conversationId]?.ttl ?? 'week');
   const ttlSecondsFor = useConversations((s) => s.ttlSecondsFor);
   const add = useConversations((s) => s.add);
