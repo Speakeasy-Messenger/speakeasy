@@ -14,6 +14,7 @@ import { GroupChatScreen } from '../screens/GroupChatScreen.js';
 import { NewChatScreen } from '../screens/NewChatScreen.js';
 import { NewGroupScreen } from '../screens/NewGroupScreen.js';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen.js';
+import { InviteFriendsScreen } from '../screens/InviteFriendsScreen.js';
 import { SettingsScreen } from '../screens/SettingsScreen.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
@@ -27,6 +28,7 @@ export type RootStack = {
   NewChat: undefined;
   NewGroup: undefined;
   Diagnostics: undefined;
+  InviteFriends: undefined;
   Settings: undefined;
 };
 
@@ -98,7 +100,13 @@ export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
                 <SettingsScreen
                   onBack={() => navigation.goBack()}
                   onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
+                  onInviteFriends={() => navigation.navigate('InviteFriends')}
                 />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="InviteFriends">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'InviteFriends'>) => (
+                <InviteFriendsScreen onBack={() => navigation.goBack()} />
               )}
             </Stack.Screen>
             <Stack.Screen

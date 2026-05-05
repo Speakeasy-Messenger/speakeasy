@@ -114,6 +114,11 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
         name: trimmedName,
         members: [myUserId, ...members],
         createdAt: Date.now(),
+        // The local user just created this group server-side, so the
+        // creator-only "Change photo" affordance can be shown
+        // immediately without waiting for the lazy GET round-trip.
+        createdBy: myUserId,
+        metadataFetchedAt: Date.now(),
       });
       diag('group', 'create: navigating to GroupChat', { group_id });
       onCreated(group_id);

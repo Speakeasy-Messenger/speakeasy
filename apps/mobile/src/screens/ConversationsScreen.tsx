@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Avatar } from '../components/Avatar.js';
+import { GroupAvatar } from '../components/GroupAvatar.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
@@ -141,9 +142,7 @@ export function ConversationsScreen({
             </Pressable>
           ) : (
             <Pressable onPress={() => onOpenGroup(item.groupId)} style={styles.card}>
-              <View style={[styles.avatar, styles.avatarGroup]}>
-                <Text style={styles.avatarGroupText}>#</Text>
-              </View>
+              <GroupAvatar groupId={item.groupId} name={item.name} size={40} />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
                   <Text style={styles.rowName} numberOfLines={1}># {item.name}</Text>

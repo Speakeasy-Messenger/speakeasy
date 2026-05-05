@@ -1,7 +1,7 @@
 import { eq, sql, and } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { groups, groupMembers } from './schema.js';
-import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo } from './groups.js';
+import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo, type GroupSummary } from './groups.js';
 
 export class DrizzleGroupRepo implements GroupRepo {
   async create(args: { groupId: string; createdBy: string }): Promise<void> {
@@ -124,5 +124,30 @@ export class DrizzleGroupRepo implements GroupRepo {
       .from(groupMembers)
       .where(eq(groupMembers.groupId, groupId));
     return rows.map((row) => row.userId);
+  }
+
+  async findById(groupId: string): Promise<GroupSummary | undefined> {
+    const db = getDb();
+    const rows = await db
+      .select({
+        id: groups.id,
+        createdBy: groups.createdBy,
+        avatarB64: groups.avatarB64,
+      })
+      .from(groups)
+      .where(eq(groups.id, groupId))
+      .limit(1);
+    const row = rows[0];
+    return row
+      ? { id: row.id, createdBy: row.createdBy, avatarB64: row.avatarB64 ?? undefined }
+      : undefined;
+  }
+
+  async setAvatar(groupId: string, avatarB64: string | undefined): Promise<void> {
+    const db = getDb();
+    await db
+      .update(groups)
+      .set({ avatarB64: avatarB64 ?? null })
+      .where(eq(groups.id, groupId));
   }
 }

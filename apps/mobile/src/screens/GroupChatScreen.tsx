@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -10,9 +11,11 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { launchImageLibrary } from 'react-native-image-picker';
 import { newMessageId } from '@speakeasy/shared';
 import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
+import { GroupAvatar } from '../components/GroupAvatar.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useUiState } from '../store/ui.js';
@@ -93,7 +96,55 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
   }, [groupId]);
 
   const [input, setInput] = useState('');
+  const [avatarBusy, setAvatarBusy] = useState(false);
   const listRef = useRef<FlatList>(null);
+  const upsertGroup = useGroups((s) => s.upsert);
+  // Only the creator can change the group avatar. `createdBy` may be
+  // undefined until the first `GET /v1/groups/:id` round-trip lands;
+  // before that we hide the affordance.
+  const isCreator = !!group?.createdBy && group.createdBy === myUserId;
+
+  async function handleChangeGroupAvatar() {
+    if (!isCreator || !group) return;
+    const deviceToken = useIdentity.getState().deviceToken;
+    if (!deviceToken) return;
+    const result = await launchImageLibrary({
+      mediaType: 'photo',
+      maxWidth: 256,
+      maxHeight: 256,
+      quality: 0.8,
+      includeBase64: true,
+      selectionLimit: 1,
+    });
+    if (result.didCancel) return;
+    const asset = result.assets?.[0];
+    if (!asset?.base64) {
+      Alert.alert('Could not read that image.');
+      return;
+    }
+    setAvatarBusy(true);
+    try {
+      await api.setGroupAvatar(deviceToken, groupId, asset.base64);
+      upsertGroup({
+        id: groupId,
+        name: group.name,
+        members: group.members,
+        createdAt: group.createdAt,
+        createdBy: group.createdBy,
+        avatarB64: asset.base64,
+        metadataFetchedAt: Date.now(),
+      });
+    } catch (err) {
+      const e = err as ApiError;
+      if (e.status === 403 && e.code === 'not_creator') {
+        Alert.alert('Only the group creator can change the photo.');
+      } else {
+        Alert.alert('Avatar upload failed', String(err));
+      }
+    } finally {
+      setAvatarBusy(false);
+    }
+  }
 
   // Local TTL engine — same as ChatScreen.
   useEffect(() => {
@@ -211,12 +262,26 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
             <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
           </Pressable>
         ) : null}
-        <Text style={[text.heroBody, styles.peer]}>
-          # {group?.name ?? groupId}
-        </Text>
-        <Text style={[text.footnote, styles.subhead]}>
-          {group ? `${group.members.length} member${group.members.length === 1 ? '' : 's'}` : ''}
-        </Text>
+        <View style={styles.headerRow}>
+          <Pressable
+            disabled={!isCreator || avatarBusy}
+            onPress={handleChangeGroupAvatar}
+            hitSlop={6}
+            testID="group-chat-avatar"
+          >
+            <GroupAvatar groupId={groupId} name={group?.name} size={40} />
+          </Pressable>
+          <View style={styles.headerText}>
+            <Text style={[text.heroBody, styles.peer]} numberOfLines={1}>
+              # {group?.name ?? groupId}
+            </Text>
+            <Text style={[text.footnote, styles.subhead]}>
+              {group
+                ? `${group.members.length} member${group.members.length === 1 ? '' : 's'}${isCreator ? ' · tap to change photo' : ''}`
+                : ''}
+            </Text>
+          </View>
+        </View>
       </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -285,6 +350,8 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   back: { paddingVertical: 4 },
+  headerRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  headerText: { flex: 1 },
   peer: { color: colors.ink, fontFamily: fonts.inter500 },
   subhead: { color: colors.slate },
   body: { flex: 1 },

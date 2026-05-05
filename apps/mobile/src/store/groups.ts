@@ -18,6 +18,17 @@ export interface Group {
   members: string[];
   /** Wall-clock ms when the group was registered locally. */
   createdAt: number;
+  /**
+   * Server-side creator. Populated when the local user creates the
+   * group (handleCreate) or when a peer's `GET /v1/groups/:id` round-
+   * trip lands. The mobile UI only surfaces the "change avatar"
+   * affordance to the creator.
+   */
+  createdBy?: string;
+  /** Group avatar (base64 JPEG). Mirrored from `GET /v1/groups/:id`. */
+  avatarB64?: string;
+  /** ms epoch of the last `GET /v1/groups/:id` round-trip. */
+  metadataFetchedAt?: number;
 }
 
 interface GroupsState {
@@ -58,6 +69,9 @@ export const useGroups = create<GroupsState>((set, get) => ({
             // gave it locally).
             name: group.name || existing.name,
             members: Array.from(new Set([...existing.members, ...group.members])),
+            createdBy: group.createdBy ?? existing.createdBy,
+            avatarB64: group.avatarB64 ?? existing.avatarB64,
+            metadataFetchedAt: group.metadataFetchedAt ?? existing.metadataFetchedAt,
           }
         : group;
       const newById = { ...s.byId, [group.id]: merged };
