@@ -18,7 +18,9 @@ interface Props {
  * Separators fade in after each word. Total ~800ms.
  */
 export function IdRevealScreen({ userId, onContinue }: Props) {
-  const words = userId.split('-');
+  // New `@handle` format has no hyphens — render as one block with the
+  // `@` prefix. Legacy 3-word ids retain the staggered-word animation.
+  const words = userId.includes('-') ? userId.split('-') : [`@${userId}`];
   const wordAnims = useRef(words.map(() => new Animated.Value(0))).current;
   const sepAnims = useRef(words.slice(0, -1).map(() => new Animated.Value(0))).current;
 
@@ -94,10 +96,10 @@ export function IdRevealScreen({ userId, onContinue }: Props) {
         <Text
           testID="id-reveal-userid"
           accessible
-          accessibilityLabel={userId}
+          accessibilityLabel={`@${userId}`}
           style={styles.hiddenLabel}
         >
-          {userId}
+          @{userId}
         </Text>
         <Button
           label="Get started"

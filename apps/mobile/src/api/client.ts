@@ -3,6 +3,10 @@ import type { PreKey, PreKeyBundleInput } from '../crypto/types.js';
 export interface EnrollRequest {
   /** Vouchflow deviceToken from the SDK's verify() result. */
   token: string;
+  /** Caller-chosen handle (no `@` prefix). The server re-validates
+   * format + reserved + uniqueness; on conflict you get
+   * `ApiError(409, 'taken')` and should prompt the user for another. */
+  user_id: string;
   /** base64 */
   publicKey: string;
   preKeyBundle: PreKeyBundleInput;
@@ -10,6 +14,13 @@ export interface EnrollRequest {
 
 export interface EnrollResponse {
   user_id: string;
+}
+
+export type AvailabilityReason = 'invalid' | 'reserved' | 'taken';
+
+export interface AvailabilityResponse {
+  available: boolean;
+  reason?: AvailabilityReason;
 }
 
 /** Phase 4 — server returns this from prekey endpoints when caller is low. */
@@ -89,6 +100,24 @@ export class ApiClient {
       /* ignore */
     }
     throw new ApiError(res.status, code);
+  }
+
+  /**
+   * Check whether a candidate handle is available for enrollment.
+   * Returns the same shape as the server: `{available, reason?}` where
+   * `reason` is one of `'invalid' | 'reserved' | 'taken'`.
+   * The race between this call and the actual enroll is closed by the
+   * atomic `tryCreate` server-side, so the UI must still handle a
+   * `taken` failure on enroll.
+   */
+  async checkAvailability(handle: string): Promise<AvailabilityResponse> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/users/availability?id=${encodeURIComponent(handle)}`,
+    );
+    if (res.status !== 200) {
+      throw new ApiError(res.status);
+    }
+    return (await res.json()) as AvailabilityResponse;
   }
 
   /**

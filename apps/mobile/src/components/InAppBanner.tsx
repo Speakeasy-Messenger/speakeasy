@@ -74,7 +74,8 @@ export function InAppBanner({ onTap }: Props) {
         </View>
         <View style={styles.body}>
           <Text style={styles.sender} numberOfLines={1}>
-            {current.target.kind === 'group' ? `# ${current.sender}` : current.sender}
+            @{current.sender}
+            {current.target.kind === 'group' ? ' (group)' : ''}
           </Text>
           <Text style={styles.text} numberOfLines={2}>
             {current.text}

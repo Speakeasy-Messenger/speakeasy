@@ -32,7 +32,7 @@ export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
   const handleCopyId = () => {
     if (!userId) return;
     // Clipboard package not available in MVP — show confirmation via Alert.
-    Alert.alert('Copied!', userId);
+    Alert.alert('Copied!', `@${userId}`);
   };
 
   const handleSignOut = () => {
@@ -65,7 +65,7 @@ export function SettingsScreen({ onBack, onShowId, onOpenDiagnostics }: Props) {
         <View style={styles.card}>
           <View style={styles.idRow}>
             <Text style={styles.idValue} numberOfLines={1}>
-              {userId ?? '—'}
+              {userId ? `@${userId}` : '—'}
             </Text>
             <Pressable onPress={handleCopyId} style={styles.copyBtn}>
               <Text style={styles.copyBtnText}>Copy ID</Text>

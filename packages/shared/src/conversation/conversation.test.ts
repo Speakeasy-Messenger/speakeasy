@@ -37,7 +37,8 @@ describe('conversationIdForDirect', () => {
   });
 
   it('rejects malformed ids', () => {
-    expect(() => conversationIdForDirect('not_valid', 'one-two-three')).toThrow();
+    // Uppercase + `!` fails both the legacy 3-word and new handle formats.
+    expect(() => conversationIdForDirect('AB!', 'one-two-three')).toThrow();
   });
 });
 

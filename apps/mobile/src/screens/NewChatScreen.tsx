@@ -37,32 +37,32 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
   const [busy, setBusy] = useState(false);
 
   function normalize(s: string): string {
-    return s.trim().toLowerCase().replace(/\s+/g, '-');
+    // Accept input with or without a leading `@`, mixed case, surrounding
+    // whitespace. Internally we always store the bare handle.
+    return s.trim().replace(/^@/, '').toLowerCase();
   }
 
-  // Live formatter so the user can type with spaces, hyphens, or shouty
-  // caps and still end up with a `word-word-word` candidate. Lowercases,
-  // converts whitespace to a dash, drops anything that isn't [a-z-],
-  // collapses runs of dashes, and caps at three tokens.
+  // Live formatter: drop the leading `@` (we render it as a prefix),
+  // lowercase, keep only handle-safe chars, cap length at 20. Legacy
+  // 3-word ids include `-`; allow it through `isUserId`'s permissive
+  // check so existing pre-cutover peers can still be reached if any
+  // are still around.
   function formatInput(raw: string): string {
-    const cleaned = raw
+    return raw
+      .replace(/^@/, '')
       .toLowerCase()
-      .replace(/\s+/g, '-')
-      .replace(/[^a-z-]/g, '')
-      .replace(/-{2,}/g, '-')
-      .replace(/^-/, '');
-    const parts = cleaned.split('-').slice(0, 3);
-    return parts.join('-');
+      .replace(/[^a-z0-9_-]/g, '')
+      .slice(0, 40);
   }
 
   async function handleStart() {
     const candidate = normalize(input);
     if (!candidate) {
-      setError('Paste a peer ID to start.');
+      setError('Enter a handle to start.');
       return;
     }
     if (!isUserId(candidate)) {
-      setError('That doesn’t look like a valid Speakeasy ID. Format: word-word-word.');
+      setError('That doesn’t look like a valid handle. 3–20 letters/digits/underscores, starting with a letter.');
       return;
     }
     // Self-DM is allowed; skip the precheck — the server already knows
@@ -115,28 +115,32 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
 
         <View style={styles.content}>
           <Text style={[text.subtitle, styles.label]}>
-            Enter a peer’s Speakeasy ID
+            Enter a peer’s handle
           </Text>
           <Text style={[text.footnote, styles.hint]}>
-            Three words, separated by hyphens. Get this from the other person — Speakeasy
-            doesn’t publish a directory.
+            Get this from the other person — Speakeasy doesn’t publish a directory.
           </Text>
-          <TextInput
-            testID="new-chat-peer-id-input"
-            style={styles.input}
-            value={input}
-            onChangeText={(s) => {
-              setInput(formatInput(s));
-              if (error) setError(undefined);
-            }}
-            placeholder="silent-golden-hawk"
-            placeholderTextColor={colors.slate}
-            autoCapitalize="none"
-            autoCorrect={false}
-            autoFocus
-            returnKeyType="go"
-            onSubmitEditing={handleStart}
-          />
+          <View style={styles.inputRow}>
+            <Text style={styles.atPrefix}>@</Text>
+            <TextInput
+              testID="new-chat-peer-id-input"
+              style={styles.input}
+              value={input}
+              onChangeText={(s) => {
+                setInput(formatInput(s));
+                if (error) setError(undefined);
+              }}
+              placeholder="theirhandle"
+              placeholderTextColor={colors.slate}
+              autoCapitalize="none"
+              autoCorrect={false}
+              autoComplete="off"
+              spellCheck={false}
+              autoFocus
+              returnKeyType="go"
+              onSubmitEditing={handleStart}
+            />
+          </View>
           {error ? <Text style={styles.error}>{error}</Text> : null}
         </View>
 
@@ -164,15 +168,27 @@ const styles = StyleSheet.create({
   content: { flex: 1, gap: space.md },
   label: { color: colors.ink, fontFamily: fonts.inter500 },
   hint: { color: colors.slate },
-  input: {
+  inputRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
     minHeight: 48,
     paddingHorizontal: space.md,
     backgroundColor: colors.pale,
     borderRadius: radius.pill,
+    marginTop: space.sm,
+  },
+  atPrefix: {
+    fontFamily: fonts.inter500,
+    fontSize: 16,
+    color: colors.slate,
+    marginRight: 2,
+  },
+  input: {
+    flex: 1,
     color: colors.ink,
     fontFamily: fonts.inter400,
     fontSize: 16,
-    marginTop: space.sm,
+    padding: 0,
   },
   error: {
     color: colors.ink,

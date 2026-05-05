@@ -232,7 +232,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
             <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
           </Pressable>
         ) : null}
-        <Text style={[text.heroBody, styles.peer]}>{peerId}</Text>
+        <Text style={[text.heroBody, styles.peer]}>@{peerId}</Text>
       </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}

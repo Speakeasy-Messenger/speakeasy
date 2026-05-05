@@ -100,7 +100,7 @@ export function ConversationsScreen({
           <View style={styles.headerLeft}>
             <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
             <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
-              {userId}
+              @{userId}
             </Text>
           </View>
           <Pressable onPress={onOpenSettings} hitSlop={8} style={styles.gearBtn}>
@@ -127,7 +127,7 @@ export function ConversationsScreen({
               </View>
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
-                  <Text style={styles.rowName} numberOfLines={1}>{item.peerUserId}</Text>
+                  <Text style={styles.rowName} numberOfLines={1}>@{item.peerUserId}</Text>
                   <Text style={styles.timestamp}>{relativeTime(item.lastActivityAt)}</Text>
                 </View>
                 <View style={styles.rowBottom}>
