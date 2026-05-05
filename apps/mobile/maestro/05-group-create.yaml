@@ -65,6 +65,10 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Create group"
 
-# Verify error message appears
-- assertVisible:
-    text: "No such user"
+# Verify error message appears. Same Vouchflow-revalidation latency
+# as flow 04 — server checks each member exists, so the error fires
+# only after the auth+lookup round-trip; 30s comfortable margin.
+- extendedWaitUntil:
+    visible:
+      text: "No such user"
+    timeout: 30000

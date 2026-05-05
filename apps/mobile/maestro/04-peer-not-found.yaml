@@ -60,10 +60,11 @@ appId: xyz.speakeasyapp.app
     text: "Start chat"
 
 # Verify error message appears. The error doesn't render until the
-# Start chat → fetchPreKeyBundle round-trip finishes, so we need a
-# wait window — bare assertVisible has no timeout and races the
-# API response.
+# Start chat → fetchPreKeyBundle round-trip finishes, which on the
+# CI emulator takes ~10s (Vouchflow `requireAuth` revalidation +
+# sandbox API round-trip). 10s was racy and timed out exactly when
+# the text appeared; 30s gives slow-CI runs comfortable margin.
 - extendedWaitUntil:
     visible:
       text: "No such user"
-    timeout: 10000
+    timeout: 30000
