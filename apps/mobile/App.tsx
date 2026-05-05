@@ -160,7 +160,16 @@ export default function App() {
       diag('app', 'AppState change', { next, wsState: ws.getState() });
       if (next === 'active') {
         const state = ws.getState();
-        if (state !== 'authed' && state !== 'authenticating' && state !== 'connecting') {
+        // `reconnecting` already has a timer pending — the WS client
+        // turned `connect()` into a no-op for that state in the loop
+        // fix, so calling it would just produce a misleading
+        // "forcing reconnect" log line. Skip and let the timer fire.
+        if (
+          state !== 'authed' &&
+          state !== 'authenticating' &&
+          state !== 'connecting' &&
+          state !== 'reconnecting'
+        ) {
           diag('app', 'AppState active → forcing reconnect', { prevState: state });
           try {
             ws.connect();
