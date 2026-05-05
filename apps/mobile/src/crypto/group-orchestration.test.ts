@@ -19,6 +19,14 @@ function makeFakeWs(): { ws: SpeakeasyWsClient; sent: CapturedFrame[] } {
     send: (frame: WsClientMsg) => {
       sent.push({ frame });
     },
+    // The orchestrator now re-confirms `authed` immediately before each
+    // ws.send (alpha-0.4.7 reconnect-loop fix). Stub these out so the
+    // unit tests don't have to model the full WS state machine.
+    getState: () => 'authed' as const,
+    waitForAuthed: async () => {},
+    enqueueAck: (id: string) => {
+      sent.push({ frame: { type: 'ack', message_id: id } as WsClientMsg });
+    },
   } as unknown as SpeakeasyWsClient;
   return { ws, sent };
 }

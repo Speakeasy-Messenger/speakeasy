@@ -66,7 +66,19 @@ export class SpeakeasyWsClient {
   }
 
   connect(): void {
-    if (this.state === 'connecting' || this.state === 'authenticating' || this.state === 'authed') {
+    if (
+      this.state === 'connecting' ||
+      this.state === 'authenticating' ||
+      this.state === 'authed' ||
+      // A reconnect is already pending — letting it fire is correct.
+      // Calling openSocket here would race the pending timer and end up
+      // with two parallel sockets. The server's `connections.add` would
+      // then kick whichever authed first, the close event would
+      // schedule yet another reconnect, and the loop self-sustains
+      // (alpha-0.4.7 reproducer: 155 ws-authed log lines / minute,
+      // status flapping `reconnecting` ↔ `authenticating` rapidly).
+      this.state === 'reconnecting'
+    ) {
       return;
     }
     this.intentionalClose = false;
@@ -164,13 +176,23 @@ export class SpeakeasyWsClient {
     const ws = new this.Ws(this.opts.url);
     this.socket = ws;
 
+    // Each handler captures `ws` and bails when `this.socket` no longer
+    // points at it. Without that, a stale socket's late-firing close
+    // (e.g. the server's `connections.add` kicking a previous socket
+    // after a new one is already in flight) would nuke `this.socket`
+    // and schedule a reconnect even though a fresh, healthy socket
+    // already exists. That mismatch is what produced the alpha-0.4.7
+    // self-sustaining replace-loop.
     ws.addEventListener('open', () => {
+      if (this.socket !== ws) return;
       void this.handleOpen();
     });
     ws.addEventListener('message', (ev) => {
+      if (this.socket !== ws) return;
       this.handleMessage(ev as MessageEvent);
     });
     ws.addEventListener('close', () => {
+      if (this.socket !== ws) return;
       this.handleClose();
     });
     ws.addEventListener('error', () => {

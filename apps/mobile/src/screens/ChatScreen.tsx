@@ -181,6 +181,9 @@ export function ChatScreen({ peerId, onBack }: Props) {
         }
         const ws = getWsClient(async () => deviceToken);
         await ws.waitForAuthed();
+        // Re-confirm the state right before send — `ensureSessionWithPeer`
+        // above can take ~10s, plenty of time for a WS flap.
+        if (ws.getState() !== 'authed') await ws.waitForAuthed();
         ws.send({
           type: 'message',
           to: peerId,
