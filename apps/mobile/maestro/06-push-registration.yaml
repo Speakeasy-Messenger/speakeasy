@@ -8,6 +8,9 @@ appId: xyz.speakeasyapp.app
 - clearKeychain
 - launchApp
 
+# Dismiss the keyguard PIN that re-engaged on clearState.
+- runFlow: _dismiss-keyguard.yaml
+
 # Dismiss cold-boot ANR dialog if present
 - tapOn:
     text: "Wait"
@@ -18,6 +21,13 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-screen"
     timeout: 30000
+# Pick a handle — Continue is disabled until availability=available.
+- tapOn:
+    id: "onboarding-handle"
+- inputText: "tierbsix"
+- extendedWaitUntil:
+    visible: "@tierbsix is available."
+    timeout: 10000
 - tapOn:
     text: "Continue"
 # Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
@@ -40,9 +50,9 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "+ New chat"
 
-# Paste own ID and start chat (self-DM)
+# Paste own handle and start chat (self-DM)
 - tapOn:
-    placeholder: "silent-golden-hawk"
+    id: "new-chat-peer-id-input"
 - inputText: "${maestro.copiedText}"
 - tapOn:
     text: "Start chat"

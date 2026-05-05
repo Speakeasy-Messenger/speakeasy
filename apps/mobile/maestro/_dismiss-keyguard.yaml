@@ -1,0 +1,32 @@
+appId: xyz.speakeasyapp.app
+name: Pre-flow keyguard dismissal (Tier B helper)
+---
+
+# Android's keyguard re-engages on `clearState` / `am force-stop` on
+# any device with a screen-lock credential set (the workflow sets a
+# 0000 PIN so Vouchflow's hardware-backed keystore key can be created
+# with setUserAuthenticationRequired(true)). After clearState the
+# system PIN keypad covers OnboardingScreen, so Maestro waits in vain
+# for `id: onboarding-continue` — the assertion fires against the
+# system PIN UI instead of our app. The workflow-level
+# `adb shell wm dismiss-keyguard` happens BEFORE the flow runs, so
+# clearState undoes it.
+#
+# Dismiss the keyguard from inside the flow by typing the test PIN,
+# matching what `_unlock-biometric-prompt.yaml` does for the
+# BiometricPrompt PIN fallback. Both surfaces use the same
+# `lockPassword` id. No-op if the keyguard is already dismissed.
+- extendedWaitUntil:
+    visible:
+      id: "com.android.systemui:id/lockPassword"
+    timeout: 4000
+    optional: true
+- runFlow:
+    when:
+      visible:
+        id: "com.android.systemui:id/lockPassword"
+    commands:
+      - tapOn:
+          id: "com.android.systemui:id/lockPassword"
+      - inputText: "0000"
+      - pressKey: Enter

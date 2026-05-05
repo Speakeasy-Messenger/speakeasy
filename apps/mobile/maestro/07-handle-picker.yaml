@@ -1,0 +1,69 @@
+# Maestro flow: Handle picker live availability states (Tier B).
+#
+# Exercises the OnboardingScreen handle UX without enrolling. Verifies
+# the three on-screen status messages drive correctly:
+#   - reserved word     → "@admin is reserved."
+#   - bad format        → format-hint message
+#   - free + valid name → "@<handle> is available."
+# Then completes the enroll path with the available handle so we also
+# cover the Continue-enabled-only-when-available gate end-to-end.
+
+appId: xyz.speakeasyapp.app
+name: Handle picker availability states (Tier B)
+---
+
+- clearState
+- clearKeychain
+- launchApp
+
+# Dismiss the keyguard PIN that re-engaged on clearState.
+- runFlow: _dismiss-keyguard.yaml
+
+- tapOn:
+    text: "Wait"
+    optional: true
+
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+
+# 1. Reserved word.
+- tapOn:
+    id: "onboarding-handle"
+- inputText: "admin"
+- extendedWaitUntil:
+    visible: "@admin is reserved."
+    timeout: 8000
+
+# 2. Invalid format. `eraseText: 50` clears the field defensively
+#    (more than the input could hold). Then we type a leading-digit
+#    handle — the input filter allows the chars but `validateHandle`
+#    returns 'invalid' because HANDLE_REGEX requires a letter first.
+- eraseText: 50
+- inputText: "1abc"
+- extendedWaitUntil:
+    visible: "Letters, digits, underscores. 3–20 chars. Start with a letter."
+    timeout: 4000
+
+# 3. Free + valid handle. Use a name no other Tier B flow claims so
+#    the availability check returns true on the running api server.
+- eraseText: 50
+- inputText: "tierbpicker"
+- extendedWaitUntil:
+    visible: "@tierbpicker is available."
+    timeout: 10000
+
+# 4. Continue should now be enabled — completing the enroll round-trip
+#    proves the gate flipped correctly.
+- tapOn:
+    text: "Continue"
+- runFlow: _unlock-biometric-prompt.yaml
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 30000
+
+# 5. The conversations header should render the chosen handle with `@`.
+- assertVisible:
+    text: "@tierbpicker"

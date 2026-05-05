@@ -8,6 +8,9 @@ appId: xyz.speakeasyapp.app
 - clearKeychain
 - launchApp
 
+# Dismiss the keyguard PIN that re-engaged on clearState.
+- runFlow: _dismiss-keyguard.yaml
+
 # Dismiss cold-boot ANR dialog if present
 - tapOn:
     text: "Wait"
@@ -18,6 +21,13 @@ appId: xyz.speakeasyapp.app
     visible:
       id: "onboarding-screen"
     timeout: 30000
+# Pick a handle — Continue is disabled until availability=available.
+- tapOn:
+    id: "onboarding-handle"
+- inputText: "tierbfive"
+- extendedWaitUntil:
+    visible: "@tierbfive is available."
+    timeout: 10000
 - tapOn:
     text: "Continue"
 # Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
@@ -45,11 +55,11 @@ appId: xyz.speakeasyapp.app
 # Enter group name
 - inputText: "weekend plans"
 
-# Enter a valid-format but non-existent member
+# Enter a valid-format but non-existent member handle
 # Note: The placeholder is multiline, tap on the second line if needed
 - tapOn:
     id: "new-group-members-input"
-- inputText: "quiet-empty-mountain"
+- inputText: "ghosthandle"
 
 # Tap create group (should fail with "No such user")
 - tapOn:

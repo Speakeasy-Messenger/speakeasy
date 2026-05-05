@@ -6,6 +6,9 @@ name: Self-DM round-trip (Tier B)
 - clearState
 - launchApp
 
+# 1a. Dismiss the keyguard PIN that re-engaged on clearState.
+- runFlow: _dismiss-keyguard.yaml
+
 # 2. Dismiss ANR dialog if present
 - tapOn:
     text: "Wait"
@@ -17,7 +20,15 @@ name: Self-DM round-trip (Tier B)
       id: "onboarding-continue"
     timeout: 20000
 
-# 4. Tap Continue to begin enrollment
+# 4. Pick a handle — Continue is disabled until availability=available.
+- tapOn:
+    id: "onboarding-handle"
+- inputText: "tierbtwo"
+- extendedWaitUntil:
+    visible: "@tierbtwo is available."
+    timeout: 10000
+
+# 4b. Tap Continue to begin enrollment
 - tapOn:
     text: "Continue"
 
