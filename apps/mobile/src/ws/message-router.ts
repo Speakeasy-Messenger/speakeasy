@@ -64,6 +64,19 @@ export interface MessageRouterDeps {
 export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg) => void {
   const log = deps.log ?? ((m, c) => console.log('[ws]', m, c ?? ''));
 
+  // Per-sender SKDM in-flight tracker. The server delivers an SKDM
+  // bootstrap envelope right before the first group message from a
+  // new sender (orchestrator's `sendGroupMessage` does SKDM-then-
+  // message in that order, and the server's buffer-drain preserves
+  // it). Both frames land on the WS within ms of each other; SKDM
+  // processing is a couple of native calls (signal decrypt +
+  // processSenderKeyDistribution), each potentially hundreds of ms.
+  // If the group message races ahead, `decryptFromGroupMember` finds
+  // no SenderKey and rejects — silently, because the catch only logs
+  // the bubble. We track the in-flight handler promise per sender
+  // and have group decrypts await it.
+  const pendingSkdms = new Map<string, Promise<void>>();
+
   function decodeBubble(decryptResult: Uint8Array | Error): string {
     if (decryptResult instanceof Error) {
       const sce = decryptResult as SignalClientError;
@@ -111,18 +124,53 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         deps.onPrekeysLow();
         return;
 
-      case 'skdm':
+      case 'skdm': {
         // SKDM bootstrap envelope — install the SenderKey + ack the
-        // server so it deletes the buffered row.
-        void deps.orchestrator
+        // server so it deletes the buffered row. Track the in-flight
+        // promise per sender so a group message arriving in the same
+        // tick can await it (otherwise `decryptFromGroupMember`
+        // rejects with no SenderKey installed yet).
+        diag('router', 'skdm: enter', {
+          msgId: frame.message_id,
+          from: frame.from,
+          groupId: frame.group_id,
+        });
+        const senderId = frame.from;
+        const messageId = frame.message_id;
+        const handled = deps.orchestrator
           .handleIncomingSkdm({
-            from: frame.from,
+            from: senderId,
             group_id: frame.group_id,
             ciphertext: frame.ciphertext,
-            message_id: frame.message_id,
+            message_id: messageId,
           })
-          .catch((err) => log('skdm handle failed', { err: String(err), from: frame.from }));
+          .then(
+            () => {
+              diag('router', 'skdm: handled OK', {
+                msgId: messageId,
+                from: senderId,
+              });
+            },
+            (err) => {
+              diag('router', 'skdm: handle FAILED', {
+                msgId: messageId,
+                from: senderId,
+                err: String(err),
+              });
+              log('skdm handle failed', { err: String(err), from: senderId });
+            },
+          );
+        pendingSkdms.set(senderId, handled);
+        // Clear the pending entry once settled — only if it still
+        // points at us; a fresher SKDM from the same sender may have
+        // replaced it while we were running.
+        void handled.finally(() => {
+          if (pendingSkdms.get(senderId) === handled) {
+            pendingSkdms.delete(senderId);
+          }
+        });
         return;
+      }
 
       case 'message': {
         // Bulletproof wrapper — every step gets a diag breadcrumb so a
@@ -248,33 +296,86 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           // (added when group messages can't carry it inside the
           // ciphertext envelope). Bucket directly into that group.
           void (async () => {
-            let bubble: string;
-            let decryptedOk = false;
             try {
-              const plaintext = await deps.groupMessaging.decryptFromGroupMember(
-                frame.from,
-                ciphertext,
-              );
-              bubble = utf8FromBytes(plaintext);
-              decryptedOk = true;
+              // If an SKDM from the same sender is mid-flight (e.g.
+              // both arrived together on a buffer drain after a
+              // reconnect), wait for it to finish so the SenderKey is
+              // installed before we try to decrypt.
+              const pendingSkdm = pendingSkdms.get(frame.from);
+              if (pendingSkdm) {
+                diag('router', 'group: awaiting in-flight SKDM', {
+                  msgId: frame.message_id,
+                  from: frame.from,
+                });
+                await pendingSkdm;
+                diag('router', 'group: SKDM settled, proceeding', {
+                  msgId: frame.message_id,
+                  from: frame.from,
+                });
+              }
+              let bubble: string;
+              let decryptedOk = false;
+              try {
+                const plaintext = await deps.groupMessaging.decryptFromGroupMember(
+                  frame.from,
+                  ciphertext,
+                );
+                bubble = utf8FromBytes(plaintext);
+                decryptedOk = true;
+                diag('router', 'group: decrypted', {
+                  msgId: frame.message_id,
+                  from: frame.from,
+                  textPreview: bubble.slice(0, 24),
+                });
+              } catch (err) {
+                bubble = decodeBubble(err as Error);
+                diag('router', 'group: decrypt FAILED → bubble', {
+                  msgId: frame.message_id,
+                  from: frame.from,
+                  bubble,
+                  err: String(err),
+                });
+              }
+              try {
+                deps.addToConversation(frame.conversation_id, {
+                  id: frame.message_id,
+                  from: frame.from,
+                  text: bubble,
+                  kind: 'group',
+                  sentAt: Date.now(),
+                  stage: 'sent',
+                });
+                diag('router', 'group: addToConversation OK', {
+                  convId: frame.conversation_id,
+                  msgId: frame.message_id,
+                });
+              } catch (err) {
+                diag('router', 'group: addToConversation THREW', {
+                  convId: frame.conversation_id,
+                  msgId: frame.message_id,
+                  err: String(err),
+                });
+                return;
+              }
+              deps.ws.enqueueAck(frame.message_id);
+              diag('router', 'group: ack queued', { msgId: frame.message_id });
+              if (decryptedOk && frame.from !== deps.myUserId) {
+                deps.notifyInbound?.({
+                  msgId: frame.message_id,
+                  from: frame.from,
+                  text: bubble,
+                  target: { kind: 'group', groupId: frame.conversation_id },
+                });
+              }
             } catch (err) {
-              bubble = decodeBubble(err as Error);
-            }
-            deps.addToConversation(frame.conversation_id, {
-              id: frame.message_id,
-              from: frame.from,
-              text: bubble,
-              kind: 'group',
-              sentAt: Date.now(),
-              stage: 'sent',
-            });
-            deps.ws.enqueueAck(frame.message_id);
-            if (decryptedOk && frame.from !== deps.myUserId) {
-              deps.notifyInbound?.({
+              // Catch-all so any unhandled rejection makes it to the
+              // on-device Diagnostics screen instead of vanishing into
+              // the WS subscriber's outer try/catch.
+              diag('router', 'group IIFE CRASHED', {
                 msgId: frame.message_id,
                 from: frame.from,
-                text: bubble,
-                target: { kind: 'group', groupId: frame.conversation_id },
+                err: String(err),
+                stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
               });
             }
           })();
