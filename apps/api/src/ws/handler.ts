@@ -23,6 +23,7 @@ import type { CommunityRepo } from '../db/communities.js';
 import type { AckRouter } from './ack-router.js';
 import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
+import type { UserRepo } from '../db/users.js';
 
 const AUTH_TIMEOUT_MS = 10_000;
 const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // spec §5: 7-day relay buffer
@@ -39,6 +40,7 @@ interface Deps {
   ackRouter: AckRouter;
   push: PushProvider;
   devices: DevicesRepo;
+  users: UserRepo;
 }
 
 interface AuthedSession {
@@ -170,12 +172,24 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
       }
       try {
         const v = await deps.validator.validate(msg.token);
-        if (!v.userId) {
+        // Real Vouchflow's ValidatedAttestation has no userId field —
+        // it tracks attestation/risk/age, not Speakeasy's internal id.
+        // Same fallback HTTP `requireAuth` does (apps/api/src/auth/
+        // vouchflow.ts): resolve via the user repo's deviceToken→userId
+        // index that the enroll route populated. Without this, every WS
+        // auth fails with `not_enrolled` whenever the validator is real
+        // Vouchflow OR `MockValidator.alwaysSucceeds()` (sandbox mode),
+        // and the client's reconnect loop spins forever.
+        let userId = v.userId;
+        if (!userId) {
+          userId = await deps.users.findUserIdByDeviceToken(v.deviceToken);
+        }
+        if (!userId) {
           sendError(socket, 'not_enrolled', 'token has no userId; enroll first');
           socket.close(4003, 'not_enrolled');
           return;
         }
-        session = { userId: v.userId, deviceToken: v.deviceToken };
+        session = { userId, deviceToken: v.deviceToken };
         clearTimeout(authTimer);
         await deps.connections.add(session.userId, session.deviceToken, socket);
         await deps.devices.upsertOnSeen({
