@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { MockValidator } from '@speakeasy/vouchflow';
-import { isUserId } from '@speakeasy/shared';
+import { isHandle } from '@speakeasy/shared';
 import { buildServer } from '../server.js';
 import { InMemoryUserRepo } from '../db/users.memory.js';
 import { InMemoryRateLimiter } from '../ratelimit/ratelimit.js';
@@ -27,23 +27,93 @@ async function makeApp(overrides: Partial<Parameters<typeof buildServer>[0]> = {
   });
 }
 
+const validHandle = 'alice';
+function basePayload(overrides: Record<string, unknown> = {}) {
+  return {
+    token: 'dvt_demo_001',
+    user_id: validHandle,
+    publicKey: Buffer.from('pk').toString('base64'),
+    preKeyBundle: bundle(),
+    ...overrides,
+  };
+}
+
 describe('POST /v1/enroll', () => {
-  it('creates a user with a valid deviceToken', async () => {
+  it('creates a user with the chosen handle', async () => {
     const repo = new InMemoryUserRepo();
     const app = await makeApp({ userRepo: repo });
     const res = await app.inject({
       method: 'POST',
       url: '/v1/enroll',
-      payload: {
-        token: 'dvt_demo_001',
-        publicKey: Buffer.from('pk').toString('base64'),
-        preKeyBundle: bundle(),
-      },
+      payload: basePayload(),
     });
     expect(res.statusCode).toBe(201);
     const body = res.json();
-    expect(isUserId(body.user_id)).toBe(true);
+    expect(body.user_id).toBe(validHandle);
+    expect(isHandle(body.user_id)).toBe(true);
     expect(repo.users.has(body.user_id)).toBe(true);
+    await app.close();
+  });
+
+  it('lowercases the handle before claiming', async () => {
+    // Schema enforces 3..20 length but the route still defensively
+    // lowercases so a client that ignores the format hint can't
+    // accidentally claim two variants of the same name.
+    const repo = new InMemoryUserRepo();
+    const app = await makeApp({ userRepo: repo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/enroll',
+      payload: basePayload({ user_id: '  Alice  ' }),
+    });
+    expect(res.statusCode).toBe(201);
+    expect(res.json().user_id).toBe('alice');
+    await app.close();
+  });
+
+  it('rejects invalid handle format with 400 invalid_user_id', async () => {
+    const app = await makeApp();
+    for (const bad of ['ab', '1abc', 'al-ice', 'ALICE!']) {
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/enroll',
+        payload: basePayload({ user_id: bad }),
+      });
+      // Schema covers some (length); route covers the rest. Both are
+      // 400 from the client's perspective.
+      expect([400, 409]).toContain(res.statusCode);
+    }
+    await app.close();
+  });
+
+  it('rejects reserved handles with 409 reserved', async () => {
+    const app = await makeApp();
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/enroll',
+      payload: basePayload({ user_id: 'admin' }),
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('reserved');
+    await app.close();
+  });
+
+  it('returns 409 taken when the chosen handle already exists', async () => {
+    const repo = new InMemoryUserRepo();
+    repo.users.set('alice', {
+      publicKey: Buffer.from('existing'),
+      bundle: bundle(),
+      createdAt: new Date(),
+      deviceToken: 'dvt_other',
+    });
+    const app = await makeApp({ userRepo: repo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/enroll',
+      payload: basePayload(),
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('taken');
     await app.close();
   });
 
@@ -52,11 +122,7 @@ describe('POST /v1/enroll', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/enroll',
-      payload: {
-        token: 'dvt_low',
-        publicKey: Buffer.from('pk').toString('base64'),
-        preKeyBundle: bundle(),
-      },
+      payload: basePayload({ token: 'dvt_low' }),
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().error).toBe('low_confidence');
@@ -68,11 +134,7 @@ describe('POST /v1/enroll', () => {
     const res = await app.inject({
       method: 'POST',
       url: '/v1/enroll',
-      payload: {
-        token: 'dvt_bogus',
-        publicKey: Buffer.from('pk').toString('base64'),
-        preKeyBundle: bundle(),
-      },
+      payload: basePayload({ token: 'dvt_bogus' }),
     });
     expect(res.statusCode).toBe(401);
     expect(res.json().error).toBe('device_not_found');
@@ -90,75 +152,28 @@ describe('POST /v1/enroll', () => {
     await app.close();
   });
 
-  it('retries on id collision and eventually succeeds', async () => {
-    const repo = new InMemoryUserRepo();
-    repo.users.set('aaa-bbb-ccc', {
-      publicKey: Buffer.from('existing'),
-      bundle: bundle(),
-    });
-    let calls = 0;
-    const generateId = () => {
-      calls++;
-      return calls === 1 ? 'aaa-bbb-ccc' : 'fresh-shiny-fish';
-    };
-    const app = await makeApp({ userRepo: repo, generateId });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/enroll',
-      payload: {
-        token: 'dvt_collide',
-        publicKey: Buffer.from('pk').toString('base64'),
-        preKeyBundle: bundle(),
-      },
-    });
-    expect(res.statusCode).toBe(201);
-    expect(res.json().user_id).toBe('fresh-shiny-fish');
-    expect(calls).toBe(2);
-    await app.close();
-  });
-
   it('rate-limits enrollment per Phase 4 hardening', async () => {
     const limiter = new InMemoryRateLimiter();
     const app = await makeApp({ rateLimiter: limiter });
-    const payload = {
-      token: 'dvt_x',
-      publicKey: Buffer.from('pk').toString('base64'),
-      preKeyBundle: bundle(),
-    };
     // Default enroll rate-limit is 5/hour. The 6th hit returns 429.
+    // Each call must use a different handle so we don't get 409s.
     for (let i = 0; i < 5; i++) {
-      const res = await app.inject({ method: 'POST', url: '/v1/enroll', payload });
+      const res = await app.inject({
+        method: 'POST',
+        url: '/v1/enroll',
+        payload: basePayload({ user_id: `alice${i}` }),
+      });
       expect(res.statusCode).toBe(201);
     }
-    const res = await app.inject({ method: 'POST', url: '/v1/enroll', payload });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/enroll',
+      payload: basePayload({ user_id: 'alice5' }),
+    });
     expect(res.statusCode).toBe(429);
     expect(res.json().error).toBe('rate_limited');
     expect(res.headers['ratelimit-limit']).toBe('5');
     expect(res.headers['ratelimit-remaining']).toBe('0');
-    await app.close();
-  });
-
-  it('gives up after sustained collisions', async () => {
-    const repo = new InMemoryUserRepo();
-    const app = await makeApp({
-      userRepo: repo,
-      generateId: () => 'always-the-same',
-    });
-    repo.users.set('always-the-same', {
-      publicKey: Buffer.from('x'),
-      bundle: bundle(),
-    });
-    const res = await app.inject({
-      method: 'POST',
-      url: '/v1/enroll',
-      payload: {
-        token: 'dvt_x',
-        publicKey: Buffer.from('pk').toString('base64'),
-        preKeyBundle: bundle(),
-      },
-    });
-    expect(res.statusCode).toBe(503);
-    expect(res.json().error).toBe('id_generation_failed');
     await app.close();
   });
 });

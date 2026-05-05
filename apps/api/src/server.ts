@@ -17,6 +17,7 @@ import { DrizzleCommunityRepo } from './db/communities.drizzle.js';
 import { DrizzleMessagesRepo } from './db/messages.drizzle.js';
 import { DrizzleDevicesRepo } from './db/devices.drizzle.js';
 import { registerEnrollRoutes } from './routes/enroll.js';
+import { registerAvailabilityRoute } from './routes/availability.js';
 import { registerUserRoutes } from './routes/users.js';
 import { registerPreKeyRoutes } from './routes/prekeys.js';
 import { registerGroupRoutes } from './routes/groups.js';
@@ -73,8 +74,6 @@ export interface BuildServerOptions {
   /** Server instance id used as the value of `session:{user_id}` in Redis. */
   instanceId?: string;
   logger?: boolean | { level: string };
-  /** Override id generator for deterministic tests. */
-  generateId?: () => string;
   /** Skip mounting the WebSocket server (useful for unit tests of REST routes). */
   skipWebsocket?: boolean;
 }
@@ -155,7 +154,6 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const onUserMinted = undefined;
   await registerEnrollRoutes(app, {
     repo,
-    generateId: opts.generateId,
     enrollRateLimit: rateLimit({
       limiter,
       endpoint: 'enroll',
@@ -165,6 +163,15 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     onUserMinted,
   });
   await registerUserRoutes(app, { repo });
+  await registerAvailabilityRoute(app, {
+    repo,
+    rateLimit: rateLimit({
+      limiter,
+      endpoint: 'availability',
+      limit: 60,
+      windowMs: 60_000,
+    }),
+  });
   const preKeyRepo =
     opts.preKeyRepo ??
     (hasDb ? new DrizzlePreKeyRepo() : new InMemoryPreKeyRepo(repo as InMemoryUserRepo));

@@ -57,7 +57,9 @@ describe('GET /v1/users/:id', () => {
     const { app } = await makeApp();
     const res = await app.inject({
       method: 'GET',
-      url: '/v1/users/not_a_valid_id',
+      // 'AB!' fails both legacy 3-word and new handle formats — uppercase
+      // and `!` are disallowed by either regex.
+      url: '/v1/users/AB!',
       headers: { authorization: 'Bearer dvt_demo' },
     });
     expect(res.statusCode).toBe(400);

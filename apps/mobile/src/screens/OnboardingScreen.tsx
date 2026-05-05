@@ -1,5 +1,6 @@
-import React, { useState } from 'react';
-import { SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useRef, useState } from 'react';
+import { SafeAreaView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../components/Button.js';
 import { IconMark } from '../components/IconMark.js';
 import { Wordmark } from '../components/Wordmark.js';
@@ -9,7 +10,16 @@ import { pushNotifications } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../native/vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
-import { colors, fonts, space, text } from '../theme/index.js';
+import { colors, fonts, radius, space, text } from '../theme/index.js';
+
+type AvailabilityState =
+  | { kind: 'idle' }
+  | { kind: 'localInvalid' }
+  | { kind: 'reserved' }
+  | { kind: 'checking' }
+  | { kind: 'available' }
+  | { kind: 'taken' }
+  | { kind: 'error' };
 
 interface Props {
   onEnrolled: (userId: string) => void;
@@ -28,17 +38,66 @@ function randomRegistrationId(): number {
 }
 
 const PRINCIPLES = [
-  'No personal info — no phone, no email.',
-  'End-to-end encrypted by default.',
-  'Disappears by default. 7 days, then gone.',
-  'Random ID. No display name. No tracking.',
+  'No phone, no email.',
+  'End-to-end encrypted.',
+  'Disappears in 7 days.',
 ];
 
 export function OnboardingScreen({ onEnrolled }: Props) {
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  const [handle, setHandle] = useState('');
+  const [availability, setAvailability] = useState<AvailabilityState>({ kind: 'idle' });
+  // Bumped on every input change; the in-flight check ignores its
+  // response when its token is no longer current. Kills the "user
+  // typed faster than the server replied → stale state lands" race.
+  const tokenRef = useRef(0);
+  const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (handle.length === 0) {
+      setAvailability({ kind: 'idle' });
+      return;
+    }
+    const localReason = validateHandle(handle);
+    if (localReason === 'invalid') {
+      setAvailability({ kind: 'localInvalid' });
+      return;
+    }
+    if (localReason === 'reserved') {
+      setAvailability({ kind: 'reserved' });
+      return;
+    }
+    setAvailability({ kind: 'checking' });
+    const myToken = ++tokenRef.current;
+    debounceRef.current = setTimeout(() => {
+      api
+        .checkAvailability(handle)
+        .then((r) => {
+          if (myToken !== tokenRef.current) return;
+          if (r.available) {
+            setAvailability({ kind: 'available' });
+          } else if (r.reason === 'taken') {
+            setAvailability({ kind: 'taken' });
+          } else if (r.reason === 'reserved') {
+            setAvailability({ kind: 'reserved' });
+          } else {
+            setAvailability({ kind: 'localInvalid' });
+          }
+        })
+        .catch(() => {
+          if (myToken !== tokenRef.current) return;
+          setAvailability({ kind: 'error' });
+        });
+    }, 300);
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current);
+    };
+  }, [handle]);
 
   async function handleContinue() {
+    if (availability.kind !== 'available') return;
     setBusy(true);
     setError(undefined);
     try {
@@ -76,6 +135,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
       });
       const { user_id } = await api.enroll({
         token: deviceToken,
+        user_id: handle,
         publicKey: identityPublicKey,
         preKeyBundle: {
           registrationId: ownBundle.registrationId,
@@ -132,6 +192,13 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         setError(`${messageForVouchflowError(err.reason)} [${err.reason}]${detail}`);
       } else if (err instanceof SignalClientError) {
         setError(`Identity key gen failed: ${err.reason}${err.message && err.message !== err.reason ? ` — ${err.message}` : ''}`);
+      } else if (err instanceof ApiError && err.status === 409 && err.code === 'taken') {
+        // Lost the race between `checkAvailability` and `tryCreate`.
+        setAvailability({ kind: 'taken' });
+        setError('That handle was just claimed — try another.');
+      } else if (err instanceof ApiError && err.status === 409 && err.code === 'reserved') {
+        setAvailability({ kind: 'reserved' });
+        setError('That handle is reserved.');
       } else if (err instanceof ApiError) {
         setError(`Enrollment failed (${err.status}${err.code ? ` ${err.code}` : ''}).`);
       } else {
@@ -156,18 +223,81 @@ export function OnboardingScreen({ onEnrolled }: Props) {
           </View>
         ))}
       </View>
+      <View style={styles.handleSection}>
+        <Text style={styles.handleLabel}>Choose your handle</Text>
+        <View
+          style={[
+            styles.handleRow,
+            availability.kind === 'available' && styles.handleRowOk,
+            (availability.kind === 'taken' ||
+              availability.kind === 'reserved' ||
+              availability.kind === 'localInvalid') &&
+              styles.handleRowBad,
+          ]}
+        >
+          <Text style={styles.atPrefix}>@</Text>
+          <TextInput
+            value={handle}
+            onChangeText={(t) => setHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, ''))}
+            placeholder="yourname"
+            placeholderTextColor={colors.slate}
+            autoCapitalize="none"
+            autoCorrect={false}
+            autoComplete="off"
+            spellCheck={false}
+            maxLength={20}
+            editable={!busy}
+            style={styles.handleInput}
+            testID="onboarding-handle"
+          />
+        </View>
+        <Text
+          style={[styles.handleStatus, statusColor(availability)]}
+          testID="onboarding-handle-status"
+        >
+          {statusMessage(availability, handle)}
+        </Text>
+      </View>
       <View style={styles.bottom}>
         {error ? <Text testID="onboarding-error" style={styles.error}>{error}</Text> : null}
         <Button
           label="Continue"
           onPress={handleContinue}
           loading={busy}
+          disabled={availability.kind !== 'available' || busy}
           tone="primary"
           testID="onboarding-continue"
         />
       </View>
     </SafeAreaView>
   );
+}
+
+function statusMessage(s: AvailabilityState, handle: string): string {
+  switch (s.kind) {
+    case 'idle':
+      return 'Letters, digits, underscores. 3–20 chars. Start with a letter.';
+    case 'localInvalid':
+      return 'Letters, digits, underscores. 3–20 chars. Start with a letter.';
+    case 'reserved':
+      return `@${handle} is reserved.`;
+    case 'checking':
+      return 'Checking…';
+    case 'available':
+      return `@${handle} is available.`;
+    case 'taken':
+      return `@${handle} is taken.`;
+    case 'error':
+      return 'Could not check availability — retry in a moment.';
+  }
+}
+
+function statusColor(s: AvailabilityState) {
+  if (s.kind === 'available') return { color: colors.primary };
+  if (s.kind === 'taken' || s.kind === 'reserved' || s.kind === 'localInvalid' || s.kind === 'error') {
+    return { color: '#B14A4A' };
+  }
+  return { color: colors.slate };
 }
 
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
@@ -191,8 +321,8 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream, padding: space.lg },
-  header: { alignItems: 'center', gap: space.md, marginTop: space.xxl },
-  principles: { flex: 1, justifyContent: 'center', gap: space.md, paddingHorizontal: space.md },
+  header: { alignItems: 'center', gap: space.md, marginTop: space.xl },
+  principles: { gap: space.sm, paddingHorizontal: space.md, marginTop: space.lg },
   principleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   bullet: {
     width: 6,
@@ -201,7 +331,43 @@ const styles = StyleSheet.create({
     backgroundColor: colors.primary,
   },
   principleText: { color: colors.ink, flex: 1 },
-  bottom: { gap: space.sm },
+  handleSection: { gap: space.xs, marginTop: space.xl, paddingHorizontal: space.md },
+  handleLabel: {
+    fontFamily: fonts.inter500,
+    fontSize: 13,
+    color: colors.slate,
+  },
+  handleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FFFFFF',
+    borderRadius: radius.avatar,
+    paddingHorizontal: space.md,
+    paddingVertical: space.sm,
+    borderWidth: 1.5,
+    borderColor: 'transparent',
+  },
+  handleRowOk: { borderColor: colors.primary },
+  handleRowBad: { borderColor: '#B14A4A' },
+  atPrefix: {
+    fontFamily: fonts.inter500,
+    fontSize: 18,
+    color: colors.slate,
+    marginRight: 2,
+  },
+  handleInput: {
+    flex: 1,
+    fontFamily: fonts.inter500,
+    fontSize: 18,
+    color: colors.ink,
+    padding: 0,
+  },
+  handleStatus: {
+    fontFamily: fonts.inter400,
+    fontSize: 12,
+    paddingHorizontal: space.xs,
+  },
+  bottom: { flex: 1, justifyContent: 'flex-end', gap: space.sm },
   error: {
     color: colors.ink,
     fontFamily: fonts.inter400,
