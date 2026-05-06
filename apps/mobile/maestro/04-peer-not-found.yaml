@@ -32,13 +32,13 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Start chat"
 
-# Verify error message appears. The error doesn't render until the
-# Start chat → fetchPreKeyBundle round-trip finishes, which in CI
-# (Vouchflow sandbox + Fastify in-runner + emulator I/O) can take
-# >10s. The current text reads "No such user. Speakeasy IDs are
-# case-sensitive — double-check it." — `text:` is regex / substring
-# matching, so the leading prefix is enough to match.
+# Verify the error renders. We assert by testID rather than text
+# because the actual error string ("No such user. Speakeasy IDs are
+# case-sensitive — double-check it.") wasn't being matched by
+# Maestro's text regex against the RN accessibility tree even when
+# the screenshot showed it visually present. testID is the resilient
+# selector here.
 - extendedWaitUntil:
     visible:
-      text: "No such user"
+      id: "new-chat-error"
     timeout: 25000

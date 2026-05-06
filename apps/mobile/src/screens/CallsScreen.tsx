@@ -135,7 +135,7 @@ export function CallsScreen({ orchestrator, onCallStarted }: Props) {
           </Pressable>
         </View>
         {error ? (
-          <Text style={[text.subtitle, styles.error]}>{error}</Text>
+          <Text testID="calls-error" style={[text.subtitle, styles.error]}>{error}</Text>
         ) : null}
 
         <Text

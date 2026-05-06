@@ -141,7 +141,11 @@ export function NewChatScreen({ onStart, onCancel }: Props) {
               onSubmitEditing={handleStart}
             />
           </View>
-          {error ? <Text style={styles.error}>{error}</Text> : null}
+          {error ? (
+            <Text testID="new-chat-error" style={styles.error}>
+              {error}
+            </Text>
+          ) : null}
         </View>
 
         <View style={styles.bottom}>
