@@ -227,7 +227,15 @@ export function ConversationsScreen({
         </View>
       ) : null}
 
-      <View pointerEvents="box-none" style={styles.fabStack}>
+      <View
+        pointerEvents="box-none"
+        style={[
+          styles.fabStack,
+          // Lift the FABs above the Get Started dock when it's showing,
+          // otherwise the pencil button covers the rightmost card.
+          showGetStarted ? styles.fabStackAboveDock : null,
+        ]}
+      >
         <Pressable
           testID="conversations-new-group"
           onPress={onNewGroup}
@@ -393,6 +401,12 @@ const styles = StyleSheet.create({
     bottom: space.lg,
     alignItems: 'center',
     gap: space.sm,
+  },
+  // When the Get Started dock is rendered (≈140px tall card row +
+  // padding), the FABs need to sit above it — otherwise the pencil
+  // button overlaps the rightmost card.
+  fabStackAboveDock: {
+    bottom: 156,
   },
   fabPrimary: {
     width: 56,
