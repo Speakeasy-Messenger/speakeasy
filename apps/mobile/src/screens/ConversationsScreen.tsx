@@ -9,6 +9,7 @@ import {
 } from 'react-native';
 import { Avatar } from '../components/Avatar.js';
 import { GroupAvatar } from '../components/GroupAvatar.js';
+import { StatusSquare } from '../components/StatusSquare.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
@@ -101,17 +102,20 @@ export function ConversationsScreen({
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
             <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
-            <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
-              @{userId}
-            </Text>
+            <View style={styles.youRow}>
+              <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
+                @{userId}
+              </Text>
+              {/* Spec §6.10: status is a 6×6 brass square (online) or
+                  text-faint square (offline). The wsState text label is
+                  gone — the square IS the status. */}
+              <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
+            </View>
           </View>
           <Pressable onPress={onOpenSettings} hitSlop={8} style={styles.gearBtn}>
             <Text style={styles.gearIcon}>⚙️</Text>
           </Pressable>
         </View>
-        <Text style={[text.footnote, styles.status]}>
-          {wsState === 'authed' ? '●' : '○'} {wsState}
-        </Text>
       </View>
 
       <FlatList
@@ -212,6 +216,7 @@ const styles = StyleSheet.create({
   headerLeft: { gap: space.xs, flex: 1 },
   label: { color: colors.slate },
   you: { color: colors.ink, fontFamily: fonts.inter500 },
+  youRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   status: { color: colors.slate },
   gearBtn: { padding: space.sm },
   gearIcon: { fontSize: 20 },

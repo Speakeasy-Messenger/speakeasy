@@ -54,9 +54,13 @@ export function Avatar({ userId, size = 36, initialOf, style }: Props) {
     // render — `isFresh` reads through Zustand and skips on its own.
   }, [userId, isFresh, setProfile]);
 
+  // Spec §10: no avatar circles. Avatars are 4-radius squares —
+  // small enough to read as "thumbnail" without echoing the
+  // forbidden circular-badge motif. Same `radius.sm` used by chat
+  // bubbles and inputs.
   const wrapperStyle = [
     styles.wrap,
-    { width: size, height: size, borderRadius: size / 2 },
+    { width: size, height: size, borderRadius: 4 },
     style,
   ];
   const initial = (initialOf ?? userId).slice(0, 1).toUpperCase();
@@ -66,7 +70,7 @@ export function Avatar({ userId, size = 36, initialOf, style }: Props) {
       <View style={wrapperStyle}>
         <Image
           source={{ uri: `data:image/jpeg;base64,${profile.avatarB64}` }}
-          style={[styles.image, { width: size, height: size, borderRadius: size / 2 }]}
+          style={[styles.image, { width: size, height: size, borderRadius: 4 }]}
         />
       </View>
     );

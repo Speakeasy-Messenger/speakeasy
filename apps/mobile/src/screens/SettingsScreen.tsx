@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
   },
 
   card: {
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.pale,
     borderRadius: radius.avatar,
     padding: space.md,
     gap: space.sm,
@@ -266,10 +266,12 @@ const styles = StyleSheet.create({
   },
   profileBody: { flex: 1, gap: space.xs },
   profileActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
+  // Spec §10: no avatar circles — the placeholder follows the
+  // `<Avatar>` component's 4-radius square rule.
   profileAvatarPlaceholder: {
     width: 64,
     height: 64,
-    borderRadius: 32,
+    borderRadius: radius.avatar,
     backgroundColor: colors.pale,
   },
   idValue: {
@@ -343,16 +345,22 @@ const styles = StyleSheet.create({
     backgroundColor: colors.divider,
   },
 
+  // Spec §1: no third color. Sign Out is "deliberate but secondary":
+  // transparent bg + 1px text-faint border + ink foreground. The
+  // confirmation Alert.alert handles the "are you sure" gate so we
+  // don't need a fire-engine red to signal danger.
   destructiveBtn: {
     paddingVertical: 14,
     borderRadius: radius.pill,
-    backgroundColor: '#EF4444',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: colors.divider,
     alignItems: 'center',
   },
   destructiveBtnText: {
     fontFamily: fonts.inter500,
     fontSize: 15,
-    color: '#FFFFFF',
+    color: colors.ink,
   },
 
   version: {

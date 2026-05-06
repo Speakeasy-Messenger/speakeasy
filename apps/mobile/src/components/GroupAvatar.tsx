@@ -54,9 +54,11 @@ export function GroupAvatar({ groupId, name, size = 36, style }: Props) {
     };
   }, [groupId, group?.metadataFetchedAt, group?.name, group?.members, group?.createdAt, upsert]);
 
+  // Spec §10: no avatar circles. Group thumbnails are 4-radius
+  // squares — same as user avatars.
   const wrapperStyle = [
     styles.wrap,
-    { width: size, height: size, borderRadius: size / 2 },
+    { width: size, height: size, borderRadius: 4 },
     style,
   ];
   const fallback = name?.slice(0, 1).toUpperCase() || '#';
@@ -66,7 +68,7 @@ export function GroupAvatar({ groupId, name, size = 36, style }: Props) {
       <View style={wrapperStyle}>
         <Image
           source={{ uri: `data:image/jpeg;base64,${group.avatarB64}` }}
-          style={[styles.image, { width: size, height: size, borderRadius: size / 2 }]}
+          style={[styles.image, { width: size, height: size, borderRadius: 4 }]}
         />
       </View>
     );

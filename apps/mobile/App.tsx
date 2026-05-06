@@ -194,11 +194,11 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        {/* StatusBar's bar style is decided by mode, not the legacy
-            cream bg — the new tokens drive this. We leave the legacy
-            `colors.cream` reference in place for now; phases B/C
-            replace it as the components migrate. */}
-        <StatusBar barStyle="dark-content" backgroundColor={colors.cream} />
+        {/* Light-on-dark status bar — the workspace canvas is dark
+            by default per the rebrand spec, so the icons are the
+            warm bone foreground. Light-mode + per-screen brand-canvas
+            overrides land later. */}
+        <StatusBar barStyle="light-content" backgroundColor={colors.cream} />
         {hydrated ? (
           <RootNavigator
             navRef={navRef}

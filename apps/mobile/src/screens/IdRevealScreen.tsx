@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, SafeAreaView, StyleSheet, Text, View, Easing } from 'react-native';
 import { Button } from '../components/Button.js';
 import { colors, fonts, space, text } from '../theme/index.js';
+import { brand, workspace } from '../theme/tokens.js';
 
 interface Props {
   userId: string;
@@ -113,7 +114,8 @@ export function IdRevealScreen({ userId, onContinue }: Props) {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.cream, padding: space.lg },
+  // Spec §7: brand-moment screens render on the brand canvas (aubergine).
+  root: { flex: 1, backgroundColor: brand.canvas, padding: space.lg },
   center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.lg },
   intro: { color: colors.primary },
   stack: { alignItems: 'center', gap: space.sm },

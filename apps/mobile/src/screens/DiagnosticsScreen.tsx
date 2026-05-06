@@ -145,9 +145,12 @@ const styles = StyleSheet.create({
     fontSize: 11,
     lineHeight: 16,
   },
+  // Spec §1: no third color. The crash card sits on the workspace
+  // canvas; it gets a brass accent border + the standard surface bg
+  // (not a saturated red).
   crashCard: {
-    backgroundColor: '#fff4f4',
-    borderColor: '#e57373',
+    backgroundColor: colors.pale,
+    borderColor: colors.primary,
     borderWidth: 1,
     borderRadius: radius.bubble,
     padding: space.md,
