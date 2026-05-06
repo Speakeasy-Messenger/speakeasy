@@ -187,6 +187,13 @@ dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
 
+    // RN's bundled <Image> renders only the first frame of GIFs by
+    // default — Fresco's animated-gif backend has to be added
+    // explicitly. Pin the version to match the Fresco bundled with
+    // RN 0.76 (3.2.0). Without this, GIF attachments render as a
+    // single frozen frame.
+    implementation("com.facebook.fresco:animated-gif:3.2.0")
+
     // Phase 5b: Vouchflow Android SDK — wraps Android Keystore + biometrics
     // + Play Integrity attestation for device-native verification.
     // Maven coordinate: dev.vouchflow. Auto-published per push, so newer

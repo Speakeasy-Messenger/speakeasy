@@ -4,6 +4,7 @@ import {
   DEFAULT_TTL_SECONDS,
   TTL_OPTIONS,
   conversationIdForDirect,
+  type Attachment,
   type ConversationKind,
   type TtlOption,
 } from '@speakeasy/shared';
@@ -25,14 +26,17 @@ const STORAGE_KEY = 'speakeasy.conversations.v1';
 export interface ChatMessage {
   /** Server-assigned message id (ULID). */
   id: string;
-  /** Sender's adjective-adjective-noun id, or 'me' for the local user. */
+  /** Sender id (handle or legacy 3-word), or 'me' for the local user. */
   from: string;
   /**
-   * Display text. Phase 1 mobile receives base64 ciphertext; real decrypt
-   * fills this in when the Signal Protocol native module ships. Until then
-   * we render the ciphertext verbatim so the layout can be exercised.
+   * Display text. May be empty when the message is attachment-only.
+   * Decrypted Signal plaintext is parsed via shared/attachments
+   * `decodePayload` — text and attachments come from the same envelope.
    */
   text: string;
+  /** Optional attachments (images, gifs, files). When present, the
+   * bubble renders them above any caption text. */
+  attachments?: Attachment[];
   /** Conversation membership type — affects routing on outbound. */
   kind: ConversationKind;
   /** Wall-clock send time (ms). */

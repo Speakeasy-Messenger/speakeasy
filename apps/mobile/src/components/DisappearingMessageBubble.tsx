@@ -1,5 +1,7 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text } from 'react-native';
+import type { Attachment } from '@speakeasy/shared';
+import { AttachmentView } from './AttachmentView.js';
 import { colors, fonts, radius, space } from '../theme/index.js';
 
 /**
@@ -34,6 +36,8 @@ export interface DisappearingMessageBubbleProps {
   stage: DisappearingStage;
   /** Sender vs recipient — affects bubble colours per spec §14. */
   variant?: 'sent' | 'received';
+  /** Optional attachments rendered ABOVE the caption text. */
+  attachments?: Attachment[];
   /** Fires when the current stage's animation completes. */
   onStageAnimated?: (stage: DisappearingStage) => void;
 }
@@ -68,6 +72,7 @@ export function DisappearingMessageBubble({
   text,
   stage,
   variant = 'sent',
+  attachments,
   onStageAnimated,
 }: DisappearingMessageBubbleProps) {
   const opacity = useRef(new Animated.Value(1)).current;
@@ -140,7 +145,9 @@ export function DisappearingMessageBubble({
       transform: [{ scale }],
       // height collapses in the 'gone' stage. Using maxHeight + scaleY would be
       // cleaner with native driver, but we want predictable collapse.
-      maxHeight: heightFactor.interpolate({ inputRange: [0, 1], outputRange: [0, 200] }),
+      // 600 covers a single 220-height photo grid + caption + padding;
+      // the previous 200 cap clipped image bubbles vertically.
+      maxHeight: heightFactor.interpolate({ inputRange: [0, 1], outputRange: [0, 600] }),
     },
   ];
 
@@ -152,7 +159,15 @@ export function DisappearingMessageBubble({
       // (When react-native-community/blur lands, swap to <BlurView blurAmount={blur._value}>.)
       accessibilityLabel={`message: ${text}`}
     >
-      <Text style={[styles.text, isSent ? styles.sentText : styles.receivedText]}>{text}</Text>
+      {attachments && attachments.length > 0 ? (
+        <AttachmentView
+          attachments={attachments}
+          variant={isSent ? 'me' : 'them'}
+        />
+      ) : null}
+      {text ? (
+        <Text style={[styles.text, isSent ? styles.sentText : styles.receivedText]}>{text}</Text>
+      ) : null}
     </Animated.View>
   );
 }

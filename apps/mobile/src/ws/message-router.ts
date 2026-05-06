@@ -4,7 +4,11 @@ import type {
   SignalProtocolModule,
 } from '@speakeasy/crypto';
 import { SignalClientError } from '@speakeasy/crypto';
-import type { WsServerMsg } from '@speakeasy/shared';
+import {
+  decodePayload,
+  type Attachment,
+  type WsServerMsg,
+} from '@speakeasy/shared';
 import type { SpeakeasyWsClient } from './client.js';
 import type { GroupOrchestrator } from '../crypto/group-orchestration.js';
 import type { ChatMessage } from '../store/conversations.js';
@@ -57,6 +61,14 @@ export interface MessageRouterDeps {
       | { kind: 'direct'; peerId: string }
       | { kind: 'group'; groupId: string };
   }) => void;
+  /**
+   * Called once per successfully-decrypted inbound message that
+   * carries `image` / `gif` / `file` attachments. App-level wiring
+   * uses this to auto-save photos to the device gallery
+   * (WhatsApp-style). Failures are non-fatal — chat rendering still
+   * works regardless.
+   */
+  onInboundAttachments?: (attachments: Attachment[]) => void;
   /** Optional structured logger; defaults to console. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
@@ -207,11 +219,16 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               // the optimistic bubble; the wire payload was utf-8 (no
               // libsignal encrypt). Decode directly instead of running
               // decrypt against a self-paired session that may not exist.
+              let attachments: Attachment[] | undefined;
               if (frame.from === deps.myUserId) {
-                bubble = utf8FromBytes(ciphertext);
+                const raw = utf8FromBytes(ciphertext);
+                const payload = decodePayload(raw);
+                bubble = payload.text ?? '';
+                attachments = payload.attachments;
                 diag('router', 'message: self-DM utf8 decoded', {
                   ...frameDesc,
                   textPreview: bubble.slice(0, 24),
+                  attachCount: attachments?.length ?? 0,
                 });
               } else {
                 try {
@@ -219,11 +236,15 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                     frame.from,
                     ciphertext,
                   );
-                  bubble = utf8FromBytes(plaintext);
+                  const raw = utf8FromBytes(plaintext);
+                  const payload = decodePayload(raw);
+                  bubble = payload.text ?? '';
+                  attachments = payload.attachments;
                   decryptedOk = true;
                   diag('router', 'message: signal decrypted', {
                     ...frameDesc,
                     textPreview: bubble.slice(0, 24),
+                    attachCount: attachments?.length ?? 0,
                   });
                 } catch (err) {
                   bubble = decodeBubble(err as Error);
@@ -259,11 +280,15 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   id: frame.message_id,
                   from: frame.from,
                   text: bubble,
+                  attachments,
                   kind: 'direct',
                   sentAt: Date.now(),
                   stage: 'sent',
                 });
                 diag('router', 'addToConversation OK', { convId: conversationId });
+                if (attachments && frame.from !== deps.myUserId) {
+                  deps.onInboundAttachments?.(attachments);
+                }
               } catch (err) {
                 diag('router', 'addToConversation THREW', {
                   convId: conversationId,
@@ -314,18 +339,23 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 });
               }
               let bubble: string;
+              let groupAttachments: Attachment[] | undefined;
               let decryptedOk = false;
               try {
                 const plaintext = await deps.groupMessaging.decryptFromGroupMember(
                   frame.from,
                   ciphertext,
                 );
-                bubble = utf8FromBytes(plaintext);
+                const raw = utf8FromBytes(plaintext);
+                const payload = decodePayload(raw);
+                bubble = payload.text ?? '';
+                groupAttachments = payload.attachments;
                 decryptedOk = true;
                 diag('router', 'group: decrypted', {
                   msgId: frame.message_id,
                   from: frame.from,
                   textPreview: bubble.slice(0, 24),
+                  attachCount: groupAttachments?.length ?? 0,
                 });
               } catch (err) {
                 bubble = decodeBubble(err as Error);
@@ -341,6 +371,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   id: frame.message_id,
                   from: frame.from,
                   text: bubble,
+                  attachments: groupAttachments,
                   kind: 'group',
                   sentAt: Date.now(),
                   stage: 'sent',
@@ -349,6 +380,9 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   convId: frame.conversation_id,
                   msgId: frame.message_id,
                 });
+                if (groupAttachments && frame.from !== deps.myUserId) {
+                  deps.onInboundAttachments?.(groupAttachments);
+                }
               } catch (err) {
                 diag('router', 'group: addToConversation THREW', {
                   convId: frame.conversation_id,
