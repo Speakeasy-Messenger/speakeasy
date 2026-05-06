@@ -33,10 +33,12 @@ appId: xyz.speakeasyapp.app
     text: "Start chat"
 
 # Verify error message appears. The error doesn't render until the
-# Start chat → fetchPreKeyBundle round-trip finishes, so we need a
-# wait window — bare assertVisible has no timeout and races the
-# API response.
+# Start chat → fetchPreKeyBundle round-trip finishes, which in CI
+# (Vouchflow sandbox + Fastify in-runner + emulator I/O) can take
+# >10s. The current text reads "No such user. Speakeasy IDs are
+# case-sensitive — double-check it." — `text:` is regex / substring
+# matching, so the leading prefix is enough to match.
 - extendedWaitUntil:
     visible:
       text: "No such user"
-    timeout: 10000
+    timeout: 25000

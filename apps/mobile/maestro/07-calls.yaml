@@ -70,10 +70,11 @@ name: Calls tab smoke (Tier B)
     id: "calls-dial-btn"
 
 # Expected outcome: orchestrator throws after fetchPreKeyBundle 404,
-# CallsScreen renders "Couldn't start call: …" inline. The 15s
-# window covers TURN credential fetch + WebRTC init + getUserMedia +
-# offer creation + the failing prekey fetch.
+# CallsScreen renders "Couldn't start call: …" inline. Generous
+# window because TURN credential fetch + WebRTC init + getUserMedia
+# + offer creation + the failing prekey fetch is a several-second
+# chain on the CI emulator (Vouchflow sandbox + Fastify in-runner).
 - extendedWaitUntil:
     visible:
       text: "Couldn't start call"
-    timeout: 15000
+    timeout: 30000

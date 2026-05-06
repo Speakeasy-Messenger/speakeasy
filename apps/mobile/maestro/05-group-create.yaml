@@ -40,6 +40,10 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Create group"
 
-# Verify error message appears
-- assertVisible:
-    text: "No such user"
+# Verify error message appears. Server roundtrip can take >10s in CI
+# (Vouchflow sandbox + Fastify in-runner), so use extendedWaitUntil
+# with a generous window. Bare assertVisible races the API response.
+- extendedWaitUntil:
+    visible:
+      text: "No such user"
+    timeout: 25000
