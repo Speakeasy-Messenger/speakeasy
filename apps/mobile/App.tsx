@@ -13,6 +13,7 @@ import { useSettings } from './src/store/settings.js';
 import { useProfiles } from './src/store/profiles.js';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider.js';
 import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
+import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
@@ -145,6 +146,13 @@ export default function App() {
           case 'community':
             return conversationIdForCommunity(to);
         }
+      },
+      // Best-effort: photos/gifs land in the device gallery so the
+      // recipient can revisit them outside Speakeasy (and so the
+      // dissolve TTL doesn't take them away forever). Files are
+      // skipped — there's no system "documents" gallery analog.
+      onInboundAttachments: (attachments) => {
+        void saveAttachmentsToGallery(attachments);
       },
       notifyInbound: ({ msgId, from, text, target }) => {
         if (notifiedMsgIds.has(msgId)) return;

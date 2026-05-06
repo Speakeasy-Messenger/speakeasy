@@ -1,6 +1,7 @@
 export * from './ids/index.js';
 export * from './types/index.js';
 export * from './conversation/index.js';
+export * from './attachments/index.js';
 // Wordlist-dependent exports (`generateUserId`, `ID_SPACE_SIZE`,
 // `ADJECTIVES`, `NOUNS`) intentionally NOT re-exported here: they pull
 // in `node:fs` + `node:crypto`, which crash Metro's bundler. Server-only

@@ -1,5 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Alert,
   FlatList,
   KeyboardAvoidingView,
   Platform,
@@ -10,7 +11,13 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
+import {
+  conversationIdForDirect,
+  encodePayload,
+  newMessageId,
+  type Attachment,
+} from '@speakeasy/shared';
+import { pickFile, pickGif, pickPhotos } from '../attachments/pick.js';
 import { Avatar } from '../components/Avatar.js';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
@@ -142,84 +149,132 @@ export function ChatScreen({ peerId, onBack }: Props) {
     const trimmed = input.trim();
     if (!trimmed) return;
     setInput('');
+    void sendOutbound({ text: trimmed });
+  }
+
+  async function handleAttach() {
+    Alert.alert('Send', 'What would you like to attach?', [
+      {
+        text: 'Photos',
+        onPress: async () => {
+          const photos = await pickPhotos();
+          if (photos.length) await sendOutbound({ attachments: photos });
+        },
+      },
+      {
+        text: 'GIF',
+        onPress: async () => {
+          const gif = await pickGif();
+          if (gif) await sendOutbound({ attachments: [gif] });
+        },
+      },
+      {
+        text: 'File',
+        onPress: async () => {
+          const file = await pickFile();
+          if (file) await sendOutbound({ attachments: [file] });
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
+    const text = opts.text?.trim() || undefined;
+    const attachments = opts.attachments?.length ? opts.attachments : undefined;
+    if (!text && !attachments) return;
     const id = newMessageId();
-    // Optimistic local echo — we render the plaintext immediately so the
-    // bubble appears with no perceived latency, then send the encrypted
-    // payload over the wire in the background.
-    diag('chat', 'send', { convId: conversationId, peerId, isSelf: peerId === myUserId });
+    // Optimistic local echo — render immediately, encrypt + send
+    // in the background.
+    diag('chat', 'send', {
+      convId: conversationId,
+      peerId,
+      isSelf: peerId === myUserId,
+      hasAttachments: !!attachments,
+      attachCount: attachments?.length ?? 0,
+    });
     add(conversationId, {
       id,
       from: 'me',
-      text: trimmed,
+      text: text ?? '',
+      attachments,
       kind: 'direct',
       sentAt: Date.now(),
       stage: 'sent',
     });
-    void (async () => {
-      try {
-        let deviceToken = useIdentity.getState().deviceToken;
-        if (!deviceToken) {
-          diag('chat', 'send: no deviceToken, calling vouchflow.verify');
-          const r = await vouchflow.verify({ context: 'login' });
-          useIdentity.getState().setDeviceToken(r.deviceToken);
-          deviceToken = r.deviceToken;
-        }
-        const isSelf = peerId === myUserId;
-        let ciphertext: Uint8Array;
-        if (isSelf) {
-          ciphertext = utf8ToBytes(trimmed);
-        } else {
-          diag('chat', 'send: ensureSessionWithPeer', { peerId });
-          await ensureSessionWithPeer({
-            api,
-            signalProtocol,
-            deviceToken,
-            peerUserId: peerId,
-          });
-          diag('chat', 'send: ensureSessionWithPeer OK', { peerId });
-          ciphertext = await signalProtocol.encrypt(peerId, utf8ToBytes(trimmed));
-          diag('chat', 'send: encrypt OK', { peerId, ctLen: ciphertext.length });
-        }
-        const ws = getWsClient(async () => deviceToken);
-        await ws.waitForAuthed();
-        // Re-confirm the state right before send — `ensureSessionWithPeer`
-        // above can take ~10s, plenty of time for a WS flap.
-        if (ws.getState() !== 'authed') await ws.waitForAuthed();
-        ws.send({
-          type: 'message',
-          to: peerId,
-          ciphertext: bytesToB64(ciphertext),
-          msg_type: 'direct',
-        });
-        diag('chat', 'send: ws.send OK', { peerId });
-      } catch (err: unknown) {
-        const e = err as { name?: string; message?: string; reason?: string; code?: string; status?: number; stack?: string };
-        diag('chat', 'send FAILED', {
-          peerId,
-          isSelf: peerId === myUserId,
-          name: e.name,
-          message: e.message,
-          reason: e.reason,
-          code: e.code,
-          status: e.status,
-          stack: e.stack?.slice(0, 240),
-        });
-        const reason =
-          err instanceof SignalClientError
-            ? `[encrypt failed: ${err.reason}]`
-            : err instanceof ApiError
-              ? `[send failed: ${err.code ?? err.status}]`
-              : `[send failed: ${e.name ?? 'Error'} — ${e.message ?? String(err)}]`;
-        add(conversationId, {
-          id: newMessageId(),
-          from: 'me',
-          text: reason,
-          kind: 'direct',
-          sentAt: Date.now(),
-          stage: 'sent',
-        });
+    try {
+      let deviceToken = useIdentity.getState().deviceToken;
+      if (!deviceToken) {
+        diag('chat', 'send: no deviceToken, calling vouchflow.verify');
+        const r = await vouchflow.verify({ context: 'login' });
+        useIdentity.getState().setDeviceToken(r.deviceToken);
+        deviceToken = r.deviceToken;
       }
-    })();
+      const isSelf = peerId === myUserId;
+      // Pack the text + attachments into the v1 envelope. Pre-rebrand
+      // peers see legacy raw utf-8 text — `decodePayload` handles both.
+      const plaintext = encodePayload({ v: 1, text, attachments });
+      let ciphertext: Uint8Array;
+      if (isSelf) {
+        ciphertext = utf8ToBytes(plaintext);
+      } else {
+        diag('chat', 'send: ensureSessionWithPeer', { peerId });
+        await ensureSessionWithPeer({
+          api,
+          signalProtocol,
+          deviceToken,
+          peerUserId: peerId,
+        });
+        diag('chat', 'send: ensureSessionWithPeer OK', { peerId });
+        ciphertext = await signalProtocol.encrypt(peerId, utf8ToBytes(plaintext));
+        diag('chat', 'send: encrypt OK', { peerId, ctLen: ciphertext.length });
+      }
+      const ws = getWsClient(async () => deviceToken);
+      await ws.waitForAuthed();
+      // Re-confirm the state right before send — `ensureSessionWithPeer`
+      // above can take ~10s, plenty of time for a WS flap.
+      if (ws.getState() !== 'authed') await ws.waitForAuthed();
+      ws.send({
+        type: 'message',
+        to: peerId,
+        ciphertext: bytesToB64(ciphertext),
+        msg_type: 'direct',
+      });
+      diag('chat', 'send: ws.send OK', { peerId });
+    } catch (err: unknown) {
+      const e = err as {
+        name?: string;
+        message?: string;
+        reason?: string;
+        code?: string;
+        status?: number;
+        stack?: string;
+      };
+      diag('chat', 'send FAILED', {
+        peerId,
+        isSelf: peerId === myUserId,
+        name: e.name,
+        message: e.message,
+        reason: e.reason,
+        code: e.code,
+        status: e.status,
+        stack: e.stack?.slice(0, 240),
+      });
+      const reason =
+        err instanceof SignalClientError
+          ? `[encrypt failed: ${err.reason}]`
+          : err instanceof ApiError
+            ? `[send failed: ${err.code ?? err.status}]`
+            : `[send failed: ${e.name ?? 'Error'} — ${e.message ?? String(err)}]`;
+      add(conversationId, {
+        id: newMessageId(),
+        from: 'me',
+        text: reason,
+        kind: 'direct',
+        sentAt: Date.now(),
+        stage: 'sent',
+      });
+    }
   }
 
   function cycleTtl() {
@@ -251,6 +306,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
           renderItem={({ item }) => (
             <DisappearingMessageBubble
               text={item.text}
+              attachments={item.attachments}
               stage={item.stage as DisappearingStage}
               variant={item.from === 'me' ? 'sent' : 'received'}
             />
@@ -270,6 +326,14 @@ export function ChatScreen({ peerId, onBack }: Props) {
             style={styles.ttlPill}
           >
             <Text style={styles.ttlText}>⏱ {ttl}</Text>
+          </Pressable>
+          <Pressable
+            testID="chat-attach"
+            onPress={handleAttach}
+            style={styles.attachBtn}
+            hitSlop={6}
+          >
+            <Text style={styles.attachText}>+</Text>
           </Pressable>
           <TextInput
             testID="chat-input"
@@ -333,6 +397,20 @@ const styles = StyleSheet.create({
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.pale,
+  },
+  attachBtn: {
+    width: 36,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: colors.pale,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  attachText: {
+    fontFamily: fonts.inter500,
+    fontSize: 22,
+    color: colors.primary,
+    lineHeight: 24,
   },
   ttlText: {
     fontFamily: fonts.inter500,
