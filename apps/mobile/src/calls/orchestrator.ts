@@ -120,13 +120,17 @@ export class CallOrchestrator {
 
     try {
       const iceServers = await this.fetchIceServers();
+      diag('call', 'iceServers fetched', { count: iceServers.length });
       const peer = await this.deps.peerFactory.create({
         iceServers,
         role: 'caller',
       });
+      diag('call', 'peer created');
       this.attachPeer(peer);
       const offer = await peer.createOffer();
+      diag('call', 'offer created', { sdpLen: offer.sdp.length });
       await this.sendEncrypted(peerUserId, callId, 'call_offer', offer);
+      diag('call', 'offer sent', { peerUserId, callId });
       this.transition('outgoing_ringing');
       this.armRingTimeout();
       return callId;
@@ -208,6 +212,17 @@ export class CallOrchestrator {
    * `call_*` frames; everything else is ignored.
    */
   async handleFrame(frame: WsServerMsg): Promise<void> {
+    if (
+      frame.type === 'call_offer' ||
+      frame.type === 'call_answer' ||
+      frame.type === 'call_ice' ||
+      frame.type === 'call_end'
+    ) {
+      diag('call', `handleFrame: ${frame.type}`, {
+        from: frame.from,
+        call_id: frame.call_id,
+      });
+    }
     switch (frame.type) {
       case 'call_offer':
         return this.handleIncomingOffer(frame.from, frame.call_id, frame.ciphertext);
@@ -371,6 +386,7 @@ export class CallOrchestrator {
     type: 'call_offer' | 'call_answer' | 'call_ice',
     payload: CallOfferPayload | CallAnswerPayload | CallIcePayload,
   ): Promise<void> {
+    diag('call', 'sendEncrypted: enter', { type, peerUserId, callId });
     const deviceToken = await this.deps.getDeviceToken();
     await this.deps.ensureSessionWithPeer({
       api: this.deps.api,
@@ -378,14 +394,21 @@ export class CallOrchestrator {
       deviceToken,
       peerUserId,
     });
+    diag('call', 'sendEncrypted: session ensured', { type, peerUserId });
     const plaintext = utf8ToBytes(JSON.stringify(payload));
     const ciphertext = await this.deps.signalProtocol.encrypt(peerUserId, plaintext);
+    diag('call', 'sendEncrypted: ciphertext built', {
+      type,
+      peerUserId,
+      ctLen: ciphertext.length,
+    });
     this.deps.send({
       type,
       to: peerUserId,
       call_id: callId,
       ciphertext: bytesToB64(ciphertext),
     });
+    diag('call', 'sendEncrypted: ws.send returned', { type, peerUserId, callId });
   }
 
   private async decrypt(fromUserId: string, ciphertextB64: string): Promise<unknown> {
@@ -396,7 +419,8 @@ export class CallOrchestrator {
 
   private async fetchIceServers(): Promise<IceServer[]> {
     try {
-      return await this.deps.api.fetchTurnCredentials();
+      const deviceToken = await this.deps.getDeviceToken();
+      return await this.deps.api.fetchTurnCredentials(deviceToken);
     } catch (err) {
       diag('call', 'fetchTurnCredentials FAILED — using STUN-only', {
         err: String(err),

@@ -425,12 +425,17 @@ export class ApiClient {
    * Vouchflow auth. Call right before `RTCPeerConnection` setup; the
    * returned tokens typically last ~1 hour.
    */
-  async fetchTurnCredentials(): Promise<
+  async fetchTurnCredentials(
+    deviceToken: string,
+  ): Promise<
     Array<{ urls: string | string[]; username?: string; credential?: string }>
   > {
     const res = await this.doFetch(`${this.baseUrl}/v1/turn/credentials`, {
       method: 'GET',
-      headers: { 'content-type': 'application/json' },
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deviceToken}`,
+      },
     });
     if (res.status === 200) {
       const j = (await res.json()) as {
