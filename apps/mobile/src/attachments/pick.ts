@@ -1,4 +1,4 @@
-import { launchImageLibrary } from 'react-native-image-picker';
+import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import DocumentPicker from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
 import type { Attachment } from '@speakeasy/shared';
@@ -68,6 +68,32 @@ export async function pickGif(): Promise<Attachment | null> {
   if ((asset.fileSize ?? 0) > GIF_MAX_BYTES) return null;
   const data = await RNFS.readFile(asset.uri.replace('file://', ''), 'base64');
   return { kind: 'gif', mime: 'image/gif', data };
+}
+
+/**
+ * Take a photo with the device camera. Same resize/quality envelope
+ * as `pickPhotos` so an in-the-moment camera shot ends up roughly the
+ * same size on the wire as a gallery photo. Returns `null` on cancel
+ * or when the camera is unavailable.
+ */
+export async function pickFromCamera(): Promise<Attachment | null> {
+  const result = await launchCamera({
+    mediaType: 'photo',
+    maxWidth: PHOTO_MAX_W,
+    maxHeight: PHOTO_MAX_H,
+    quality: PHOTO_QUALITY,
+    includeBase64: true,
+    saveToPhotos: true,
+  });
+  if (result.didCancel || !result.assets?.[0]) return null;
+  const asset = result.assets[0];
+  if (!asset.base64) return null;
+  if ((asset.fileSize ?? 0) > PHOTO_MAX_BYTES) return null;
+  return {
+    kind: 'image',
+    mime: asset.type ?? 'image/jpeg',
+    data: asset.base64,
+  };
 }
 
 /**

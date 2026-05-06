@@ -88,6 +88,61 @@ export async function registerGroupRoutes(
   );
 
   /**
+   * GET /v1/groups/:id/members — list every member in the group.
+   * Members-only (the same privacy rationale as the metadata endpoint:
+   * non-members shouldn't be able to enumerate the roster).
+   */
+  app.get<{ Params: IdParam }>(
+    '/v1/groups/:id/members',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const callerId = request.auth?.userId;
+      if (!callerId) return reply.code(403).send({ error: 'not_enrolled' });
+      const { id: groupId } = request.params;
+      const summary = await opts.repo.findById(groupId);
+      if (!summary) return reply.code(404).send({ error: 'group_missing' });
+      if (!(await opts.repo.isMember(groupId, callerId))) {
+        return reply.code(403).send({ error: 'not_member' });
+      }
+      const members = await opts.repo.listMembers(groupId);
+      return reply.send({ members, created_by: summary.createdBy });
+    },
+  );
+
+  /**
+   * DELETE /v1/groups/:id/members/:userId — remove a member. Only the
+   * creator may evict; the creator themselves cannot be removed via
+   * this route (`cannot_remove_creator`). The repo is the source of
+   * truth on membership/auth state — we surface its result codes back
+   * to the client one-to-one.
+   */
+  app.delete<{ Params: { id: string; userId: string } }>(
+    '/v1/groups/:id/members/:userId',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const callerId = request.auth?.userId;
+      if (!callerId) return reply.code(403).send({ error: 'not_enrolled' });
+      const { id: groupId, userId: target } = request.params;
+      const summary = await opts.repo.findById(groupId);
+      if (!summary) return reply.code(404).send({ error: 'group_missing' });
+      if (summary.createdBy !== callerId) {
+        return reply.code(403).send({ error: 'not_creator' });
+      }
+      const result = await opts.repo.removeMember({ groupId, userId: target });
+      if (result === 'group_missing') {
+        return reply.code(404).send({ error: 'group_missing' });
+      }
+      if (result === 'not_member') {
+        return reply.code(404).send({ error: 'not_member' });
+      }
+      if (result === 'cannot_remove_creator') {
+        return reply.code(409).send({ error: 'cannot_remove_creator' });
+      }
+      return reply.send({ members: result });
+    },
+  );
+
+  /**
    * GET /v1/groups/:id — fetch group metadata (creator + avatar).
    * Members-only; an outsider doesn't get to probe whether a group
    * exists or sniff its avatar.

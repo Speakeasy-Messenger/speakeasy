@@ -20,6 +20,21 @@ export interface GroupRepo {
   countMembers(groupId: string): Promise<number>;
   /** All members of the group, in arbitrary order. */
   listMembers(groupId: string): Promise<string[]>;
+  /**
+   * Remove a member. The caller must already be authorized upstream
+   * (in our case the routes layer enforces creator-only). Returns:
+   *   `'group_missing'` — group doesn't exist
+   *   `'not_member'`    — `userId` isn't currently in the group
+   *   `'cannot_remove_creator'` — refuse to evict the creator (they'd
+   *                              still own the room and the next /v1/groups
+   *                              GET would then fail their own membership
+   *                              check; cleanest semantics is to forbid)
+   *   number            — new member count after removal.
+   */
+  removeMember(args: {
+    groupId: string;
+    userId: string;
+  }): Promise<number | 'group_missing' | 'not_member' | 'cannot_remove_creator'>;
   /** Existence + avatar + creator lookup. Undefined when the group is missing. */
   findById(groupId: string): Promise<GroupSummary | undefined>;
   /**

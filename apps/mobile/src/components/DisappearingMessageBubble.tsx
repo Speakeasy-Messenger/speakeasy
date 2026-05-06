@@ -38,6 +38,10 @@ export interface DisappearingMessageBubbleProps {
   variant?: 'sent' | 'received';
   /** Optional attachments rendered ABOVE the caption text. */
   attachments?: Attachment[];
+  /** Tap a photo/gif → host opens fullscreen viewer. */
+  onTapPhoto?: (attachment: Attachment) => void;
+  /** Tap a file → host writes to Downloads / opens externally. */
+  onTapFile?: (attachment: Attachment) => void;
   /** Fires when the current stage's animation completes. */
   onStageAnimated?: (stage: DisappearingStage) => void;
 }
@@ -73,6 +77,8 @@ export function DisappearingMessageBubble({
   stage,
   variant = 'sent',
   attachments,
+  onTapPhoto,
+  onTapFile,
   onStageAnimated,
 }: DisappearingMessageBubbleProps) {
   const opacity = useRef(new Animated.Value(1)).current;
@@ -163,6 +169,8 @@ export function DisappearingMessageBubble({
         <AttachmentView
           attachments={attachments}
           variant={isSent ? 'me' : 'them'}
+          onTapPhoto={onTapPhoto}
+          onTapFile={onTapFile}
         />
       ) : null}
       {text ? (

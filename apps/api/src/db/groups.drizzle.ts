@@ -126,6 +126,49 @@ export class DrizzleGroupRepo implements GroupRepo {
     return rows.map((row) => row.userId);
   }
 
+  async removeMember(args: {
+    groupId: string;
+    userId: string;
+  }): Promise<number | 'group_missing' | 'not_member' | 'cannot_remove_creator'> {
+    const db = getDb();
+    return db.transaction(async (tx) => {
+      const groupRows = await tx
+        .select({ id: groups.id, createdBy: groups.createdBy })
+        .from(groups)
+        .where(eq(groups.id, args.groupId))
+        .limit(1);
+      if (groupRows.length === 0) return 'group_missing';
+      if (groupRows[0]!.createdBy === args.userId) return 'cannot_remove_creator';
+
+      const existing = await tx
+        .select({ userId: groupMembers.userId })
+        .from(groupMembers)
+        .where(
+          and(
+            eq(groupMembers.groupId, args.groupId),
+            eq(groupMembers.userId, args.userId),
+          ),
+        )
+        .limit(1);
+      if (existing.length === 0) return 'not_member';
+
+      await tx
+        .delete(groupMembers)
+        .where(
+          and(
+            eq(groupMembers.groupId, args.groupId),
+            eq(groupMembers.userId, args.userId),
+          ),
+        );
+
+      const countRows = await tx
+        .select({ count: sql<number>`count(*)` })
+        .from(groupMembers)
+        .where(eq(groupMembers.groupId, args.groupId));
+      return Number(countRows[0]!.count);
+    });
+  }
+
   async findById(groupId: string): Promise<GroupSummary | undefined> {
     const db = getDb();
     const rows = await db

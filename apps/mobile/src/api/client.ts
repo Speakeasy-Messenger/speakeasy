@@ -299,6 +299,62 @@ export class ApiClient {
   }
 
   /**
+   * List the roster of a group. Members-only. Returns the members and
+   * the original creator (so the UI can show a "creator" badge on
+   * their row, and so non-creators can hide the kick affordances).
+   */
+  async listGroupMembers(
+    deviceToken: string,
+    groupId: string,
+  ): Promise<{ members: string[]; created_by: string }> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}/members`,
+      {
+        method: 'GET',
+        headers: { authorization: `Bearer ${deviceToken}` },
+      },
+    );
+    if (res.status === 200)
+      return (await res.json()) as { members: string[]; created_by: string };
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
+   * Remove a member from a group. Creator-only on the server. The
+   * server refuses to evict the creator themselves
+   * (`cannot_remove_creator` → 409). Returns the post-remove count.
+   */
+  async removeGroupMember(
+    deviceToken: string,
+    groupId: string,
+    userId: string,
+  ): Promise<{ members: number }> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}/members/${encodeURIComponent(userId)}`,
+      {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${deviceToken}` },
+      },
+    );
+    if (res.status === 200) return (await res.json()) as { members: number };
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
    * Fetch a peer's PreKey bundle so we can establish a Signal session.
    * Server consumes one OTPK on the way out; the response includes a
    * `low_water` flag the *peer's* device acts on next time it auths.

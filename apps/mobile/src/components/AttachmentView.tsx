@@ -21,11 +21,20 @@ interface Props {
   /** Outgoing bubbles use a brass background — captions + file names
    * inside need accent-fg, not the workspace text color. */
   variant: 'me' | 'them';
+  /** Tap a photo/gif → opens fullscreen viewer in the host screen. */
+  onTapPhoto?: (attachment: Attachment) => void;
+  /** Tap a file → host writes to Downloads + alerts. */
+  onTapFile?: (attachment: Attachment) => void;
 }
 
 const SIDE = 220; // logical-px square footprint per photo
 
-export function AttachmentView({ attachments, variant }: Props): React.JSX.Element | null {
+export function AttachmentView({
+  attachments,
+  variant,
+  onTapPhoto,
+  onTapFile,
+}: Props): React.JSX.Element | null {
   if (!attachments.length) return null;
 
   const photos = attachments.filter((a) => a.kind === 'image' || a.kind === 'gif');
@@ -33,30 +42,39 @@ export function AttachmentView({ attachments, variant }: Props): React.JSX.Eleme
 
   return (
     <View style={styles.root}>
-      {photos.length > 0 ? <PhotoGrid photos={photos} /> : null}
+      {photos.length > 0 ? <PhotoGrid photos={photos} onTap={onTapPhoto} /> : null}
       {files.map((f, i) => (
-        <FileCard key={`${f.name ?? 'file'}-${i}`} attachment={f} variant={variant} />
+        <FileCard
+          key={`${f.name ?? 'file'}-${i}`}
+          attachment={f}
+          variant={variant}
+          onTap={onTapFile}
+        />
       ))}
     </View>
   );
 }
 
-function PhotoGrid({ photos }: { photos: Attachment[] }) {
+function PhotoGrid({
+  photos,
+  onTap,
+}: {
+  photos: Attachment[];
+  onTap?: (a: Attachment) => void;
+}) {
   if (photos.length === 1) {
-    return <PhotoTile attachment={photos[0]!} width={SIDE} />;
+    return <PhotoTile attachment={photos[0]!} width={SIDE} onTap={onTap} />;
   }
-  // 2 → side-by-side. 3+ → 2-column wrap, last odd photo spans full
-  // width on its own row.
   return (
     <View style={styles.grid}>
       {photos.map((p, i) => {
-        const fullWidth =
-          photos.length % 2 === 1 && i === photos.length - 1;
+        const fullWidth = photos.length % 2 === 1 && i === photos.length - 1;
         return (
           <PhotoTile
             key={i}
             attachment={p}
             width={fullWidth ? SIDE : (SIDE - 4) / 2}
+            onTap={onTap}
           />
         );
       })}
@@ -67,24 +85,30 @@ function PhotoGrid({ photos }: { photos: Attachment[] }) {
 function PhotoTile({
   attachment,
   width,
+  onTap,
 }: {
   attachment: Attachment;
   width: number;
+  onTap?: (a: Attachment) => void;
 }) {
   return (
-    <Image
-      source={{ uri: `data:${attachment.mime};base64,${attachment.data}` }}
-      style={[styles.photo, { width, height: width }]}
-    />
+    <Pressable onPress={onTap ? () => onTap(attachment) : undefined}>
+      <Image
+        source={{ uri: `data:${attachment.mime};base64,${attachment.data}` }}
+        style={[styles.photo, { width, height: width }]}
+      />
+    </Pressable>
   );
 }
 
 function FileCard({
   attachment,
   variant,
+  onTap,
 }: {
   attachment: Attachment;
   variant: 'me' | 'them';
+  onTap?: (a: Attachment) => void;
 }) {
   const theme = useTheme();
   const isMe = variant === 'me';
@@ -93,7 +117,10 @@ function FileCard({
   const name = attachment.name ?? 'file';
   const ext = name.includes('.') ? name.split('.').pop()?.toUpperCase() : 'FILE';
   return (
-    <Pressable style={[styles.fileCard, { borderColor: muted }]}>
+    <Pressable
+      style={[styles.fileCard, { borderColor: muted }]}
+      onPress={onTap ? () => onTap(attachment) : undefined}
+    >
       <View style={[styles.fileBadge, { borderColor: fg }]}>
         <Text style={[styles.fileBadgeText, { color: fg, fontFamily: font.semibold }]}>
           {ext?.slice(0, 4) ?? 'FILE'}
