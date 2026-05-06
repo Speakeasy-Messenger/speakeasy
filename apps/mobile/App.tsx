@@ -11,6 +11,7 @@ import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
 import { useProfiles } from './src/store/profiles.js';
+import { useOnboardingCards } from './src/store/onboarding-cards.js';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider.js';
 import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
 import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
@@ -55,6 +56,7 @@ export default function App() {
       void useDistributionIds.getState().hydrate();
       void useSettings.getState().hydrate();
       void useProfiles.getState().hydrate();
+      void useOnboardingCards.getState().hydrate();
     }
   }, [hydrated]);
 
