@@ -13,24 +13,12 @@ appId: xyz.speakeasyapp.app
     text: "Wait"
     optional: true
 
-# Navigate through onboarding
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-screen"
-    timeout: 30000
-- tapOn:
-    text: "Continue"
-# Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
-- runFlow: _unlock-biometric-prompt.yaml
-# OnboardingScreen race: navigator flips to Auth stack (initialRoute:
-# Conversations) before navigation.replace("IdReveal") fires, so IdReveal
-# is usually skipped. Wait directly for Conversations (matches 01-enroll).
-
-# Wait for enrollment to complete
-- extendedWaitUntil:
-    visible:
-      id: "conversations-screen"
-    timeout: 30000
+# Run shared enrollment flow (types handle, waits for availability,
+# taps Continue, dismisses BiometricPrompt, asserts conversations-userid).
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester03
 
 # Remember the user ID
 - copyTextFrom:

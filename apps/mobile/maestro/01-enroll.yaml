@@ -11,27 +11,10 @@ name: Enroll fresh user (Tier B)
     text: "Wait"
     optional: true
 
-# 3. Wait for onboarding screen
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 20000
-
-# 4. Tap Continue to begin enrollment
-- tapOn:
-    text: "Continue"
-
-# 4a. Vouchflow's verify() shows BiometricPrompt; emulator has a PIN
-#     but no fingerprint, so Android falls back to PIN entry from
-#     com.android.systemui. Type 0000 to dismiss.
-- runFlow: _unlock-biometric-prompt.yaml
-
-# 5. Wait for enrollment to complete
-#    NOTE: Race condition — after setUserId(), the navigator flips
-#    to the Auth stack (initialRoute: Conversations). The
-#    navigation.replace('IdReveal') in OnboardingScreen may lose
-#    the race, so we skip IdReveal and wait directly for Conversations.
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 30000
+# 3. Run the shared enrollment flow — types a handle, waits for the
+#    server's availability check to settle, taps Continue, dismisses
+#    BiometricPrompt, asserts conversations-userid.
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester01

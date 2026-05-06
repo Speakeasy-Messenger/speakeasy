@@ -2,67 +2,46 @@ appId: xyz.speakeasyapp.app
 name: Self-DM round-trip (Tier B)
 ---
 
-# 1. Setup — clear state & launch
 - clearState
 - launchApp
-
-# 2. Dismiss ANR dialog if present
 - tapOn:
     text: "Wait"
     optional: true
 
-# 3. Wait for onboarding screen
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-continue"
-    timeout: 20000
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester02
 
-# 4. Tap Continue to begin enrollment
-- tapOn:
-    text: "Continue"
-
-# 4a. Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
-- runFlow: _unlock-biometric-prompt.yaml
-
-# 5. Wait for enrollment to complete (race condition — see 01-enroll.yaml)
-- extendedWaitUntil:
-    visible:
-      id: "conversations-userid"
-    timeout: 30000
-
-# 6. Copy our user ID
+# Copy our user ID — the conversations tab shows @<handle> in the
+# header. We'll use it as the peer for a self-DM.
 - copyTextFrom:
     id: "conversations-userid"
 
-# 7. Start new chat — FAB on the bottom-right of the Conversations
-#    screen (Phase 6 UX rebuild replaced the inline "+ New chat" button
-#    with this floating action button).
+# New chat — FAB on the bottom-right of the Conversations screen
+# (Phase 6 UX rebuild replaced the inline button with this FAB).
 - tapOn:
     id: "conversations-new-chat"
 
-# 8. Enter our own ID as recipient
+# Enter our own ID as recipient
 - tapOn:
     id: "new-chat-peer-id-input"
 - inputText: "${maestro.copiedText}"
 
-# 9. Start chat
 - tapOn:
     text: "Start chat"
 
-# 10. Send a message
+# Send a message
 - tapOn:
     id: "chat-input"
 - inputText: "Hello self!"
 - tapOn:
     text: "Send"
 
-# 11. Verify message appears in chat
 - assertVisible:
     text: "Hello self!"
 
-# 12. Go back to conversations list
 - back
 
-# 13. Verify conversation appears in list
 - assertVisible:
     text: "Hello self!"

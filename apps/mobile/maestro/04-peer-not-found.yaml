@@ -3,34 +3,17 @@
 
 appId: xyz.speakeasyapp.app
 ---
-# Clear state and enroll fresh
 - clearState
 - clearKeychain
 - launchApp
-
-# Dismiss cold-boot ANR dialog if present
 - tapOn:
     text: "Wait"
     optional: true
 
-# Navigate through onboarding
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-screen"
-    timeout: 30000
-- tapOn:
-    text: "Continue"
-# Handle BiometricPrompt PIN fallback (CI emulator, no fingerprint)
-- runFlow: _unlock-biometric-prompt.yaml
-# OnboardingScreen race: navigator flips to Auth stack (initialRoute:
-# Conversations) before navigation.replace("IdReveal") fires, so IdReveal
-# is usually skipped. Wait directly for Conversations (matches 01-enroll).
-
-# Wait for enrollment to complete
-- extendedWaitUntil:
-    visible:
-      id: "conversations-screen"
-    timeout: 30000
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester04
 
 # Navigate to new chat — FAB on the bottom-right (Phase 6 UX rebuild).
 - tapOn:

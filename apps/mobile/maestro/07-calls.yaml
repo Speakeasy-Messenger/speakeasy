@@ -38,23 +38,14 @@ name: Calls tab smoke (Tier B)
 - clearState
 - clearKeychain
 - launchApp
-
 - tapOn:
     text: "Wait"
     optional: true
 
-- extendedWaitUntil:
-    visible:
-      id: "onboarding-screen"
-    timeout: 30000
-- tapOn:
-    text: "Continue"
-- runFlow: _unlock-biometric-prompt.yaml
-
-- extendedWaitUntil:
-    visible:
-      id: "conversations-screen"
-    timeout: 30000
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester07
 
 # Switch to the Calls tab. RootNavigator's tabBarLabelStyle uppercases
 # the labels, so we tap on "CALLS".

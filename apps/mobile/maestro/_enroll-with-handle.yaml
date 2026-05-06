@@ -1,0 +1,62 @@
+# Shared sub-flow: complete enrollment with a chosen handle.
+#
+# OnboardingScreen requires the user to type a handle, see the
+# server-side availability check come back "available", and only then
+# tap Continue (the button is disabled until availability.kind ===
+# 'available').
+#
+# Each Tier B run boots a fresh in-memory api server, so any well-formed
+# handle is available. Callers don't need to thread a unique value
+# through — the in-runner namespace is empty at flow start.
+#
+# Pre-conditions:
+#   - App is launched and OnboardingScreen is on top.
+#   - clearState / clearKeychain has run (we leave that to the parent
+#     flow so it can run before launchApp).
+#
+# Post-conditions:
+#   - Vouchflow attestation finished.
+#   - Conversations tab is visible and conversations-userid renders the
+#     resolved user id (= the handle the caller picked).
+#
+# Args (set via env or `runFlow`'s env block):
+#   HANDLE — handle to enroll, lowercase a-z0-9_ only, 3-20 chars.
+
+appId: xyz.speakeasyapp.app
+---
+
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-screen"
+    timeout: 30000
+
+# Tap the handle input and type the chosen handle. The input
+# auto-strips any non-handle chars, but we provide a clean string.
+- tapOn:
+    id: "onboarding-handle"
+- inputText: ${HANDLE}
+
+# Wait for the availability check to settle. The status text reads
+# "@{handle} is available." once the server confirms — that's also
+# when the Continue button stops being disabled.
+- extendedWaitUntil:
+    visible:
+      text: "@${HANDLE} is available."
+    timeout: 15000
+
+- tapOn:
+    id: "onboarding-continue"
+
+# Vouchflow's verify() shows BiometricPrompt; emulator has a PIN
+# but no fingerprint, so Android falls back to PIN entry from
+# com.android.systemui. Type 0000 to dismiss.
+- runFlow: _unlock-biometric-prompt.yaml
+
+# Race condition (documented in 01-enroll.yaml comments): after
+# setUserId the navigator flips to the authed stack; the
+# navigation.replace('IdReveal') in OnboardingScreen may lose the race.
+# Wait directly for the conversations tab.
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 30000
