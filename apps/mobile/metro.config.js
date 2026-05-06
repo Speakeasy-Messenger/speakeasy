@@ -20,6 +20,17 @@ const defaultConfig = getDefaultConfig(projectRoot);
 const previousResolveRequest = defaultConfig.resolver.resolveRequest;
 function resolveTsJsImports(context, moduleName, platform) {
   const inner = previousResolveRequest ?? context.resolveRequest;
+  // react-native-webrtc 124 imports `event-target-shim/index`, but the
+  // 5.0.1 shim ships `dist/event-target-shim.js` via its `main` field
+  // and has no `index.js` at the root. Metro's release-mode bundler
+  // (which the debug dev server skips) resolves the subpath literally
+  // and fails. Redirect to the package root so `main` takes over.
+  if (
+    moduleName === 'event-target-shim/index' ||
+    moduleName === 'event-target-shim/index.js'
+  ) {
+    return inner(context, 'event-target-shim', platform);
+  }
   try {
     return inner(context, moduleName, platform);
   } catch (err) {
