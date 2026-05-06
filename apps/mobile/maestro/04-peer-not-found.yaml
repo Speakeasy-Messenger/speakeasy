@@ -32,9 +32,9 @@ appId: xyz.speakeasyapp.app
       id: "conversations-screen"
     timeout: 30000
 
-# Navigate to new chat
+# Navigate to new chat — FAB on the bottom-right (Phase 6 UX rebuild).
 - tapOn:
-    text: "+ New chat"
+    id: "conversations-new-chat"
 
 # Wait for new chat screen
 - extendedWaitUntil:

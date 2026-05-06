@@ -34,9 +34,11 @@ name: Self-DM round-trip (Tier B)
 - copyTextFrom:
     id: "conversations-userid"
 
-# 7. Start new chat
+# 7. Start new chat — FAB on the bottom-right of the Conversations
+#    screen (Phase 6 UX rebuild replaced the inline "+ New chat" button
+#    with this floating action button).
 - tapOn:
-    text: "+ New chat"
+    id: "conversations-new-chat"
 
 # 8. Enter our own ID as recipient
 - tapOn:
