@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -12,7 +13,12 @@ import {
   View,
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
-import { newMessageId } from '@speakeasy/shared';
+import { type Attachment, encodePayload, newMessageId } from '@speakeasy/shared';
+import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
+import { GifPickerSheet } from '../components/GifPickerSheet.js';
+import { CameraIcon, GifIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
+import { MediaViewerScreen } from './MediaViewerScreen.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import { GroupAvatar } from '../components/GroupAvatar.js';
@@ -31,6 +37,9 @@ import { colors, fonts, radius, space, text } from '../theme/index.js';
 interface Props {
   groupId: string;
   onBack?: () => void;
+  /** Open the manage-members screen — tapped from the member-count
+   * subline in the chat header. */
+  onManageMembers?: () => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal here
@@ -57,7 +66,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * The orchestrator is constructed per-render (cheap; bootstrap state is
  * a captured Map). All other deps come from singleton services.
  */
-export function GroupChatScreen({ groupId, onBack }: Props) {
+export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
   const myUserId = useIdentity((s) => s.userId);
   if (!myUserId) {
     throw new Error('GroupChatScreen rendered without an enrolled identity');
@@ -97,6 +106,8 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
 
   const [input, setInput] = useState('');
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
+  const [gifSheetOpen, setGifSheetOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
   const upsertGroup = useGroups((s) => s.upsert);
   // Only the creator can change the group avatar. `createdBy` may be
@@ -178,9 +189,19 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
   function handleSend() {
     const trimmed = input.trim();
     if (!trimmed) return;
+    setInput('');
+    void sendOutbound({ text: trimmed });
+  }
+
+  // Group send accepts text and/or attachments. Same v1 envelope as
+  // direct chats (`encodePayload`) so the message-router decode path
+  // is identical on the receiving side. Attachments go through the
+  // sender-key fan-out, just like text.
+  async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
+    const text = opts.text?.trim() || undefined;
+    const attachments = opts.attachments?.length ? opts.attachments : undefined;
+    if (!text && !attachments) return;
     if (!group) {
-      // Defensive: somehow on this screen for an unknown group. Surface
-      // it on a bubble so the user notices.
       add(groupId, {
         id: newMessageId(),
         from: 'me',
@@ -191,61 +212,93 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
       });
       return;
     }
-    setInput('');
     const localId = newMessageId();
-    // Optimistic local echo.
     add(groupId, {
       id: localId,
       from: 'me',
-      text: trimmed,
+      text: text ?? '',
+      attachments,
       kind: 'group',
       sentAt: Date.now(),
       stage: 'sent',
     });
-    void (async () => {
-      try {
-        const getDeviceToken = async () => {
-          const cached = useIdentity.getState().deviceToken;
-          if (cached) return cached;
-          const r = await vouchflow.verify({ context: 'login' });
-          useIdentity.getState().setDeviceToken(r.deviceToken);
-          return r.deviceToken;
-        };
-        const ws = getWsClient(getDeviceToken);
-        const orchestrator = makeGroupOrchestrator({
-          api,
-          signalProtocol,
-          groupMessaging,
-          ws,
-          getDeviceToken,
-          getOrCreateDistributionId: (id) =>
-            useDistributionIds.getState().getOrCreate(id),
-        });
-        await ws.waitForAuthed();
-        await orchestrator.sendGroupMessage({
-          groupId,
-          members: group.members,
-          selfUserId: myUserId!,
-          plaintext: utf8ToBytes(trimmed),
-        });
-      } catch (err: unknown) {
-        const e = err as { name?: string; message?: string };
-        const reason =
-          err instanceof SignalClientError
-            ? `[encrypt failed: ${err.reason}]`
-            : err instanceof ApiError
-              ? `[send failed: ${err.code ?? err.status}]`
-              : `[send failed: ${e.name ?? 'Error'} — ${e.message ?? String(err)}]`;
-        add(groupId, {
-          id: newMessageId(),
-          from: 'me',
-          text: reason,
-          kind: 'group',
-          sentAt: Date.now(),
-          stage: 'sent',
-        });
-      }
-    })();
+    try {
+      const getDeviceToken = async () => {
+        const cached = useIdentity.getState().deviceToken;
+        if (cached) return cached;
+        const r = await vouchflow.verify({ context: 'login' });
+        useIdentity.getState().setDeviceToken(r.deviceToken);
+        return r.deviceToken;
+      };
+      const ws = getWsClient(getDeviceToken);
+      const orchestrator = makeGroupOrchestrator({
+        api,
+        signalProtocol,
+        groupMessaging,
+        ws,
+        getDeviceToken,
+        getOrCreateDistributionId: (id) =>
+          useDistributionIds.getState().getOrCreate(id),
+      });
+      await ws.waitForAuthed();
+      const plaintext = encodePayload({ v: 1, text, attachments });
+      await orchestrator.sendGroupMessage({
+        groupId,
+        members: group.members,
+        selfUserId: myUserId!,
+        plaintext: utf8ToBytes(plaintext),
+      });
+    } catch (err: unknown) {
+      const e = err as { name?: string; message?: string };
+      const reason =
+        err instanceof SignalClientError
+          ? `[encrypt failed: ${err.reason}]`
+          : err instanceof ApiError
+            ? `[send failed: ${err.code ?? err.status}]`
+            : `[send failed: ${e.name ?? 'Error'} — ${e.message ?? String(err)}]`;
+      add(groupId, {
+        id: newMessageId(),
+        from: 'me',
+        text: reason,
+        kind: 'group',
+        sentAt: Date.now(),
+        stage: 'sent',
+      });
+    }
+  }
+
+  async function handlePaperclip() {
+    Alert.alert('Attach', 'Pick a source.', [
+      {
+        text: 'Photos',
+        onPress: async () => {
+          const photos = await pickPhotos();
+          if (photos.length) await sendOutbound({ attachments: photos });
+        },
+      },
+      {
+        text: 'File',
+        onPress: async () => {
+          const file = await pickFile();
+          if (file) await sendOutbound({ attachments: [file] });
+        },
+      },
+      { text: 'Cancel', style: 'cancel' },
+    ]);
+  }
+
+  async function handleCamera() {
+    const photo = await pickFromCamera();
+    if (photo) await sendOutbound({ attachments: [photo] });
+  }
+
+  function handleGif() {
+    setGifSheetOpen(true);
+  }
+
+  async function handleGifPicked(gif: Attachment) {
+    setGifSheetOpen(false);
+    await sendOutbound({ attachments: [gif] });
   }
 
   function cycleTtl() {
@@ -271,16 +324,20 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
           >
             <GroupAvatar groupId={groupId} name={group?.name} size={40} />
           </Pressable>
-          <View style={styles.headerText}>
+          <Pressable
+            style={styles.headerText}
+            onPress={onManageMembers}
+            testID="group-chat-manage-members"
+          >
             <Text style={[text.heroBody, styles.peer]} numberOfLines={1}>
               # {group?.name ?? groupId}
             </Text>
             <Text style={[text.footnote, styles.subhead]}>
               {group
-                ? `${group.members.length} member${group.members.length === 1 ? '' : 's'}${isCreator ? ' · tap to change photo' : ''}`
+                ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · tap to manage${isCreator ? ' · photo above' : ''}`
                 : ''}
             </Text>
-          </View>
+          </Pressable>
         </View>
       </View>
       <KeyboardAvoidingView
@@ -299,8 +356,11 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
                   ? item.text
                   : `${item.from}: ${item.text}`
               }
+              attachments={item.attachments}
               stage={item.stage as DisappearingStage}
               variant={item.from === 'me' ? 'sent' : 'received'}
+              onTapPhoto={(a) => setViewerAttachment(a)}
+              onTapFile={(a) => void saveAndAnnounceFile(a)}
             />
           )}
           ListFooterComponent={
@@ -310,7 +370,7 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
           }
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         />
-        <View style={styles.inputBar}>
+        <View style={styles.composer}>
           <Pressable
             onPress={cycleTtl}
             onLongPress={() => setPersistence(groupId, true)}
@@ -318,21 +378,65 @@ export function GroupChatScreen({ groupId, onBack }: Props) {
           >
             <Text style={styles.ttlText}>⏱ {ttl}</Text>
           </Pressable>
-          <TextInput
-            testID="chat-input"
-            style={styles.input}
-            value={input}
-            onChangeText={setInput}
-            placeholder="Say it…"
-            placeholderTextColor={colors.slate}
-            onSubmitEditing={handleSend}
-            returnKeyType="send"
-          />
-          <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
-            <Text style={styles.sendText}>Send</Text>
-          </Pressable>
+          <View style={styles.inputBar}>
+            <Pressable
+              onPress={handleGif}
+              hitSlop={6}
+              style={styles.iconBtn}
+              testID="chat-gif"
+            >
+              <GifIcon size={22} />
+            </Pressable>
+            <TextInput
+              testID="chat-input"
+              style={styles.input}
+              value={input}
+              onChangeText={setInput}
+              placeholder="Say it…"
+              placeholderTextColor={colors.slate}
+              onSubmitEditing={handleSend}
+              returnKeyType="send"
+            />
+            <Pressable
+              onPress={handlePaperclip}
+              hitSlop={6}
+              style={styles.iconBtn}
+              testID="chat-attach"
+            >
+              <PaperclipIcon size={22} />
+            </Pressable>
+            <Pressable
+              onPress={handleCamera}
+              hitSlop={6}
+              style={styles.iconBtn}
+              testID="chat-camera"
+            >
+              <CameraIcon size={22} />
+            </Pressable>
+            <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
+              <Text style={styles.sendText}>Send</Text>
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
+      <Modal
+        visible={!!viewerAttachment}
+        animationType="fade"
+        onRequestClose={() => setViewerAttachment(null)}
+      >
+        {viewerAttachment ? (
+          <MediaViewerScreen
+            data={viewerAttachment.data}
+            mime={viewerAttachment.mime}
+            onClose={() => setViewerAttachment(null)}
+          />
+        ) : null}
+      </Modal>
+      <GifPickerSheet
+        visible={gifSheetOpen}
+        onClose={() => setGifSheetOpen(false)}
+        onPick={(gif) => void handleGifPicked(gif)}
+      />
     </SafeAreaView>
   );
 }
@@ -361,18 +465,30 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: space.lg,
   },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+  composer: {
     borderTopColor: colors.pale,
     borderTopWidth: 1,
     backgroundColor: colors.cream,
+    paddingVertical: 6,
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+  },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   ttlPill: {
-    paddingVertical: 6,
+    alignSelf: 'flex-start',
+    marginLeft: space.md,
+    marginBottom: 2,
+    paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: radius.pill,
     borderWidth: 1,

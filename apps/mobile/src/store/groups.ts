@@ -39,6 +39,12 @@ interface GroupsState {
   upsert: (group: Group) => void;
   /** Add a single member to an existing group (no-op if missing). */
   addMember: (groupId: string, userId: string) => void;
+  /** Remove a single member from a group (no-op if missing). */
+  removeMember: (groupId: string, userId: string) => void;
+  /** Replace the entire member list — used after a server-side roster
+   * resync so the local view doesn't drift if a member was removed
+   * out-of-band. */
+  setMembers: (groupId: string, members: string[]) => void;
   /** Read persisted state from disk. Idempotent. */
   hydrate: () => Promise<void>;
   /** Wipe groups locally AND on disk. */
@@ -85,6 +91,27 @@ export const useGroups = create<GroupsState>((set, get) => ({
       if (!g) return s;
       if (g.members.includes(userId)) return s;
       const newById = { ...s.byId, [groupId]: { ...g, members: [...g.members, userId] } };
+      void persist(newById);
+      return { byId: newById };
+    }),
+
+  removeMember: (groupId, userId) =>
+    set((s) => {
+      const g = s.byId[groupId];
+      if (!g || !g.members.includes(userId)) return s;
+      const newById = {
+        ...s.byId,
+        [groupId]: { ...g, members: g.members.filter((m) => m !== userId) },
+      };
+      void persist(newById);
+      return { byId: newById };
+    }),
+
+  setMembers: (groupId, members) =>
+    set((s) => {
+      const g = s.byId[groupId];
+      if (!g) return s;
+      const newById = { ...s.byId, [groupId]: { ...g, members: [...members] } };
       void persist(newById);
       return { byId: newById };
     }),

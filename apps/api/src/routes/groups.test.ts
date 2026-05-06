@@ -261,3 +261,76 @@ describe('PUT /v1/groups/:id/avatar', () => {
     await app.close();
   });
 });
+
+describe('GET /v1/groups/:id/members', () => {
+  it('returns the roster + creator for a member', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-roster', createdBy: 'alice' });
+    await repo.addMember({ groupId: 'grp-roster', userId: 'bob', addedBy: 'alice' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/groups/grp-roster/members',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.created_by).toBe('alice');
+    expect((body.members as string[]).sort()).toEqual(['alice', 'bob']);
+    await app.close();
+  });
+
+  it('403 for a non-member peeker', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-private', createdBy: 'alice' });
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/groups/grp-private/members',
+      headers: callerHeader('mallory'),
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+});
+
+describe('DELETE /v1/groups/:id/members/:userId', () => {
+  it('creator can evict a regular member; member count drops', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-kick', createdBy: 'alice' });
+    await repo.addMember({ groupId: 'grp-kick', userId: 'bob', addedBy: 'alice' });
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/groups/grp-kick/members/bob',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().members).toBe(1);
+    expect(await repo.isMember('grp-kick', 'bob')).toBe(false);
+    await app.close();
+  });
+
+  it('403 when a non-creator tries to evict', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-kick2', createdBy: 'alice' });
+    await repo.addMember({ groupId: 'grp-kick2', userId: 'bob', addedBy: 'alice' });
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/groups/grp-kick2/members/alice',
+      headers: callerHeader('bob'),
+    });
+    expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  it('409 when creator tries to evict themselves', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-self', createdBy: 'alice' });
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/groups/grp-self/members/alice',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(409);
+    expect(res.json().error).toBe('cannot_remove_creator');
+    await app.close();
+  });
+});

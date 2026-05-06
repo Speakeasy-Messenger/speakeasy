@@ -11,6 +11,7 @@ import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
 import { ChatScreen } from '../screens/ChatScreen.js';
 import { GroupChatScreen } from '../screens/GroupChatScreen.js';
+import { ManageGroupMembersScreen } from '../screens/ManageGroupMembersScreen.js';
 import { NewChatScreen } from '../screens/NewChatScreen.js';
 import { NewGroupScreen } from '../screens/NewGroupScreen.js';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen.js';
@@ -25,6 +26,7 @@ export type RootStack = {
   Conversations: undefined;
   Chat: { peerId: string };
   GroupChat: { groupId: string };
+  ManageGroupMembers: { groupId: string };
   NewChat: undefined;
   NewGroup: undefined;
   Diagnostics: undefined;
@@ -146,6 +148,22 @@ export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
             <Stack.Screen name="GroupChat">
               {({ navigation, route }: NativeStackScreenProps<RootStack, 'GroupChat'>) => (
                 <GroupChatScreen
+                  groupId={route.params.groupId}
+                  onBack={() => navigation.goBack()}
+                  onManageMembers={() =>
+                    navigation.navigate('ManageGroupMembers', {
+                      groupId: route.params.groupId,
+                    })
+                  }
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="ManageGroupMembers">
+              {({
+                navigation,
+                route,
+              }: NativeStackScreenProps<RootStack, 'ManageGroupMembers'>) => (
+                <ManageGroupMembersScreen
                   groupId={route.params.groupId}
                   onBack={() => navigation.goBack()}
                 />

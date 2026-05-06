@@ -3,6 +3,7 @@ import {
   Alert,
   FlatList,
   KeyboardAvoidingView,
+  Modal,
   Platform,
   Pressable,
   SafeAreaView,
@@ -17,7 +18,11 @@ import {
   newMessageId,
   type Attachment,
 } from '@speakeasy/shared';
-import { pickFile, pickGif, pickPhotos } from '../attachments/pick.js';
+import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
+import { GifPickerSheet } from '../components/GifPickerSheet.js';
+import { CameraIcon, GifIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
+import { MediaViewerScreen } from './MediaViewerScreen.js';
 import { Avatar } from '../components/Avatar.js';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
@@ -84,6 +89,10 @@ export function ChatScreen({ peerId, onBack }: Props) {
   const markRead = useConversations((s) => s.markRead);
 
   const [input, setInput] = useState('');
+  // Tap a photo/gif in the bubble → render this attachment fullscreen
+  // in a Modal layered over the chat. Null = closed.
+  const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
+  const [gifSheetOpen, setGifSheetOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
 
   // Ensure the conversation entry exists with the correct peerUserId. If
@@ -152,20 +161,16 @@ export function ChatScreen({ peerId, onBack }: Props) {
     void sendOutbound({ text: trimmed });
   }
 
-  async function handleAttach() {
-    Alert.alert('Send', 'What would you like to attach?', [
+  // WhatsApp-style direct affordances — no nested action sheet.
+  // Paperclip is the only one that branches (Photos vs Files), since
+  // those two pickers are functionally distinct on Android.
+  async function handlePaperclip() {
+    Alert.alert('Attach', 'Pick a source.', [
       {
         text: 'Photos',
         onPress: async () => {
           const photos = await pickPhotos();
           if (photos.length) await sendOutbound({ attachments: photos });
-        },
-      },
-      {
-        text: 'GIF',
-        onPress: async () => {
-          const gif = await pickGif();
-          if (gif) await sendOutbound({ attachments: [gif] });
         },
       },
       {
@@ -177,6 +182,20 @@ export function ChatScreen({ peerId, onBack }: Props) {
       },
       { text: 'Cancel', style: 'cancel' },
     ]);
+  }
+
+  async function handleCamera() {
+    const photo = await pickFromCamera();
+    if (photo) await sendOutbound({ attachments: [photo] });
+  }
+
+  function handleGif() {
+    setGifSheetOpen(true);
+  }
+
+  async function handleGifPicked(gif: Attachment) {
+    setGifSheetOpen(false);
+    await sendOutbound({ attachments: [gif] });
   }
 
   async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
@@ -309,6 +328,8 @@ export function ChatScreen({ peerId, onBack }: Props) {
               attachments={item.attachments}
               stage={item.stage as DisappearingStage}
               variant={item.from === 'me' ? 'sent' : 'received'}
+              onTapPhoto={(a) => setViewerAttachment(a)}
+              onTapFile={(a) => void saveAndAnnounceFile(a)}
             />
           )}
           ListFooterComponent={
@@ -319,7 +340,7 @@ export function ChatScreen({ peerId, onBack }: Props) {
           }
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         />
-        <View style={styles.inputBar}>
+        <View style={styles.composer}>
           <Pressable
             onPress={cycleTtl}
             onLongPress={() => setPersistence(conversationId, true)}
@@ -327,29 +348,65 @@ export function ChatScreen({ peerId, onBack }: Props) {
           >
             <Text style={styles.ttlText}>⏱ {ttl}</Text>
           </Pressable>
-          <Pressable
-            testID="chat-attach"
-            onPress={handleAttach}
-            style={styles.attachBtn}
-            hitSlop={6}
-          >
-            <Text style={styles.attachText}>+</Text>
-          </Pressable>
-          <TextInput
-            testID="chat-input"
-            style={styles.input}
-            value={input}
-            onChangeText={setInput}
-            placeholder="Say it…"
-            placeholderTextColor={colors.slate}
-            onSubmitEditing={handleSend}
-            returnKeyType="send"
-          />
-          <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
-            <Text style={styles.sendText}>Send</Text>
-          </Pressable>
+          <View style={styles.inputBar}>
+            <Pressable
+              onPress={handleGif}
+              hitSlop={6}
+              style={styles.iconBtn}
+              testID="chat-gif"
+            >
+              <GifIcon size={22} />
+            </Pressable>
+            <TextInput
+              testID="chat-input"
+              style={styles.input}
+              value={input}
+              onChangeText={setInput}
+              placeholder="Say it…"
+              placeholderTextColor={colors.slate}
+              onSubmitEditing={handleSend}
+              returnKeyType="send"
+            />
+            <Pressable
+              onPress={handlePaperclip}
+              hitSlop={6}
+              style={styles.iconBtn}
+              testID="chat-attach"
+            >
+              <PaperclipIcon size={22} />
+            </Pressable>
+            <Pressable
+              onPress={handleCamera}
+              hitSlop={6}
+              style={styles.iconBtn}
+              testID="chat-camera"
+            >
+              <CameraIcon size={22} />
+            </Pressable>
+            <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
+              <Text style={styles.sendText}>Send</Text>
+            </Pressable>
+          </View>
         </View>
       </KeyboardAvoidingView>
+      <Modal
+        visible={!!viewerAttachment}
+        animationType="fade"
+        onRequestClose={() => setViewerAttachment(null)}
+      >
+        {viewerAttachment ? (
+          <MediaViewerScreen
+            data={viewerAttachment.data}
+            mime={viewerAttachment.mime}
+            onClose={() => setViewerAttachment(null)}
+          />
+        ) : null}
+      </Modal>
+      <GifPickerSheet
+        visible={gifSheetOpen}
+        onClose={() => setGifSheetOpen(false)}
+        onPick={(gif) => void handleGifPicked(gif)}
+      />
     </SafeAreaView>
   );
 }
@@ -381,36 +438,34 @@ const styles = StyleSheet.create({
   },
   // Spec §6.10: status indicator is a 6×6 brass square — no radius.
   dot: { width: 6, height: 6, backgroundColor: colors.primary },
-  inputBar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    paddingHorizontal: space.md,
-    paddingVertical: space.sm,
+  composer: {
     borderTopColor: colors.pale,
     borderTopWidth: 1,
     backgroundColor: colors.cream,
+    paddingVertical: 6,
+  },
+  inputBar: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    paddingHorizontal: space.md,
+    paddingVertical: space.xs,
+  },
+  iconBtn: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   ttlPill: {
-    paddingVertical: 6,
+    alignSelf: 'flex-start',
+    marginLeft: space.md,
+    marginBottom: 2,
+    paddingVertical: 4,
     paddingHorizontal: 10,
     borderRadius: radius.pill,
     borderWidth: 1,
     borderColor: colors.pale,
-  },
-  attachBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: radius.pill,
-    backgroundColor: colors.pale,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  attachText: {
-    fontFamily: fonts.inter500,
-    fontSize: 22,
-    color: colors.primary,
-    lineHeight: 24,
   },
   ttlText: {
     fontFamily: fonts.inter500,
