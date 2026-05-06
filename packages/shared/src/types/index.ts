@@ -81,7 +81,12 @@ export type WsClientMsg =
    * level (one row per recipient, persist-and-forward, ack-delete) but
    * dispatches as a separate frame type to the recipient.
    */
-  | { type: 'skdm'; to: string; group_id: string; ciphertext: string };
+  | { type: 'skdm'; to: string; group_id: string; ciphertext: string }
+  // ----- Voice call signaling (1:1 only — see Call* types below) -----
+  | { type: 'call_offer'; to: UserId; call_id: CallId; ciphertext: string }
+  | { type: 'call_answer'; to: UserId; call_id: CallId; ciphertext: string }
+  | { type: 'call_ice'; to: UserId; call_id: CallId; ciphertext: string }
+  | { type: 'call_end'; to: UserId; call_id: CallId; reason: CallEndReason };
 
 export type WsServerMsg =
   | { type: 'authed'; user_id: UserId }
@@ -124,7 +129,59 @@ export type WsServerMsg =
    * `POST /v1/prekeys/replenish`. Emitted by `/v1/prekeys/bundle` when a
    * peer's bundle fetch drains the owner's pool.
    */
-  | { type: 'prekeys_low'; remaining_prekeys: number };
+  | { type: 'prekeys_low'; remaining_prekeys: number }
+  // ----- Voice call signaling (1:1 only) -----
+  | { type: 'call_offer'; from: UserId; call_id: CallId; ciphertext: string }
+  | { type: 'call_answer'; from: UserId; call_id: CallId; ciphertext: string }
+  | { type: 'call_ice'; from: UserId; call_id: CallId; ciphertext: string }
+  | { type: 'call_end'; from: UserId; call_id: CallId; reason: CallEndReason };
+
+// ------------ Voice calling (1:1, E2E via DTLS-SRTP authenticated by Signal) ------------
+
+export type CallId = string;
+
+/**
+ * Wire-level reason a call ended. Locally the orchestrator may also
+ * record synthetic reasons that are never sent over the wire
+ * (`no_answer`, `callee_offline`, `error`); see `apps/mobile/src/calls/`.
+ */
+export type CallEndReason =
+  | 'hangup' // active call ended by either party
+  | 'decline' // callee rejected the offer
+  | 'cancel' // caller cancelled before callee answered
+  | 'busy'; // callee already in a call
+
+/**
+ * Plaintext shape of the JSON inside `call_offer.ciphertext`. Encrypted
+ * via the existing Signal 1:1 session before going on the wire — server
+ * cannot read it. The DTLS fingerprint is what authenticates the WebRTC
+ * media layer back to the Signal-authenticated identity, blocking any
+ * MITM at the TURN relay.
+ */
+export interface CallOfferPayload {
+  v: 1;
+  /** SDP offer, RFC 8866 plaintext. */
+  sdp: string;
+  /** Initial trickle-ICE candidates known at offer time (may be []). */
+  candidates: CallIceCandidate[];
+}
+
+export interface CallAnswerPayload {
+  v: 1;
+  sdp: string;
+  candidates: CallIceCandidate[];
+}
+
+export interface CallIcePayload {
+  v: 1;
+  candidates: CallIceCandidate[];
+}
+
+export interface CallIceCandidate {
+  candidate: string;
+  sdpMid: string | null;
+  sdpMLineIndex: number | null;
+}
 
 // ------------ Disappearing-message TTL options (spec §13 suggested) ------------
 

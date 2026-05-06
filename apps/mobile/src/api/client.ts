@@ -420,6 +420,34 @@ export class ApiClient {
    * touch the secret material here. Caller's identity comes from the
    * `Authorization: Bearer <deviceToken>` header.
    */
+  /**
+   * Voice-call ICE servers — short-lived TURN credentials gated by
+   * Vouchflow auth. Call right before `RTCPeerConnection` setup; the
+   * returned tokens typically last ~1 hour.
+   */
+  async fetchTurnCredentials(): Promise<
+    Array<{ urls: string | string[]; username?: string; credential?: string }>
+  > {
+    const res = await this.doFetch(`${this.baseUrl}/v1/turn/credentials`, {
+      method: 'GET',
+      headers: { 'content-type': 'application/json' },
+    });
+    if (res.status === 200) {
+      const j = (await res.json()) as {
+        ice_servers: Array<{ urls: string | string[]; username?: string; credential?: string }>;
+      };
+      return j.ice_servers;
+    }
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
   async replenishPreKeys(
     deviceToken: string,
     body: PreKeyReplenishRequest,

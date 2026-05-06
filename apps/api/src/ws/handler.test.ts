@@ -1125,3 +1125,199 @@ describe('ws messaging — Phase 5d push-token integration', () => {
     expect(pushProvider.calls).toHaveLength(0);
   });
 });
+
+describe('ws voice call signaling — Phase 6', () => {
+  async function authedSocket(
+    userId: string,
+  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+    const ws = await open();
+    const q = new MsgQueue(ws);
+    ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
+    const authed = (await q.next()) as { type: string };
+    expect(authed.type).toBe('authed');
+    return { ws, q };
+  }
+
+  it('forwards call_offer live to a connected callee', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: 'call-01HZZZTESTOFFERAAAAAAAAAA',
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    const incoming = (await b.q.next()) as {
+      type: string;
+      from: string;
+      call_id: string;
+      ciphertext: string;
+    };
+    expect(incoming.type).toBe('call_offer');
+    expect(incoming.from).toBe('alice-blue-fox');
+    expect(incoming.call_id).toBe('call-01HZZZTESTOFFERAAAAAAAAAA');
+    expect(incoming.ciphertext).toBe('T0ZGRVI=');
+    // Calls are live-only — never persisted to the relay buffer.
+    expect(messagesRepo.buffer.size).toBe(0);
+  });
+
+  it('forwards call_answer and call_ice to the caller', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    b.ws.send(
+      JSON.stringify({
+        type: 'call_answer',
+        to: 'alice-blue-fox',
+        call_id: 'call-01HZZZTESTANSWERBBBBBBBBB',
+        ciphertext: 'QU5T',
+      }),
+    );
+    const ans = (await a.q.next()) as { type: string; from: string };
+    expect(ans.type).toBe('call_answer');
+    expect(ans.from).toBe('bob-red-bear');
+
+    b.ws.send(
+      JSON.stringify({
+        type: 'call_ice',
+        to: 'alice-blue-fox',
+        call_id: 'call-01HZZZTESTANSWERBBBBBBBBB',
+        ciphertext: 'SUNF',
+      }),
+    );
+    const ice = (await a.q.next()) as { type: string; ciphertext: string };
+    expect(ice.type).toBe('call_ice');
+    expect(ice.ciphertext).toBe('SUNF');
+  });
+
+  it('forwards call_end with reason and no ciphertext', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'bob-red-bear',
+        call_id: 'call-01HZZZTESTENDCCCCCCCCCCCC',
+        reason: 'cancel',
+      }),
+    );
+    const end = (await b.q.next()) as { type: string; reason: string; from: string };
+    expect(end.type).toBe('call_end');
+    expect(end.reason).toBe('cancel');
+    expect(end.from).toBe('alice-blue-fox');
+  });
+
+  it('fans a call_offer out to every live device of the callee', async () => {
+    // Reuse the multi-device fixture pattern.
+    await app.close();
+    const validator = new MockValidator((tok) => {
+      if (tok === 'dvt_alice') {
+        return { ok: true, attestation: { confidence: 'medium', userId: 'alice-blue-fox' } };
+      }
+      if (tok === 'dvt_bob_phone' || tok === 'dvt_bob_laptop') {
+        return { ok: true, attestation: { confidence: 'medium', userId: 'bob-red-bear' } };
+      }
+      return { ok: false, reason: 'device_not_found' };
+    });
+    connections = new InMemoryConnections();
+    presence = new InMemoryPresence();
+    messagesRepo = new InMemoryMessagesRepo();
+    pushProvider = new MockPushProvider();
+    app = await buildServer({
+      validator,
+      userRepo: new InMemoryUserRepo(),
+      connections,
+      presence,
+      messagesRepo,
+      groupRepo: new InMemoryGroupRepo(),
+      communityRepo: new InMemoryCommunityRepo(),
+      push: pushProvider,
+      instanceId: 'test-instance-call-multi',
+      logger: false,
+    });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    url = `ws://127.0.0.1:${(app.server.address() as AddressInfo).port}/ws`;
+
+    const aliceWs = await open();
+    const aliceQ = new MsgQueue(aliceWs);
+    aliceWs.send(JSON.stringify({ type: 'auth', token: 'dvt_alice' }));
+    await aliceQ.next();
+    const phoneWs = await open();
+    const phoneQ = new MsgQueue(phoneWs);
+    phoneWs.send(JSON.stringify({ type: 'auth', token: 'dvt_bob_phone' }));
+    await phoneQ.next();
+    const laptopWs = await open();
+    const laptopQ = new MsgQueue(laptopWs);
+    laptopWs.send(JSON.stringify({ type: 'auth', token: 'dvt_bob_laptop' }));
+    await laptopQ.next();
+
+    aliceWs.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: 'call-01HZZZMULTIDEVICEAAAAAAAAA',
+        ciphertext: 'TVUx',
+      }),
+    );
+    const onPhone = (await phoneQ.next()) as { type: string; ciphertext: string };
+    const onLaptop = (await laptopQ.next()) as { type: string; ciphertext: string };
+    expect(onPhone.type).toBe('call_offer');
+    expect(onLaptop.type).toBe('call_offer');
+  });
+
+  it('pushes notify-only when the callee has no live devices and drops other call frames', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'offline-foo-bar',
+        call_id: 'call-01HZZZOFFLINEEEEEEEEEEEEEE',
+        ciphertext: 'T0ZGTElORQ==',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(pushProvider.calls[0]!.userId).toBe('offline-foo-bar');
+    // Call frames are never persisted to the relay buffer.
+    expect(messagesRepo.buffer.size).toBe(0);
+
+    // call_end / call_ice / call_answer to an offline peer = no-op,
+    // no push fired (only call_offer wakes the device).
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'offline-foo-bar',
+        call_id: 'call-01HZZZOFFLINEEEEEEEEEEEEEE',
+        reason: 'cancel',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(1);
+  });
+
+  it('rejects call to self and missing fields', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'alice-blue-fox',
+        call_id: 'call-01HZZZSELFAAAAAAAAAAAAAAAA',
+        ciphertext: 'AAA=',
+      }),
+    );
+    const err1 = (await a.q.next()) as { type: string; code: string };
+    expect(err1.type).toBe('error');
+    expect(err1.code).toBe('invalid_target');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+      }),
+    );
+    const err2 = (await a.q.next()) as { type: string; code: string };
+    expect(err2.code).toBe('bad_call_id');
+  });
+});

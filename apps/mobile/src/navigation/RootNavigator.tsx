@@ -17,8 +17,12 @@ import { NewGroupScreen } from '../screens/NewGroupScreen.js';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen.js';
 import { InviteFriendsScreen } from '../screens/InviteFriendsScreen.js';
 import { SettingsScreen } from '../screens/SettingsScreen.js';
+import { CallScreen } from '../screens/CallScreen.js';
+import { DialerScreen } from '../screens/DialerScreen.js';
+import { IncomingCallScreen } from '../screens/IncomingCallScreen.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
+import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 export type RootStack = {
   Onboarding: undefined;
@@ -32,6 +36,9 @@ export type RootStack = {
   Diagnostics: undefined;
   InviteFriends: undefined;
   Settings: undefined;
+  Dialer: undefined;
+  Call: undefined;
+  IncomingCall: undefined;
 };
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -39,9 +46,15 @@ const Stack = createNativeStackNavigator<RootStack>();
 interface RootNavigatorProps {
   navRef: React.RefObject<NavigationContainerRef<RootStack>>;
   onBannerTap: (target: BannerData['target']) => void;
+  /**
+   * Optional voice-call orchestrator. When undefined the call screens
+   * are inert and call entry points are hidden — useful for tests that
+   * render the navigator without bootstrapping the WS pipeline.
+   */
+  callOrchestrator?: CallOrchestrator;
 }
 
-export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
+export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNavigatorProps) {
   const userId = useIdentity((s) => s.userId);
   const openDirect = useConversations((s) => s.openDirect);
 
@@ -82,6 +95,9 @@ export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
                   onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
                   onOpenSettings={() => navigation.navigate('Settings')}
                   onInviteFriends={() => navigation.navigate('InviteFriends')}
+                  onOpenDialer={
+                    callOrchestrator ? () => navigation.navigate('Dialer') : undefined
+                  }
                 />
               )}
             </Stack.Screen>
@@ -142,9 +158,65 @@ export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
                 <ChatScreen
                   peerId={route.params.peerId}
                   onBack={() => navigation.goBack()}
+                  onStartCall={
+                    callOrchestrator
+                      ? async (peerId) => {
+                          try {
+                            await callOrchestrator.startOutgoing(peerId);
+                            navigation.navigate('Call');
+                          } catch {
+                            // already busy / self-call; ignore — orchestrator
+                            // surfaces details via diag()
+                          }
+                        }
+                      : undefined
+                  }
                 />
               )}
             </Stack.Screen>
+            {callOrchestrator ? (
+              <>
+                <Stack.Screen
+                  name="Dialer"
+                  options={{ presentation: 'modal' }}
+                >
+                  {({ navigation }: NativeStackScreenProps<RootStack, 'Dialer'>) => (
+                    <DialerScreen
+                      orchestrator={callOrchestrator}
+                      onCallStarted={() => navigation.replace('Call')}
+                      onCancel={() => navigation.goBack()}
+                    />
+                  )}
+                </Stack.Screen>
+                <Stack.Screen
+                  name="Call"
+                  options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
+                >
+                  {({ navigation }: NativeStackScreenProps<RootStack, 'Call'>) => (
+                    <CallScreen
+                      orchestrator={callOrchestrator}
+                      onClosed={() => navigation.goBack()}
+                    />
+                  )}
+                </Stack.Screen>
+                <Stack.Screen
+                  name="IncomingCall"
+                  options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
+                >
+                  {({ navigation }: NativeStackScreenProps<RootStack, 'IncomingCall'>) => (
+                    <IncomingCallScreen
+                      orchestrator={callOrchestrator}
+                      onResolved={() => {
+                        // After accept → CallScreen; after decline → pop back.
+                        // We always replace to Call; if it dismissed itself
+                        // already (decline) the dismiss is a no-op effect.
+                        navigation.replace('Call');
+                      }}
+                    />
+                  )}
+                </Stack.Screen>
+              </>
+            ) : null}
             <Stack.Screen name="GroupChat">
               {({ navigation, route }: NativeStackScreenProps<RootStack, 'GroupChat'>) => (
                 <GroupChatScreen

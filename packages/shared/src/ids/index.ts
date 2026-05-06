@@ -98,3 +98,13 @@ export function isCommunityId(value: string): boolean {
 export function newMessageId(): string {
   return ulid();
 }
+
+export const CALL_ID_REGEX = /^call-[0-9A-HJKMNP-TV-Z]{26}$/;
+
+export function newCallId(): string {
+  return `call-${ulid()}`;
+}
+
+export function isCallId(value: string): boolean {
+  return CALL_ID_REGEX.test(value);
+}

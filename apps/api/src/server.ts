@@ -52,6 +52,11 @@ import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
 import { registerDeviceRoutes } from './routes/devices.js';
+import {
+  registerTurnRoutes,
+  turnProviderFromEnv,
+  type TurnProvider,
+} from './routes/turn.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -66,6 +71,9 @@ export interface BuildServerOptions {
   rateLimiter?: RateLimiter;
   ackRouter?: AckRouter;
   push?: PushProvider;
+  /** TURN/STUN credentials provider for `/v1/turn/credentials`. Defaults
+   *  to env-driven (Cloudflare if env set; STUN-only fallback). */
+  turnProvider?: TurnProvider;
   devicesRepo?: DevicesRepo;
   connections?: Connections;
   presence?: Presence;
@@ -188,6 +196,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Resolve it once so both paths share the same instance.
   const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
   await registerDeviceRoutes(app, { devices });
+  const turnProvider = opts.turnProvider ?? turnProviderFromEnv();
+  await registerTurnRoutes(app, { provider: turnProvider });
 
   app.get('/healthz', async () => ({ ok: true }));
 

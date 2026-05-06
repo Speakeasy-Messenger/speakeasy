@@ -422,6 +422,84 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         }
         return;
       }
+      case 'call_offer':
+      case 'call_answer':
+      case 'call_ice':
+      case 'call_end': {
+        // Voice call signaling. Live-route only — no relay buffer.
+        // Rationale: a call_offer that arrives 7 days later isn't a
+        // call, it's an artifact. The sender's orchestrator handles
+        // ringing-window timeout (~45s) locally; if the recipient is
+        // offline, push wakes the device and a fresh offer can be
+        // attempted on reconnect.
+        //
+        // The `ciphertext` (offer/answer/ice) is encrypted with the
+        // existing Signal 1:1 session — server can't read SDP, ICE
+        // candidates, or DTLS fingerprints. `call_end` carries no
+        // ciphertext, just a plaintext reason.
+        if (!msg.to || typeof msg.to !== 'string') {
+          sendError(socket, 'invalid_target', 'call frame requires `to`');
+          return;
+        }
+        if (msg.to === session.userId) {
+          sendError(socket, 'invalid_target', 'cannot call self');
+          return;
+        }
+        if (!msg.call_id || typeof msg.call_id !== 'string') {
+          sendError(socket, 'bad_call_id', 'call frame requires `call_id`');
+          return;
+        }
+        if (msg.type !== 'call_end' && typeof msg.ciphertext !== 'string') {
+          sendError(socket, 'invalid_ciphertext', 'call signaling requires ciphertext');
+          return;
+        }
+
+        const peerDevices = deps.connections.getDevices(msg.to);
+        if (peerDevices.length === 0) {
+          if (msg.type === 'call_offer') {
+            // Wake the device — push provider already does notify-only,
+            // no content. The caller's orchestrator times out the
+            // ringing window if the callee never connects.
+            const conversation = conversationIdForDirect(session.userId, msg.to);
+            void deps.push
+              .notifyDelivery({
+                userId: msg.to,
+                conversationId: conversation,
+                msgType: 'direct',
+              })
+              .catch((err) =>
+                deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
+              );
+          }
+          // call_answer / call_ice / call_end to an offline peer is a
+          // best-effort no-op. (call_end specifically is fine to drop —
+          // the peer's local timeout will produce the same outcome.)
+          return;
+        }
+
+        // Fan out to every live device of the recipient. First answer
+        // wins; orchestrator on losing devices sees no media flow and
+        // transitions to ended on the next call_end frame.
+        const senderUserId = session.userId;
+        for (const peer of peerDevices) {
+          if (msg.type === 'call_end') {
+            send(peer, {
+              type: 'call_end',
+              from: senderUserId,
+              call_id: msg.call_id,
+              reason: msg.reason,
+            });
+          } else {
+            send(peer, {
+              type: msg.type,
+              from: senderUserId,
+              call_id: msg.call_id,
+              ciphertext: msg.ciphertext,
+            });
+          }
+        }
+        return;
+      }
       default: {
         const _exhaustive: never = msg;
         void _exhaustive;

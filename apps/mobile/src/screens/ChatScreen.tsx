@@ -22,6 +22,7 @@ import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { GifPickerSheet } from '../components/GifPickerSheet.js';
 import { CameraIcon, GifIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
+import { PhoneIcon } from '../components/icons/CallIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
 import { Avatar } from '../components/Avatar.js';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
@@ -41,6 +42,13 @@ interface Props {
   /** The other user's adjective-adjective-noun id, for direct chats only. */
   peerId: string;
   onBack?: () => void;
+  /**
+   * Optional: tap-handler for the phone-icon affordance in the chat
+   * header. When provided, the icon is rendered. When omitted (e.g. a
+   * test rendering ChatScreen in isolation), the call entry point is
+   * hidden.
+   */
+  onStartCall?: (peerId: string) => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal in the
@@ -71,7 +79,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * `GroupMessagingModule` carry-over). SQLCipher message persistence
  * lands when the conversation store leaves in-memory Zustand.
  */
-export function ChatScreen({ peerId, onBack }: Props) {
+export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
   const myUserId = useIdentity((s) => s.userId);
   if (!myUserId) {
     throw new Error('ChatScreen rendered without an enrolled identity');
@@ -305,13 +313,31 @@ export function ChatScreen({ peerId, onBack }: Props) {
   return (
     <SafeAreaView testID="chat-screen" style={styles.root}>
       <View style={styles.header}>
-        {onBack ? (
-          <Pressable testID="chat-back" onPress={onBack} style={styles.back}>
-            <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
-          </Pressable>
-        ) : null}
-        <Avatar userId={peerId} size={32} />
-        <Text style={[text.heroBody, styles.peer]}>@{peerId}</Text>
+        <View style={styles.headerRow}>
+          {onBack ? (
+            <Pressable testID="chat-back" onPress={onBack} style={styles.back}>
+              <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
+            </Pressable>
+          ) : (
+            <View style={styles.back} />
+          )}
+          <View style={styles.headerCenter}>
+            <Avatar userId={peerId} size={32} />
+            <Text style={[text.heroBody, styles.peer]}>@{peerId}</Text>
+          </View>
+          {onStartCall ? (
+            <Pressable
+              testID="chat-call"
+              onPress={() => onStartCall(peerId)}
+              hitSlop={8}
+              style={styles.callBtn}
+            >
+              <PhoneIcon size={22} color={colors.primary} />
+            </Pressable>
+          ) : (
+            <View style={styles.callBtn} />
+          )}
+        </View>
       </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -425,9 +451,21 @@ const styles = StyleSheet.create({
     paddingBottom: space.sm,
     borderBottomColor: colors.pale,
     borderBottomWidth: 1,
-    gap: space.xs,
   },
-  back: { paddingVertical: 4 },
+  headerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  headerCenter: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    flex: 1,
+    paddingHorizontal: space.sm,
+  },
+  back: { paddingVertical: 4, minWidth: 56 },
+  callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
   peer: { color: colors.ink, fontFamily: fonts.inter500 },
   body: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },

@@ -12,6 +12,7 @@ import { GetStartedCards } from '../components/GetStartedCards.js';
 import { GroupAvatar } from '../components/GroupAvatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
+import { PhoneIcon } from '../components/icons/CallIcons.js';
 import { useColors } from '../theme/index.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
@@ -48,6 +49,8 @@ interface Props {
   onOpenDiagnostics: () => void;
   onOpenSettings: () => void;
   onInviteFriends: () => void;
+  /** Open the dialer to start a new call. */
+  onOpenDialer?: () => void;
 }
 
 /**
@@ -62,6 +65,7 @@ export function ConversationsScreen({
   onNewGroup,
   onOpenSettings,
   onInviteFriends,
+  onOpenDialer,
 }: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
@@ -131,14 +135,26 @@ export function ConversationsScreen({
               <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
             </View>
           </View>
-          <Pressable
-            onPress={onOpenSettings}
-            hitSlop={8}
-            style={styles.gearBtn}
-            testID="conversations-settings-btn"
-          >
-            <SettingsIcon size={24} />
-          </Pressable>
+          <View style={styles.headerActions}>
+            {onOpenDialer ? (
+              <Pressable
+                onPress={onOpenDialer}
+                hitSlop={8}
+                style={styles.gearBtn}
+                testID="conversations-call-btn"
+              >
+                <PhoneIcon size={22} />
+              </Pressable>
+            ) : null}
+            <Pressable
+              onPress={onOpenSettings}
+              hitSlop={8}
+              style={styles.gearBtn}
+              testID="conversations-settings-btn"
+            >
+              <SettingsIcon size={24} />
+            </Pressable>
+          </View>
         </View>
       </View>
 
@@ -276,6 +292,7 @@ const styles = StyleSheet.create({
   youRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   status: { color: colors.slate },
   gearBtn: { padding: space.sm },
+  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   gearIcon: { fontSize: 20 },
   listContent: { paddingHorizontal: space.md, paddingBottom: space.xl, gap: space.xs },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },

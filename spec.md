@@ -58,6 +58,39 @@ Speakeasy is a private, encrypted messenger with the following core principles:
 - Payments (USDT/TRON or USDC/Solana — under consideration)
 - Web client
 
+### Phase 6 — Voice calling (in progress)
+
+1:1 voice calls, end-to-end encrypted via DTLS-SRTP whose fingerprints
+are authenticated through the existing Signal session. Server is a pure
+signaling relay (call_offer/call_answer/call_ice/call_end frames live-
+routed only — never persisted to the relay buffer). Group calls deferred.
+
+- ✅ WS frame types `call_offer` / `call_answer` / `call_ice` / `call_end`
+  in `packages/shared`. SDP/ICE payloads are Signal-encrypted ciphertext;
+  `call_end.reason` is plaintext metadata.
+- ✅ Server live-routing in `apps/api/src/ws/handler.ts` — fans out to
+  every live device of the callee, pushes notify-only when offline (only
+  for `call_offer`), drops other frames silently when offline.
+- ✅ TURN credentials route `GET /v1/turn/credentials`,
+  Vouchflow-gated. `TurnProvider` interface with `CloudflareTurnProvider`
+  + `StaticTurnProvider` (STUN-only fallback). `turnProviderFromEnv()`
+  switches on `CLOUDFLARE_TURN_KEY_ID`/`CLOUDFLARE_TURN_TOKEN`.
+- ✅ Mobile `CallOrchestrator` state machine, mockable `CallPeer`
+  interface, `useCalls` Zustand store with persisted history, message-
+  router dispatch into `handleFrame`. 7 orchestrator unit tests cover
+  dial→accept→connected→hangup, decline, cancel, busy, ring timeout,
+  mic/speaker toggles, single-call invariant.
+- ✅ Mobile UI: `CallScreen`, `IncomingCallScreen`, `DialerScreen`.
+  Phone-icon entry points in `ChatScreen` header (1:1) and
+  `ConversationsScreen` header (opens dialer). Local call history
+  persisted via AsyncStorage (debug-friendly per user ask).
+- 🚧 `react-native-webrtc` native bridge — `webrtc-peer.ts` throws
+  `webrtc_not_implemented` until the dep ships. Integration checklist
+  in the module docstring covers iOS (CallKit with `includesCallsInRecents:
+  false`), Android (ConnectionService, RECORD_AUDIO permission).
+- 🚧 CallKit (iOS) + ConnectionService (Android) — pending native shells.
+- 🚧 Real-device runtime testing — same blocker as Phase 5 carry-over.
+
 ---
 
 ## 2. Authentication — Vouchflow

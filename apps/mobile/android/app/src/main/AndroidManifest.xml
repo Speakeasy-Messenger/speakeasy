@@ -7,6 +7,27 @@
          deliberately NOT done — contact data never leaves the device. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
 
+    <!-- Phase 6 voice calling: WebRTC + ConnectionService prerequisites. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+    <uses-permission android:name="android.permission.BLUETOOTH" />
+    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
+    <!-- ConnectionService (native ring UI). Required for CallKeep on
+         Android 9+. The user grants the phone-account permission once
+         via the system "Calling apps" prompt CallKeep raises on first
+         setup; without it CallKeep silently degrades to in-app UI. -->
+    <uses-permission android:name="android.permission.MANAGE_OWN_CALLS" />
+    <uses-permission android:name="android.permission.READ_PHONE_NUMBERS" />
+    <uses-permission android:name="android.permission.READ_PHONE_STATE" />
+    <!-- Foreground service while a call is active. CallKeep's Android
+         module starts the service so the OS doesn't kill the JS engine
+         mid-call. `microphone` type is required on API 34+. -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+
     <application
       android:name=".MainApplication"
       android:label="@string/app_name"

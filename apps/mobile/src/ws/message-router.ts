@@ -35,6 +35,11 @@ export interface MessageRouterDeps {
   groupMessaging: GroupMessagingModule;
   ws: SpeakeasyWsClient;
   orchestrator: GroupOrchestrator;
+  /**
+   * Inbound voice-call signaling sink. Optional so unit tests of the
+   * messaging path don't have to construct a CallOrchestrator.
+   */
+  onCallFrame?: (frame: WsServerMsg) => void;
   /** Called when prekey replenishment should fire. */
   onPrekeysLow: () => void;
   /** Add a chat message to the right conversation. */
@@ -423,6 +428,13 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         }
         return;
       }
+
+      case 'call_offer':
+      case 'call_answer':
+      case 'call_ice':
+      case 'call_end':
+        deps.onCallFrame?.(frame);
+        return;
 
       default: {
         const _exhaustive: never = frame;

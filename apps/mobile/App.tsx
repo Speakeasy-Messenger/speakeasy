@@ -21,6 +21,11 @@ import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vo
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
+import { CallOrchestrator } from './src/calls/orchestrator.js';
+import { ensureSessionWithPeer } from './src/crypto/session.js';
+import { useCalls } from './src/store/calls.js';
+import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
+import { CallKeepBridge } from './src/calls/callkeep-bridge.js';
 import { diag } from './src/diag/log.js';
 import { colors } from './src/theme/index.js';
 
@@ -42,6 +47,7 @@ export default function App() {
   const userId = useIdentity((s) => s.userId);
   const hydrated = useIdentity((s) => s.hydrated);
   const navRef = useRef<NavigationContainerRef<RootStack>>(null);
+  const orchestratorRef = useRef<CallOrchestrator | undefined>(undefined);
 
   // Pull persisted identity AND conversations off disk on first mount.
   // Renders a blank screen until both are done so the navigator doesn't
@@ -57,6 +63,7 @@ export default function App() {
       void useSettings.getState().hydrate();
       void useProfiles.getState().hydrate();
       void useOnboardingCards.getState().hydrate();
+      void useCalls.getState().hydrate();
     }
   }, [hydrated]);
 
@@ -126,6 +133,28 @@ export default function App() {
     // pruned only on app restart.
     const notifiedMsgIds = new Set<string>();
 
+    // Voice-call orchestrator. Owns the WebRTC peer connection and
+    // the call_* WS frame round-trip. Reuses the same Signal session
+    // ChatScreen does, so calls go through the existing 1:1 crypto.
+    const callOrchestrator = new CallOrchestrator({
+      myUserId: userId,
+      signalProtocol,
+      api,
+      peerFactory: reactNativeWebRtcPeerFactory,
+      getDeviceToken: getToken,
+      send: (frame) => ws.send(frame),
+      ensureSessionWithPeer,
+      onStateChange: (call) => useCalls.getState().setActive(call),
+      onCallFinished: (entry) => useCalls.getState().recordHistory(entry),
+    });
+    orchestratorRef.current = callOrchestrator;
+
+    // Native call UI integration. Best-effort — if CallKit/
+    // ConnectionService permissions aren't granted yet, the bridge
+    // logs and continues; calls still work via the in-app screens.
+    const callKeep = new CallKeepBridge({ orchestrator: callOrchestrator });
+    void callKeep.start();
+
     // Single ws.subscribe wired to the unified router. Every screen
     // (ChatScreen, GroupChatScreen, future CommunityScreen) reads from
     // the conversations store; nobody owns the ws subscription anymore.
@@ -136,6 +165,7 @@ export default function App() {
       groupMessaging,
       ws,
       orchestrator,
+      onCallFrame: (frame) => void callOrchestrator.handleFrame(frame),
       onPrekeysLow: () => void replenisher.trigger(),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
@@ -207,10 +237,24 @@ export default function App() {
       }
     });
 
+    // Bring the IncomingCallScreen up automatically when the
+    // orchestrator transitions into `incoming_ringing`.
+    const callsUnsub = useCalls.subscribe((s, prev) => {
+      if (
+        s.active?.stage === 'incoming_ringing' &&
+        prev?.active?.stage !== 'incoming_ringing'
+      ) {
+        navRef.current?.navigate('IncomingCall');
+      }
+    });
+
     return () => {
       diag('app', 'cleanup router for userId', { userId });
       lifecycleSub.remove();
       unsubscribe();
+      callsUnsub();
+      callKeep.stop();
+      orchestratorRef.current = undefined;
       ws.close();
     };
   }, [userId]);
@@ -222,6 +266,7 @@ export default function App() {
         {hydrated ? (
           <RootNavigator
             navRef={navRef}
+            callOrchestrator={orchestratorRef.current}
             onBannerTap={(target) => {
               if (target.kind === 'direct') {
                 navRef.current?.navigate('Chat', { peerId: target.peerId });
