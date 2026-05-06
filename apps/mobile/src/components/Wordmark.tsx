@@ -41,6 +41,14 @@ export function Wordmark({
   return (
     <View style={styles.col} accessible accessibilityLabel="speakeasy">
       <Text
+        // The spec's hero size (96pt with the optical-size variant)
+        // wraps "speakeasy" on a 1080-wide phone with safe-area
+        // padding. `numberOfLines=1` + `adjustsFontSizeToFit` lets
+        // the OS scale the wordmark down to fit; `minimumFontScale`
+        // keeps the smallest variant readable.
+        numberOfLines={1}
+        adjustsFontSizeToFit
+        minimumFontScale={0.55}
         style={[
           styles.word,
           {

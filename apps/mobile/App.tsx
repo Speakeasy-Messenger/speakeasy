@@ -11,7 +11,8 @@ import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
 import { useProfiles } from './src/store/profiles.js';
-import { ThemeProvider } from './src/theme/ThemeProvider.js';
+import { ThemeProvider, useTheme } from './src/theme/ThemeProvider.js';
+import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
@@ -55,6 +56,19 @@ export default function App() {
       void useProfiles.getState().hydrate();
     }
   }, [hydrated]);
+
+  // After hydration, if we have a cached identity, make sure the
+  // server still knows about us. The alpha sandbox runs in-memory
+  // and forgets every enrollment on restart; without this guard a
+  // returning user gets 401 not_enrolled on every authed request and
+  // the WS loops forever in `reconnecting`. `ensureServerBinding`
+  // re-enrolls silently with the same handle + cached identity key.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    void ensureServerBinding({ signalProtocol, vouchflow });
+    // We only run on hydrate-then-userId-becomes-known. The
+    // re-enroll itself is idempotent so a stray double-call is fine.
+  }, [hydrated, userId]);
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.
   // Token comes from the identity store (set at signup); we only fall
@@ -194,11 +208,7 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        {/* Light-on-dark status bar — the workspace canvas is dark
-            by default per the rebrand spec, so the icons are the
-            warm bone foreground. Light-mode + per-screen brand-canvas
-            overrides land later. */}
-        <StatusBar barStyle="light-content" backgroundColor={colors.cream} />
+        <ThemedStatusBar />
         {hydrated ? (
           <RootNavigator
             navRef={navRef}
@@ -215,5 +225,23 @@ export default function App() {
         )}
       </ThemeProvider>
     </SafeAreaProvider>
+  );
+}
+
+/**
+ * StatusBar that flips with the active theme. Lives inside the
+ * ThemeProvider so it can read `useTheme()`. The status bar is owned
+ * by the OS shell, so backgroundColor here paints the Android tinted
+ * area to match the workspace canvas (or stays dark on the brand
+ * canvas — Onboarding / IdReveal handle their own status-bar color
+ * via their SafeAreaView).
+ */
+function ThemedStatusBar(): React.JSX.Element {
+  const t = useTheme();
+  return (
+    <StatusBar
+      barStyle={t.mode === 'dark' ? 'light-content' : 'dark-content'}
+      backgroundColor={t.canvas}
+    />
   );
 }

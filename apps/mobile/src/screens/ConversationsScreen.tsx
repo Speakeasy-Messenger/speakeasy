@@ -10,6 +10,8 @@ import {
 import { Avatar } from '../components/Avatar.js';
 import { GroupAvatar } from '../components/GroupAvatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
+import { SettingsIcon } from '../components/icons/SettingsIcon.js';
+import { useColors } from '../theme/index.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
@@ -63,6 +65,10 @@ export function ConversationsScreen({
   const conversationsById = useConversations((s) => s.byId);
   const groupsById = useGroups((s) => s.byId);
   const unreadCountFor = useConversations((s) => s.unreadCountFor);
+  // Themed palette — `themed.cream` flips to the light canvas when
+  // mode is light. Module-level `styles` (which use the static `colors`
+  // alias) stay dark-pinned for now; phase E moves them too.
+  const themed = useColors();
 
   const directRows: DirectRow[] = Object.entries(conversationsById)
     .filter(([_, c]) => c.kind === 'direct' && !!c.peerUserId)
@@ -97,7 +103,10 @@ export function ConversationsScreen({
   const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
 
   return (
-    <SafeAreaView testID="conversations-screen" style={styles.root}>
+    <SafeAreaView
+      testID="conversations-screen"
+      style={[styles.root, { backgroundColor: themed.cream }]}
+    >
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
@@ -112,8 +121,13 @@ export function ConversationsScreen({
               <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
             </View>
           </View>
-          <Pressable onPress={onOpenSettings} hitSlop={8} style={styles.gearBtn}>
-            <Text style={styles.gearIcon}>⚙️</Text>
+          <Pressable
+            onPress={onOpenSettings}
+            hitSlop={8}
+            style={styles.gearBtn}
+            testID="conversations-settings-btn"
+          >
+            <SettingsIcon size={24} />
           </Pressable>
         </View>
       </View>

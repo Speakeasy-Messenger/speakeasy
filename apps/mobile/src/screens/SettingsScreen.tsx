@@ -18,6 +18,7 @@ import { useConversations } from '../store/conversations.js';
 import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
 import { api } from '../services.js';
+import { useThemePref } from '../theme/ThemeProvider.js';
 
 interface Props {
   onBack: () => void;
@@ -33,6 +34,8 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
   const inAppNotificationsEnabled = useSettings((s) => s.inAppNotificationsEnabled);
   const setInAppNotificationsEnabled = useSettings((s) => s.setInAppNotificationsEnabled);
   const setProfile = useProfiles((s) => s.set);
+  const themePref = useThemePref((s) => s.preference);
+  const setThemePref = useThemePref((s) => s.set);
   const [avatarBusy, setAvatarBusy] = useState(false);
 
   const handleCopyId = () => {
@@ -165,6 +168,28 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
                 </Pressable>
               </View>
             </View>
+          </View>
+        </View>
+
+        {/* ── Appearance ── */}
+        <Text style={[text.sectionLabel, styles.sectionLabel]}>APPEARANCE</Text>
+        <View style={styles.card}>
+          <View style={styles.segmentRow}>
+            {(['system', 'dark', 'light'] as const).map((opt) => {
+              const active = themePref === opt;
+              return (
+                <Pressable
+                  key={opt}
+                  onPress={() => setThemePref(opt)}
+                  style={[styles.segment, active && styles.segmentActive]}
+                  testID={`settings-theme-${opt}`}
+                >
+                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                    {opt === 'system' ? 'System' : opt === 'dark' ? 'Dark' : 'Light'}
+                  </Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -327,6 +352,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.md,
   },
+
+  // Segmented theme toggle. Sharp corners (radius 0) per spec §6.6;
+  // active segment uses the brass accent + ink foreground.
+  segmentRow: {
+    flexDirection: 'row',
+    borderWidth: 1,
+    borderColor: colors.divider,
+  },
+  segment: {
+    flex: 1,
+    alignItems: 'center',
+    paddingVertical: space.sm,
+    backgroundColor: 'transparent',
+  },
+  segmentActive: { backgroundColor: colors.primary },
+  segmentText: {
+    fontFamily: fonts.inter500,
+    fontSize: 13,
+    color: colors.ink,
+  },
+  segmentTextActive: { color: colors.cream },
   toggleLabelWrap: { flex: 1 },
   toggleLabel: {
     fontFamily: fonts.inter500,
