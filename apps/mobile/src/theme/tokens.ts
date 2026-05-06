@@ -77,7 +77,11 @@ export const font = {
  * multiplies font size — we resolve to absolute px in the helper).
  */
 export const type = {
-  display: { size: 72, weight: font.bold, letterSpacingEm: -0.045 },
+  // 64 fits "speakeasy" on a typical 360-logical-px phone with
+  // workspace padding intact. Larger screens still get the spec's
+  // range (56–96) — the wordmark uses `adjustsFontSizeToFit` as a
+  // safety net for narrower devices.
+  display: { size: 64, weight: font.bold, letterSpacingEm: -0.045 },
   title: { size: 22, weight: font.semibold, letterSpacingEm: -0.02 },
   subtitle: { size: 17, weight: font.medium, letterSpacingEm: -0.01 },
   body: { size: 15, weight: font.regular, letterSpacingEm: 0 },

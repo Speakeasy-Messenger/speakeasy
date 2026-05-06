@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   KeyboardAvoidingView,
   Platform,
   SafeAreaView,
@@ -58,11 +60,28 @@ export function OnboardingScreen({ onEnrolled }: Props) {
   const [error, setError] = useState<string | undefined>();
   const [handle, setHandle] = useState('');
   const [availability, setAvailability] = useState<AvailabilityState>({ kind: 'idle' });
+  const [focused, setFocused] = useState(false);
+  // Drives the hero/principles slide-up. 1 = full hero shown,
+  // 0 = collapsed so the handle input + Continue dominate. Animated
+  // with opacity + translateY (-40px) over `motion.screen` (240ms);
+  // we can't animate height with the native driver but the
+  // collapsed Animated.View also gets pointerEvents="none" so it
+  // doesn't intercept taps.
+  const heroAnim = useRef(new Animated.Value(1)).current;
   // Bumped on every input change; the in-flight check ignores its
   // response when its token is no longer current. Kills the "user
   // typed faster than the server replied → stale state lands" race.
   const tokenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+
+  useEffect(() => {
+    Animated.timing(heroAnim, {
+      toValue: focused ? 0 : 1,
+      duration: 240,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [focused, heroAnim]);
 
   useEffect(() => {
     if (debounceRef.current) clearTimeout(debounceRef.current);
@@ -233,18 +252,39 @@ export function OnboardingScreen({ onEnrolled }: Props) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <View style={styles.header}>
-            <IconMark size={120} animate />
-            <Wordmark variant="hero" tagline={SLOGAN_PLACEHOLDER} />
-          </View>
-          <View style={styles.principles}>
-            {PRINCIPLES.map((p) => (
-              <View key={p} style={styles.principleRow}>
-                <View style={styles.bullet} />
-                <Text style={[text.subtitle, styles.principleText]}>{p}</Text>
-              </View>
-            ))}
-          </View>
+          <Animated.View
+            pointerEvents={focused ? 'none' : 'auto'}
+            style={{
+              opacity: heroAnim,
+              transform: [
+                {
+                  translateY: heroAnim.interpolate({
+                    inputRange: [0, 1],
+                    outputRange: [-40, 0],
+                  }),
+                },
+              ],
+              // Collapse the hero block to zero height when focused
+              // so the handle section rises to the top of the visible
+              // area. `height: 0 + overflow: hidden` is the cheapest
+              // collapse that still respects flex layout below it.
+              height: focused ? 0 : undefined,
+              overflow: 'hidden',
+            }}
+          >
+            <View style={styles.header}>
+              <IconMark size={120} animate />
+              <Wordmark variant="hero" tagline={SLOGAN_PLACEHOLDER} />
+            </View>
+            <View style={styles.principles}>
+              {PRINCIPLES.map((p) => (
+                <View key={p} style={styles.principleRow}>
+                  <View style={styles.bullet} />
+                  <Text style={[text.subtitle, styles.principleText]}>{p}</Text>
+                </View>
+              ))}
+            </View>
+          </Animated.View>
           <View style={styles.handleSection}>
             <Text style={styles.handleLabel}>Choose your handle</Text>
             <View
@@ -263,6 +303,8 @@ export function OnboardingScreen({ onEnrolled }: Props) {
                 onChangeText={(t) =>
                   setHandle(t.toLowerCase().replace(/[^a-z0-9_]/g, ''))
                 }
+                onFocus={() => setFocused(true)}
+                onBlur={() => setFocused(false)}
                 placeholder="yourname"
                 placeholderTextColor={colors.slate}
                 autoCapitalize="none"
