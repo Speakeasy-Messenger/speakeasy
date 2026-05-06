@@ -23,9 +23,10 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     id: "conversations-new-chat"
 
-# Paste own ID and start chat (self-DM)
+# Paste own ID and start chat (self-DM). Use testIDs — `placeholder:`
+# is not a Maestro selector property.
 - tapOn:
-    placeholder: "silent-golden-hawk"
+    id: "new-chat-peer-id-input"
 - inputText: "${maestro.copiedText}"
 - tapOn:
     text: "Start chat"
@@ -36,7 +37,7 @@ appId: xyz.speakeasyapp.app
       id: "chat-screen"
     timeout: 10000
 - tapOn:
-    placeholder: "Say it…"
+    id: "chat-input"
 - inputText: "Testing push registration"
 - tapOn:
     text: "Send"
