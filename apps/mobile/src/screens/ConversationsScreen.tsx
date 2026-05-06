@@ -110,9 +110,12 @@ export function ConversationsScreen({
       <View style={styles.header}>
         <View style={styles.headerTop}>
           <View style={styles.headerLeft}>
-            <Text style={[text.sectionLabel, styles.label]}>YOU ARE</Text>
+            <Text style={[text.sectionLabel, styles.label, { color: themed.slate }]}>YOU ARE</Text>
             <View style={styles.youRow}>
-              <Text testID="conversations-userid" style={[text.heroBody, styles.you]}>
+              <Text
+                testID="conversations-userid"
+                style={[text.heroBody, styles.you, { color: themed.ink }]}
+              >
                 @{userId}
               </Text>
               {/* Spec §6.10: status is a 6×6 brass square (online) or
@@ -137,19 +140,33 @@ export function ConversationsScreen({
         keyExtractor={(r) => (r.kind === 'direct' ? r.conversationId : r.groupId)}
         contentContainerStyle={rows.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
-          <Text style={[text.subtitle, styles.emptyText]}>No conversations yet.</Text>
+          <Text style={[text.subtitle, styles.emptyText, { color: themed.slate }]}>
+            No conversations yet.
+          </Text>
         }
         renderItem={({ item }) =>
           item.kind === 'direct' ? (
-            <Pressable onPress={() => onOpenChat(item.peerUserId)} style={styles.card}>
+            <Pressable onPress={() => onOpenChat(item.peerUserId)} style={[styles.card, { backgroundColor: themed.pale }]}>
               <Avatar userId={item.peerUserId} size={40} />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
-                  <Text style={styles.rowName} numberOfLines={1}>@{item.peerUserId}</Text>
-                  <Text style={styles.timestamp}>{relativeTime(item.lastActivityAt)}</Text>
+                  <Text
+                    style={[styles.rowName, { color: themed.ink }]}
+                    numberOfLines={1}
+                  >
+                    @{item.peerUserId}
+                  </Text>
+                  <Text style={[styles.timestamp, { color: themed.slate }]}>
+                    {relativeTime(item.lastActivityAt)}
+                  </Text>
                 </View>
                 <View style={styles.rowBottom}>
-                  <Text style={styles.rowPreview} numberOfLines={1}>{item.preview}</Text>
+                  <Text
+                    style={[styles.rowPreview, { color: themed.slate }]}
+                    numberOfLines={1}
+                  >
+                    {item.preview}
+                  </Text>
                   {item.unread > 0 && (
                     <View style={styles.badge}>
                       <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
@@ -159,15 +176,25 @@ export function ConversationsScreen({
               </View>
             </Pressable>
           ) : (
-            <Pressable onPress={() => onOpenGroup(item.groupId)} style={styles.card}>
+            <Pressable onPress={() => onOpenGroup(item.groupId)} style={[styles.card, { backgroundColor: themed.pale }]}>
               <GroupAvatar groupId={item.groupId} name={item.name} size={40} />
               <View style={styles.rowBody}>
                 <View style={styles.rowTop}>
-                  <Text style={styles.rowName} numberOfLines={1}># {item.name}</Text>
-                  <Text style={styles.timestamp}>{relativeTime(item.lastActivityAt)}</Text>
+                  <Text
+                    style={[styles.rowName, { color: themed.ink }]}
+                    numberOfLines={1}
+                  >
+                    # {item.name}
+                  </Text>
+                  <Text style={[styles.timestamp, { color: themed.slate }]}>
+                    {relativeTime(item.lastActivityAt)}
+                  </Text>
                 </View>
                 <View style={styles.rowBottom}>
-                  <Text style={styles.rowPreview} numberOfLines={1}>
+                  <Text
+                    style={[styles.rowPreview, { color: themed.slate }]}
+                    numberOfLines={1}
+                  >
                     {item.memberCount} member{item.memberCount === 1 ? '' : 's'} · {item.preview}
                   </Text>
                   {item.unread > 0 && (

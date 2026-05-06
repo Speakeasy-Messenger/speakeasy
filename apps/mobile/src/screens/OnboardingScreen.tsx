@@ -252,39 +252,42 @@ export function OnboardingScreen({ onEnrolled }: Props) {
           contentContainerStyle={styles.scrollContent}
           keyboardShouldPersistTaps="handled"
         >
-          <Animated.View
-            pointerEvents={focused ? 'none' : 'auto'}
-            style={{
-              opacity: heroAnim,
-              transform: [
-                {
-                  translateY: heroAnim.interpolate({
-                    inputRange: [0, 1],
-                    outputRange: [-40, 0],
-                  }),
-                },
-              ],
-              // Collapse the hero block to zero height when focused
-              // so the handle section rises to the top of the visible
-              // area. `height: 0 + overflow: hidden` is the cheapest
-              // collapse that still respects flex layout below it.
-              height: focused ? 0 : undefined,
-              overflow: 'hidden',
-            }}
-          >
-            <View style={styles.header}>
-              <IconMark size={120} animate />
-              <Wordmark variant="hero" tagline={SLOGAN_PLACEHOLDER} />
-            </View>
-            <View style={styles.principles}>
-              {PRINCIPLES.map((p) => (
-                <View key={p} style={styles.principleRow}>
-                  <View style={styles.bullet} />
-                  <Text style={[text.subtitle, styles.principleText]}>{p}</Text>
-                </View>
-              ))}
-            </View>
-          </Animated.View>
+          {/* Conditional render — when the input is focused, drop
+              the hero entirely. The previous approach (Animated.View
+              + height: 0 + overflow: hidden) interacted poorly with
+              the wordmark's `adjustsFontSizeToFit`: RN measured the
+              collapsed container and shrank the font to fit a near-
+              zero box, leaving "speakeasy" rendered as miniscule
+              misaligned text. Unmounting eliminates the
+              partial-collapse window. */}
+          {focused ? null : (
+            <Animated.View
+              style={{
+                opacity: heroAnim,
+                transform: [
+                  {
+                    translateY: heroAnim.interpolate({
+                      inputRange: [0, 1],
+                      outputRange: [-40, 0],
+                    }),
+                  },
+                ],
+              }}
+            >
+              <View style={styles.header}>
+                <IconMark size={160} animate />
+                <Wordmark variant="hero" tagline={SLOGAN_PLACEHOLDER} />
+              </View>
+              <View style={styles.principles}>
+                {PRINCIPLES.map((p) => (
+                  <View key={p} style={styles.principleRow}>
+                    <View style={styles.bullet} />
+                    <Text style={[text.subtitle, styles.principleText]}>{p}</Text>
+                  </View>
+                ))}
+              </View>
+            </Animated.View>
+          )}
           <View style={styles.handleSection}>
             <Text style={styles.handleLabel}>Choose your handle</Text>
             <View
