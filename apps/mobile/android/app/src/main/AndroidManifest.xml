@@ -49,5 +49,21 @@
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
       </activity>
+
+      <!-- CallKeep VoiceConnectionService — required for CallKit/Connection-
+           Service ring UI on Android. The lib's own AndroidManifest.xml
+           declares the permissions but NOT this service, so each app has
+           to register it explicitly.
+           See https://github.com/react-native-webrtc/react-native-callkeep#android -->
+      <service
+        android:name="io.wazo.callkeep.VoiceConnectionService"
+        android:label="Speakeasy"
+        android:permission="android.permission.BIND_TELECOM_CONNECTION_SERVICE"
+        android:foregroundServiceType="microphone"
+        android:exported="true">
+        <intent-filter>
+            <action android:name="android.telecom.ConnectionService" />
+        </intent-filter>
+      </service>
     </application>
 </manifest>

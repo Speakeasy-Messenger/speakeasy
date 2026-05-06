@@ -1,4 +1,4 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { AppState, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
@@ -47,7 +47,10 @@ export default function App() {
   const userId = useIdentity((s) => s.userId);
   const hydrated = useIdentity((s) => s.hydrated);
   const navRef = useRef<NavigationContainerRef<RootStack>>(null);
-  const orchestratorRef = useRef<CallOrchestrator | undefined>(undefined);
+  // useState (not useRef) — assigning to a ref doesn't re-render, so the
+  // RootNavigator below would never see the orchestrator. State triggers
+  // a re-render and the navigator picks up the new prop on next pass.
+  const [callOrchestrator, setCallOrchestrator] = useState<CallOrchestrator | undefined>(undefined);
 
   // Pull persisted identity AND conversations off disk on first mount.
   // Renders a blank screen until both are done so the navigator doesn't
@@ -136,7 +139,7 @@ export default function App() {
     // Voice-call orchestrator. Owns the WebRTC peer connection and
     // the call_* WS frame round-trip. Reuses the same Signal session
     // ChatScreen does, so calls go through the existing 1:1 crypto.
-    const callOrchestrator = new CallOrchestrator({
+    const callOrch = new CallOrchestrator({
       myUserId: userId,
       signalProtocol,
       api,
@@ -147,12 +150,12 @@ export default function App() {
       onStateChange: (call) => useCalls.getState().setActive(call),
       onCallFinished: (entry) => useCalls.getState().recordHistory(entry),
     });
-    orchestratorRef.current = callOrchestrator;
+    setCallOrchestrator(callOrch);
 
     // Native call UI integration. Best-effort — if CallKit/
     // ConnectionService permissions aren't granted yet, the bridge
     // logs and continues; calls still work via the in-app screens.
-    const callKeep = new CallKeepBridge({ orchestrator: callOrchestrator });
+    const callKeep = new CallKeepBridge({ orchestrator: callOrch });
     void callKeep.start();
 
     // Single ws.subscribe wired to the unified router. Every screen
@@ -165,7 +168,7 @@ export default function App() {
       groupMessaging,
       ws,
       orchestrator,
-      onCallFrame: (frame) => void callOrchestrator.handleFrame(frame),
+      onCallFrame: (frame) => void callOrch.handleFrame(frame),
       onPrekeysLow: () => void replenisher.trigger(),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
@@ -254,7 +257,7 @@ export default function App() {
       unsubscribe();
       callsUnsub();
       callKeep.stop();
-      orchestratorRef.current = undefined;
+      setCallOrchestrator(undefined);
       ws.close();
     };
   }, [userId]);
@@ -266,7 +269,7 @@ export default function App() {
         {hydrated ? (
           <RootNavigator
             navRef={navRef}
-            callOrchestrator={orchestratorRef.current}
+            callOrchestrator={callOrchestrator}
             onBannerTap={(target) => {
               if (target.kind === 'direct') {
                 navRef.current?.navigate('Chat', { peerId: target.peerId });
