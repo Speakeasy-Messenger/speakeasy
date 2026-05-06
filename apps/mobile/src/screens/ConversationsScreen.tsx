@@ -8,6 +8,7 @@ import {
   View,
 } from 'react-native';
 import { Avatar } from '../components/Avatar.js';
+import { GetStartedCards } from '../components/GetStartedCards.js';
 import { GroupAvatar } from '../components/GroupAvatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
@@ -46,6 +47,7 @@ interface Props {
   onNewGroup: () => void;
   onOpenDiagnostics: () => void;
   onOpenSettings: () => void;
+  onInviteFriends: () => void;
 }
 
 /**
@@ -59,6 +61,7 @@ export function ConversationsScreen({
   onNewChat,
   onNewGroup,
   onOpenSettings,
+  onInviteFriends,
 }: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
@@ -101,6 +104,10 @@ export function ConversationsScreen({
   });
 
   const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
+  // Show the Get Started card row while the user has fewer than 5
+  // conversations. Cards are individually dismissable; the component
+  // renders nothing once everything's been dismissed.
+  const showGetStarted = rows.length < 5;
 
   return (
     <SafeAreaView
@@ -139,6 +146,15 @@ export function ConversationsScreen({
         data={rows}
         keyExtractor={(r) => (r.kind === 'direct' ? r.conversationId : r.groupId)}
         contentContainerStyle={rows.length === 0 ? styles.emptyContainer : styles.listContent}
+        ListHeaderComponent={
+          showGetStarted ? (
+            <GetStartedCards
+              onInviteFriends={onInviteFriends}
+              onNewGroup={onNewGroup}
+              onNewChat={onNewChat}
+            />
+          ) : null
+        }
         ListEmptyComponent={
           <Text style={[text.subtitle, styles.emptyText, { color: themed.slate }]}>
             No conversations yet.

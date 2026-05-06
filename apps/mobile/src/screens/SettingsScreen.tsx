@@ -19,6 +19,7 @@ import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
 import { api } from '../services.js';
 import { useThemePref } from '../theme/ThemeProvider.js';
+import { useColors } from '../theme/index.js';
 
 interface Props {
   onBack: () => void;
@@ -37,6 +38,7 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
   const themePref = useThemePref((s) => s.preference);
   const setThemePref = useThemePref((s) => s.set);
   const [avatarBusy, setAvatarBusy] = useState(false);
+  const themed = useColors();
 
   const handleCopyId = () => {
     if (!userId) return;
@@ -120,18 +122,18 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
   };
 
   return (
-    <SafeAreaView style={styles.root}>
+    <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={8} style={styles.backBtn}>
           <Text style={styles.backText}>← Back</Text>
         </Pressable>
-        <Text style={text.heroBody}>Settings</Text>
+        <Text style={[text.heroBody, { color: themed.ink }]}>Settings</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         {/* ── Profile ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel]}>PROFILE</Text>
-        <View style={styles.card}>
+        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>PROFILE</Text>
+        <View style={[styles.card, { backgroundColor: themed.pale }]}>
           <View style={styles.profileRow}>
             <Pressable
               onPress={avatarBusy ? undefined : handleChangeAvatar}
@@ -145,7 +147,10 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
               )}
             </Pressable>
             <View style={styles.profileBody}>
-              <Text style={styles.idValue} numberOfLines={1}>
+              <Text
+                style={[styles.idValue, { color: themed.ink }]}
+                numberOfLines={1}
+              >
                 {userId ? `@${userId}` : '—'}
               </Text>
               <View style={styles.profileActions}>
@@ -172,8 +177,8 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
         </View>
 
         {/* ── Appearance ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel]}>APPEARANCE</Text>
-        <View style={styles.card}>
+        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>APPEARANCE</Text>
+        <View style={[styles.card, { backgroundColor: themed.pale }]}>
           <View style={styles.segmentRow}>
             {(['system', 'dark', 'light'] as const).map((opt) => {
               const active = themePref === opt;
@@ -184,7 +189,12 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
                   style={[styles.segment, active && styles.segmentActive]}
                   testID={`settings-theme-${opt}`}
                 >
-                  <Text style={[styles.segmentText, active && styles.segmentTextActive]}>
+                  <Text
+                    style={[
+                      styles.segmentText,
+                      { color: active ? styles.segmentTextActive.color : themed.ink },
+                    ]}
+                  >
                     {opt === 'system' ? 'System' : opt === 'dark' ? 'Dark' : 'Light'}
                   </Text>
                 </Pressable>
@@ -194,12 +204,12 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
         </View>
 
         {/* ── Notifications ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel]}>NOTIFICATIONS</Text>
-        <View style={styles.card}>
+        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>NOTIFICATIONS</Text>
+        <View style={[styles.card, { backgroundColor: themed.pale }]}>
           <View style={styles.toggleRow}>
             <View style={styles.toggleLabelWrap}>
-              <Text style={styles.toggleLabel}>In-app banners</Text>
-              <Text style={styles.toggleHint}>
+              <Text style={[styles.toggleLabel, { color: themed.ink }]}>In-app banners</Text>
+              <Text style={[styles.toggleHint, { color: themed.slate }]}>
                 Show a top banner with sender + preview when a message
                 arrives while you're using the app.
               </Text>
@@ -213,17 +223,17 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
         </View>
 
         {/* ── Connection ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel]}>CONNECTION</Text>
-        <View style={styles.card}>
+        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>CONNECTION</Text>
+        <View style={[styles.card, { backgroundColor: themed.pale }]}>
           <View style={styles.statusRow}>
-            <Text style={styles.statusLabel}>WebSocket</Text>
-            <Text style={styles.statusValue}>{wsState}</Text>
+            <Text style={[styles.statusLabel, { color: themed.ink }]}>WebSocket</Text>
+            <Text style={[styles.statusValue, { color: themed.slate }]}>{wsState}</Text>
           </View>
         </View>
 
         {/* ── Actions ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel]}>ACTIONS</Text>
-        <View style={styles.card}>
+        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>ACTIONS</Text>
+        <View style={[styles.card, { backgroundColor: themed.pale }]}>
           <Pressable
             onPress={onInviteFriends}
             style={styles.primaryBtn}
@@ -236,13 +246,21 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
             <Text style={styles.primaryBtnText}>Diagnostics</Text>
           </Pressable>
           <View style={styles.divider} />
-          <Pressable onPress={handleSignOut} style={styles.destructiveBtn}>
-            <Text style={styles.destructiveBtnText}>Sign Out</Text>
+          <Pressable
+            onPress={handleSignOut}
+            style={[
+              styles.destructiveBtn,
+              { borderColor: themed.divider },
+            ]}
+          >
+            <Text style={[styles.destructiveBtnText, { color: themed.ink }]}>Sign Out</Text>
           </Pressable>
         </View>
 
         {/* ── Footer ── */}
-        <Text style={[text.footnote, styles.version]}>speakeasy 0.1.0</Text>
+        <Text style={[text.footnote, styles.version, { color: themed.slate }]}>
+          speakeasy 0.1.0
+        </Text>
       </ScrollView>
     </SafeAreaView>
   );

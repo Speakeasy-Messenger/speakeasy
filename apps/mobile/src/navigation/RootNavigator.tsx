@@ -79,6 +79,7 @@ export function RootNavigator({ navRef, onBannerTap }: RootNavigatorProps) {
                   onNewGroup={() => navigation.navigate('NewGroup')}
                   onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
                   onOpenSettings={() => navigation.navigate('Settings')}
+                  onInviteFriends={() => navigation.navigate('InviteFriends')}
                 />
               )}
             </Stack.Screen>

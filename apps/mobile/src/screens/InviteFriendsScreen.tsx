@@ -102,7 +102,16 @@ export function InviteFriendsScreen({ onBack }: Props) {
       return;
     }
     const greeting = prefix ? `Hey ${prefix}, ` : '';
-    const message = `${greeting}join me on Speakeasy: my handle is @${myUserId}.`;
+    // GitHub's `/releases/latest` redirect always points at the
+    // latest tagged release. Including it in the share message gives
+    // the recipient a direct download path. (TinyURL wrapping is a
+    // future nice-to-have — the URL is short enough that SMS
+    // 160-char limit isn't a concern for the typical greeting.)
+    const downloadUrl =
+      'https://github.com/Speakeasy-Messenger/speakeasy/releases/latest';
+    const message =
+      `${greeting}join me on Speakeasy: my handle is @${myUserId}.\n` +
+      `Download: ${downloadUrl}`;
     try {
       await Share.share({ message });
     } catch (err) {
