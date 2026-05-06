@@ -20,6 +20,7 @@ import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../native/vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { brand } from '../theme/tokens.js';
 
 type AvailabilityState =
   | { kind: 'idle' }
@@ -34,8 +35,8 @@ interface Props {
   onEnrolled: (userId: string) => void;
 }
 
-// Slogan is brand-WIP per spec §14. Centralised so it's easy to swap.
-const SLOGAN_PLACEHOLDER = 'Say it & leave.';
+// Tagline per BRANDING1.md §11 (rebrand): "Say it. Leave nothing."
+const SLOGAN_PLACEHOLDER = 'Say it. Leave nothing.';
 
 // libsignal's PreKey replenish-batch convention. Server's low_water trigger
 // fires when remaining drops below 10, so 100 leaves a generous buffer.
@@ -234,7 +235,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
         >
           <View style={styles.header}>
             <IconMark size={120} animate />
-            <Wordmark variant="hero" subtitle={SLOGAN_PLACEHOLDER} />
+            <Wordmark variant="hero" tagline={SLOGAN_PLACEHOLDER} />
           </View>
           <View style={styles.principles}>
             {PRINCIPLES.map((p) => (
@@ -318,9 +319,18 @@ function statusMessage(s: AvailabilityState, handle: string): string {
 }
 
 function statusColor(s: AvailabilityState) {
+  // Spec §1: only one accent on screen. Available = brass-positive.
+  // Unhappy states fall back to ink (foreground) so they don't compete
+  // with the brass affirmation; the ROW border still flips to mute on
+  // bad input, which is enough to surface "wrong".
   if (s.kind === 'available') return { color: colors.primary };
-  if (s.kind === 'taken' || s.kind === 'reserved' || s.kind === 'localInvalid' || s.kind === 'error') {
-    return { color: '#B14A4A' };
+  if (
+    s.kind === 'taken' ||
+    s.kind === 'reserved' ||
+    s.kind === 'localInvalid' ||
+    s.kind === 'error'
+  ) {
+    return { color: colors.ink };
   }
   return { color: colors.slate };
 }
@@ -345,7 +355,9 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: colors.cream },
+  // Spec §7: onboarding renders on the brand canvas (aubergine), not
+  // the workspace canvas. Mode-invariant.
+  root: { flex: 1, backgroundColor: brand.canvas },
   flex: { flex: 1 },
   scrollContent: {
     flexGrow: 1,
@@ -356,10 +368,11 @@ const styles = StyleSheet.create({
   header: { alignItems: 'center', gap: space.md, marginTop: space.lg },
   principles: { gap: space.sm, paddingHorizontal: space.md, marginTop: space.lg },
   principleRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  // Spec §10: no circular badges. Bullets are 6×6 brass squares —
+  // same gesture as the StatusSquare, scaled identically.
   bullet: {
     width: 6,
     height: 6,
-    borderRadius: 3,
     backgroundColor: colors.primary,
   },
   principleText: { color: colors.ink, flex: 1 },
@@ -369,18 +382,23 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: colors.slate,
   },
+  // Onboarding sits on the brand canvas — the handle input uses the
+  // brand-side surface so it reads against the aubergine, not the
+  // workspace surface (which would near-vanish on aubergine).
   handleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: '#FFFFFF',
+    backgroundColor: brand.surface,
     borderRadius: radius.avatar,
     paddingHorizontal: space.md,
     paddingVertical: space.sm,
     borderWidth: 1.5,
     borderColor: 'transparent',
   },
+  // Spec §1: two colors do everything. We don't introduce a separate
+  // error red — the unhappy paths use text-mute / accent treatments.
   handleRowOk: { borderColor: colors.primary },
-  handleRowBad: { borderColor: '#B14A4A' },
+  handleRowBad: { borderColor: colors.slate },
   atPrefix: {
     fontFamily: fonts.inter500,
     fontSize: 18,

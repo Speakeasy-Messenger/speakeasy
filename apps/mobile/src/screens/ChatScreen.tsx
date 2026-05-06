@@ -315,7 +315,8 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     marginTop: space.lg,
   },
-  dot: { width: 6, height: 6, borderRadius: 3, backgroundColor: colors.primary },
+  // Spec §6.10: status indicator is a 6×6 brass square — no radius.
+  dot: { width: 6, height: 6, backgroundColor: colors.primary },
   inputBar: {
     flexDirection: 'row',
     alignItems: 'center',

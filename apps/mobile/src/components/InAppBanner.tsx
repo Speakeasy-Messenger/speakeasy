@@ -3,6 +3,7 @@ import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-nativ
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { Avatar } from './Avatar.js';
 import { colors, fonts, radius, space } from '../theme/index.js';
+import { workspace } from '../theme/tokens.js';
 import { useBanner } from '../store/banner.js';
 
 const AUTO_DISMISS_MS = 4000;
@@ -96,29 +97,22 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: workspace.dark.surface,
     borderRadius: radius.avatar,
     paddingVertical: space.sm,
     paddingHorizontal: space.md,
-    shadowColor: '#000',
+    shadowColor: workspace.dark.text,
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.12,
     shadowRadius: 12,
     elevation: 6,
   },
-  avatar: {
-    width: 36,
-    height: 36,
-    borderRadius: 18,
-    backgroundColor: colors.pale,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontFamily: fonts.inter500,
-    fontSize: 14,
-    color: colors.primary,
-  },
+  // Legacy `avatar` / `avatarText` styles — superseded by the
+  // `<Avatar>` component above. Kept as zero-height no-ops so any
+  // forgotten reference doesn't draw a stray pill; phase D cleanup
+  // can delete fully once verified unused.
+  avatar: { width: 0, height: 0 },
+  avatarText: { fontFamily: fonts.inter500, fontSize: 0, color: colors.primary },
   body: { flex: 1 },
   sender: {
     fontFamily: fonts.inter500,

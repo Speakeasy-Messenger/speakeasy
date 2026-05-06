@@ -11,6 +11,7 @@ import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
 import { useProfiles } from './src/store/profiles.js';
+import { ThemeProvider } from './src/theme/ThemeProvider.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
@@ -192,24 +193,27 @@ export default function App() {
 
   return (
     <SafeAreaProvider>
-      <StatusBar
-        barStyle="dark-content"
-        backgroundColor={colors.cream}
-      />
-      {hydrated ? (
-        <RootNavigator
-          navRef={navRef}
-          onBannerTap={(target) => {
-            if (target.kind === 'direct') {
-              navRef.current?.navigate('Chat', { peerId: target.peerId });
-            } else {
-              navRef.current?.navigate('GroupChat', { groupId: target.groupId });
-            }
-          }}
-        />
-      ) : (
-        <View style={{ flex: 1, backgroundColor: colors.cream }} />
-      )}
+      <ThemeProvider>
+        {/* Light-on-dark status bar — the workspace canvas is dark
+            by default per the rebrand spec, so the icons are the
+            warm bone foreground. Light-mode + per-screen brand-canvas
+            overrides land later. */}
+        <StatusBar barStyle="light-content" backgroundColor={colors.cream} />
+        {hydrated ? (
+          <RootNavigator
+            navRef={navRef}
+            onBannerTap={(target) => {
+              if (target.kind === 'direct') {
+                navRef.current?.navigate('Chat', { peerId: target.peerId });
+              } else {
+                navRef.current?.navigate('GroupChat', { groupId: target.groupId });
+              }
+            }}
+          />
+        ) : (
+          <View style={{ flex: 1, backgroundColor: colors.cream }} />
+        )}
+      </ThemeProvider>
     </SafeAreaProvider>
   );
 }

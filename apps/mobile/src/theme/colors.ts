@@ -1,26 +1,46 @@
+import { accent, workspace } from './tokens.js';
+
 /**
- * Speakeasy palette — spec §14 (April 2026 revision: purple replaces gold).
+ * Legacy palette aliases. The rebrand canonical palette lives in
+ * `tokens.ts` and is consumed via `useTheme()`; this file remains so
+ * existing screens (which import `colors.primary` etc.) globally
+ * upgrade to the new aubergine + brass + bone scheme without
+ * per-screen edits.
  *
- *   primary  — brand voice: icon mark disc, sent bubbles, primary CTA
- *   soft     — support tint: received bubbles, hover/pressed, fade endpoints
- *   pale     — surface variant, dividers, light input fields, avatar tint
- *   cream    — primary background everywhere
- *   ink      — primary text colour
- *   slate    — structural metadata (labels, timestamps)
+ * Values are pinned to the **dark workspace** mode — that's the spec
+ * default. Light-mode consumers must migrate to `useTheme()` directly
+ * (phase D / future work).
+ *
+ * Phase D will delete this file once every consumer has been moved to
+ * `useTheme()` / direct `tokens.*` imports.
  */
 export const colors = {
-  ink: '#0F1117',
-  cream: '#F7F6F3',
-  primary: '#6C5CE7',
-  soft: '#A79CFF',
-  pale: '#E6E3F1',
-  slate: '#6B7280',
+  // Foreground — was a near-black ink. Now the warm bone foreground
+  // that sits on top of the dark workspace canvas.
+  ink: workspace.dark.text,
+  // Primary background — was cream. Now the dark workspace canvas.
+  // Old screens that used `colors.cream` as a "page bg" pick this up
+  // automatically.
+  cream: workspace.dark.canvas,
+  // Brand voice — was purple. Now brass.
+  primary: accent.base,
+  // Soft / surface variant — was a purple-tinted pale. Now the
+  // pressed-state surface (the most-tinted of the three workspace
+  // surfaces).
+  soft: workspace.dark.surfacePressed,
+  // Pale surface — was a purple-tinted background. Now the standard
+  // raised surface (bubbles/cards).
+  pale: workspace.dark.surface,
+  // Metadata text — was slate gray. Now the muted workspace foreground
+  // (~55% opacity bone).
+  slate: workspace.dark.textMute,
 
-  // Convenience aliases referenced by chat surfaces:
-  chatListBg: '#F7F6F3',
-  receivedBubble: '#E6E3F1',
-  sentBubble: '#6C5CE7',
-  divider: '#E6E3F1',
+  // Convenience aliases referenced by chat surfaces. Spec §6.2/6.3:
+  // incoming bubble = `surface`; outgoing = brass.
+  chatListBg: workspace.dark.canvas,
+  receivedBubble: workspace.dark.surface,
+  sentBubble: accent.base,
+  divider: workspace.dark.textFaint,
 } as const;
 
 export type ColorToken = keyof typeof colors;

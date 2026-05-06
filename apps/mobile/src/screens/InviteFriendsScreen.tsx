@@ -225,7 +225,7 @@ const styles = StyleSheet.create({
   search: {
     paddingHorizontal: space.md,
     paddingVertical: 12,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.pale,
     borderRadius: radius.pill,
     color: colors.ink,
     fontFamily: fonts.inter400,
@@ -240,15 +240,16 @@ const styles = StyleSheet.create({
     gap: space.md,
     paddingVertical: space.sm,
     paddingHorizontal: space.md,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: colors.pale,
     borderRadius: radius.avatar,
     marginBottom: space.xs,
   },
+  // Avatars are 4-radius squares per the rebrand spec (was circles).
   avatar: {
     width: 40,
     height: 40,
-    borderRadius: 20,
-    backgroundColor: colors.pale,
+    borderRadius: radius.avatar,
+    backgroundColor: colors.soft,
     alignItems: 'center',
     justifyContent: 'center',
   },
