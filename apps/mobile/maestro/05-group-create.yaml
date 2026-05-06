@@ -36,14 +36,22 @@ appId: xyz.speakeasyapp.app
       id: "new-group-screen"
     timeout: 10000
 
-# Group name
+# Tap the name input explicitly (don't rely on auto-focus). Then type.
+- tapOn:
+    id: "new-group-name-input"
 - inputText: "weekend plans"
+# Dismiss keyboard so the members input below isn't covered. Pressing
+# Back on Android dismisses the IME first, then the activity — only
+# the IME-dismiss should fire here since the new-group screen still
+# has its own focus.
+- hideKeyboard
 
-# Add a single member (well-formed handle; server accepts unknown
-# handles via repo.addMember without validating existence).
+# Tap the members input. The IME re-opens; that's fine, since we
+# don't need to interact with anything below this input.
 - tapOn:
     id: "new-group-members-input"
 - inputText: "quiet-empty-mountain"
+- hideKeyboard
 
 - tapOn:
     text: "Create group"
