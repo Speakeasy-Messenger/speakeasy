@@ -227,34 +227,37 @@ function CardIcon({
   );
 }
 
-const CARD_W = 168;
+// Compact dimensions — this panel sticks to the bottom of the
+// conversations list so it can't crowd the chat rows.
+const CARD_W = 132;
 
 const styles = StyleSheet.create({
-  wrap: { paddingTop: space.s, paddingBottom: space.m, gap: space.s },
+  wrap: { paddingTop: space.xs, paddingBottom: space.s, gap: 4 },
   label: {
     textTransform: 'uppercase',
     paddingHorizontal: space.lg,
   },
   row: {
     paddingHorizontal: space.lg,
-    gap: space.s,
+    gap: space.xs,
   },
   card: {
     width: CARD_W,
     borderRadius: radius.sm,
     borderWidth: 1,
-    padding: space.m,
-    gap: 4,
+    paddingVertical: space.s,
+    paddingHorizontal: space.m,
+    gap: 2,
     position: 'relative',
   },
   dismiss: {
     position: 'absolute',
-    top: 6,
-    right: 8,
+    top: 4,
+    right: 6,
     width: 18,
     height: 18,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrap: { marginBottom: space.xs },
+  iconWrap: { marginBottom: 2 },
 });

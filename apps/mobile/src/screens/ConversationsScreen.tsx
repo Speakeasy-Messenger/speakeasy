@@ -12,7 +12,7 @@ import { GetStartedCards } from '../components/GetStartedCards.js';
 import { GroupAvatar } from '../components/GroupAvatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
-import { PhoneIcon } from '../components/icons/CallIcons.js';
+import Svg, { Path } from 'react-native-svg';
 import { useColors } from '../theme/index.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
@@ -49,8 +49,6 @@ interface Props {
   onOpenDiagnostics: () => void;
   onOpenSettings: () => void;
   onInviteFriends: () => void;
-  /** Open the dialer to start a new call. */
-  onOpenDialer?: () => void;
 }
 
 /**
@@ -65,7 +63,6 @@ export function ConversationsScreen({
   onNewGroup,
   onOpenSettings,
   onInviteFriends,
-  onOpenDialer,
 }: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
@@ -135,26 +132,14 @@ export function ConversationsScreen({
               <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
             </View>
           </View>
-          <View style={styles.headerActions}>
-            {onOpenDialer ? (
-              <Pressable
-                onPress={onOpenDialer}
-                hitSlop={8}
-                style={styles.gearBtn}
-                testID="conversations-call-btn"
-              >
-                <PhoneIcon size={22} />
-              </Pressable>
-            ) : null}
-            <Pressable
-              onPress={onOpenSettings}
-              hitSlop={8}
-              style={styles.gearBtn}
-              testID="conversations-settings-btn"
-            >
-              <SettingsIcon size={24} />
-            </Pressable>
-          </View>
+          <Pressable
+            onPress={onOpenSettings}
+            hitSlop={8}
+            style={styles.gearBtn}
+            testID="conversations-settings-btn"
+          >
+            <SettingsIcon size={24} />
+          </Pressable>
         </View>
       </View>
 
@@ -162,15 +147,6 @@ export function ConversationsScreen({
         data={rows}
         keyExtractor={(r) => (r.kind === 'direct' ? r.conversationId : r.groupId)}
         contentContainerStyle={rows.length === 0 ? styles.emptyContainer : styles.listContent}
-        ListHeaderComponent={
-          showGetStarted ? (
-            <GetStartedCards
-              onInviteFriends={onInviteFriends}
-              onNewGroup={onNewGroup}
-              onNewChat={onNewChat}
-            />
-          ) : null
-        }
         ListEmptyComponent={
           <Text style={[text.subtitle, styles.emptyText, { color: themed.slate }]}>
             No conversations yet.
@@ -241,23 +217,63 @@ export function ConversationsScreen({
         }
       />
 
-      <View style={styles.bottom}>
-        <Pressable
-          testID="conversations-new-chat"
-          onPress={onNewChat}
-          style={styles.newBtn}
-        >
-          <Text style={styles.newBtnText}>+ New chat</Text>
-        </Pressable>
+      {showGetStarted ? (
+        <View style={styles.getStartedDock}>
+          <GetStartedCards
+            onInviteFriends={onInviteFriends}
+            onNewGroup={onNewGroup}
+            onNewChat={onNewChat}
+          />
+        </View>
+      ) : null}
+
+      <View pointerEvents="box-none" style={styles.fabStack}>
         <Pressable
           testID="conversations-new-group"
           onPress={onNewGroup}
-          style={styles.newGroupBtn}
+          style={[styles.fabSecondary, { backgroundColor: themed.pale }]}
+          android_ripple={{ color: themed.soft, borderless: false }}
         >
-          <Text style={styles.newGroupBtnText}># New group</Text>
+          <HashFabIcon color={themed.primary} />
+        </Pressable>
+        <Pressable
+          testID="conversations-new-chat"
+          onPress={onNewChat}
+          style={[styles.fabPrimary, { backgroundColor: themed.primary }]}
+          android_ripple={{ color: themed.soft, borderless: false }}
+        >
+          <PencilFabIcon color={themed.cream} />
         </Pressable>
       </View>
     </SafeAreaView>
+  );
+}
+
+function PencilFabIcon({ color }: { color: string }): React.JSX.Element {
+  return (
+    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M3 21 L3 17 L15 5 L19 9 L7 21 Z M14 6 L18 10"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+        fill="none"
+      />
+    </Svg>
+  );
+}
+
+function HashFabIcon({ color }: { color: string }): React.JSX.Element {
+  return (
+    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M5 9 H21 M3 15 H19 M9 3 L7 21 M17 3 L15 21"
+        stroke={color}
+        strokeWidth={1.6}
+        strokeLinecap="square"
+      />
+    </Svg>
   );
 }
 
@@ -292,7 +308,6 @@ const styles = StyleSheet.create({
   youRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
   status: { color: colors.slate },
   gearBtn: { padding: space.sm },
-  headerActions: { flexDirection: 'row', alignItems: 'center', gap: 4 },
   gearIcon: { fontSize: 20 },
   listContent: { paddingHorizontal: space.md, paddingBottom: space.xl, gap: space.xs },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
@@ -361,28 +376,46 @@ const styles = StyleSheet.create({
     fontFamily: fonts.inter500,
     fontSize: 11,
   },
-  bottom: { padding: space.lg, gap: space.sm },
-  newBtn: {
-    paddingVertical: 14,
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
+  // Sticky bottom dock for the Get Started cards. The cards are
+  // horizontal-scrollable; the dock is a fixed-height row above the
+  // FABs so the chat list always has the rest of the screen.
+  getStartedDock: {
+    borderTopColor: colors.pale,
+    borderTopWidth: 1,
+    backgroundColor: colors.cream,
+  },
+  // FABs float over the bottom-right corner. `pointerEvents="box-none"`
+  // on the wrapper lets taps fall through to the list everywhere except
+  // on the buttons themselves.
+  fabStack: {
+    position: 'absolute',
+    right: space.lg,
+    bottom: space.lg,
     alignItems: 'center',
+    gap: space.sm,
   },
-  newBtnText: {
-    color: colors.cream,
-    fontFamily: fonts.inter500,
-    fontSize: 15,
-  },
-  newGroupBtn: {
-    paddingVertical: 12,
-    borderRadius: radius.pill,
+  fabPrimary: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
     alignItems: 'center',
-    borderWidth: 1,
-    borderColor: colors.primary,
+    justifyContent: 'center',
+    elevation: 6,
+    shadowColor: '#000',
+    shadowOpacity: 0.18,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
   },
-  newGroupBtnText: {
-    color: colors.primary,
-    fontFamily: fonts.inter500,
-    fontSize: 14,
+  fabSecondary: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    alignItems: 'center',
+    justifyContent: 'center',
+    elevation: 4,
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 4,
+    shadowOffset: { width: 0, height: 2 },
   },
 });
