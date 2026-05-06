@@ -25,7 +25,9 @@ import { CallOrchestrator } from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
-import { CallKeepBridge } from './src/calls/callkeep-bridge.js';
+// CallKeepBridge intentionally not imported here — see deferred-init
+// note below. The bridge module still ships in the bundle so the next
+// release can wire it without another dep dance.
 import { diag } from './src/diag/log.js';
 import { colors } from './src/theme/index.js';
 
@@ -139,24 +141,36 @@ export default function App() {
     // Voice-call orchestrator. Owns the WebRTC peer connection and
     // the call_* WS frame round-trip. Reuses the same Signal session
     // ChatScreen does, so calls go through the existing 1:1 crypto.
-    const callOrch = new CallOrchestrator({
-      myUserId: userId,
-      signalProtocol,
-      api,
-      peerFactory: reactNativeWebRtcPeerFactory,
-      getDeviceToken: getToken,
-      send: (frame) => ws.send(frame),
-      ensureSessionWithPeer,
-      onStateChange: (call) => useCalls.getState().setActive(call),
-      onCallFinished: (entry) => useCalls.getState().recordHistory(entry),
-    });
-    setCallOrchestrator(callOrch);
+    //
+    // Wrapped so a constructor failure in any new dep can't crash the
+    // post-enrollment effect. Messaging keeps working even if calling
+    // is broken.
+    let callOrch: CallOrchestrator | undefined;
+    try {
+      callOrch = new CallOrchestrator({
+        myUserId: userId,
+        signalProtocol,
+        api,
+        peerFactory: reactNativeWebRtcPeerFactory,
+        getDeviceToken: getToken,
+        send: (frame) => ws.send(frame),
+        ensureSessionWithPeer,
+        onStateChange: (call) => useCalls.getState().setActive(call),
+        onCallFinished: (entry) => useCalls.getState().recordHistory(entry),
+      });
+      setCallOrchestrator(callOrch);
+    } catch (err) {
+      diag('app', 'CallOrchestrator init FAILED — calls disabled', {
+        err: String(err),
+      });
+    }
 
-    // Native call UI integration. Best-effort — if CallKit/
-    // ConnectionService permissions aren't granted yet, the bridge
-    // logs and continues; calls still work via the in-app screens.
-    const callKeep = new CallKeepBridge({ orchestrator: callOrch });
-    void callKeep.start();
+    // CallKeep (CallKit / ConnectionService) deferred — a misconfigured
+    // foregroundService notificationIcon was crashing the app right
+    // after enrollment. Calls still work via the in-app
+    // IncomingCallScreen / CallScreen; the lock-screen ring UI lands in
+    // a follow-up once we've verified the right resource references on
+    // hardware. Bridge code remains for that future enable.
 
     // Single ws.subscribe wired to the unified router. Every screen
     // (ChatScreen, GroupChatScreen, future CommunityScreen) reads from
@@ -168,7 +182,11 @@ export default function App() {
       groupMessaging,
       ws,
       orchestrator,
-      onCallFrame: (frame) => void callOrch.handleFrame(frame),
+      // Optional — when callOrch failed to construct, we drop call_*
+      // frames; messaging still works.
+      onCallFrame: callOrch
+        ? (frame) => void callOrch!.handleFrame(frame)
+        : undefined,
       onPrekeysLow: () => void replenisher.trigger(),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
@@ -256,7 +274,6 @@ export default function App() {
       lifecycleSub.remove();
       unsubscribe();
       callsUnsub();
-      callKeep.stop();
       setCallOrchestrator(undefined);
       ws.close();
     };
