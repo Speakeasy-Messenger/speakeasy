@@ -25,6 +25,9 @@ kill_timeout = "30s"
   NODE_ENV = "production"
   LOG_LEVEL = "info"
   # VOUCHFLOW_BASE_URL set at deploy time — sandbox vs live.
+  # Prometheus /metrics on the main listener (same port as app traffic;
+  # no separate :9091 to expose). Scraped by Fly's internal Prometheus.
+  METRICS_ENABLED = "1"
 
 # Phase 4: keep at least 2 instances so a rolling deploy / one-machine crash
 # never drops the WS pool below cluster-redundant. Cross-instance ack
@@ -79,8 +82,5 @@ kill_timeout = "30s"
   cpus = 2
   memory_mb = 1024
 
-# Metrics endpoint — enable with METRICS_ENABLED=1 on the Fly app.
-# fastify-metrics serves /metrics on the main HTTP listener, same port
-# as the app. No separate port needed.
-[env]
-  METRICS_ENABLED = "1"
+# (METRICS_ENABLED moved into the main [env] block above — TOML treats
+# multiple [env] blocks as a merge, but the duplicate was confusing.)
