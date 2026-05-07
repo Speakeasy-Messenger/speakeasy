@@ -40,32 +40,51 @@ export class FcmApnsPushProvider implements PushProvider {
     const withPush = userDevices.filter((d) => d.pushToken);
     if (withPush.length === 0) return;
 
-    // Spec §11/§12: notify-only, no content. The `notification` payload
-    // is a generic "you have a new message" — system-level FCM uses it
-    // to auto-display a banner when the app is backgrounded, without
-    // leaking sender, conversation, or text. The `data` block still
-    // rides along so the foregrounded app can route via the WS reconnect
-    // path. iOS APNs honours the same shape via the firebase-admin SDK
-    // (the SDK transparently maps to the APNs `aps.alert` field).
-    const payload: admin.messaging.MulticastMessage = {
-      notification: {
-        title: 'speakeasy',
-        body: 'New message',
-      },
-      data: {
-        conversation_id: notice.conversationId,
-        msg_type: notice.msgType,
-      },
-      tokens: withPush.map((d) => d.pushToken!),
+    // Per-device privacy: a user can have a 'rich' work phone and a
+    // 'private' bedside tablet. Group device tokens by the resolved
+    // banner copy so every device sees its preferred treatment in
+    // one batched FCM call. Sealed senderId is forced to undefined
+    // upstream (handler.ts doesn't pass it through) so 'rich' devices
+    // still degrade gracefully when the message can't be attributed.
+    const data = {
+      conversation_id: notice.conversationId,
+      msg_type: notice.msgType,
     };
+    const buckets = new Map<string, { title: string; body: string; tokens: string[] }>();
+    for (const d of withPush) {
+      const privacy = d.notificationPrivacy ?? 'rich';
+      const showSender = privacy === 'rich' && !!notice.senderId;
+      // Spec §11/§12: notify-only, no message content. 'rich' surfaces
+      // sender handle ("from whom") but never preview text ("what they
+      // said"); preview-text would need a Notification Service
+      // Extension that decrypts on-device, deferred to Phase 6.
+      const title = showSender ? `@${notice.senderId}` : 'speakeasy';
+      const body = 'New message';
+      const key = `${title}\0${body}`;
+      const bucket = buckets.get(key);
+      if (bucket) {
+        bucket.tokens.push(d.pushToken!);
+      } else {
+        buckets.set(key, { title, body, tokens: [d.pushToken!] });
+      }
+    }
 
-    const response = await admin.messaging(this.app).sendEachForMulticast(payload);
-    if (response.failureCount > 0) {
-      // Log failures but don't throw — one bad token shouldn't block others.
-      const failed = response.responses.filter((r) => !r.success);
+    const sends: Promise<admin.messaging.BatchResponse>[] = [];
+    for (const { title, body, tokens } of buckets.values()) {
+      const payload: admin.messaging.MulticastMessage = {
+        notification: { title, body },
+        data,
+        tokens,
+      };
+      sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
+    }
+    const responses = await Promise.all(sends);
+    const totalFailures = responses.reduce((acc, r) => acc + r.failureCount, 0);
+    if (totalFailures > 0) {
+      const allFailed = responses.flatMap((r) => r.responses.filter((x) => !x.success));
       // eslint-disable-next-line no-console
       console.warn(
-        { failures: failed.map((f) => f.error?.message) },
+        { failures: allFailed.map((f) => f.error?.message) },
         'FCM push: some deliveries failed',
       );
     }

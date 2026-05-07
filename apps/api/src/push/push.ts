@@ -16,6 +16,14 @@ export interface PushDeliveryNotice {
   /** The conversation the buffered message lives on. */
   conversationId: string;
   msgType: ConversationKind;
+  /**
+   * Sender id (handle), when known to the server. Omitted for
+   * sealed-sender messages (server doesn't have it). Drives the
+   * FCM/APNs banner copy alongside the recipient's per-device privacy
+   * preference: `rich` + senderId → "@bananaman1: New message",
+   * otherwise generic.
+   */
+  senderId?: string;
 }
 
 export interface PushProvider {

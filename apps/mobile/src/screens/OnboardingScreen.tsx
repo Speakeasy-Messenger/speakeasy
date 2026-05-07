@@ -16,6 +16,7 @@ import { Button } from '../components/Button.js';
 import { IconMark } from '../components/IconMark.js';
 import { Wordmark } from '../components/Wordmark.js';
 import { useIdentity } from '../store/identity.js';
+import { useSettings } from '../store/settings.js';
 import { api, signalProtocol, vouchflow } from '../services.js';
 import { pushNotifications } from '../services.js';
 import { ApiError } from '../api/client.js';
@@ -193,6 +194,7 @@ export function OnboardingScreen({ onEnrolled }: Props) {
             deviceToken,
             pushResult.pushToken,
             pushResult.platform,
+            useSettings.getState().notificationPrivacy,
           );
         }
       } catch {

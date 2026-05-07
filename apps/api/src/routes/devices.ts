@@ -5,6 +5,10 @@ import type { DevicesRepo } from '../db/devices.js';
 interface PushTokenBody {
   push_token: string;
   platform: 'ios' | 'android';
+  /** Optional. Drives the FCM/APNs banner copy. Omitting leaves the
+   * stored value alone — Settings can update it independently of a
+   * fresh push-token rotation. */
+  notification_privacy?: 'rich' | 'private';
 }
 
 /**
@@ -27,6 +31,7 @@ export async function registerDeviceRoutes(
           properties: {
             push_token: { type: 'string', minLength: 1 },
             platform: { type: 'string', enum: ['ios', 'android'] },
+            notification_privacy: { type: 'string', enum: ['rich', 'private'] },
           },
         },
       },
@@ -40,6 +45,7 @@ export async function registerDeviceRoutes(
         deviceToken,
         pushToken: request.body.push_token,
         platform: request.body.platform,
+        notificationPrivacy: request.body.notification_privacy,
       });
       return reply.code(200).send({ ok: true });
     },

@@ -18,7 +18,7 @@ import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
 import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
-import { api } from '../services.js';
+import { api, pushNotifications } from '../services.js';
 import { useThemePref } from '../theme/ThemeProvider.js';
 import { useColors } from '../theme/index.js';
 
@@ -46,6 +46,8 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
   const wsState = useConnection((s) => s.state);
   const inAppNotificationsEnabled = useSettings((s) => s.inAppNotificationsEnabled);
   const setInAppNotificationsEnabled = useSettings((s) => s.setInAppNotificationsEnabled);
+  const notificationPrivacy = useSettings((s) => s.notificationPrivacy);
+  const setNotificationPrivacy = useSettings((s) => s.setNotificationPrivacy);
   const setProfile = useProfiles((s) => s.set);
   const themePref = useThemePref((s) => s.preference);
   const setThemePref = useThemePref((s) => s.set);
@@ -112,6 +114,25 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
         },
       },
     ]);
+  }
+
+  // Toggle "Show sender" → flip the local store, then push the new
+  // value to the server immediately so the next inbound push respects
+  // it without waiting for the next app-start sync. Best-effort: a
+  // failure here is recovered on the next launch via App.tsx's
+  // registerPushToken call.
+  async function handleTogglePrivacy(showSender: boolean) {
+    const next = showSender ? 'rich' : 'private';
+    setNotificationPrivacy(next);
+    try {
+      const deviceToken = useIdentity.getState().deviceToken;
+      if (!deviceToken) return;
+      const pushResult = await pushNotifications.getToken();
+      if (!pushResult) return;
+      await api.registerPushToken(deviceToken, pushResult.pushToken, pushResult.platform, next);
+    } catch {
+      // Non-fatal — App.tsx re-syncs on next launch.
+    }
   }
 
   const handleSignOut = () => {
@@ -239,6 +260,23 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
             thumbColor={themed.cream}
             ios_backgroundColor={themed.soft}
             testID="settings-in-app-notifications"
+          />
+        </ListItem>
+        <ListItem dividerColor={themed.divider}>
+          <View style={styles.listItemBody}>
+            <Text style={[styles.listItemTitle, { color: themed.ink }]}>Show sender</Text>
+            <Text style={[styles.listItemSubtitle, { color: themed.slate }]}>
+              Lock-screen banner reads "@handle: New message". Off → "speakeasy: New message" with
+              no sender attribution. Message content stays end-to-end encrypted either way.
+            </Text>
+          </View>
+          <Switch
+            value={notificationPrivacy === 'rich'}
+            onValueChange={(showSender) => void handleTogglePrivacy(showSender)}
+            trackColor={{ false: themed.soft, true: themed.primary }}
+            thumbColor={themed.cream}
+            ios_backgroundColor={themed.soft}
+            testID="settings-notification-show-sender"
           />
         </ListItem>
 

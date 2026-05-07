@@ -194,10 +194,16 @@ export default function App() {
     // Phase 5d: register push token on every app start. Token can
     // rotate (FCM invalidates on app reinstall, OS update). Best-effort.
     // Errors are non-fatal — push is a nice-to-have, not a blocker.
+    // Also rides along the current notificationPrivacy preference so a
+    // user who toggled privacy mode while offline gets it synced up on
+    // the next launch even if the inline toggle-time request failed.
     getToken().then((dt) => {
       return pushNotifications.getToken().then((pushResult) => {
         if (pushResult) {
-          void api.registerPushToken(dt, pushResult.pushToken, pushResult.platform).catch(() => {});
+          const privacy = useSettings.getState().notificationPrivacy;
+          void api
+            .registerPushToken(dt, pushResult.pushToken, pushResult.platform, privacy)
+            .catch(() => {});
         }
       });
     }).catch((err) => {

@@ -1,7 +1,7 @@
 import { eq, sql } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { devices } from './schema.js';
-import type { DeviceRecord, DevicesRepo } from './devices.js';
+import type { DeviceRecord, DevicesRepo, NotificationPrivacy } from './devices.js';
 
 export class DrizzleDevicesRepo implements DevicesRepo {
   async upsertOnSeen(args: {
@@ -32,6 +32,8 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       userId: r.userId,
       pushToken: r.pushToken ?? undefined,
       platform: (r.platform as 'ios' | 'android') ?? undefined,
+      notificationPrivacy:
+        (r.notificationPrivacy as NotificationPrivacy | null) ?? undefined,
       enrolledAt: r.enrolledAt,
       lastSeen: r.lastSeen,
     }));
@@ -50,11 +52,21 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     deviceToken: string;
     pushToken: string;
     platform: 'ios' | 'android';
+    notificationPrivacy?: NotificationPrivacy;
   }): Promise<void> {
     const db = getDb();
+    const set: Record<string, unknown> = {
+      pushToken: args.pushToken,
+      platform: args.platform,
+    };
+    // Only overwrite the privacy column when the caller actually
+    // supplied one — see DevicesRepo.setPushToken contract.
+    if (args.notificationPrivacy !== undefined) {
+      set.notificationPrivacy = args.notificationPrivacy;
+    }
     await db
       .update(devices)
-      .set({ pushToken: args.pushToken, platform: args.platform })
+      .set(set)
       .where(eq(devices.deviceToken, args.deviceToken));
   }
 }

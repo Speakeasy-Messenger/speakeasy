@@ -394,14 +394,17 @@ export class ApiClient {
     deviceToken: string,
     pushToken: string,
     platform: 'ios' | 'android',
+    notificationPrivacy?: 'rich' | 'private',
   ): Promise<void> {
+    const body: Record<string, unknown> = { push_token: pushToken, platform };
+    if (notificationPrivacy !== undefined) body.notification_privacy = notificationPrivacy;
     const res = await this.doFetch(`${this.baseUrl}/v1/devices/push-token`, {
       method: 'POST',
       headers: {
         'content-type': 'application/json',
         authorization: `Bearer ${deviceToken}`,
       },
-      body: JSON.stringify({ push_token: pushToken, platform }),
+      body: JSON.stringify(body),
     });
     if (res.status === 200) return;
     let code: string | undefined;

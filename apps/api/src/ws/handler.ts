@@ -358,6 +358,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                   userId: recipientId,
                   conversationId: conversation,
                   msgType: msg.msg_type,
+                  // Sealed-sender messages don't reveal the sender to
+                  // the server-side push surface — degrades to generic
+                  // "speakeasy: New message" regardless of recipient
+                  // privacy preference.
+                  senderId: sealed ? undefined : senderUserId,
                 })
                 .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
             }
@@ -453,6 +458,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               userId: msg.to,
               conversationId: conversation,
               msgType: 'direct',
+              // SKDM is the group-key-distribution carrier — sender
+              // identity is fine to surface (member adds member, you
+              // see who added the SKDM that unlocks future group
+              // messages).
+              senderId: senderUserId,
             })
             .catch((err) => deps.log.warn({ err, recipientId: msg.to }, 'push notify failed'));
         }
@@ -502,6 +512,12 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 userId: msg.to,
                 conversationId: conversation,
                 msgType: 'direct',
+                // Incoming-call wake-up — sender is the caller, very
+                // helpful to show on the banner ("@bananaman1 is
+                // calling…" once we add a 'call_offer' notification
+                // template; for now banner reads "@bananaman1: New
+                // message" which is at least directionally right).
+                senderId: session.userId,
               })
               .catch((err) =>
                 deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),

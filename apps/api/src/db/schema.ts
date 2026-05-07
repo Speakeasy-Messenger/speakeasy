@@ -147,6 +147,10 @@ export const devices = pgTable(
       .references(() => users.id, { onDelete: 'cascade' }),
     pushToken: text('push_token'),
     platform: text('platform'),
+    // 'rich' or 'private'. Drives FCM/APNs system-banner copy. NULL is
+    // interpreted as 'rich' at read-time so pre-Phase-5d-knob rows
+    // don't all silently get the privacy mode they didn't ask for.
+    notificationPrivacy: text('notification_privacy'),
     enrolledAt: timestamp('enrolled_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeen: timestamp('last_seen', { withTimezone: true }).notNull().defaultNow(),
   },
