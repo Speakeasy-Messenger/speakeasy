@@ -54,9 +54,20 @@ class WebRtcCallPeer implements CallPeer {
     // we go through `any`. The runtime API matches the W3C spec.
     const pcAny = this.pc as any;
     pcAny.addEventListener('icecandidate', (ev: any) => {
-      if (!ev?.candidate) return; // null = end-of-candidates
+      if (!ev?.candidate) {
+        diag('webrtc', 'local ice: end-of-candidates');
+        return; // null = end-of-candidates
+      }
+      // Parse the candidate `typ` token so we can see at a glance
+      // whether the device is generating relay (TURN) candidates —
+      // critical when ICE goes connecting → closed and we can't tell
+      // if the TURN credentials silently failed.
+      const cand = ev.candidate.candidate as string;
+      const typMatch = cand.match(/ typ (\S+)/);
+      const candType = typMatch ? typMatch[1] : 'unknown';
+      diag('webrtc', 'local ice candidate', { type: candType });
       this.localIceCb?.({
-        candidate: ev.candidate.candidate,
+        candidate: cand,
         sdpMid: ev.candidate.sdpMid ?? null,
         sdpMLineIndex: ev.candidate.sdpMLineIndex ?? null,
       });
@@ -64,12 +75,28 @@ class WebRtcCallPeer implements CallPeer {
     pcAny.addEventListener('connectionstatechange', () => {
       const s = this.pc.connectionState;
       diag('webrtc', 'connectionstate', { state: s });
+      // When we drop into 'connecting' or 'failed', sample the inner
+      // ICE state machine + selected pair via getStats — that's where
+      // the real "why didn't this work" signal lives. The browser-spec
+      // top-level `connectionState` only summarizes; its sub-states are
+      // ice / dtls connection states.
+      if (s === 'connecting' || s === 'failed' || s === 'closed' || s === 'disconnected') {
+        void this.dumpIceStats(s);
+      }
       if (s === 'connecting' || s === 'connected' || s === 'failed' || s === 'closed') {
         this.connStateCb?.(s);
       } else if (s === 'disconnected') {
         // ICE flap. WebRTC may recover; if not, we'll see `failed`
         // shortly. Don't surface this as a terminal end-state.
       }
+    });
+    pcAny.addEventListener('iceconnectionstatechange', () => {
+      const s = (this.pc as any).iceConnectionState;
+      diag('webrtc', 'iceconnectionstate', { state: s });
+    });
+    pcAny.addEventListener('icegatheringstatechange', () => {
+      const s = (this.pc as any).iceGatheringState;
+      diag('webrtc', 'icegatheringstate', { state: s });
     });
 
     // Attach the track event so the inbound audio stream gets routed
@@ -122,6 +149,69 @@ class WebRtcCallPeer implements CallPeer {
     );
     for (const c of payload.candidates) {
       await this.addRemoteIce({ v: 1, candidates: [c] });
+    }
+  }
+
+  /**
+   * Sample the inner ICE stats via `pc.getStats()` and emit a single
+   * diag entry summarizing the selected candidate pair (if any) +
+   * counts by candidate type. Intentionally compact — gets dumped on
+   * every `connectionstate` transition into a non-connected state so
+   * the diagnostic log shows exactly where ICE is.
+   *
+   * Without this, "connectionstate: closed" is the only signal and
+   * we can't distinguish "TURN credentials wrong" from "both peers
+   * behind symmetric NAT" from "all candidates host-only because
+   * STUN couldn't reach the public internet."
+   */
+  private async dumpIceStats(trigger: string): Promise<void> {
+    try {
+      const stats = await this.pc.getStats();
+      let local: any = undefined;
+      let remote: any = undefined;
+      let pair: any = undefined;
+      const localById = new Map<string, any>();
+      const remoteById = new Map<string, any>();
+      let localCount = 0;
+      let relayCount = 0;
+      let srflxCount = 0;
+      let hostCount = 0;
+      stats.forEach((report: any) => {
+        if (report.type === 'local-candidate') {
+          localById.set(report.id, report);
+          localCount += 1;
+          if (report.candidateType === 'relay') relayCount += 1;
+          else if (report.candidateType === 'srflx') srflxCount += 1;
+          else if (report.candidateType === 'host') hostCount += 1;
+        } else if (report.type === 'remote-candidate') {
+          remoteById.set(report.id, report);
+        } else if (report.type === 'candidate-pair') {
+          // We want the selected (or nominated, or in-progress) pair.
+          // RN-WebRTC doesn't always set `selected` — fall back to
+          // `nominated` then highest-priority succeeded.
+          if (report.selected || report.nominated || (!pair && report.state === 'succeeded')) {
+            pair = report;
+          }
+        }
+      });
+      if (pair) {
+        local = localById.get(pair.localCandidateId);
+        remote = remoteById.get(pair.remoteCandidateId);
+      }
+      diag('webrtc', `ice stats @ ${trigger}`, {
+        localCands: localCount,
+        host: hostCount,
+        srflx: srflxCount,
+        relay: relayCount,
+        pairState: pair?.state,
+        nominated: pair?.nominated,
+        localType: local?.candidateType,
+        remoteType: remote?.candidateType,
+        localProto: local?.protocol,
+        remoteProto: remote?.protocol,
+      });
+    } catch (err) {
+      diag('webrtc', 'getStats failed', { err: String(err) });
     }
   }
 

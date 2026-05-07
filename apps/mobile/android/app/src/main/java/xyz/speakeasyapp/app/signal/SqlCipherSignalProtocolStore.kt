@@ -229,6 +229,23 @@ class SqlCipherSignalProtocolStore(
     db.execSQL("DELETE FROM sessions WHERE name = ?", arrayOf<Any?>(name))
   }
 
+  /**
+   * Clear *everything* the store remembers about a peer — identity row +
+   * all session rows. Used by [SignalProtocolModule.resetPeer] when the
+   * user opts in to trust a peer's freshly-rotated identity (typical
+   * after the peer reinstalls / re-enrolls). After this, the next
+   * [saveIdentity] for `name` becomes a clean TOFU and the next
+   * [initiateSession] gets a clean session.
+   *
+   * Mirrors `deleteAllSessions(name)` semantics — both are key-namespaced
+   * by the peer userId, ignoring deviceId, since we only run a single
+   * deviceId per peer in the 1:1 path today.
+   */
+  fun clearPeerIdentity(name: String) {
+    db.execSQL("DELETE FROM identities WHERE name = ?", arrayOf<Any?>(name))
+    db.execSQL("DELETE FROM sessions WHERE name = ?", arrayOf<Any?>(name))
+  }
+
   // ---------------- KyberPreKeyStore (delegated, Phase 5b carry-over) ----------------
 
   override fun loadKyberPreKey(kyberPreKeyId: Int) = kyberPreKeyStore.loadKyberPreKey(kyberPreKeyId)

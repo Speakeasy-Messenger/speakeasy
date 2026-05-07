@@ -241,4 +241,33 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
       promise.reject("decrypt_failed", e.message, e)
     }
   }
+
+  /**
+   * Clear all stored state about a peer — their identity key + every
+   * session record. Used to recover from `UntrustedIdentityException`
+   * when the user opts in to trust a peer's freshly-rotated identity
+   * (typical after the peer reinstalls / re-enrolls and gets a new
+   * Signal identity key).
+   *
+   * After this returns, the next `initiateSession(peerUserId, …)`
+   * fetches the peer's current PreKey bundle and saves the new identity
+   * via TOFU — exactly as if we had never communicated with them.
+   *
+   * The caller is responsible for also dropping any in-process session
+   * cache (see `crypto/session.ts:initiatedPeers`).
+   */
+  @ReactMethod
+  fun resetPeer(peerUserId: String, promise: Promise) {
+    try {
+      ensureRestored()
+      val store = SpeakeasySignalStore.requireInitialized()
+      // SpeakeasySignalStore returns the SignalProtocolStore interface;
+      // clearPeerIdentity is a SqlCipher-specific helper. There's only
+      // one impl in production (the InMemoryStore is test-only).
+      (store as SqlCipherSignalProtocolStore).clearPeerIdentity(peerUserId)
+      promise.resolve(null)
+    } catch (e: Throwable) {
+      promise.reject("reset_peer_failed", e.message, e)
+    }
+  }
 }

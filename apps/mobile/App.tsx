@@ -197,12 +197,27 @@ export default function App() {
     // the next launch even if the inline toggle-time request failed.
     getToken().then((dt) => {
       return pushNotifications.getToken().then((pushResult) => {
-        if (pushResult) {
-          const privacy = useSettings.getState().notificationPrivacy;
-          void api
-            .registerPushToken(dt, pushResult.pushToken, pushResult.platform, privacy)
-            .catch(() => {});
+        if (!pushResult) {
+          // No FCM/APNs token available — Firebase native module
+          // didn't link, the user denied notification permission, or
+          // (Android) Play Services aren't installed. Silently
+          // degrades: messages still arrive via WS reconnect on app
+          // resume; just no system banner while backgrounded.
+          diag('push', 'no token (firebase unlinked or permission denied)');
+          return;
         }
+        const privacy = useSettings.getState().notificationPrivacy;
+        diag('push', 'registering token', {
+          platform: pushResult.platform,
+          tokenPreview: pushResult.pushToken.slice(0, 8) + '…',
+          privacy,
+        });
+        void api
+          .registerPushToken(dt, pushResult.pushToken, pushResult.platform, privacy)
+          .then(() => diag('push', 'token registered'))
+          .catch((err) =>
+            diag('push', 'register failed', { err: String(err) }),
+          );
       });
     }).catch((err) => {
       diag('app', 'push token registration failed (non-fatal)', { err: String(err) });

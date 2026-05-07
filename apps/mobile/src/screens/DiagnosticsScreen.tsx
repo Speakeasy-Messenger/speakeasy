@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import {
   clearDiag,
   formatDiag,
@@ -38,6 +39,9 @@ interface Props {
 export function DiagnosticsScreen({ onBack }: Props) {
   const [entries, setEntries] = useState<DiagEntry[]>(() => getDiagSnapshot());
   const [lastCrash, setLastCrash] = useState<CapturedCrash | null>(null);
+  // Brief visual confirmation after Copy. Reset after 1.5s; the user
+  // gets a clear "yes that worked" without a separate Alert prompt.
+  const [copied, setCopied] = useState<'none' | 'log' | 'crash'>('none');
 
   useEffect(() => {
     const off = subscribeDiag((e) => setEntries(e.slice()));
@@ -48,6 +52,29 @@ export function DiagnosticsScreen({ onBack }: Props) {
   function handleClearCrash() {
     setLastCrash(null);
     void clearLastJsCrash();
+  }
+
+  function handleCopyLog() {
+    // Bundle the formatted snapshot with a short header so when the
+    // user pastes it back to us we know what build / when. Keeps the
+    // clipboard payload self-contained.
+    const header = `speakeasy diagnostics — ${new Date().toISOString()} — ${entries.length} events`;
+    Clipboard.setString(`${header}\n\n${formatDiag(entries)}`);
+    setCopied('log');
+    setTimeout(() => setCopied('none'), 1500);
+  }
+
+  function handleCopyCrash() {
+    if (!lastCrash) return;
+    const lines = [
+      `speakeasy crash — ${lastCrash.capturedAt}`,
+      `${lastCrash.errorName}: ${lastCrash.errorMessage}`,
+    ];
+    if (lastCrash.errorStack) lines.push('', lastCrash.errorStack);
+    if (lastCrash.diagLog) lines.push('', '— diag log at crash time —', lastCrash.diagLog);
+    Clipboard.setString(lines.join('\n'));
+    setCopied('crash');
+    setTimeout(() => setCopied('none'), 1500);
   }
 
   return (
@@ -70,9 +97,16 @@ export function DiagnosticsScreen({ onBack }: Props) {
               <Text style={styles.crashTitle}>
                 Last crash {lastCrash.isFatal ? '(fatal)' : ''}
               </Text>
-              <Pressable onPress={handleClearCrash} hitSlop={8}>
-                <Text style={styles.crashClear}>Dismiss</Text>
-              </Pressable>
+              <View style={styles.crashHeaderActions}>
+                <Pressable onPress={handleCopyCrash} hitSlop={8}>
+                  <Text style={styles.crashClear}>
+                    {copied === 'crash' ? 'Copied' : 'Copy'}
+                  </Text>
+                </Pressable>
+                <Pressable onPress={handleClearCrash} hitSlop={8}>
+                  <Text style={styles.crashClear}>Dismiss</Text>
+                </Pressable>
+              </View>
             </View>
             <Text selectable style={styles.crashMeta}>
               {lastCrash.capturedAt}
@@ -106,6 +140,19 @@ export function DiagnosticsScreen({ onBack }: Props) {
       </ScrollView>
 
       <View style={styles.bottom}>
+        <Pressable
+          onPress={handleCopyLog}
+          disabled={entries.length === 0}
+          style={[
+            styles.btn,
+            styles.btnPrimary,
+            entries.length === 0 && styles.btnDisabled,
+          ]}
+        >
+          <Text style={styles.btnTextPrimary}>
+            {copied === 'log' ? 'Copied to clipboard' : 'Copy log'}
+          </Text>
+        </Pressable>
         <Pressable
           onPress={clearDiag}
           style={[styles.btn, styles.btnSecondary]}
@@ -158,6 +205,7 @@ const styles = StyleSheet.create({
     gap: space.xs,
   },
   crashHeader: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'center' },
+  crashHeaderActions: { flexDirection: 'row', gap: space.md },
   crashTitle: { color: colors.ink, fontFamily: fonts.inter500, fontSize: 14 },
   crashClear: { color: colors.primary, fontFamily: fonts.inter500, fontSize: 12 },
   crashMeta: { color: colors.slate, fontFamily: fonts.inter400, fontSize: 11 },
@@ -186,4 +234,11 @@ const styles = StyleSheet.create({
     fontFamily: fonts.inter500,
     fontSize: 14,
   },
+  btnPrimary: { backgroundColor: colors.primary },
+  btnTextPrimary: {
+    color: colors.cream,
+    fontFamily: fonts.inter500,
+    fontSize: 14,
+  },
+  btnDisabled: { opacity: 0.5 },
 });

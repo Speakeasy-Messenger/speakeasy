@@ -87,6 +87,20 @@ export interface SignalProtocolModule {
 
   /** Decrypt a payload from a peer. May establish a new session on first message. */
   decrypt(peerUserId: string, ciphertext: Uint8Array): Promise<Uint8Array>;
+
+  /**
+   * Drop all stored Signal state for `peerUserId` — their identity key
+   * and every session record. Used to recover from a TOFU-rejected
+   * key change (`SignalClientError('untrusted_identity')`) when the
+   * user opts in to trust the peer's freshly-rotated identity.
+   *
+   * After this resolves, the next `initiateSession(peerUserId, …)`
+   * fetches the peer's current PreKey bundle, saves the new identity
+   * via TOFU, and proceeds as if we'd never communicated with them.
+   * Caller must also drop any in-process session cache (see
+   * `crypto/session.ts`).
+   */
+  resetPeer(peerUserId: string): Promise<void>;
 }
 
 /** Mirrors error reasons from the Kotlin module (apps/mobile/.../SignalProtocolModule.kt). */
@@ -117,6 +131,7 @@ interface NativeSignalModule {
   initiateSession(peerUserId: string, peerBundle: PeerPreKeyBundle): Promise<null>;
   encrypt(peerUserId: string, plaintextB64: string): Promise<string>;
   decrypt(peerUserId: string, ciphertextB64: string): Promise<string>;
+  resetPeer(peerUserId: string): Promise<null>;
 }
 
 /**
@@ -195,6 +210,10 @@ export class NativeSignalProtocolModule implements SignalProtocolModule {
       this.module.decrypt(peerUserId, b64Encode(ciphertext)),
     );
     return b64Decode(out);
+  }
+
+  async resetPeer(peerUserId: string): Promise<void> {
+    await this.callBridge(() => this.module.resetPeer(peerUserId));
   }
 
   private async callBridge<T>(fn: () => Promise<T>): Promise<T> {

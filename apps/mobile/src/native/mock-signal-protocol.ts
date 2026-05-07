@@ -65,4 +65,8 @@ export class MockSignalProtocolClient implements SignalProtocolModule {
     if (ciphertext.length === 0) return ciphertext;
     return ciphertext.slice(1);
   }
+
+  async resetPeer(_peerUserId: string): Promise<void> {
+    // Mock has no per-peer state; nothing to clear.
+  }
 }

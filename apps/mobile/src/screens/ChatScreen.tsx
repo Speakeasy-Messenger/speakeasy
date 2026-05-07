@@ -33,7 +33,7 @@ import { useIdentity } from '../store/identity.js';
 import { api, getWsClient, signalProtocol, vouchflow } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { SignalClientError } from '@speakeasy/crypto';
-import { ensureSessionWithPeer } from '../crypto/session.js';
+import { ensureSessionWithPeer, clearSessionCacheFor } from '../crypto/session.js';
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 import { diag } from '../diag/log.js';
 import { colors, fonts, space } from '../theme/index.js';
@@ -294,6 +294,26 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
         status: e.status,
         stack: e.stack?.slice(0, 240),
       });
+      // Identity-key change recovery: same flow as the dialer (see
+      // DialerScreen.handleCall). Surface the new-identity prompt
+      // instead of stamping a "[encrypt failed: untrusted_identity]"
+      // error bubble, since the user can almost always recover by
+      // opting in to trust the rotated key.
+      if (err instanceof SignalClientError && err.reason === 'untrusted_identity') {
+        Alert.alert(
+          `@${peerId}'s identity has changed`,
+          `This usually means they reinstalled the app. It could also indicate a security issue. Trust the new identity and resend?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Trust + send',
+              style: 'destructive',
+              onPress: () => void resendAfterReset(opts),
+            },
+          ],
+        );
+        return;
+      }
       const reason =
         err instanceof SignalClientError
           ? `[encrypt failed: ${err.reason}]`
@@ -304,6 +324,27 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
         id: newMessageId(),
         from: 'me',
         text: reason,
+        kind: 'direct',
+        sentAt: Date.now(),
+        stage: 'sent',
+      });
+    }
+  }
+
+  async function resendAfterReset(opts: { text?: string; attachments?: Attachment[] }) {
+    try {
+      await signalProtocol.resetPeer(peerId);
+      clearSessionCacheFor(peerId);
+      // Re-enter the normal send path. The optimistic echo for the
+      // FIRST attempt is still on screen; rather than de-dupe by id,
+      // we just send a fresh message — the user just opted to retry.
+      await sendOutbound(opts);
+    } catch (err) {
+      diag('chat', 'resend after reset FAILED', { err: String(err) });
+      add(conversationId, {
+        id: newMessageId(),
+        from: 'me',
+        text: `[reset failed: ${(err as Error).message ?? String(err)}]`,
         kind: 'direct',
         sentAt: Date.now(),
         stage: 'sent',

@@ -21,6 +21,14 @@ export function clearSessionCache(): void {
   initiatedPeers.clear();
 }
 
+/** Drop the in-process "session initiated" mark for a single peer.
+ * Called by the identity-reset recovery path so the next call to
+ * [ensureSessionWithPeer] re-fetches the peer's PreKey bundle and
+ * re-initiates against their freshly-rotated identity. */
+export function clearSessionCacheFor(peerUserId: string): void {
+  initiatedPeers.delete(peerUserId);
+}
+
 /**
  * Make sure a Signal session exists with `peerUserId`. If we have not
  * yet initiated this process-lifetime, fetch the peer's PreKey bundle

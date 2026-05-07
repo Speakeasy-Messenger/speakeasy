@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -10,11 +11,14 @@ import {
   View,
 } from 'react-native';
 import { isUserId } from '@speakeasy/shared';
+import { SignalClientError } from '@speakeasy/crypto';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { callPalette } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
+import { signalProtocol } from '../services.js';
+import { clearSessionCacheFor } from '../crypto/session.js';
 
 interface Props {
   orchestrator: CallOrchestrator;
@@ -69,7 +73,46 @@ export function DialerScreen({ orchestrator, onCallStarted, onCancel }: Props) {
       await orchestrator.startOutgoing(candidate);
       onCallStarted();
     } catch (err) {
+      // Identity-key change recovery: peer reinstalled / re-enrolled,
+      // their old key in our SQLCipher store no longer matches the
+      // bundle the server now serves. TOFU correctly rejects this —
+      // surface a confirmation so the user can opt in to trust the
+      // new identity (Signal's safety-numbers UX, minus the safety
+      // numbers themselves which need a verifiable side-channel we
+      // don't have yet). On confirm, wipe the stored identity +
+      // sessions for this peer and retry the call.
+      if (err instanceof SignalClientError && err.reason === 'untrusted_identity') {
+        setBusy(false);
+        Alert.alert(
+          `@${candidate}'s identity has changed`,
+          `This usually means they reinstalled the app. It could also indicate a security issue. Trust the new identity and call anyway?`,
+          [
+            { text: 'Cancel', style: 'cancel' },
+            {
+              text: 'Trust + call',
+              style: 'destructive',
+              onPress: () => void retryAfterReset(candidate),
+            },
+          ],
+        );
+        return;
+      }
       setError(`Couldn't start call: ${(err as Error).message ?? String(err)}`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function retryAfterReset(handle: string) {
+    setBusy(true);
+    setError(undefined);
+    try {
+      await signalProtocol.resetPeer(handle);
+      clearSessionCacheFor(handle);
+      await orchestrator.startOutgoing(handle);
+      onCallStarted();
+    } catch (err) {
+      setError(`Couldn't start call after reset: ${(err as Error).message ?? String(err)}`);
     } finally {
       setBusy(false);
     }
