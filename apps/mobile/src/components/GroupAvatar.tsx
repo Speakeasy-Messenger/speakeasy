@@ -3,7 +3,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
 import { api } from '../services.js';
-import { colors, fonts } from '../theme/index.js';
+import { colors, fonts, radius } from '../theme/index.js';
 
 const TTL_MS = 24 * 60 * 60 * 1000;
 
@@ -58,7 +58,7 @@ export function GroupAvatar({ groupId, name, size = 36, style }: Props) {
   // squares — same as user avatars.
   const wrapperStyle = [
     styles.wrap,
-    { width: size, height: size, borderRadius: 4 },
+    { width: size, height: size, borderRadius: radius.avatar },
     style,
   ];
   const fallback = name?.slice(0, 1).toUpperCase() || '#';
@@ -68,7 +68,7 @@ export function GroupAvatar({ groupId, name, size = 36, style }: Props) {
       <View style={wrapperStyle}>
         <Image
           source={{ uri: `data:image/jpeg;base64,${group.avatarB64}` }}
-          style={[styles.image, { width: size, height: size, borderRadius: 4 }]}
+          style={[styles.image, { width: size, height: size, borderRadius: radius.avatar }]}
         />
       </View>
     );

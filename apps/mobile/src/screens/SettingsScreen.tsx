@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { Avatar } from '../components/Avatar.js';
-import { colors, fonts, space, text } from '../theme/index.js';
+import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { font, type } from '../theme/tokens.js';
 import { useIdentity } from '../store/identity.js';
 import { useConnection } from '../store/connection.js';
@@ -419,7 +419,7 @@ const styles = StyleSheet.create({
   profileAvatarPlaceholder: {
     width: 56,
     height: 56,
-    borderRadius: 4,
+    borderRadius: radius.avatar,
   },
   idValue: {
     fontFamily: font.medium,

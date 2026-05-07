@@ -16,6 +16,7 @@ import { PhoneIcon } from '../components/icons/CallIcons.js';
 import { useCalls } from '../store/calls.js';
 import { useIdentity } from '../store/identity.js';
 import { colors, fonts, radius, space, text, useColors } from '../theme/index.js';
+import { callPalette } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { CallEndedReason } from '../calls/types.js';
 
@@ -262,7 +263,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  error: { color: '#D63E3E' },
+  error: { color: callPalette.decline },
   historyLabel: { letterSpacing: 2, marginTop: space.sm },
   historyList: { flex: 1 },
   historyContent: { gap: space.xs, paddingBottom: space.lg },

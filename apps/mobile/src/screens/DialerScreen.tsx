@@ -13,6 +13,7 @@ import { isUserId } from '@speakeasy/shared';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { callPalette } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -181,7 +182,7 @@ const styles = StyleSheet.create({
     fontFamily: fonts.inter400,
     fontSize: 16,
   },
-  error: { color: '#D63E3E', marginTop: space.sm },
+  error: { color: callPalette.decline, marginTop: space.sm },
   callBtn: {
     marginTop: space.lg,
     paddingVertical: 14,

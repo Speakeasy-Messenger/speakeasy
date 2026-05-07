@@ -3,7 +3,7 @@ import { Image, StyleSheet, Text, View } from 'react-native';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { api } from '../services.js';
-import { colors, fonts } from '../theme/index.js';
+import { colors, fonts, radius } from '../theme/index.js';
 
 /**
  * Round avatar with a base64-JPEG image when set, falling back to the
@@ -60,7 +60,7 @@ export function Avatar({ userId, size = 36, initialOf, style }: Props) {
   // bubbles and inputs.
   const wrapperStyle = [
     styles.wrap,
-    { width: size, height: size, borderRadius: 4 },
+    { width: size, height: size, borderRadius: radius.avatar },
     style,
   ];
   const initial = (initialOf ?? userId).slice(0, 1).toUpperCase();
@@ -70,7 +70,7 @@ export function Avatar({ userId, size = 36, initialOf, style }: Props) {
       <View style={wrapperStyle}>
         <Image
           source={{ uri: `data:image/jpeg;base64,${profile.avatarB64}` }}
-          style={[styles.image, { width: size, height: size, borderRadius: 4 }]}
+          style={[styles.image, { width: size, height: size, borderRadius: radius.avatar }]}
         />
       </View>
     );

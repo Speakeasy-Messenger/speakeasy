@@ -4,6 +4,7 @@ import { Avatar } from '../components/Avatar.js';
 import { PhoneEndIcon, PhoneIcon } from '../components/icons/CallIcons.js';
 import { useCalls } from '../store/calls.js';
 import { colors, fonts, space, text } from '../theme/index.js';
+import { callPalette } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -96,7 +97,7 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: '#D63E3E',
+    backgroundColor: callPalette.decline,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -104,7 +105,7 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: '#1FA463',
+    backgroundColor: callPalette.accept,
     alignItems: 'center',
     justifyContent: 'center',
   },

@@ -265,7 +265,7 @@ const styles = StyleSheet.create({
   qrFrame: {
     padding: space.md,
     backgroundColor: colors.cream,
-    borderRadius: 8,
+    borderRadius: radius.avatar,
   },
   qrHandle: {
     color: colors.ink,

@@ -3,6 +3,7 @@ import { Animated, Easing, StyleSheet, Text } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
 import { colors, fonts, radius, space } from '../theme/index.js';
+import { accent } from '../theme/tokens.js';
 
 /**
  * Five-stage dissolve per spec §14 motion #2. **Real Animated transitions,
@@ -245,8 +246,13 @@ const styles = StyleSheet.create({
     marginRight: -2,
     letterSpacing: 0.5,
   },
-  receiptSent: { color: 'rgba(20,9,26,0.55)' },
-  receiptDelivered: { color: 'rgba(20,9,26,0.85)' },
+  // Mode-invariant ink (= `accent.foreground` = `#14091A`) at 55% / 85%
+  // opacity. Keeps the receipt legible against the brass sent-bubble
+  // in both dark and light modes — the bubble is brand-invariant per
+  // §6.3 ("brass + ink in dark, brass + ink in light"), so the receipt
+  // stays put too.
+  receiptSent: { color: `${accent.foreground}8C` }, // 0x8C ≈ 55%
+  receiptDelivered: { color: `${accent.foreground}D9` }, // 0xD9 ≈ 85%
 });
 
 /**

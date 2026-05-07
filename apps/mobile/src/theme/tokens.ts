@@ -34,6 +34,41 @@ export const accent = {
   foreground: '#14091A',
 } as const;
 
+/**
+ * Mode-invariant scrim tints. The brand's per-mode `textGhost` /
+ * `textFaint` aren't right for these surfaces because they invert
+ * with the mode (transparent over the canvas), but a scrim wants to
+ * dim *whatever's behind it* regardless of mode — picture overlays,
+ * loading-state placeholders, modal backdrops. So: pure black at
+ * graduated alpha, used sparingly.
+ */
+export const scrim = {
+  /** Subtle (≈6%) — image cell while a base64 → bitmap decode is
+   * pending. Just enough to read as "loading" against any bubble. */
+  subtle: '#00000010',
+  /** Heavy (≈38%) — modal backdrop / picker-while-resolving overlay. */
+  modal: '#00000060',
+} as const;
+
+/**
+ * Call-control palette — *intentional* divergence from the brand's
+ * "no third color" rule (BRANDING1.md §1). Phone-call UX is the one
+ * surface where red-decline / green-accept is so deeply learned across
+ * iOS + Android that going brand-pure (e.g. accent + secondary)
+ * actively confuses users mid-call. Centralized here so the
+ * divergence is visible in one place rather than sprinkled across
+ * IncomingCallScreen / CallScreen / CallsScreen / DialerScreen as
+ * stray hex literals.
+ *
+ * Foreground (`fg`) is cream — both reds + greens at this saturation
+ * are dim enough that ink-on-color is illegible.
+ */
+export const callPalette = {
+  decline: '#D63E3E',
+  accept: '#1FA463',
+  fg: '#F2E9D8',
+} as const;
+
 // Per-mode workspace tokens — resolved via ThemeProvider.
 export const workspace = {
   dark: {

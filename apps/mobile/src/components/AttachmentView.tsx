@@ -162,7 +162,12 @@ function humanBytes(n: number): string {
 const styles = StyleSheet.create({
   root: { gap: space.xs },
   grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 4, width: SIDE },
-  photo: { borderRadius: radius.sm, backgroundColor: '#00000020' },
+  // Placeholder color shown while the image base64 → bitmap decode is
+  // in flight. Mode-invariant ink at 12% — same value used for the
+  // brand's `text-faint` divider so it reads as a quiet "loading"
+  // rectangle on either the brass sent-bubble or the surface
+  // received-bubble.
+  photo: { borderRadius: radius.sm, backgroundColor: 'rgba(20,9,26,0.12)' },
   fileCard: {
     flexDirection: 'row',
     alignItems: 'center',

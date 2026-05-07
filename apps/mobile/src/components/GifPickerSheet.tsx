@@ -20,6 +20,7 @@ import {
 } from '../attachments/tenor.js';
 import { useColors } from '../theme/index.js';
 import { fonts, radius, space, text as textStyles } from '../theme/index.js';
+import { scrim } from '../theme/tokens.js';
 
 interface Props {
   visible: boolean;
@@ -185,14 +186,14 @@ const styles = StyleSheet.create({
   row: { gap: space.xs, marginBottom: space.xs },
   cell: {
     flex: 1,
-    backgroundColor: '#00000010',
+    backgroundColor: scrim.subtle,
     borderRadius: radius.avatar,
     overflow: 'hidden',
   },
   gifImg: { width: '100%' },
   pickingOverlay: {
     ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#00000060',
+    backgroundColor: scrim.modal,
     alignItems: 'center',
     justifyContent: 'center',
   },

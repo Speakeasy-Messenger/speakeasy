@@ -8,6 +8,7 @@ import {
 } from '../components/icons/CallIcons.js';
 import { useCalls } from '../store/calls.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { callPalette } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -155,7 +156,7 @@ const styles = StyleSheet.create({
     width: 76,
     height: 76,
     borderRadius: 38,
-    backgroundColor: '#D63E3E',
+    backgroundColor: callPalette.decline,
     alignItems: 'center',
     justifyContent: 'center',
   },
