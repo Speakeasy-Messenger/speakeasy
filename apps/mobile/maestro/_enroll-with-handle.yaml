@@ -67,6 +67,17 @@ appId: xyz.speakeasyapp.app
 # setUserId the navigator flips to the authed stack; the
 # navigation.replace('IdReveal') in OnboardingScreen may lose the race.
 # Wait directly for the conversations tab.
+#
+# Belt-and-suspenders: post-enrollment a system Alert may pop on
+# top of the conversations screen, blocking the testID. Tier B run
+# 25513081609 hit this — a near-empty AlertDialog with just an "OK"
+# button covered the screen after biometric. Source unidentified
+# (no AlertDialog in our app code or react-native-callkeep; possibly
+# from a linked native module's permission flow). Optional tap →
+# no-op when the dialog isn't there.
+- tapOn:
+    text: "OK"
+    optional: true
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"
