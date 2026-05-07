@@ -36,13 +36,24 @@ appId: xyz.speakeasyapp.app
     id: "onboarding-handle"
 - inputText: ${HANDLE}
 
+# Belt-and-suspenders ANR mitigation: a hung Pixel Launcher can
+# pop "isn't responding" mid-flow and steal focus, blanking the
+# handle field we just typed into. The CI script disables the
+# launcher (pm disable-user) but if that didn't take, dismiss the
+# dialog. Optional → no-op when the dialog isn't there.
+- tapOn:
+    text: "Wait"
+    optional: true
+
 # Wait for the availability check to settle. The status text reads
 # "@{handle} is available." once the server confirms — that's also
-# when the Continue button stops being disabled.
+# when the Continue button stops being disabled. 30s gives the
+# Vouchflow attestation + handle-availability round-trip a generous
+# margin on a cold-boot CI emulator.
 - extendedWaitUntil:
     visible:
       text: "@${HANDLE} is available."
-    timeout: 15000
+    timeout: 30000
 
 - tapOn:
     id: "onboarding-continue"
