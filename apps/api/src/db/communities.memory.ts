@@ -44,6 +44,17 @@ export class InMemoryCommunityRepo implements CommunityRepo {
     return 'ok';
   }
 
+  async removeMember(args: {
+    communityId: string;
+    userId: string;
+  }): Promise<{ remaining: string[] } | 'community_missing' | 'not_a_member'> {
+    const c = this.communities.get(args.communityId);
+    if (!c) return 'community_missing';
+    if (!c.members.has(args.userId)) return 'not_a_member';
+    c.members.delete(args.userId);
+    return { remaining: Array.from(c.members.keys()) };
+  }
+
   async isMember(communityId: string, userId: string): Promise<boolean> {
     return this.communities.get(communityId)?.members.has(userId) ?? false;
   }

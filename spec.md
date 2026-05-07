@@ -513,7 +513,7 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 
 #### 5g. Spec §13 deferred decisions worth resolving in this phase
 - [ ] **Sealed sender** for 1:1 (hide sender identity from the server's metadata). Signal-style. Recommended.
-- [ ] **Channel key rotation policy** — implement the auto-rotation-on-leave path (server triggers a rotation event; existing members generate fresh K and upload new-epoch envelopes for all remaining members). Moderator-triggered rotation already supported by the envelope endpoint via `key_epoch`.
+- [x] **Channel key rotation policy** (server side) — `DELETE /v1/communities/:id/members/:user_id` removes the target member. Authz: moderator can remove anyone; anyone can remove self. On success, every remaining member's live socket receives a `channel_key_rotation_required` WS frame (via `UserNotifier`); the leaver does NOT receive the signal. Mobile orchestration of "elect-a-wrapper, generate fresh K, fan-out new-epoch envelopes" is deferred to the mobile-side commit — server side is the rotation primitive. 7 new tests cover happy path, self-leave, non-mod blocked, not-a-member 404, missing-community surfacing (privacy: outsiders see 403, self-remove sees 404), and post-removal /key gating.
 - [ ] **Username discovery** — at minimum a "show my QR code" + "scan a QR code to add" flow.
 - [ ] Decide community message TTL: keep moderator-configurable in MVP or freeze at 7 days?
 

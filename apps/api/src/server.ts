@@ -195,7 +195,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const groups = opts.groupRepo ?? (hasDb ? new DrizzleGroupRepo() : new InMemoryGroupRepo());
   const communities = opts.communityRepo ?? (hasDb ? new DrizzleCommunityRepo() : new InMemoryCommunityRepo());
   await registerGroupRoutes(app, { repo: groups });
-  await registerCommunityRoutes(app, { repo: communities, limiter });
+  await registerCommunityRoutes(app, {
+    repo: communities,
+    limiter,
+    notifier: userNotifier,
+  });
   // Devices repo is needed for both the push-token route and the WS handler.
   // Resolve it once so both paths share the same instance.
   const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());

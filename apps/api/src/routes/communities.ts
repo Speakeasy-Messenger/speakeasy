@@ -4,11 +4,17 @@ import { requireAuth } from '../auth/vouchflow.js';
 import type { CommunityRepo } from '../db/communities.js';
 import { rateLimit } from '../ratelimit/middleware.js';
 import type { RateLimiter } from '../ratelimit/ratelimit.js';
+import type { UserNotifier } from '../ws/user-notifier.js';
+import { NoopUserNotifier } from '../ws/user-notifier.js';
 
 interface CreateBody {
   ttl_days?: number;
 }
 interface AddMemberBody {
+  user_id: string;
+}
+interface RemoveMemberParams {
+  id: string;
   user_id: string;
 }
 interface EnvelopeBody {
@@ -39,9 +45,16 @@ export async function registerCommunityRoutes(
     repo: CommunityRepo;
     generateCommunityId?: () => string;
     limiter?: RateLimiter;
+    /**
+     * Push the `channel_key_rotation_required` signal to remaining
+     * members on member-remove. Defaults to no-op for tests that
+     * exercise the route without a WS layer.
+     */
+    notifier?: UserNotifier;
   },
 ): Promise<void> {
   const generateId = opts.generateCommunityId ?? newCommunityId;
+  const notifier = opts.notifier ?? new NoopUserNotifier();
   const rateLimitEnvelopes = opts.limiter
     ? [
         rateLimit({
@@ -113,6 +126,76 @@ export async function registerCommunityRoutes(
         return reply.code(403).send({ error: 'not_member' });
       }
       return reply.code(201).send({});
+    },
+  );
+
+  /**
+   * DELETE /v1/communities/:id/members/:user_id — remove a member.
+   *
+   * Authorization rules:
+   *   - The caller must be a moderator of `:id`, OR
+   *   - The caller is removing themselves (`:user_id === auth.userId`).
+   *
+   * On success, every remaining member's live socket receives a
+   * `channel_key_rotation_required` frame so the mobile orchestrator
+   * can rotate K (spec §4b: revocation guarantee — the leaver's K is
+   * still on their device but is useless for messages encrypted with
+   * the new K). The leaver's own envelopes for this community remain
+   * in the table; they are never queried again because `getLatestEnvelope`
+   * is gated on `isMember`.
+   */
+  app.delete<{ Params: RemoveMemberParams }>(
+    '/v1/communities/:id/members/:user_id',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const callerId = request.auth?.userId;
+      if (!callerId) return reply.code(403).send({ error: 'not_enrolled' });
+      const { id: communityId, user_id: target } = request.params;
+      if (!isUserId(target)) return reply.code(400).send({ error: 'invalid_id' });
+
+      // Authz: moderator can remove anyone; anyone can remove self.
+      const removingSelf = target === callerId;
+      if (!removingSelf) {
+        if (!(await opts.repo.isModerator(communityId, callerId))) {
+          return reply.code(403).send({ error: 'not_moderator' });
+        }
+      }
+
+      const result = await opts.repo.removeMember({
+        communityId,
+        userId: target,
+      });
+      if (result === 'community_missing') {
+        return reply.code(404).send({ error: 'community_missing' });
+      }
+      if (result === 'not_a_member') {
+        return reply.code(404).send({ error: 'not_a_member' });
+      }
+
+      // Notify remaining members so their devices can rotate K.
+      // Best-effort: notifier is per-user fan-out to live sockets;
+      // members offline at this moment will catch the rotation when
+      // they next call `GET /v1/communities/:id/key` (the latest-epoch
+      // envelope wins) — assuming a remaining member has uploaded
+      // fresh envelopes by then.
+      for (const memberId of result.remaining) {
+        notifier.notify(memberId, {
+          type: 'channel_key_rotation_required',
+          community_id: communityId,
+          reason: 'member_removed',
+        });
+      }
+      request.log.info(
+        {
+          audit: 'community_member_removed',
+          communityId,
+          removedBy: callerId,
+          removed: target,
+          remainingCount: result.remaining.length,
+        },
+        'community member removed; rotation signal fanned out',
+      );
+      return reply.code(200).send({ remaining_members: result.remaining.length });
     },
   );
 

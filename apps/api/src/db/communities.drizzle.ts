@@ -69,6 +69,38 @@ export class DrizzleCommunityRepo implements CommunityRepo {
     return 'ok';
   }
 
+  async removeMember(args: {
+    communityId: string;
+    userId: string;
+  }): Promise<{ remaining: string[] } | 'community_missing' | 'not_a_member'> {
+    const db = getDb();
+    return db.transaction(async (tx) => {
+      const c = await tx
+        .select({ id: communities.id })
+        .from(communities)
+        .where(eq(communities.id, args.communityId))
+        .limit(1);
+      if (c.length === 0) return 'community_missing' as const;
+
+      const deleted = await tx
+        .delete(communityMembers)
+        .where(
+          and(
+            eq(communityMembers.communityId, args.communityId),
+            eq(communityMembers.userId, args.userId),
+          ),
+        )
+        .returning({ userId: communityMembers.userId });
+      if (deleted.length === 0) return 'not_a_member' as const;
+
+      const remaining = await tx
+        .select({ userId: communityMembers.userId })
+        .from(communityMembers)
+        .where(eq(communityMembers.communityId, args.communityId));
+      return { remaining: remaining.map((r) => r.userId) };
+    });
+  }
+
   async isMember(communityId: string, userId: string): Promise<boolean> {
     const db = getDb();
     const rows = await db

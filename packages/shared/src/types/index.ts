@@ -130,6 +130,28 @@ export type WsServerMsg =
    * peer's bundle fetch drains the owner's pool.
    */
   | { type: 'prekeys_low'; remaining_prekeys: number }
+  /**
+   * Server-pushed signal: a community's channel key MUST rotate.
+   * Fires on every remaining member's live socket when a member is
+   * removed (revocation guarantee per spec §4b) — possibly other
+   * triggers in the future (moderator-initiated forced rotation,
+   * scheduled rotation, etc.).
+   *
+   * Mobile-side handling: an existing member (deterministically
+   * chosen — moderator with lowest userId is a reasonable rule)
+   * generates a fresh K with `key_epoch + 1`, wraps it for every
+   * remaining member's identity public key, and uploads the new
+   * envelopes via `POST /v1/communities/:id/envelopes`. Server
+   * already accepts envelopes with arbitrary `key_epoch`; the
+   * `getLatestEnvelope` route returns the highest-epoch envelope
+   * so non-uploading members pick up the new key on their next
+   * fetch automatically.
+   */
+  | {
+      type: 'channel_key_rotation_required';
+      community_id: CommunityId;
+      reason: 'member_removed' | 'moderator_triggered';
+    }
   // ----- Voice call signaling (1:1 only) -----
   | { type: 'call_offer'; from: UserId; call_id: CallId; ciphertext: string }
   | { type: 'call_answer'; from: UserId; call_id: CallId; ciphertext: string }

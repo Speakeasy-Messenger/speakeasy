@@ -240,3 +240,188 @@ describe('POST /v1/communities/:id/envelopes + GET /v1/communities/:id/key', () 
     await app.close();
   });
 });
+
+describe('DELETE /v1/communities/:id/members/:user_id (auto-rotate on leave)', () => {
+  /**
+   * In-process notifier captures every (userId, frame) pair so tests
+   * can assert exactly which members got the rotation signal.
+   */
+  class CapturingNotifier {
+    readonly calls: Array<{ userId: string; frame: object }> = [];
+    notify(userId: string, frame: object): void {
+      this.calls.push({ userId, frame });
+    }
+  }
+
+  async function makeAppWithNotifier(): Promise<{
+    app: Awaited<ReturnType<typeof buildServer>>;
+    repo: InMemoryCommunityRepo;
+    notifier: CapturingNotifier;
+  }> {
+    const repo = new InMemoryCommunityRepo();
+    const notifier = new CapturingNotifier();
+    const app = await buildServer({
+      validator: makeValidator(),
+      communityRepo: repo,
+      userNotifier: notifier,
+      logger: false,
+    });
+    return { app, repo, notifier };
+  }
+
+  async function setupCommunityWithMembers(
+    app: Awaited<ReturnType<typeof buildServer>>,
+    moderator: string,
+    members: string[],
+  ): Promise<string> {
+    const cid = await createCommunity(app, moderator);
+    for (const m of members) {
+      await app.inject({
+        method: 'POST',
+        url: `/v1/communities/${cid}/members`,
+        headers: callerHeader(moderator),
+        payload: { user_id: m },
+      });
+    }
+    return cid;
+  }
+
+  it('moderator removes a member; rotation signal fires for each remaining member', async () => {
+    const { app, repo, notifier } = await makeAppWithNotifier();
+    const cid = await setupCommunityWithMembers(app, 'alice', ['bob', 'carol', 'dave']);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/communities/${cid}/members/bob`,
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ remaining_members: 3 });
+
+    expect(await repo.isMember(cid, 'bob')).toBe(false);
+    expect(await repo.isMember(cid, 'alice')).toBe(true);
+    expect(await repo.isMember(cid, 'carol')).toBe(true);
+    expect(await repo.isMember(cid, 'dave')).toBe(true);
+
+    // Rotation signal sent to all REMAINING members. Bob (the removed
+    // user) MUST NOT receive it — that would leak the rotation event
+    // back to the user we're revoking.
+    const recipients = notifier.calls.map((c) => c.userId).sort();
+    expect(recipients).toEqual(['alice', 'carol', 'dave']);
+    for (const call of notifier.calls) {
+      expect(call.frame).toEqual({
+        type: 'channel_key_rotation_required',
+        community_id: cid,
+        reason: 'member_removed',
+      });
+    }
+    await app.close();
+  });
+
+  it('member can remove themselves (self-leave)', async () => {
+    const { app, repo, notifier } = await makeAppWithNotifier();
+    const cid = await setupCommunityWithMembers(app, 'alice', ['bob']);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/communities/${cid}/members/bob`,
+      headers: callerHeader('bob'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(await repo.isMember(cid, 'bob')).toBe(false);
+    expect(notifier.calls.map((c) => c.userId)).toEqual(['alice']);
+    await app.close();
+  });
+
+  it('non-moderator cannot remove someone else', async () => {
+    const { app, notifier } = await makeAppWithNotifier();
+    const cid = await setupCommunityWithMembers(app, 'alice', ['bob', 'carol']);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/communities/${cid}/members/carol`,
+      headers: callerHeader('bob'),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('not_moderator');
+    expect(notifier.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('returns 404 for not-a-member; no rotation signal fires', async () => {
+    const { app, notifier } = await makeAppWithNotifier();
+    const cid = await setupCommunityWithMembers(app, 'alice', ['bob']);
+
+    const res = await app.inject({
+      method: 'DELETE',
+      url: `/v1/communities/${cid}/members/carol`,
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('not_a_member');
+    expect(notifier.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('returns 404 for missing community (self-remove path, bypasses moderator gate)', async () => {
+    // The moderator-authz gate fires before existence check for
+    // non-self removals (privacy: outsiders can't probe community
+    // existence via DELETE). The self-remove path skips that gate
+    // and surfaces the underlying community_missing as 404.
+    const { app, notifier } = await makeAppWithNotifier();
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/communities/com-01HZZZNOTREALCOMMUNITYAA/members/alice',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('community_missing');
+    expect(notifier.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('returns 403 not_moderator for non-self DELETE on missing community (privacy)', async () => {
+    // Authz gate fires before existence check — an outsider probing
+    // for community ids gets the same 403 whether the community
+    // exists or not.
+    const { app, notifier } = await makeAppWithNotifier();
+    const res = await app.inject({
+      method: 'DELETE',
+      url: '/v1/communities/com-01HZZZNOTREALCOMMUNITYAA/members/bob',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('not_moderator');
+    expect(notifier.calls).toHaveLength(0);
+    await app.close();
+  });
+
+  it('after removal, the leaver loses access via /key (gated by isMember)', async () => {
+    const { app } = await makeAppWithNotifier();
+    const cid = await setupCommunityWithMembers(app, 'alice', ['bob']);
+
+    // Bob passes the gate while a member (404 no_envelope, not 403).
+    let res = await app.inject({
+      method: 'GET',
+      url: `/v1/communities/${cid}/key`,
+      headers: callerHeader('bob'),
+    });
+    expect(res.statusCode).toBe(404);
+
+    await app.inject({
+      method: 'DELETE',
+      url: `/v1/communities/${cid}/members/bob`,
+      headers: callerHeader('alice'),
+    });
+
+    // Bob now hits the 403 not_member gate before getLatestEnvelope.
+    res = await app.inject({
+      method: 'GET',
+      url: `/v1/communities/${cid}/key`,
+      headers: callerHeader('bob'),
+    });
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('not_member');
+    await app.close();
+  });
+});
