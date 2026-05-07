@@ -1,9 +1,53 @@
-import { Platform } from 'react-native';
-import RNCallKeep from 'react-native-callkeep';
+import { NativeModules, Platform } from 'react-native';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from './orchestrator.js';
 import type { ActiveCall } from './types.js';
 import { useCalls } from '../store/calls.js';
+
+/**
+ * Lazy-loaded `react-native-callkeep`. The lib's CommonJS
+ * top-level `require` runs Java module-init code that's incompatible
+ * with the React Native new architecture — under Fabric, the import
+ * itself throws and crashes the app at JS bundle load.
+ *
+ * `tryLoadCallKeep()` wraps the require in a try/catch + a
+ * NativeModules guard, so callers can fall back to no-op when CallKit
+ * / ConnectionService isn't available on this build. (Mirrors the
+ * pattern in `push/push-notifications.ts` for `@react-native-firebase`.)
+ *
+ * Crash repro: alpha-0.4.33 — JS exception in `commitHookEffectListMount`
+ * traced to the post-enrollment useEffect → CallKeepBridge → static
+ * `import RNCallKeep from 'react-native-callkeep'` → throw.
+ */
+type RNCallKeepShape = {
+  setup: (opts: unknown) => Promise<unknown>;
+  registerAndroidEvents: () => void;
+  setAvailable: (v: boolean) => void;
+  addEventListener: (event: string, handler: (arg: { callUUID: string; muted?: boolean }) => void) => void;
+  removeEventListener: (event: string) => void;
+  startCall: (uuid: string, handle: string, name: string, type: string, video: boolean) => void;
+  displayIncomingCall: (uuid: string, handle: string, name: string, type: string, video: boolean) => void;
+  endCall: (uuid: string) => void;
+  reportConnectedOutgoingCallWithUUID: (uuid: string) => void;
+};
+
+function tryLoadCallKeep(): RNCallKeepShape | undefined {
+  // The native module name varies by platform — check both before
+  // attempting the JS import; if neither is registered the JS-side
+  // require would still load (just a JS-only stub) but every call
+  // would silently fail at the bridge layer.
+  if (!NativeModules.RNCallKeepModule && !NativeModules.RNCallKeep) {
+    return undefined;
+  }
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const mod = require('react-native-callkeep') as { default?: RNCallKeepShape } | RNCallKeepShape;
+    return ('default' in mod && mod.default) ? mod.default : (mod as RNCallKeepShape);
+  } catch (err) {
+    diag('callkeep', 'require failed (fabric incompat?)', { err: String(err) });
+    return undefined;
+  }
+}
 
 /**
  * Bridges the JS `CallOrchestrator` to the platform native call UIs:
@@ -40,11 +84,22 @@ export class CallKeepBridge {
   /** Map our internal `call-{ulid}` ids ↔ CallKit's UUID-shaped ids. */
   private readonly idToUuid = new Map<string, string>();
   private readonly uuidToId = new Map<string, string>();
+  /** Resolved on first start(); `undefined` when the native module
+   * isn't available on this build (e.g. new-arch Android with the
+   * pre-Fabric callkeep lib). All methods then no-op. */
+  private rnCallKeep: RNCallKeepShape | undefined;
 
   constructor(private readonly deps: BridgeDeps) {}
 
   async start(): Promise<void> {
     if (this.setupDone) return;
+    const RNCallKeep = tryLoadCallKeep();
+    if (!RNCallKeep) {
+      diag('callkeep', 'native module unavailable — bridge no-ops');
+      this.setupDone = true; // mark so we don't retry every call
+      return;
+    }
+    this.rnCallKeep = RNCallKeep;
     try {
       await RNCallKeep.setup({
         ios: {
@@ -94,19 +149,20 @@ export class CallKeepBridge {
   }
 
   stop(): void {
-    if (!this.setupDone) return;
-    RNCallKeep.removeEventListener('answerCall');
-    RNCallKeep.removeEventListener('endCall');
-    RNCallKeep.removeEventListener('didPerformSetMutedCallAction');
-    RNCallKeep.removeEventListener('didActivateAudioSession');
-    RNCallKeep.removeEventListener('didDeactivateAudioSession');
+    if (!this.setupDone || !this.rnCallKeep) return;
+    this.rnCallKeep.removeEventListener('answerCall');
+    this.rnCallKeep.removeEventListener('endCall');
+    this.rnCallKeep.removeEventListener('didPerformSetMutedCallAction');
+    this.rnCallKeep.removeEventListener('didActivateAudioSession');
+    this.rnCallKeep.removeEventListener('didDeactivateAudioSession');
     this.unsubscribeStore?.();
     this.unsubscribeStore = undefined;
     this.setupDone = false;
   }
 
   private attachListeners(): void {
-    RNCallKeep.addEventListener('answerCall', ({ callUUID }) => {
+    if (!this.rnCallKeep) return;
+    this.rnCallKeep.addEventListener('answerCall', ({ callUUID }) => {
       const callId = this.uuidToId.get(callUUID);
       diag('callkeep', 'answerCall', { callUUID, callId });
       if (!callId) return;
@@ -114,7 +170,7 @@ export class CallKeepBridge {
         diag('callkeep', 'accept failed', { err: String(err) });
       });
     });
-    RNCallKeep.addEventListener('endCall', ({ callUUID }) => {
+    this.rnCallKeep.addEventListener('endCall', ({ callUUID }) => {
       const callId = this.uuidToId.get(callUUID);
       diag('callkeep', 'endCall', { callUUID, callId });
       if (!callId) return;
@@ -125,9 +181,9 @@ export class CallKeepBridge {
         this.deps.orchestrator.hangup();
       }
     });
-    RNCallKeep.addEventListener('didPerformSetMutedCallAction', ({ muted }) => {
-      diag('callkeep', 'mute toggle', { muted });
-      this.deps.orchestrator.setMicMuted(muted);
+    this.rnCallKeep.addEventListener('didPerformSetMutedCallAction', ({ muted }) => {
+      diag('callkeep', 'mute toggle', { muted: !!muted });
+      this.deps.orchestrator.setMicMuted(!!muted);
     });
   }
 
@@ -148,6 +204,8 @@ export class CallKeepBridge {
   }
 
   private diff(prev: ActiveCall | undefined, next: ActiveCall | undefined): void {
+    const RNCallKeep = this.rnCallKeep;
+    if (!RNCallKeep) return;
     if (!prev && next) {
       const uuid = this.allocUuid(next.callId);
       if (next.isCaller) {
@@ -172,7 +230,6 @@ export class CallKeepBridge {
       return;
     }
     if (!next) {
-      // Call ended — dismiss any native UI.
       if (prev) {
         const uuid = this.idToUuid.get(prev.callId);
         if (uuid) {
@@ -187,7 +244,6 @@ export class CallKeepBridge {
       }
       return;
     }
-    // Same call — track stage transitions that matter to the OS.
     if (prev && prev.stage !== 'connected' && next.stage === 'connected') {
       const uuid = this.idToUuid.get(next.callId);
       if (uuid) {
