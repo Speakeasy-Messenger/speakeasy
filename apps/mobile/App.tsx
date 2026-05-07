@@ -72,17 +72,44 @@ export default function App() {
     }
   }, [hydrated]);
 
-  // After hydration, if we have a cached identity, make sure the
-  // server still knows about us. The alpha sandbox runs in-memory
-  // and forgets every enrollment on restart; without this guard a
-  // returning user gets 401 not_enrolled on every authed request and
-  // the WS loops forever in `reconnecting`. `ensureServerBinding`
-  // re-enrolls silently with the same handle + cached identity key.
+  // After hydration, if we have a cached identity, refresh
+  // authentication eagerly before any authed request can fire.
+  //
+  // Why: the persisted `deviceToken` may be stale (Vouchflow's
+  // server-side freshness window is ~5min) or missing entirely
+  // (reinstall wiped Vouchflow's keystore but Speakeasy's identity
+  // somehow survived — adb install -r, dev-build state bleed, etc.).
+  // Without this, the navigator renders Conversations and the user
+  // can tap things that hit 401 `device_not_found` / `not_enrolled`,
+  // each surfaced as a different inline error. Bug report: "many
+  // actions fail saying the device is not authenticated".
+  //
+  // Strategy: call `vouchflow.verify({context: 'login'})` first.
+  // The CachingVouchflowClient + native SDK return the in-keystore
+  // token if it's fresh (no biometric prompt); otherwise they
+  // prompt biometric and re-attest. Then write the fresh token
+  // through to the identity store, then re-bind with the server
+  // (silent re-enroll if the server forgot us). On hard failure —
+  // verify itself rejected, e.g. device removed from Vouchflow's
+  // attestation universe — reset identity so the navigator falls
+  // back to Onboarding instead of leaving the user stranded on a
+  // dead Conversations screen.
   useEffect(() => {
     if (!hydrated || !userId) return;
-    void ensureServerBinding({ signalProtocol, vouchflow });
-    // We only run on hydrate-then-userId-becomes-known. The
-    // re-enroll itself is idempotent so a stray double-call is fine.
+    void (async () => {
+      try {
+        const r = await vouchflow.verify({ context: 'login' });
+        useIdentity.getState().setDeviceToken(r.deviceToken);
+        diag('app', 'launch verify OK', { userId });
+      } catch (err) {
+        diag('app', 'launch verify FAILED — clearing identity', {
+          err: String(err),
+        });
+        await useIdentity.getState().reset();
+        return;
+      }
+      void ensureServerBinding({ signalProtocol, vouchflow });
+    })();
   }, [hydrated, userId]);
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.
