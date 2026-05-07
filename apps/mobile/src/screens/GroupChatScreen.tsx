@@ -32,7 +32,10 @@ import { api, getWsClient, groupMessaging, signalProtocol, vouchflow } from '../
 import { ApiError } from '../api/client.js';
 import { makeGroupOrchestrator } from '../crypto/group-orchestration.js';
 import { utf8ToBytes } from '../utils/bytes.js';
-import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { colors, fonts, space, text } from '../theme/index.js';
+import { font, type } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import Svg, { Path } from 'react-native-svg';
 
 interface Props {
   groupId: string;
@@ -67,6 +70,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * a captured Map). All other deps come from singleton services.
  */
 export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
+  const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
   if (!myUserId) {
     throw new Error('GroupChatScreen rendered without an enrolled identity');
@@ -307,38 +311,46 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
     setTtl(groupId, order[(idx + 1) % order.length]!);
   }
 
+  const hasInput = input.trim().length > 0;
+  const memberCount = group?.members.length ?? 0;
+
   return (
-    <SafeAreaView style={styles.root}>
-      <View style={styles.header}>
+    <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
+      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
         {onBack ? (
-          <Pressable testID="group-chat-back" onPress={onBack} style={styles.back}>
-            <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
+          <Pressable testID="group-chat-back" onPress={onBack} hitSlop={8} style={styles.back}>
+            <Text style={[styles.backText, { color: themed.primary }]}>‹</Text>
           </Pressable>
-        ) : null}
-        <View style={styles.headerRow}>
-          <Pressable
-            disabled={!isCreator || avatarBusy}
-            onPress={handleChangeGroupAvatar}
-            hitSlop={6}
-            testID="group-chat-avatar"
-          >
-            <GroupAvatar groupId={groupId} name={group?.name} size={40} />
-          </Pressable>
-          <Pressable
-            style={styles.headerText}
-            onPress={onManageMembers}
-            testID="group-chat-manage-members"
-          >
-            <Text style={[text.heroBody, styles.peer]} numberOfLines={1}>
-              # {group?.name ?? groupId}
-            </Text>
-            <Text style={[text.footnote, styles.subhead]}>
-              {group
-                ? `${group.members.length} member${group.members.length === 1 ? '' : 's'} · tap to manage${isCreator ? ' · photo above' : ''}`
-                : ''}
-            </Text>
-          </Pressable>
-        </View>
+        ) : (
+          <View style={styles.back} />
+        )}
+        {/* Brand §6.1 AppBar handle. Group avatar kept inline (not on
+            the chat list per §7 — but the AppBar permits it, and it's
+            the only entry point for the creator's change-photo
+            affordance). 32px square per §2.4. */}
+        <Pressable
+          disabled={!isCreator || avatarBusy}
+          onPress={handleChangeGroupAvatar}
+          hitSlop={6}
+          testID="group-chat-avatar"
+          style={styles.avatarBtn}
+        >
+          <GroupAvatar groupId={groupId} name={group?.name} size={32} />
+        </Pressable>
+        <Pressable
+          style={styles.headerHandle}
+          onPress={onManageMembers}
+          testID="group-chat-manage-members"
+        >
+          <Text style={[styles.handleText, { color: themed.ink }]} numberOfLines={1}>
+            <Text style={{ color: themed.primary }}>#</Text>
+            {' '}
+            {group?.name ?? groupId}
+          </Text>
+          <Text style={[styles.subhead, { color: themed.slate }]} numberOfLines={1}>
+            {memberCount} MEMBER{memberCount === 1 ? '' : 'S'} · TAP TO MANAGE
+          </Text>
+        </Pressable>
       </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -364,20 +376,21 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
             />
           )}
           ListFooterComponent={
-            <Text style={[text.footnote, styles.footnote]}>
-              {'Messages disappear after they’re seen.'}
-            </Text>
+            <View style={styles.footnote}>
+              <View style={[styles.dot, { backgroundColor: themed.primary }]} />
+              <Text style={[styles.footnoteText, { color: themed.slate }]}>
+                MESSAGES DISAPPEAR AFTER THEY'RE SEEN
+              </Text>
+            </View>
           }
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         />
-        <View style={styles.composer}>
-          <Pressable
-            onPress={cycleTtl}
-            onLongPress={() => setPersistence(groupId, true)}
-            style={styles.ttlPill}
-          >
-            <Text style={styles.ttlText}>⏱ {ttl}</Text>
-          </Pressable>
+        <View
+          style={[
+            styles.composer,
+            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+          ]}
+        >
           <View style={styles.inputBar}>
             <Pressable
               onPress={handleGif}
@@ -387,16 +400,6 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
             >
               <GifIcon size={22} />
             </Pressable>
-            <TextInput
-              testID="chat-input"
-              style={styles.input}
-              value={input}
-              onChangeText={setInput}
-              placeholder="Say it…"
-              placeholderTextColor={colors.slate}
-              onSubmitEditing={handleSend}
-              returnKeyType="send"
-            />
             <Pressable
               onPress={handlePaperclip}
               hitSlop={6}
@@ -413,9 +416,30 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
             >
               <CameraIcon size={22} />
             </Pressable>
-            <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
-              <Text style={styles.sendText}>Send</Text>
+            <TextInput
+              testID="chat-input"
+              style={[styles.input, { color: themed.ink }]}
+              value={input}
+              onChangeText={setInput}
+              placeholder="say something…"
+              placeholderTextColor={themed.slate}
+              onSubmitEditing={hasInput ? handleSend : undefined}
+              returnKeyType="send"
+              multiline
+            />
+            <Pressable
+              onPress={cycleTtl}
+              onLongPress={() => setPersistence(groupId, true)}
+              hitSlop={6}
+              style={styles.ttlChip}
+            >
+              <Text style={[styles.ttlText, { color: themed.slate }]}>{ttl.toUpperCase()}</Text>
             </Pressable>
+            {hasInput ? (
+              <Pressable testID="chat-send" onPress={handleSend} hitSlop={6} style={styles.iconBtn}>
+                <SendIcon size={22} color={themed.primary} />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -443,40 +467,74 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
 
 // utf8ToBytes imported from ../utils/bytes — Hermes-safe.
 
+function SendIcon({ size = 22, color }: { size?: number; color: string }): React.JSX.Element {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 4 L12 20 M5 11 L12 4 L19 11"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+      />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
+  // Brand §6.1 AppBar — same shape as ChatScreen, but with a leading
+  // 32px group avatar (the only change-photo entry point).
   header: {
-    paddingHorizontal: space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingHorizontal: 18,
     paddingTop: space.md,
-    paddingBottom: space.sm,
-    borderBottomColor: colors.pale,
-    borderBottomWidth: 1,
-    gap: space.xs,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: space.sm,
   },
-  back: { paddingVertical: 4 },
-  headerRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  headerText: { flex: 1 },
-  peer: { color: colors.ink, fontFamily: fonts.inter500 },
-  subhead: { color: colors.slate },
+  back: { width: 32, paddingVertical: 4 },
+  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
+  avatarBtn: { },
+  headerHandle: { flex: 1 },
+  handleText: {
+    fontFamily: font.medium,
+    fontSize: type.subtitle.size,
+    letterSpacing: type.subtitle.size * type.subtitle.letterSpacingEm,
+  },
+  subhead: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    marginTop: 2,
+  },
   body: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },
   footnote: {
-    color: colors.slate,
-    textAlign: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
     marginTop: space.lg,
   },
+  dot: { width: 6, height: 6 },
+  footnoteText: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textTransform: 'uppercase',
+  },
   composer: {
-    borderTopColor: colors.pale,
-    borderTopWidth: 1,
-    backgroundColor: colors.cream,
-    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
   inputBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: space.xs,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
   },
   iconBtn: {
     width: 32,
@@ -484,41 +542,22 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ttlPill: {
-    alignSelf: 'flex-start',
-    marginLeft: space.md,
-    marginBottom: 2,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.pale,
-  },
-  ttlText: {
-    fontFamily: fonts.inter500,
-    fontSize: 11,
-    color: colors.primary,
-    letterSpacing: 0.4,
-  },
   input: {
     flex: 1,
-    minHeight: 40,
-    paddingHorizontal: space.md,
-    backgroundColor: colors.pale,
-    borderRadius: radius.pill,
-    color: colors.ink,
-    fontFamily: fonts.inter400,
-    fontSize: 15,
+    minHeight: 32,
+    maxHeight: 120,
+    paddingHorizontal: space.sm,
+    paddingVertical: 6,
+    fontFamily: font.regular,
+    fontSize: type.body.size,
   },
-  send: {
-    paddingVertical: 10,
-    paddingHorizontal: space.md,
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
+  ttlChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 8,
   },
-  sendText: {
-    color: colors.cream,
-    fontFamily: fonts.inter500,
-    fontSize: 14,
+  ttlText: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
   },
 });

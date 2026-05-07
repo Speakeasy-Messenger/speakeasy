@@ -24,7 +24,7 @@ import { GifPickerSheet } from '../components/GifPickerSheet.js';
 import { CameraIcon, GifIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { PhoneIcon } from '../components/icons/CallIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
-import { Avatar } from '../components/Avatar.js';
+import Svg, { Path } from 'react-native-svg';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
@@ -36,7 +36,9 @@ import { SignalClientError } from '@speakeasy/crypto';
 import { ensureSessionWithPeer } from '../crypto/session.js';
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 import { diag } from '../diag/log.js';
-import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { colors, fonts, space } from '../theme/index.js';
+import { font, type } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
 
 interface Props {
   /** The other user's adjective-adjective-noun id, for direct chats only. */
@@ -80,6 +82,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * lands when the conversation store leaves in-memory Zustand.
  */
 export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
+  const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
   if (!myUserId) {
     throw new Error('ChatScreen rendered without an enrolled identity');
@@ -314,34 +317,47 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
     setTtl(conversationId, order[(idx + 1) % order.length]!);
   }
 
+  const hasInput = input.trim().length > 0;
+  // Brand §6.1: handle in `text` weight 500, segments joined by `accent`
+  // `·` separators. Speakeasy ids are noun-noun-noun on the wire — split
+  // and re-join with the brass dot for the AppBar treatment. Other
+  // surfaces (list, composer placeholder) keep `@handle` for familiarity.
+  const handleSegments = peerId.split('-').filter(Boolean);
+
   return (
-    <SafeAreaView testID="chat-screen" style={styles.root}>
-      <View style={styles.header}>
-        <View style={styles.headerRow}>
-          {onBack ? (
-            <Pressable testID="chat-back" onPress={onBack} style={styles.back}>
-              <Text style={[text.subtitle, { color: colors.primary }]}>‹ Back</Text>
-            </Pressable>
-          ) : (
-            <View style={styles.back} />
-          )}
-          <View style={styles.headerCenter}>
-            <Avatar userId={peerId} size={32} />
-            <Text style={[text.heroBody, styles.peer]}>@{peerId}</Text>
-          </View>
-          {onStartCall ? (
-            <Pressable
-              testID="chat-call"
-              onPress={() => onStartCall(peerId)}
-              hitSlop={8}
-              style={styles.callBtn}
-            >
-              <PhoneIcon size={22} color={colors.primary} />
-            </Pressable>
-          ) : (
-            <View style={styles.callBtn} />
-          )}
+    <SafeAreaView testID="chat-screen" style={[styles.root, { backgroundColor: themed.cream }]}>
+      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
+        {onBack ? (
+          <Pressable testID="chat-back" onPress={onBack} hitSlop={8} style={styles.back}>
+            <Text style={[styles.backText, { color: themed.primary }]}>‹</Text>
+          </Pressable>
+        ) : (
+          <View style={styles.back} />
+        )}
+        <View style={styles.headerHandle}>
+          <Text style={[styles.handleText, { color: themed.ink }]} numberOfLines={1}>
+            {handleSegments.map((seg, i) => (
+              <React.Fragment key={i}>
+                {i > 0 ? (
+                  <Text style={{ color: themed.primary }}> · </Text>
+                ) : null}
+                {seg}
+              </React.Fragment>
+            ))}
+          </Text>
         </View>
+        {onStartCall ? (
+          <Pressable
+            testID="chat-call"
+            onPress={() => onStartCall(peerId)}
+            hitSlop={8}
+            style={styles.callBtn}
+          >
+            <PhoneIcon size={22} color={themed.primary} />
+          </Pressable>
+        ) : (
+          <View style={styles.callBtn} />
+        )}
       </View>
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -364,21 +380,27 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
             />
           )}
           ListFooterComponent={
-            <Text style={[text.footnote, styles.footnote]}>
-              <View style={styles.dot} />
-              {' Messages disappear after they’re seen.'}
-            </Text>
+            <View style={styles.footnote}>
+              <View style={[styles.dot, { backgroundColor: themed.primary }]} />
+              <Text style={[styles.footnoteText, { color: themed.slate }]}>
+                MESSAGES DISAPPEAR AFTER THEY'RE SEEN
+              </Text>
+            </View>
           }
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         />
-        <View style={styles.composer}>
-          <Pressable
-            onPress={cycleTtl}
-            onLongPress={() => setPersistence(conversationId, true)}
-            style={styles.ttlPill}
-          >
-            <Text style={styles.ttlText}>⏱ {ttl}</Text>
-          </Pressable>
+        {/* Brand §6.5 InputBar: top border 1px text-faint, padding 14/20,
+            canvas bg, "say something..." placeholder in text-mute body,
+            send button only fades in once content exists (accent icon,
+            no fill behind). The TTL chip is a brand-affordance for the
+            ephemerality knob — meta-style label, no border, sits inline
+            on the icon row. */}
+        <View
+          style={[
+            styles.composer,
+            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+          ]}
+        >
           <View style={styles.inputBar}>
             <Pressable
               onPress={handleGif}
@@ -388,16 +410,6 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
             >
               <GifIcon size={22} />
             </Pressable>
-            <TextInput
-              testID="chat-input"
-              style={styles.input}
-              value={input}
-              onChangeText={setInput}
-              placeholder="Say it…"
-              placeholderTextColor={colors.slate}
-              onSubmitEditing={handleSend}
-              returnKeyType="send"
-            />
             <Pressable
               onPress={handlePaperclip}
               hitSlop={6}
@@ -414,9 +426,30 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
             >
               <CameraIcon size={22} />
             </Pressable>
-            <Pressable testID="chat-send" onPress={handleSend} style={styles.send}>
-              <Text style={styles.sendText}>Send</Text>
+            <TextInput
+              testID="chat-input"
+              style={[styles.input, { color: themed.ink }]}
+              value={input}
+              onChangeText={setInput}
+              placeholder="say something…"
+              placeholderTextColor={themed.slate}
+              onSubmitEditing={hasInput ? handleSend : undefined}
+              returnKeyType="send"
+              multiline
+            />
+            <Pressable
+              onPress={cycleTtl}
+              onLongPress={() => setPersistence(conversationId, true)}
+              hitSlop={6}
+              style={styles.ttlChip}
+            >
+              <Text style={[styles.ttlText, { color: themed.slate }]}>{ttl.toUpperCase()}</Text>
             </Pressable>
+            {hasInput ? (
+              <Pressable testID="chat-send" onPress={handleSend} hitSlop={6} style={styles.iconBtn}>
+                <SendIcon size={22} color={themed.primary} />
+              </Pressable>
+            ) : null}
           </View>
         </View>
       </KeyboardAvoidingView>
@@ -448,51 +481,81 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
 // Hermes-safe (no Buffer dependency). The previous Buffer-based inline
 // helpers crashed on first send because Hermes doesn't ship Buffer.
 
+function SendIcon({ size = 22, color }: { size?: number; color: string }): React.JSX.Element {
+  // Geometric arrow — sharp endpoints (square caps), no fill, accent
+  // stroke. Mirrors the input-bar icons' line-weight and feel. Per
+  // brand §6.5 the send is "accent icon, no fill behind it".
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M12 4 L12 20 M5 11 L12 4 L19 11"
+        stroke={color}
+        strokeWidth={1.8}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+      />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
+  // Brand §6.1 AppBar: 56 min, canvas bg, 1px text-faint bottom border,
+  // 18 horizontal / 14 bottom padding. Back chevron + handle (with
+  // accent `·` separators) + optional trailing call icon.
   header: {
-    paddingHorizontal: space.lg,
+    flexDirection: 'row',
+    alignItems: 'center',
+    minHeight: 56,
+    paddingHorizontal: 18,
     paddingTop: space.md,
-    paddingBottom: space.sm,
-    borderBottomColor: colors.pale,
-    borderBottomWidth: 1,
+    paddingBottom: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  headerRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  back: { width: 32, paddingVertical: 4 },
+  // Single ‹ — the chevron is the universal "back" cue; the word "Back"
+  // adds nothing the chevron doesn't already say. Bigger size matches
+  // the brand's geometric, restraint-first ethos.
+  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
+  headerHandle: { flex: 1, paddingHorizontal: space.sm },
+  // §6.1: handle in `text` (ink), weight 500. Subtitle scale (17pt) so
+  // the AppBar reads as a quiet anchor, not a hero header.
+  handleText: {
+    fontFamily: font.medium,
+    fontSize: type.subtitle.size,
+    letterSpacing: type.subtitle.size * type.subtitle.letterSpacingEm,
   },
-  headerCenter: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.xs,
-    flex: 1,
-    paddingHorizontal: space.sm,
-  },
-  back: { paddingVertical: 4, minWidth: 56 },
   callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
-  peer: { color: colors.ink, fontFamily: fonts.inter500 },
   body: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },
+  // Footnote at the foot of the list — `meta`-style uppercase tag
+  // ("MESSAGES DISAPPEAR AFTER THEY'RE SEEN") prefaced by the §6.10
+  // brass square. The dot is the only color outside text-mute, pulling
+  // attention to the disappearance promise.
   footnote: {
-    color: colors.slate,
-    textAlign: 'center',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: space.sm,
     marginTop: space.lg,
   },
-  // Spec §6.10: status indicator is a 6×6 brass square — no radius.
-  dot: { width: 6, height: 6, backgroundColor: colors.primary },
+  dot: { width: 6, height: 6 },
+  footnoteText: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textTransform: 'uppercase',
+  },
+  // Brand §6.5 InputBar: 14/20 padding, canvas bg, top hairline border.
   composer: {
-    borderTopColor: colors.pale,
-    borderTopWidth: 1,
-    backgroundColor: colors.cream,
-    paddingVertical: 6,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    paddingHorizontal: 20,
+    paddingVertical: 14,
   },
   inputBar: {
     flexDirection: 'row',
-    alignItems: 'center',
+    alignItems: 'flex-end',
     gap: space.xs,
-    paddingHorizontal: space.md,
-    paddingVertical: space.xs,
   },
   iconBtn: {
     width: 32,
@@ -500,41 +563,27 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  ttlPill: {
-    alignSelf: 'flex-start',
-    marginLeft: space.md,
-    marginBottom: 2,
-    paddingVertical: 4,
-    paddingHorizontal: 10,
-    borderRadius: radius.pill,
-    borderWidth: 1,
-    borderColor: colors.pale,
-  },
-  ttlText: {
-    fontFamily: fonts.inter500,
-    fontSize: 11,
-    color: colors.primary,
-    letterSpacing: 0.4,
-  },
+  // No pill, no fill — input sits flush on the canvas. `body` style for
+  // both placeholder and content per §6.5.
   input: {
     flex: 1,
-    minHeight: 40,
-    paddingHorizontal: space.md,
-    backgroundColor: colors.pale,
-    borderRadius: radius.pill,
-    color: colors.ink,
-    fontFamily: fonts.inter400,
-    fontSize: 15,
+    minHeight: 32,
+    maxHeight: 120,
+    paddingHorizontal: space.sm,
+    paddingVertical: 6,
+    fontFamily: font.regular,
+    fontSize: type.body.size,
   },
-  send: {
-    paddingVertical: 10,
-    paddingHorizontal: space.md,
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
+  // TTL knob — meta-style label, no border, no fill. Tap cycles the
+  // option; long-press flips to persistence. Quiet by design — most
+  // sessions use the default and shouldn't be drawn to it.
+  ttlChip: {
+    paddingHorizontal: 6,
+    paddingVertical: 8,
   },
-  sendText: {
-    color: colors.cream,
-    fontFamily: fonts.inter500,
-    fontSize: 14,
+  ttlText: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
   },
 });
