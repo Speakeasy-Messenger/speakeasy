@@ -25,7 +25,10 @@ import { CallOrchestrator } from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
-import { CallKeepBridge } from './src/calls/callkeep-bridge.js';
+// CallKeepBridge intentionally not imported here — see the deferred-
+// init comment in the post-enrollment effect. The bridge module still
+// ships in the bundle for the future lazy-start callsite (orchestrator
+// or CallScreen mount).
 import { diag } from './src/diag/log.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
@@ -273,24 +276,26 @@ export default function App() {
       });
     }
 
-    // CallKeep — bridges the JS orchestrator to iOS CallKit + Android
-    // ConnectionService for the full-screen incoming-call ring UI,
-    // hardware mute key, and OS audio focus. The earlier deferral
-    // (alpha-0.4.20) was caused by an `ic_launcher` mipmap reference
-    // in foregroundService.notificationIcon — react-native-callkeep
-    // looks in `R.drawable.*` only, so it crashed the foreground-
-    // service start. Fixed by adding `res/drawable/ic_call_notification.xml`.
+    // CallKeep — DEFERRED at app launch. `RNCallKeep.setup()` calls
+    // `telecomManager.registerPhoneAccount()` on Android, which the OS
+    // responds to with a system "Calling accounts" Settings dialog
+    // immediately after enrollment (Tier B run 25514218352 caught
+    // this — emptied AlertDialog covered the conversations screen,
+    // tapping OK redirected to system Settings → Calling accounts,
+    // never returning to our app).
     //
-    // Wrapped: a CallKeep init failure must NOT crash the app; calls
-    // can still happen via the in-app IncomingCallScreen / CallScreen.
-    if (callOrch) {
-      try {
-        const bridge = new CallKeepBridge({ orchestrator: callOrch });
-        void bridge.start();
-      } catch (err) {
-        diag('app', 'CallKeepBridge init failed (non-fatal)', { err: String(err) });
-      }
-    }
+    // Auto-starting the bridge at app launch means every fresh-install
+    // user gets that dialog seconds after enrollment, before they've
+    // placed or received a single call. That's terrible UX.
+    //
+    // Defer: orchestrator/screen calls `bridge.start()` lazily right
+    // before the first call (CallScreen mount or call_offer arrival).
+    // Then the system dialog only appears in a call context where the
+    // permission ask makes sense, and Tier B flows that don't touch
+    // the dialer never see the dialog at all. The in-app
+    // IncomingCallScreen / CallScreen continue to handle every call
+    // exactly as they did pre-0.4.35; CallKit/ConnectionService is
+    // additive when present, not required.
 
     // Single ws.subscribe wired to the unified router. Every screen
     // (ChatScreen, GroupChatScreen, future CommunityScreen) reads from
