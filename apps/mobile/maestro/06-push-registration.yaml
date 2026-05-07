@@ -31,7 +31,8 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Start chat"
 
-# Send a message
+# Send a message. Send button is an accent icon (testID `chat-send`)
+# that only renders once the input has content — brand §6.5.
 - extendedWaitUntil:
     visible:
       id: "chat-screen"
@@ -40,7 +41,7 @@ appId: xyz.speakeasyapp.app
     id: "chat-input"
 - inputText: "Testing push registration"
 - tapOn:
-    text: "Send"
+    id: "chat-send"
 
 # Verify message appears
 - extendedWaitUntil:

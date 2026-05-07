@@ -318,6 +318,7 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
           // gate (brand §1: no third color for danger).
           chevron={false}
           pressedBg={themed.soft}
+          testID="settings-sign-out"
         />
 
         <Text style={[text.footnote, styles.version, { color: themed.slate }]}>

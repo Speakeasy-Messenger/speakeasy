@@ -1,0 +1,132 @@
+# Maestro flow: Sign-out + re-enroll round-trip (Tier B)
+#
+# Catches the class of regressions we'd hit in the post-server-wipe
+# scenario the user actually lived through (alpha-0.4.30 era):
+#   - Sign-out leaves identity / conversations / settings stores in a
+#     half-cleared state, so the next enroll silently reuses something
+#     it shouldn't.
+#   - Re-enroll path doesn't re-trigger push-token registration, so
+#     bananaman's friend can't wake him via push.
+#   - Identity-reset doesn't propagate cleanly through the in-process
+#     session cache (initiatedPeers in crypto/session.ts), so the next
+#     send to a peer we used to know throws UntrustedIdentity even
+#     after sign-out.
+#   - ChatScreen send works pre-sign-out but fails post-re-enroll —
+#     usually a stale ws subscription or a stale signal protocol store
+#     handle.
+#
+# Strategy: enroll → send a self-DM (confirm baseline) → Settings →
+# Sign out → re-enroll under a different handle → send another
+# self-DM (confirm full round-trip works on the new identity).
+#
+# We don't directly assert "push token re-uploaded" — the emulator's
+# FCM getToken returns undefined (no Play Services in CI), so any
+# server-side counter of registerPushToken hits is environment-
+# dependent. The flow exercises the *path*; if pushNotifications
+# .getToken throws or the registerPushToken call hangs, the second
+# enrollment will time out. That's the regression we'd actually want
+# to catch.
+
+appId: xyz.speakeasyapp.app
+name: Sign-out + re-enroll round-trip (Tier B)
+---
+
+- clearState
+- clearKeychain
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+
+# 1. Initial enrollment.
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester08
+
+# 2. Baseline self-DM. If this fails, sign-out hasn't even started
+#    being tested — the regression is upstream.
+- copyTextFrom:
+    id: "conversations-userid"
+- tapOn:
+    id: "conversations-new-chat"
+- tapOn:
+    id: "new-chat-peer-id-input"
+- inputText: "${maestro.copiedText}"
+- tapOn:
+    text: "Start chat"
+- extendedWaitUntil:
+    visible:
+      id: "chat-screen"
+    timeout: 10000
+- tapOn:
+    id: "chat-input"
+- inputText: "Pre-sign-out"
+- tapOn:
+    id: "chat-send"
+- extendedWaitUntil:
+    visible:
+      text: "Pre-sign-out"
+    timeout: 5000
+
+# 3. Navigate to Settings via the gear icon on the conversations
+#    header (testID `conversations-settings-btn`). Use back to leave
+#    the chat first; the chat screen has its own back chevron.
+- tapOn:
+    id: "chat-back"
+- extendedWaitUntil:
+    visible:
+      id: "conversations-settings-btn"
+    timeout: 10000
+- tapOn:
+    id: "conversations-settings-btn"
+
+# 4. Sign out — flat ListItem row (brand §6.8), testID `settings-sign-out`.
+#    The handler raises a confirm Alert; the system dialog on Android
+#    surfaces the destructive option as text "Sign Out" (matches the
+#    JS Alert.alert button label exactly).
+- extendedWaitUntil:
+    visible:
+      id: "settings-sign-out"
+    timeout: 10000
+- tapOn:
+    id: "settings-sign-out"
+- tapOn:
+    text: "Sign Out"
+
+# 5. After sign-out, useIdentity.reset() clears userId, App.tsx routes
+#    back to OnboardingScreen. Re-enroll with a different handle to
+#    catch any case where the old handle is silently reused (would
+#    fail the availability probe — handle's owned by a now-orphaned
+#    server-side row).
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester08b
+
+# 6. Post-re-enroll self-DM. If this works, the full sign-out + re-
+#    enroll path is healthy: identity store rotated, signal protocol
+#    store re-keyed, ws auth re-handshook, push-token register hook
+#    fired without crashing.
+- copyTextFrom:
+    id: "conversations-userid"
+- tapOn:
+    id: "conversations-new-chat"
+- tapOn:
+    id: "new-chat-peer-id-input"
+- inputText: "${maestro.copiedText}"
+- tapOn:
+    text: "Start chat"
+- extendedWaitUntil:
+    visible:
+      id: "chat-screen"
+    timeout: 10000
+- tapOn:
+    id: "chat-input"
+- inputText: "Post-re-enroll"
+- tapOn:
+    id: "chat-send"
+- extendedWaitUntil:
+    visible:
+      text: "Post-re-enroll"
+    timeout: 5000

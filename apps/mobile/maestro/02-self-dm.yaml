@@ -31,12 +31,15 @@ name: Self-DM round-trip (Tier B)
 - tapOn:
     text: "Start chat"
 
-# Send a message
+# Send a message. Send button is an accent arrow icon (testID
+# `chat-send`) that only renders once the input has content — brand
+# §6.5. Type input first, then tap by id (the button has no visible
+# text label any more).
 - tapOn:
     id: "chat-input"
 - inputText: "Hello self!"
 - tapOn:
-    text: "Send"
+    id: "chat-send"
 
 - assertVisible:
     text: "Hello self!"

@@ -1066,12 +1066,19 @@ describe('ws messaging — Phase 5d push-token integration', () => {
     );
     await new Promise((r) => setTimeout(r, 30));
 
-    // Push should have fired with Carol's userId and the conversation id.
+    // Push should have fired with Carol's userId, the conversation id,
+    // sender attribution (Alice), and `kind: 'message'` so the rich-
+    // banner FCM path renders "@alice-blue-fox: New message" rather
+    // than the generic ringer copy.
     expect(pushProvider.calls).toHaveLength(1);
     expect(pushProvider.calls[0]).toMatchObject({
       userId: 'carol-pink-owl',
       msgType: 'direct',
+      senderId: 'alice-blue-fox',
     });
+    // `kind` is omitted (default 'message') for ordinary messages —
+    // the FCM provider treats undefined as 'message'.
+    expect(pushProvider.calls[0]!.kind ?? 'message').toBe('message');
     expect(pushProvider.calls[0]!.conversationId).toMatch(/^dm-[0-9a-f]{16}$/);
 
     // Verify the device record has the push token (FcmApnsPushProvider
@@ -1278,7 +1285,17 @@ describe('ws voice call signaling — Phase 6', () => {
     );
     await new Promise((r) => setTimeout(r, 30));
     expect(pushProvider.calls).toHaveLength(1);
-    expect(pushProvider.calls[0]!.userId).toBe('offline-foo-bar');
+    expect(pushProvider.calls[0]).toMatchObject({
+      userId: 'offline-foo-bar',
+      msgType: 'direct',
+      // Offline-call push must distinguish itself from a message push
+      // — drives the FCM bucket that renders "@caller is calling…"
+      // instead of "@sender: New message" + stamps `notify_kind: 'call'`
+      // in the FCM data block so a foreground handler can route to
+      // CallKeepBridge.displayIncomingCall.
+      kind: 'call',
+      senderId: 'alice-blue-fox',
+    });
     // Call frames are never persisted to the relay buffer.
     expect(messagesRepo.buffer.size).toBe(0);
 
@@ -1441,5 +1458,30 @@ describe('ws sealed sender — Phase 5g (spec §13)', () => {
     );
     const incoming = (await b.q.next()) as Record<string, unknown>;
     expect(incoming.from).toBe('alice-blue-fox');
+  });
+
+  it('sealed direct → offline → push fires WITHOUT senderId (forces private copy)', async () => {
+    // Privacy regression guard: when a sealed message buffers for an
+    // offline recipient, the push notice must omit the sender so the
+    // FcmApnsPushProvider falls back to "speakeasy: New message"
+    // regardless of the recipient's `notification_privacy`. If we ever
+    // accidentally leak the sender on the push path while keeping the
+    // wire frame sealed, we'd have a partial unmasking — server says
+    // "alice sent you something" via the push banner even though the
+    // forwarded frame elides the field.
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'offline-foo-bar',
+        ciphertext: 'U0VBTEVE',
+        msg_type: 'direct',
+        sealed: true,
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(pushProvider.calls[0]!.userId).toBe('offline-foo-bar');
+    expect(pushProvider.calls[0]!.senderId).toBeUndefined();
   });
 });
