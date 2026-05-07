@@ -25,9 +25,7 @@ import { CallOrchestrator } from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
-// CallKeepBridge intentionally not imported here — see deferred-init
-// note below. The bridge module still ships in the bundle so the next
-// release can wire it without another dep dance.
+import { CallKeepBridge } from './src/calls/callkeep-bridge.js';
 import { diag } from './src/diag/log.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
@@ -260,12 +258,24 @@ export default function App() {
       });
     }
 
-    // CallKeep (CallKit / ConnectionService) deferred — a misconfigured
-    // foregroundService notificationIcon was crashing the app right
-    // after enrollment. Calls still work via the in-app
-    // IncomingCallScreen / CallScreen; the lock-screen ring UI lands in
-    // a follow-up once we've verified the right resource references on
-    // hardware. Bridge code remains for that future enable.
+    // CallKeep — bridges the JS orchestrator to iOS CallKit + Android
+    // ConnectionService for the full-screen incoming-call ring UI,
+    // hardware mute key, and OS audio focus. The earlier deferral
+    // (alpha-0.4.20) was caused by an `ic_launcher` mipmap reference
+    // in foregroundService.notificationIcon — react-native-callkeep
+    // looks in `R.drawable.*` only, so it crashed the foreground-
+    // service start. Fixed by adding `res/drawable/ic_call_notification.xml`.
+    //
+    // Wrapped: a CallKeep init failure must NOT crash the app; calls
+    // can still happen via the in-app IncomingCallScreen / CallScreen.
+    if (callOrch) {
+      try {
+        const bridge = new CallKeepBridge({ orchestrator: callOrch });
+        void bridge.start();
+      } catch (err) {
+        diag('app', 'CallKeepBridge init failed (non-fatal)', { err: String(err) });
+      }
+    }
 
     // Single ws.subscribe wired to the unified router. Every screen
     // (ChatScreen, GroupChatScreen, future CommunityScreen) reads from

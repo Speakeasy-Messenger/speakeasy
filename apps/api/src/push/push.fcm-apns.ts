@@ -46,9 +46,11 @@ export class FcmApnsPushProvider implements PushProvider {
     // one batched FCM call. Sealed senderId is forced to undefined
     // upstream (handler.ts doesn't pass it through) so 'rich' devices
     // still degrade gracefully when the message can't be attributed.
+    const kind = notice.kind ?? 'message';
     const data = {
       conversation_id: notice.conversationId,
       msg_type: notice.msgType,
+      notify_kind: kind,
     };
     const buckets = new Map<string, { title: string; body: string; tokens: string[] }>();
     for (const d of withPush) {
@@ -58,8 +60,15 @@ export class FcmApnsPushProvider implements PushProvider {
       // sender handle ("from whom") but never preview text ("what they
       // said"); preview-text would need a Notification Service
       // Extension that decrypts on-device, deferred to Phase 6.
-      const title = showSender ? `@${notice.senderId}` : 'speakeasy';
-      const body = 'New message';
+      let title: string;
+      let body: string;
+      if (kind === 'call') {
+        title = showSender ? `@${notice.senderId}` : 'speakeasy';
+        body = showSender ? 'Calling…' : 'Incoming call';
+      } else {
+        title = showSender ? `@${notice.senderId}` : 'speakeasy';
+        body = 'New message';
+      }
       const key = `${title}\0${body}`;
       const bucket = buckets.get(key);
       if (bucket) {

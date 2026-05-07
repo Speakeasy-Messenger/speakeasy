@@ -512,12 +512,12 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 userId: msg.to,
                 conversationId: conversation,
                 msgType: 'direct',
-                // Incoming-call wake-up — sender is the caller, very
-                // helpful to show on the banner ("@bananaman1 is
-                // calling…" once we add a 'call_offer' notification
-                // template; for now banner reads "@bananaman1: New
-                // message" which is at least directionally right).
                 senderId: session.userId,
+                // Distinguishes the banner copy ("@caller is calling…"
+                // vs "@sender: New message") and stamps the FCM data
+                // block so the mobile app's message handler can route
+                // to CallKeepBridge for the full-screen ringer.
+                kind: 'call',
               })
               .catch((err) =>
                 deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),

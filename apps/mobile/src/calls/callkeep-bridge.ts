@@ -70,7 +70,13 @@ export class CallKeepBridge {
             channelId: 'xyz.speakeasyapp.app.calls',
             channelName: 'Active calls',
             notificationTitle: 'Speakeasy call in progress',
-            notificationIcon: 'ic_launcher',
+            // react-native-callkeep resolves this via
+            // `R.drawable.<name>` only (not mipmap). `ic_launcher` is a
+            // mipmap and the lookup failed → foreground-service start
+            // crashed at enrollment time, the alpha-0.4.20 repro. Using
+            // a dedicated single-color vector drawable that lives in
+            // `res/drawable/`.
+            notificationIcon: 'ic_call_notification',
           },
         },
       });

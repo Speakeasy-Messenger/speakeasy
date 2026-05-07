@@ -24,6 +24,15 @@ export interface PushDeliveryNotice {
    * otherwise generic.
    */
   senderId?: string;
+  /**
+   * What was buffered. Default 'message'. 'call' triggers ringer copy
+   * ("@bananaman1 is calling…") and stamps `notify_kind: 'call'` in
+   * the FCM data block so the mobile app's foreground-message handler
+   * can route to CallKeepBridge.displayIncomingCall on Android (iOS
+   * needs PushKit for true lock-screen ringing — deferred with the
+   * iOS APNs setup).
+   */
+  kind?: 'message' | 'call';
 }
 
 export interface PushProvider {
