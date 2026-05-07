@@ -85,9 +85,17 @@ name: Sign-out + re-enroll round-trip (Tier B)
 #    The handler raises a confirm Alert; the system dialog on Android
 #    surfaces the destructive option as text "Sign Out" (matches the
 #    JS Alert.alert button label exactly).
-- extendedWaitUntil:
-    visible:
+#
+#    Sign out lives at the bottom of the Settings ScrollView, below
+#    the Profile / Appearance / Notifications / Connection sections.
+#    On the Pixel 5 CI emulator (≈800dp tall) the Actions section
+#    starts off-screen; scrollUntilVisible scrolls until it's in the
+#    viewport. Run 25515141909 caught this — straight `assertVisible`
+#    timed out 10s waiting for the testID even though the row exists.
+- scrollUntilVisible:
+    element:
       id: "settings-sign-out"
+    direction: DOWN
     timeout: 10000
 - tapOn:
     id: "settings-sign-out"
