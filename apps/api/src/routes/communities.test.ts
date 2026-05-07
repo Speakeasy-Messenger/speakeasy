@@ -53,6 +53,7 @@ describe('POST /v1/communities', () => {
 
   it('rejects ttl_days outside range', async () => {
     const { app } = await makeApp();
+    // ttl_days=0 violates the lower bound (must be ≥1)
     const res = await app.inject({
       method: 'POST',
       url: '/v1/communities',
@@ -60,6 +61,45 @@ describe('POST /v1/communities', () => {
       payload: { ttl_days: 0 },
     });
     expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('caps ttl_days at 365 days (spec §13: long-arc ephemeral)', async () => {
+    // Phase 5g policy decision: moderators can configure community
+    // message TTL from 1 day to 1 year. 1 year is the ceiling —
+    // longer values let a "community" become an effectively-permanent
+    // archive, which doesn't fit the product's ephemeral framing.
+    // Default stays 7 days (set in the schema, applied when ttl_days
+    // is omitted).
+    const { app } = await makeApp();
+
+    // 366 days is over the cap.
+    const tooLong = await app.inject({
+      method: 'POST',
+      url: '/v1/communities',
+      headers: callerHeader('alice'),
+      payload: { ttl_days: 366 },
+    });
+    expect(tooLong.statusCode).toBe(400);
+
+    // Right at the cap (365) is fine.
+    const atCap = await app.inject({
+      method: 'POST',
+      url: '/v1/communities',
+      headers: callerHeader('alice'),
+      payload: { ttl_days: 365 },
+    });
+    expect(atCap.statusCode).toBe(201);
+
+    // Tightening to 1 day works.
+    const tighter = await app.inject({
+      method: 'POST',
+      url: '/v1/communities',
+      headers: callerHeader('alice'),
+      payload: { ttl_days: 1 },
+    });
+    expect(tighter.statusCode).toBe(201);
+
     await app.close();
   });
 });

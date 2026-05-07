@@ -73,7 +73,16 @@ export async function registerCommunityRoutes(
       schema: {
         body: {
           type: 'object',
-          properties: { ttl_days: { type: 'integer', minimum: 1, maximum: 3650 } },
+          // Spec §13 decision (Phase 5g): community message TTL is
+          // moderator-configurable from 1 day up to 1 year (365),
+          // default 7. Communities have legitimate retention needs
+          // beyond 7 days (e.g. a "decisions log" channel) that the
+          // 1:1 ephemeral default doesn't apply to. 1 year is the
+          // ceiling — preserves "ephemeral on a long arc" without
+          // letting moderators set effectively-permanent retention
+          // (the prior 3650-day cap was 10 years, which isn't
+          // ephemeral by any reasonable reading).
+          properties: { ttl_days: { type: 'integer', minimum: 1, maximum: 365 } },
         },
       },
     },
