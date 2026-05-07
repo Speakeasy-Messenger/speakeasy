@@ -112,11 +112,20 @@ export class CallKeepBridge {
           maximumCallsPerCallGroup: '1',
         },
         android: {
-          alertTitle: 'Permissions required',
-          alertDescription:
-            'Speakeasy needs phone-account permission to display calls in the system UI.',
-          cancelButton: 'Cancel',
-          okButton: 'OK',
+          // alertTitle / alertDescription / cancelButton / okButton
+          // intentionally omitted. When passed, CallKeep raises a
+          // blocking system dialog the first time setup runs, asking
+          // the user to enable Speakeasy as a "calling app" in system
+          // settings. That's a poor moment to interrupt — the user
+          // just finished enrollment — and it broke Tier B Maestro
+          // by covering `conversations-userid` with the permission
+          // dialog. Without these fields CallKeep silently registers
+          // its phone-account; if the OS hasn't granted the calling-
+          // app role, the lock-screen ringer degrades to the in-app
+          // IncomingCallScreen (same fallback as 0.4.34's lazy load).
+          // Real-device users who want the system ringer can grant
+          // it manually via Settings → Apps → Default apps → Calling
+          // app; we'll surface that as a Settings affordance later.
           additionalPermissions: [],
           // Foreground service is auto-managed by CallKeep on Android
           // when this is set — we get a system call notification while
