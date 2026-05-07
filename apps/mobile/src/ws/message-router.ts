@@ -436,6 +436,19 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         deps.onCallFrame?.(frame);
         return;
 
+      case 'channel_key_rotation_required':
+        // Server tells us a community's channel key must rotate — fired
+        // when a member is removed (spec §4b revocation guarantee).
+        // Mobile-side orchestration ("elect a wrapper, generate fresh K,
+        // upload new-epoch envelopes") is a future commit; for now we
+        // just record the signal so the on-device Diagnostics screen
+        // can show the user it landed.
+        diag('router', 'channel_key_rotation_required', {
+          community_id: frame.community_id,
+          reason: frame.reason,
+        });
+        return;
+
       default: {
         const _exhaustive: never = frame;
         void _exhaustive;

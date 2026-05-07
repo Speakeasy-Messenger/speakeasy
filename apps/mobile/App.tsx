@@ -97,16 +97,39 @@ export default function App() {
   useEffect(() => {
     if (!hydrated || !userId) return;
     void (async () => {
-      try {
-        const r = await vouchflow.verify({ context: 'login' });
-        useIdentity.getState().setDeviceToken(r.deviceToken);
-        diag('app', 'launch verify OK', { userId });
-      } catch (err) {
-        diag('app', 'launch verify FAILED — clearing identity', {
-          err: String(err),
+      // Only re-verify if the cached deviceToken is missing or older
+      // than the server's freshness window. Prior behaviour was to
+      // re-attest on every cold launch, which (a) churned the
+      // biometric prompt every time the app resumed from a long
+      // background, and (b) meant the status pip greyed for a
+      // few seconds while we waited on Vouchflow + Play Integrity.
+      // The server's window is 24h by default (see VouchflowValidator
+      // DEFAULT_MAX_AGE_MS). Mobile re-verifies a comfortable margin
+      // before that — 22h — so a token that's still server-valid
+      // is NEVER pre-emptively refreshed at launch.
+      const FRESHNESS_MS = 22 * 60 * 60_000;
+      const { deviceToken: cachedToken, deviceTokenIssuedAt: issuedAt } =
+        useIdentity.getState();
+      const ageMs = issuedAt ? Date.now() - issuedAt : Number.POSITIVE_INFINITY;
+      const tokenStillFresh = !!cachedToken && ageMs < FRESHNESS_MS;
+
+      if (tokenStillFresh) {
+        diag('app', 'launch verify skipped — cached token still fresh', {
+          userId,
+          ageMs,
         });
-        await useIdentity.getState().reset();
-        return;
+      } else {
+        try {
+          const r = await vouchflow.verify({ context: 'login' });
+          useIdentity.getState().setDeviceToken(r.deviceToken);
+          diag('app', 'launch verify OK', { userId, prevAgeMs: ageMs });
+        } catch (err) {
+          diag('app', 'launch verify FAILED — clearing identity', {
+            err: String(err),
+          });
+          await useIdentity.getState().reset();
+          return;
+        }
       }
       void ensureServerBinding({ signalProtocol, vouchflow });
     })();

@@ -29,6 +29,14 @@ export interface IdentityState {
   userId: string | undefined;
   deviceToken: string | undefined;
   /**
+   * Wall-clock ms when `deviceToken` was last refreshed via a successful
+   * `vouchflow.verify()`. Used by App.tsx to skip a launch-verify when
+   * the token is still inside the server's freshness window — there's
+   * no reason to re-attest (and possibly prompt biometric) when the
+   * server would still accept the cached token.
+   */
+  deviceTokenIssuedAt: number | undefined;
+  /**
    * `false` until `hydrate()` has run on app start. Gates the initial
    * navigation: the RootNavigator shows a blank/splash screen while
    * hydrating, then routes to Onboarding (no userId) or Conversations
@@ -49,6 +57,7 @@ export interface IdentityState {
 interface PersistedShape {
   userId?: string;
   deviceToken?: string;
+  deviceTokenIssuedAt?: number;
 }
 
 async function persist(s: PersistedShape): Promise<void> {
@@ -63,16 +72,26 @@ async function persist(s: PersistedShape): Promise<void> {
 export const useIdentity = create<IdentityState>((set, get) => ({
   userId: undefined,
   deviceToken: undefined,
+  deviceTokenIssuedAt: undefined,
   hydrated: false,
 
   setUserId: (userId) => {
     set({ userId });
-    void persist({ userId, deviceToken: get().deviceToken });
+    void persist({
+      userId,
+      deviceToken: get().deviceToken,
+      deviceTokenIssuedAt: get().deviceTokenIssuedAt,
+    });
   },
 
   setDeviceToken: (deviceToken) => {
-    set({ deviceToken });
-    void persist({ userId: get().userId, deviceToken });
+    const issuedAt = deviceToken ? Date.now() : undefined;
+    set({ deviceToken, deviceTokenIssuedAt: issuedAt });
+    void persist({
+      userId: get().userId,
+      deviceToken,
+      deviceTokenIssuedAt: issuedAt,
+    });
   },
 
   hydrate: async () => {
@@ -83,6 +102,7 @@ export const useIdentity = create<IdentityState>((set, get) => ({
         set({
           userId: parsed.userId,
           deviceToken: parsed.deviceToken,
+          deviceTokenIssuedAt: parsed.deviceTokenIssuedAt,
         });
       }
     } catch {
@@ -93,7 +113,11 @@ export const useIdentity = create<IdentityState>((set, get) => ({
   },
 
   reset: async () => {
-    set({ userId: undefined, deviceToken: undefined });
+    set({
+      userId: undefined,
+      deviceToken: undefined,
+      deviceTokenIssuedAt: undefined,
+    });
     try {
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch {
