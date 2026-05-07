@@ -165,8 +165,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     enrollRateLimit: rateLimit({
       limiter,
       endpoint: 'enroll',
-      limit: 5,
-      windowMs: 60 * 60_000,
+      // Production default: 5 enrollments / hour per subject. Tier B
+      // CI runs 7 fresh enrollments back-to-back against the same
+      // in-runner server, so override via env to avoid 429s in the
+      // emulator test suite.
+      limit: Number(process.env.ENROLL_RATE_LIMIT) || 5,
+      windowMs: Number(process.env.ENROLL_RATE_LIMIT_WINDOW_MS) || 60 * 60_000,
     }),
     onUserMinted,
   });

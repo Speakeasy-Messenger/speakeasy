@@ -115,6 +115,10 @@ jobs:
           # relaxes minConfidence to "low" automatically.
           VOUCHFLOW_READ_KEY: ${{ secrets.VOUCHFLOW_READ_KEY }}
           VOUCHFLOW_BASE_URL: 'https://sandbox.api.vouchflow.dev/v1'
+          # Production limit (5/hr) trips when the suite enrolls
+          # tester01..tester07 in series. Bump for CI so the limiter
+          # stays in the code path but doesn't gate the run.
+          ENROLL_RATE_LIMIT: '100'
         run: |
           if [ -z "$VOUCHFLOW_READ_KEY" ]; then
             echo "::error::VOUCHFLOW_READ_KEY secret is not set"
