@@ -65,7 +65,15 @@ export class CloudflareTurnProvider implements TurnProvider {
   async issue(opts: { userId: string }): Promise<IceServer[]> {
     const fetchImpl = this.opts.fetchImpl ?? fetch;
     const ttl = this.opts.ttlSeconds ?? 3600;
-    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(this.opts.keyId)}/credentials/generate`;
+    // `generate-ice-servers` is the current Realtime TURN endpoint;
+    // it returns an array containing one STUN entry and one TURN
+    // entry with **multiple transports** (udp/3478, tcp/3478,
+    // tls/5349, udp/53, tcp/80, tls/443). The TLS-over-443 fallback
+    // is what makes mobile-carrier and corporate-firewall calls
+    // succeed when udp paths are blocked. The older `generate`
+    // endpoint returns a single object with only 4 transports and
+    // is being phased out.
+    const url = `https://rtc.live.cloudflare.com/v1/turn/keys/${encodeURIComponent(this.opts.keyId)}/credentials/generate-ice-servers`;
     const res = await fetchImpl(url, {
       method: 'POST',
       headers: {
@@ -78,14 +86,15 @@ export class CloudflareTurnProvider implements TurnProvider {
       body: JSON.stringify({ ttl, customIdentifier: opts.userId }),
     });
     if (!res.ok) {
-      throw new Error(`cloudflare turn credentials: ${res.status} ${res.statusText}`);
+      const body = await res.text().catch(() => '');
+      throw new Error(
+        `cloudflare turn credentials: ${res.status} ${res.statusText}${body ? ` — ${body.slice(0, 200)}` : ''}`,
+      );
     }
     const j = (await res.json()) as {
-      iceServers: { urls: string[] | string; username?: string; credential?: string };
+      iceServers: Array<{ urls: string[] | string; username?: string; credential?: string }>;
     };
-    // Cloudflare returns ONE iceServers object with multiple URL
-    // schemes (stun:, turn:, turns:). WebRTC accepts that directly.
-    return [j.iceServers];
+    return j.iceServers;
   }
 }
 

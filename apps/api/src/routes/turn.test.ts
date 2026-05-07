@@ -97,17 +97,26 @@ describe('GET /v1/turn/credentials', () => {
 });
 
 describe('CloudflareTurnProvider', () => {
-  it('posts to the Calls TURN credentials endpoint and reshapes the response', async () => {
+  it('posts to the Realtime TURN generate-ice-servers endpoint and returns the array', async () => {
     const calls: Array<{ url: string; init?: RequestInit }> = [];
     const fakeFetch = (async (url: string, init?: RequestInit) => {
       calls.push({ url, init });
+      // Mirror the live Cloudflare response shape: an array containing
+      // one STUN-only entry (no creds) and one TURN entry with multiple
+      // transports + creds.
       return new Response(
         JSON.stringify({
-          iceServers: {
-            urls: ['stun:stun.cloudflare.com:3478', 'turn:turn.cloudflare.com:3478?transport=udp'],
-            username: 'cf-user',
-            credential: 'cf-pass',
-          },
+          iceServers: [
+            { urls: ['stun:stun.cloudflare.com:3478'] },
+            {
+              urls: [
+                'turn:turn.cloudflare.com:3478?transport=udp',
+                'turns:turn.cloudflare.com:443?transport=tcp',
+              ],
+              username: 'cf-user',
+              credential: 'cf-pass',
+            },
+          ],
         }),
         { status: 200, headers: { 'content-type': 'application/json' } },
       );
@@ -120,11 +129,13 @@ describe('CloudflareTurnProvider', () => {
     });
     const ice = await provider.issue({ userId: 'alpha' });
     expect(calls).toHaveLength(1);
-    expect(calls[0]!.url).toContain('/keys/kid/credentials/generate');
+    expect(calls[0]!.url).toContain('/keys/kid/credentials/generate-ice-servers');
     const body = JSON.parse(String(calls[0]!.init?.body));
     expect(body.ttl).toBe(1800);
     expect(body.customIdentifier).toBe('alpha');
-    expect(ice).toHaveLength(1);
-    expect(ice[0]!.username).toBe('cf-user');
+    expect(ice).toHaveLength(2);
+    expect(ice[0]!.urls).toContain('stun:stun.cloudflare.com:3478');
+    expect(ice[1]!.username).toBe('cf-user');
+    expect(ice[1]!.credential).toBe('cf-pass');
   });
 });
