@@ -11,7 +11,8 @@ import {
 } from 'react-native';
 import { launchImageLibrary } from 'react-native-image-picker';
 import { Avatar } from '../components/Avatar.js';
-import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { colors, fonts, space, text } from '../theme/index.js';
+import { font, type } from '../theme/tokens.js';
 import { useIdentity } from '../store/identity.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
@@ -27,6 +28,17 @@ interface Props {
   onInviteFriends: () => void;
 }
 
+/**
+ * Settings — BRANDING1.md §7 (workspace settings):
+ *  - Section labels group items.
+ *  - ListItems with title + optional subtitle.
+ *  - Switch: `accent` when on, `surface-pressed` when off, no thumb shadow.
+ *  - Mode toggle: segmented control.
+ *
+ * No card backgrounds; flat rows separated by hairline `text-ghost`
+ * dividers. The brand prefers space to lines (§6.9) so dividers are
+ * minimum-weight.
+ */
 export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: Props) {
   const userId = useIdentity((s) => s.userId);
   const resetIdentity = useIdentity((s) => s.reset);
@@ -55,13 +67,10 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
     }
     const result = await launchImageLibrary({
       mediaType: 'photo',
-      // image-picker handles the resize for us. 256x256 is enough for
-      // a list-row thumbnail, well under the server's 200KB cap.
       maxWidth: 256,
       maxHeight: 256,
       quality: 0.8,
       includeBase64: true,
-      // No-op on Android (we don't request the front camera here).
       selectionLimit: 1,
     });
     if (result.didCancel) return;
@@ -125,144 +134,241 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
     <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={8} style={styles.backBtn}>
-          <Text style={styles.backText}>← Back</Text>
+          <Text style={[styles.backText, { color: themed.primary }]}>‹ Back</Text>
         </Pressable>
         <Text style={[text.heroBody, { color: themed.ink }]}>Settings</Text>
       </View>
 
       <ScrollView contentContainerStyle={styles.content}>
         {/* ── Profile ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>PROFILE</Text>
-        <View style={[styles.card, { backgroundColor: themed.pale }]}>
-          <View style={styles.profileRow}>
-            <Pressable
-              onPress={avatarBusy ? undefined : handleChangeAvatar}
-              hitSlop={4}
-              testID="settings-change-avatar"
-            >
-              {userId ? (
-                <Avatar userId={userId} size={64} />
-              ) : (
-                <View style={[styles.profileAvatarPlaceholder]} />
-              )}
-            </Pressable>
-            <View style={styles.profileBody}>
-              <Text
-                style={[styles.idValue, { color: themed.ink }]}
-                numberOfLines={1}
+        <SectionLabel color={themed.slate}>PROFILE</SectionLabel>
+        <View style={styles.profileBlock}>
+          <Pressable
+            onPress={avatarBusy ? undefined : handleChangeAvatar}
+            hitSlop={4}
+            testID="settings-change-avatar"
+          >
+            {userId ? (
+              <Avatar userId={userId} size={56} />
+            ) : (
+              <View style={[styles.profileAvatarPlaceholder, { backgroundColor: themed.pale }]} />
+            )}
+          </Pressable>
+          <View style={styles.profileBody}>
+            <Text style={[styles.idValue, { color: themed.ink }]} numberOfLines={1}>
+              {userId ? `@${userId}` : '—'}
+            </Text>
+            <View style={styles.profileActions}>
+              <TextLink onPress={handleCopyId} color={themed.primary}>
+                Copy
+              </TextLink>
+              <Text style={[styles.actionSep, { color: themed.divider }]}>·</Text>
+              <TextLink
+                onPress={avatarBusy ? undefined : handleChangeAvatar}
+                color={themed.primary}
+                disabled={avatarBusy}
               >
-                {userId ? `@${userId}` : '—'}
-              </Text>
-              <View style={styles.profileActions}>
-                <Pressable onPress={handleCopyId} style={styles.copyBtn}>
-                  <Text style={styles.copyBtnText}>Copy</Text>
-                </Pressable>
-                <Pressable
-                  onPress={avatarBusy ? undefined : handleChangeAvatar}
-                  style={[styles.copyBtn, avatarBusy && styles.copyBtnBusy]}
-                >
-                  <Text style={styles.copyBtnText}>
-                    {avatarBusy ? '…' : 'Change photo'}
-                  </Text>
-                </Pressable>
-                <Pressable
-                  onPress={avatarBusy ? undefined : handleClearAvatar}
-                  style={styles.copyBtn}
-                >
-                  <Text style={styles.copyBtnText}>Remove</Text>
-                </Pressable>
-              </View>
+                {avatarBusy ? '…' : 'Change photo'}
+              </TextLink>
+              <Text style={[styles.actionSep, { color: themed.divider }]}>·</Text>
+              <TextLink
+                onPress={avatarBusy ? undefined : handleClearAvatar}
+                color={themed.slate}
+                disabled={avatarBusy}
+              >
+                Remove
+              </TextLink>
             </View>
           </View>
         </View>
 
         {/* ── Appearance ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>APPEARANCE</Text>
-        <View style={[styles.card, { backgroundColor: themed.pale }]}>
-          <View style={styles.segmentRow}>
-            {(['system', 'dark', 'light'] as const).map((opt) => {
-              const active = themePref === opt;
-              return (
-                <Pressable
-                  key={opt}
-                  onPress={() => setThemePref(opt)}
-                  style={[styles.segment, active && styles.segmentActive]}
-                  testID={`settings-theme-${opt}`}
-                >
-                  <Text
+        <SectionLabel color={themed.slate}>APPEARANCE</SectionLabel>
+        <ListItem dividerColor={themed.divider}>
+          <View style={styles.listItemBody}>
+            <Text style={[styles.listItemTitle, { color: themed.ink }]}>Theme</Text>
+            <Text style={[styles.listItemSubtitle, { color: themed.slate }]}>
+              System follows your device. Brand-canvas screens stay aubergine in both modes.
+            </Text>
+            <View style={[styles.segmentRow, { borderColor: themed.divider }]}>
+              {(['system', 'dark', 'light'] as const).map((opt) => {
+                const active = themePref === opt;
+                return (
+                  <Pressable
+                    key={opt}
+                    onPress={() => setThemePref(opt)}
                     style={[
-                      styles.segmentText,
-                      { color: active ? styles.segmentTextActive.color : themed.ink },
+                      styles.segment,
+                      active && { backgroundColor: themed.primary },
                     ]}
+                    testID={`settings-theme-${opt}`}
                   >
-                    {opt === 'system' ? 'System' : opt === 'dark' ? 'Dark' : 'Light'}
-                  </Text>
-                </Pressable>
-              );
-            })}
+                    <Text
+                      style={[
+                        styles.segmentText,
+                        { color: active ? themed.cream : themed.ink },
+                      ]}
+                    >
+                      {opt === 'system' ? 'System' : opt === 'dark' ? 'Dark' : 'Light'}
+                    </Text>
+                  </Pressable>
+                );
+              })}
+            </View>
           </View>
-        </View>
+        </ListItem>
 
         {/* ── Notifications ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>NOTIFICATIONS</Text>
-        <View style={[styles.card, { backgroundColor: themed.pale }]}>
-          <View style={styles.toggleRow}>
-            <View style={styles.toggleLabelWrap}>
-              <Text style={[styles.toggleLabel, { color: themed.ink }]}>In-app banners</Text>
-              <Text style={[styles.toggleHint, { color: themed.slate }]}>
-                Show a top banner with sender + preview when a message
-                arrives while you're using the app.
-              </Text>
-            </View>
-            <Switch
-              value={inAppNotificationsEnabled}
-              onValueChange={setInAppNotificationsEnabled}
-              testID="settings-in-app-notifications"
-            />
+        <SectionLabel color={themed.slate}>NOTIFICATIONS</SectionLabel>
+        <ListItem dividerColor={themed.divider}>
+          <View style={styles.listItemBody}>
+            <Text style={[styles.listItemTitle, { color: themed.ink }]}>In-app banners</Text>
+            <Text style={[styles.listItemSubtitle, { color: themed.slate }]}>
+              Top banner with sender + preview when a message arrives while you're using the app.
+            </Text>
           </View>
-        </View>
+          {/* Brand §7: accent when on, surface-pressed when off, no
+              thumb shadow. Native Switch's thumb shadow can't be killed
+              outright on iOS, but on Android the colors map cleanly.
+              `ios_backgroundColor` matches the off track so the thumb
+              halo doesn't bleed into a different shade. */}
+          <Switch
+            value={inAppNotificationsEnabled}
+            onValueChange={setInAppNotificationsEnabled}
+            trackColor={{ false: themed.soft, true: themed.primary }}
+            thumbColor={themed.cream}
+            ios_backgroundColor={themed.soft}
+            testID="settings-in-app-notifications"
+          />
+        </ListItem>
 
         {/* ── Connection ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>CONNECTION</Text>
-        <View style={[styles.card, { backgroundColor: themed.pale }]}>
-          <View style={styles.statusRow}>
-            <Text style={[styles.statusLabel, { color: themed.ink }]}>WebSocket</Text>
-            <Text style={[styles.statusValue, { color: themed.slate }]}>{wsState}</Text>
+        <SectionLabel color={themed.slate}>CONNECTION</SectionLabel>
+        <ListItem dividerColor={themed.divider}>
+          <View style={styles.listItemBody}>
+            <Text style={[styles.listItemTitle, { color: themed.ink }]}>WebSocket</Text>
           </View>
-        </View>
+          <Text style={[styles.statusValue, { color: themed.slate }]}>{wsState}</Text>
+        </ListItem>
 
         {/* ── Actions ── */}
-        <Text style={[text.sectionLabel, styles.sectionLabel, { color: themed.slate }]}>ACTIONS</Text>
-        <View style={[styles.card, { backgroundColor: themed.pale }]}>
-          <Pressable
-            onPress={onInviteFriends}
-            style={styles.primaryBtn}
-            testID="settings-invite-friends"
-          >
-            <Text style={styles.primaryBtnText}>Invite friends</Text>
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable onPress={onOpenDiagnostics} style={styles.primaryBtn}>
-            <Text style={styles.primaryBtnText}>Diagnostics</Text>
-          </Pressable>
-          <View style={styles.divider} />
-          <Pressable
-            onPress={handleSignOut}
-            style={[
-              styles.destructiveBtn,
-              { borderColor: themed.divider },
-            ]}
-          >
-            <Text style={[styles.destructiveBtnText, { color: themed.ink }]}>Sign Out</Text>
-          </Pressable>
-        </View>
+        <SectionLabel color={themed.slate}>ACTIONS</SectionLabel>
+        <ActionItem
+          label="Invite friends"
+          onPress={onInviteFriends}
+          dividerColor={themed.divider}
+          ink={themed.ink}
+          accent={themed.primary}
+          pressedBg={themed.soft}
+          testID="settings-invite-friends"
+        />
+        <ActionItem
+          label="Diagnostics"
+          onPress={onOpenDiagnostics}
+          dividerColor={themed.divider}
+          ink={themed.ink}
+          accent={themed.primary}
+          pressedBg={themed.soft}
+        />
+        <ActionItem
+          label="Sign out"
+          onPress={handleSignOut}
+          dividerColor={themed.divider}
+          ink={themed.slate}
+          // Sign out is deliberate but secondary — no trailing chevron,
+          // muted ink. The Alert.alert confirmation does the danger
+          // gate (brand §1: no third color for danger).
+          chevron={false}
+          pressedBg={themed.soft}
+        />
 
-        {/* ── Footer ── */}
         <Text style={[text.footnote, styles.version, { color: themed.slate }]}>
           speakeasy 0.1.0
         </Text>
       </ScrollView>
     </SafeAreaView>
+  );
+}
+
+function SectionLabel({
+  children,
+  color,
+}: {
+  children: React.ReactNode;
+  color: string;
+}): React.JSX.Element {
+  return <Text style={[styles.sectionLabel, { color }]}>{children}</Text>;
+}
+
+function ListItem({
+  children,
+  dividerColor,
+}: {
+  children: React.ReactNode;
+  dividerColor: string;
+}): React.JSX.Element {
+  return (
+    <View style={[styles.listItem, { borderBottomColor: dividerColor }]}>{children}</View>
+  );
+}
+
+function TextLink({
+  children,
+  onPress,
+  color,
+  disabled,
+}: {
+  children: React.ReactNode;
+  onPress?: () => void;
+  color: string;
+  disabled?: boolean;
+}): React.JSX.Element {
+  return (
+    <Pressable onPress={disabled ? undefined : onPress} hitSlop={6}>
+      <Text
+        style={[
+          styles.textLink,
+          { color, opacity: disabled ? 0.5 : 1 },
+        ]}
+      >
+        {children}
+      </Text>
+    </Pressable>
+  );
+}
+
+function ActionItem({
+  label,
+  onPress,
+  dividerColor,
+  ink,
+  accent,
+  pressedBg,
+  chevron = true,
+  testID,
+}: {
+  label: string;
+  onPress: () => void;
+  dividerColor: string;
+  ink: string;
+  accent?: string;
+  pressedBg: string;
+  chevron?: boolean;
+  testID?: string;
+}): React.JSX.Element {
+  return (
+    <Pressable
+      onPress={onPress}
+      testID={testID}
+      style={({ pressed }) => [
+        styles.listItem,
+        { borderBottomColor: dividerColor },
+        pressed && { backgroundColor: pressedBg },
+      ]}
+    >
+      <Text style={[styles.listItemTitle, { color: ink, flex: 1 }]}>{label}</Text>
+      {chevron ? <Text style={[styles.chevron, { color: accent }]}>›</Text> : null}
+    </Pressable>
   );
 }
 
@@ -280,151 +386,117 @@ const styles = StyleSheet.create({
   backText: {
     fontFamily: fonts.inter500,
     fontSize: 15,
-    color: colors.primary,
   },
 
   content: {
-    paddingHorizontal: space.lg,
     paddingBottom: space.xxl,
-    gap: space.sm,
   },
 
   sectionLabel: {
-    color: colors.slate,
-    marginTop: space.md,
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textTransform: 'uppercase',
+    paddingHorizontal: space.lg,
+    marginTop: space.lg,
     marginBottom: space.xs,
   },
 
-  card: {
-    backgroundColor: colors.pale,
-    borderRadius: radius.avatar,
-    padding: space.md,
-    gap: space.sm,
-  },
-
-  profileRow: {
+  // Profile is the one block that breaks the strict ListItem rhythm —
+  // it's a hero affordance (avatar + handle + a row of inline text
+  // links). Padding matches the ListItem so the section reads as
+  // belonging to the same column.
+  profileBlock: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    borderBottomColor: colors.divider,
   },
   profileBody: { flex: 1, gap: space.xs },
-  profileActions: { flexDirection: 'row', flexWrap: 'wrap', gap: space.xs },
-  // Spec §10: no avatar circles — the placeholder follows the
-  // `<Avatar>` component's 4-radius square rule.
   profileAvatarPlaceholder: {
-    width: 64,
-    height: 64,
-    borderRadius: radius.avatar,
-    backgroundColor: colors.pale,
+    width: 56,
+    height: 56,
+    borderRadius: 4,
   },
   idValue: {
-    fontFamily: fonts.inter500,
+    fontFamily: font.medium,
     fontSize: 16,
-    color: colors.ink,
     letterSpacing: -0.2,
   },
-  copyBtn: {
-    paddingVertical: space.xs,
-    paddingHorizontal: space.md,
-    borderRadius: radius.pill,
-    backgroundColor: colors.pale,
-  },
-  copyBtnBusy: { opacity: 0.6 },
-  copyBtnText: {
-    fontFamily: fonts.inter500,
-    fontSize: 12,
-    color: colors.primary,
-  },
-
-  primaryBtn: {
-    paddingVertical: 14,
-    borderRadius: radius.pill,
-    backgroundColor: colors.primary,
-    alignItems: 'center',
-  },
-  primaryBtnText: {
-    fontFamily: fonts.inter500,
-    fontSize: 15,
-    color: colors.cream,
-  },
-
-  statusRow: {
+  profileActions: {
     flexDirection: 'row',
-    justifyContent: 'space-between',
+    flexWrap: 'wrap',
     alignItems: 'center',
+    gap: space.xs,
+    marginTop: 2,
   },
-  statusLabel: {
-    fontFamily: fonts.inter400,
-    fontSize: 14,
-    color: colors.ink,
-  },
-  statusValue: {
-    fontFamily: fonts.inter500,
+  textLink: {
+    fontFamily: font.medium,
     fontSize: 13,
-    color: colors.slate,
+  },
+  actionSep: {
+    fontSize: 13,
+    paddingHorizontal: 2,
+  },
+
+  // Per BRANDING1.md §6.8 — 56-min height, 16/20 padding (we use 20
+  // horizontal to match the section label gutter), hairline bottom
+  // border. NO card background.
+  listItem: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    minHeight: 56,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  listItemBody: { flex: 1, gap: 2 },
+  listItemTitle: {
+    fontFamily: type.body.weight,
+    fontSize: type.body.size,
+    letterSpacing: type.body.size * type.body.letterSpacingEm,
+  },
+  listItemSubtitle: {
+    fontFamily: type.caption.weight,
+    fontSize: type.caption.size,
+    letterSpacing: type.caption.size * type.caption.letterSpacingEm,
+  },
+
+  statusValue: {
+    fontFamily: font.medium,
+    fontSize: 13,
     textTransform: 'capitalize',
   },
 
-  toggleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.md,
-  },
-
-  // Segmented theme toggle. Sharp corners (radius 0) per spec §6.6;
-  // active segment uses the brass accent + ink foreground.
+  // Sharp, geometric segmented control. Active segment uses the brass
+  // accent + cream foreground; inactive segments are the row's own
+  // canvas. 1px border in `divider` — no inner separators (the brand
+  // prefers space to lines).
   segmentRow: {
     flexDirection: 'row',
     borderWidth: 1,
-    borderColor: colors.divider,
+    marginTop: space.sm,
   },
   segment: {
     flex: 1,
     alignItems: 'center',
     paddingVertical: space.sm,
-    backgroundColor: 'transparent',
   },
-  segmentActive: { backgroundColor: colors.primary },
   segmentText: {
-    fontFamily: fonts.inter500,
+    fontFamily: font.medium,
     fontSize: 13,
-    color: colors.ink,
-  },
-  segmentTextActive: { color: colors.cream },
-  toggleLabelWrap: { flex: 1 },
-  toggleLabel: {
-    fontFamily: fonts.inter500,
-    fontSize: 14,
-    color: colors.ink,
-  },
-  toggleHint: {
-    fontFamily: fonts.inter400,
-    fontSize: 12,
-    color: colors.slate,
-    marginTop: 2,
   },
 
-  divider: {
-    height: StyleSheet.hairlineWidth,
-    backgroundColor: colors.divider,
-  },
-
-  // Spec §1: no third color. Sign Out is "deliberate but secondary":
-  // transparent bg + 1px text-faint border + ink foreground. The
-  // confirmation Alert.alert handles the "are you sure" gate so we
-  // don't need a fire-engine red to signal danger.
-  destructiveBtn: {
-    paddingVertical: 14,
-    borderRadius: radius.pill,
-    backgroundColor: 'transparent',
-    borderWidth: 1,
-    borderColor: colors.divider,
-    alignItems: 'center',
-  },
-  destructiveBtnText: {
-    fontFamily: fonts.inter500,
-    fontSize: 15,
-    color: colors.ink,
+  // The trailing accent chevron — brand §6.8 explicitly allows this as
+  // the trailing element on a ListItem, and *only* in accent.
+  chevron: {
+    fontFamily: font.regular,
+    fontSize: 22,
+    lineHeight: 22,
   },
 
   version: {

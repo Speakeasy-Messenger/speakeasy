@@ -1,20 +1,12 @@
-import React from 'react';
-import {
-  FlatList,
-  Pressable,
-  SafeAreaView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
-import { Avatar } from '../components/Avatar.js';
+import React, { useEffect, useRef, useState } from 'react';
+import { FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { GetStartedCards } from '../components/GetStartedCards.js';
-import { GroupAvatar } from '../components/GroupAvatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
 import Svg, { Path } from 'react-native-svg';
 import { useColors } from '../theme/index.js';
-import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { colors, fonts, space, text } from '../theme/index.js';
+import { font, type } from '../theme/tokens.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
@@ -52,9 +44,10 @@ interface Props {
 }
 
 /**
- * Phase 5e: combined conversations list — direct chats + groups, sorted
- * by most-recent activity. Spec §14: color-pale cards, rounded-square
- * avatars, timer pills, unread badges, relative timestamps.
+ * Combined conversations list — direct chats + groups, sorted by most-
+ * recent activity. Brand §7 (workspace): flat ListItems with a hairline
+ * `text-ghost` divider, no avatars, timestamp on long-press only.
+ * Trailing accent indicator marks unread rows (brand §6.8).
  */
 export function ConversationsScreen({
   onOpenChat,
@@ -69,9 +62,6 @@ export function ConversationsScreen({
   const conversationsById = useConversations((s) => s.byId);
   const groupsById = useGroups((s) => s.byId);
   const unreadCountFor = useConversations((s) => s.unreadCountFor);
-  // Themed palette — `themed.cream` flips to the light canvas when
-  // mode is light. Module-level `styles` (which use the static `colors`
-  // alias) stay dark-pinned for now; phase E moves them too.
   const themed = useColors();
 
   const directRows: DirectRow[] = Object.entries(conversationsById)
@@ -105,10 +95,21 @@ export function ConversationsScreen({
   });
 
   const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
-  // Show the Get Started card row while the user has fewer than 5
-  // conversations. Cards are individually dismissable; the component
-  // renders nothing once everything's been dismissed.
   const showGetStarted = rows.length < 5;
+
+  // The brand spec hides timestamps by default and reveals on
+  // long-press (§7). Track which row id is currently revealed; clear
+  // after a short window so the row reverts to its quiet default.
+  const [revealedId, setRevealedId] = useState<string | null>(null);
+  const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => () => {
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+  }, []);
+  const reveal = (id: string) => {
+    if (revealTimer.current) clearTimeout(revealTimer.current);
+    setRevealedId(id);
+    revealTimer.current = setTimeout(() => setRevealedId(null), 1800);
+  };
 
   return (
     <SafeAreaView
@@ -126,9 +127,6 @@ export function ConversationsScreen({
               >
                 @{userId}
               </Text>
-              {/* Spec §6.10: status is a 6×6 brass square (online) or
-                  text-faint square (offline). The wsState text label is
-                  gone — the square IS the status. */}
               <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
             </View>
           </View>
@@ -152,73 +150,61 @@ export function ConversationsScreen({
             No conversations yet.
           </Text>
         }
-        renderItem={({ item }) =>
-          item.kind === 'direct' ? (
-            <Pressable onPress={() => onOpenChat(item.peerUserId)} style={[styles.card, { backgroundColor: themed.pale }]}>
-              <Avatar userId={item.peerUserId} size={40} />
+        renderItem={({ item }) => {
+          const id = item.kind === 'direct' ? item.conversationId : item.groupId;
+          const title = item.kind === 'direct' ? `@${item.peerUserId}` : `# ${item.name}`;
+          const subtitle =
+            item.kind === 'direct'
+              ? item.preview
+              : `${item.memberCount} member${item.memberCount === 1 ? '' : 's'} · ${item.preview}`;
+          const onPress = () =>
+            item.kind === 'direct' ? onOpenChat(item.peerUserId) : onOpenGroup(item.groupId);
+          const showTimestamp = revealedId === id;
+          return (
+            <Pressable
+              onPress={onPress}
+              onLongPress={() => reveal(id)}
+              style={({ pressed }) => [
+                styles.row,
+                { borderBottomColor: themed.divider },
+                pressed && { backgroundColor: themed.soft },
+              ]}
+            >
               <View style={styles.rowBody}>
-                <View style={styles.rowTop}>
+                <Text style={[styles.rowTitle, { color: themed.ink }]} numberOfLines={1}>
+                  {title}
+                </Text>
+                <Text style={[styles.rowSubtitle, { color: themed.slate }]} numberOfLines={1}>
+                  {subtitle}
+                </Text>
+                {showTimestamp ? (
                   <Text
-                    style={[styles.rowName, { color: themed.ink }]}
-                    numberOfLines={1}
+                    style={[
+                      styles.rowTimestamp,
+                      { color: themed.slate },
+                    ]}
                   >
-                    @{item.peerUserId}
+                    {relativeTime(item.lastActivityAt).toUpperCase()}
                   </Text>
-                  <Text style={[styles.timestamp, { color: themed.slate }]}>
-                    {relativeTime(item.lastActivityAt)}
-                  </Text>
-                </View>
-                <View style={styles.rowBottom}>
-                  <Text
-                    style={[styles.rowPreview, { color: themed.slate }]}
-                    numberOfLines={1}
-                  >
-                    {item.preview}
-                  </Text>
-                  {item.unread > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
-                    </View>
-                  )}
-                </View>
+                ) : null}
               </View>
-            </Pressable>
-          ) : (
-            <Pressable onPress={() => onOpenGroup(item.groupId)} style={[styles.card, { backgroundColor: themed.pale }]}>
-              <GroupAvatar groupId={item.groupId} name={item.name} size={40} />
-              <View style={styles.rowBody}>
-                <View style={styles.rowTop}>
-                  <Text
-                    style={[styles.rowName, { color: themed.ink }]}
-                    numberOfLines={1}
-                  >
-                    # {item.name}
-                  </Text>
-                  <Text style={[styles.timestamp, { color: themed.slate }]}>
-                    {relativeTime(item.lastActivityAt)}
-                  </Text>
+              {item.unread > 0 ? (
+                <View style={styles.unread}>
+                  {item.unread > 1 ? (
+                    <Text style={[styles.unreadCount, { color: themed.primary }]}>
+                      {item.unread > 99 ? '99+' : item.unread}
+                    </Text>
+                  ) : null}
+                  <View style={[styles.unreadMark, { backgroundColor: themed.primary }]} />
                 </View>
-                <View style={styles.rowBottom}>
-                  <Text
-                    style={[styles.rowPreview, { color: themed.slate }]}
-                    numberOfLines={1}
-                  >
-                    {item.memberCount} member{item.memberCount === 1 ? '' : 's'} · {item.preview}
-                  </Text>
-                  {item.unread > 0 && (
-                    <View style={styles.badge}>
-                      <Text style={styles.badgeText}>{item.unread > 99 ? '99+' : item.unread}</Text>
-                    </View>
-                  )}
-                </View>
-              </View>
+              ) : null}
             </Pressable>
-          )
-        }
+          );
+        }}
       />
 
       {showGetStarted ? (
-        <View style={styles.getStartedDock}>
+        <View style={[styles.getStartedDock, { backgroundColor: themed.cream, borderTopColor: themed.divider }]}>
           <GetStartedCards
             onInviteFriends={onInviteFriends}
             onNewGroup={onNewGroup}
@@ -231,8 +217,6 @@ export function ConversationsScreen({
         pointerEvents="box-none"
         style={[
           styles.fabStack,
-          // Lift the FABs above the Get Started dock when it's showing,
-          // otherwise the pencil button covers the rightmost card.
           showGetStarted ? styles.fabStackAboveDock : null,
         ]}
       >
@@ -285,14 +269,6 @@ function HashFabIcon({ color }: { color: string }): React.JSX.Element {
   );
 }
 
-function initials(userId: string): string {
-  const parts = userId.split('-').filter(Boolean);
-  if (parts.length === 0) return '??';
-  const first = parts[0]![0]!.toUpperCase();
-  const last = parts[parts.length - 1]![0]!.toUpperCase();
-  return first + last;
-}
-
 function relativeTime(ms: number): string {
   const diff = Date.now() - ms;
   const seconds = Math.floor(diff / 1000);
@@ -314,87 +290,65 @@ const styles = StyleSheet.create({
   label: { color: colors.slate },
   you: { color: colors.ink, fontFamily: fonts.inter500 },
   youRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  status: { color: colors.slate },
   gearBtn: { padding: space.sm },
-  gearIcon: { fontSize: 20 },
-  listContent: { paddingHorizontal: space.md, paddingBottom: space.xl, gap: space.xs },
+  // Per BRANDING1.md §6.8: 56-min height, 16/20 padding, 1px text-ghost
+  // bottom border, NO per-row card background, NO avatar, NO default
+  // timestamp. The whole list reads as one quiet column.
+  listContent: { paddingBottom: space.xl },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: colors.slate },
-  card: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.avatar,
-    backgroundColor: colors.pale,
-  },
-  avatar: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.avatar,
-    backgroundColor: colors.soft,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  avatarText: {
-    fontFamily: fonts.inter500,
-    fontSize: 14,
-    color: colors.primary,
-    letterSpacing: 0.5,
-  },
-  avatarGroup: { backgroundColor: colors.primary },
-  avatarGroupText: {
-    fontFamily: fonts.inter500,
-    fontSize: 22,
-    color: colors.cream,
+    minHeight: 56,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowBody: { flex: 1, gap: 2 },
-  rowTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'baseline' },
-  rowName: {
-    color: colors.ink,
-    fontFamily: fonts.inter500,
-    fontSize: 14,
-    flex: 1,
+  rowTitle: {
+    fontFamily: type.body.weight,
+    fontSize: type.body.size,
+    letterSpacing: type.body.size * type.body.letterSpacingEm,
   },
-  timestamp: {
-    color: colors.slate,
-    fontFamily: fonts.inter300,
-    fontSize: 11,
-    marginLeft: space.sm,
+  rowSubtitle: {
+    fontFamily: type.caption.weight,
+    fontSize: type.caption.size,
+    letterSpacing: type.caption.size * type.caption.letterSpacingEm,
   },
-  rowBottom: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
-  rowPreview: {
-    color: colors.slate,
-    fontFamily: fonts.inter400,
-    fontSize: 12,
-    flex: 1,
+  // Long-press reveal — meta-style timestamp slid in beneath the
+  // subtitle. Uppercase + accent-tracking matches the brand's `meta`
+  // scale (§2.2) so it reads as a quiet annotation, not a competing
+  // line of content.
+  rowTimestamp: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textTransform: 'uppercase',
+    marginTop: 4,
   },
-  badge: {
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
-    minWidth: 20,
-    height: 20,
+  // Trailing accent indicator: a 6×6 brass square (matches §6.10
+  // status-square geometry) marks unread rows. When the count is >1,
+  // the number appears in `caption`-sized brass to the left of the
+  // square. count==1 renders the square alone — minimum information,
+  // maximum brand-quiet.
+  unread: {
+    flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
-    paddingHorizontal: 6,
+    gap: space.sm,
+    marginLeft: space.md,
   },
-  badgeText: {
-    color: colors.cream,
-    fontFamily: fonts.inter500,
-    fontSize: 11,
+  unreadCount: {
+    fontFamily: font.medium,
+    fontSize: type.caption.size,
   },
-  // Sticky bottom dock for the Get Started cards. The cards are
-  // horizontal-scrollable; the dock is a fixed-height row above the
-  // FABs so the chat list always has the rest of the screen.
+  unreadMark: {
+    width: 6,
+    height: 6,
+  },
   getStartedDock: {
-    borderTopColor: colors.pale,
-    borderTopWidth: 1,
-    backgroundColor: colors.cream,
+    borderTopWidth: StyleSheet.hairlineWidth,
   },
-  // FABs float over the bottom-right corner. `pointerEvents="box-none"`
-  // on the wrapper lets taps fall through to the list everywhere except
-  // on the buttons themselves.
   fabStack: {
     position: 'absolute',
     right: space.lg,
@@ -402,9 +356,6 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.sm,
   },
-  // When the Get Started dock is rendered (≈140px tall card row +
-  // padding), the FABs need to sit above it — otherwise the pencil
-  // button overlaps the rightmost card.
   fabStackAboveDock: {
     bottom: 156,
   },

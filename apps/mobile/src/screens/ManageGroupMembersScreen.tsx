@@ -11,13 +11,13 @@ import {
   View,
 } from 'react-native';
 import { isUserId } from '@speakeasy/shared';
-import { Avatar } from '../components/Avatar.js';
 import { ApiError } from '../api/client.js';
 import { api, vouchflow } from '../services.js';
 import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
 import { useColors } from '../theme/index.js';
-import { colors, fonts, radius, space, text } from '../theme/index.js';
+import { colors, fonts, space, text } from '../theme/index.js';
+import { font, type } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
 
 interface Props {
@@ -26,30 +26,16 @@ interface Props {
 }
 
 /**
- * Manage members of a group. Two affordances:
+ * Manage members of a group — BRANDING1.md §6.6 (sharp buttons), §6.8
+ * (ListItem) + §7 (workspace conventions). Two affordances:
  *
- *  - **Add member**: input + Add button, accepts `@handle` or bare
- *    handle. Validates against the same `isUserId` regex used by
- *    NewChat, so a typo returns inline rather than a 400 from the
- *    server. On success the row is appended optimistically and the
- *    local store is updated; the next group send will include the new
- *    member in its fan-out.
+ *  - **Add member**: input + Add button. Validates against `isUserId`
+ *    so a typo returns inline rather than a 400 from the server.
+ *  - **Remove member** (creator only): Per-row "Remove" link, gated by
+ *    Alert.alert for the danger confirm (brand §1: no third color for
+ *    danger — the dialog is the gate, not a red label).
  *
- *  - **Remove member** (creator only): Each row has a "Remove" link
- *    on the right. Tapping prompts a confirm dialog, then DELETE
- *    /v1/groups/:id/members/:userId. The creator's own row never gets
- *    a Remove link (server enforces this; we hide it client-side too
- *    so the affordance never tempts).
- *
- * Non-creators see a read-only roster — no Add input, no Remove links.
- *
- * **Sender-key rotation on remove (deferred)**: when a member is
- * kicked, ideally we'd rotate the sender key so the kicked member's
- * still-cached SKDM stops decrypting future messages. The alpha sandbox
- * doesn't enforce post-removal forward secrecy yet — adding rotation is
- * a follow-up; the server already stops fanning messages to the kicked
- * member, so the practical leak window is bounded by what they can
- * coax out of their own previously-cached key, not by ongoing traffic.
+ * Non-creators see a read-only roster.
  */
 export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
   const themed = useColors();
@@ -67,10 +53,6 @@ export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
 
   const isCreator = !!myUserId && !!createdBy && myUserId === createdBy;
 
-  // Resync the roster from the server on mount. The local Group.members
-  // is an ever-growing union (we never had a remove path before), so it
-  // can drift if anyone was kicked; pulling fresh on entry guarantees
-  // the manage UI reflects truth.
   useEffect(() => {
     void (async () => {
       setLoading(true);
@@ -147,7 +129,7 @@ export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
     <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
       <View style={styles.header}>
         <Pressable onPress={onBack} hitSlop={8} style={styles.backBtn}>
-          <Text style={[styles.backText, { color: colors.primary }]}>← Back</Text>
+          <Text style={[styles.backText, { color: themed.primary }]}>‹ Back</Text>
         </Pressable>
         <Text style={[text.heroBody, { color: themed.ink }]}>Members</Text>
       </View>
@@ -161,26 +143,34 @@ export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
             placeholderTextColor={themed.slate}
             autoCorrect={false}
             autoCapitalize="none"
+            // Brand §2.4: inputs at radius-2 (4px). Single-color border
+            // in `divider` keeps the input quiet against the canvas.
             style={[
               styles.input,
-              { backgroundColor: themed.pale, color: themed.ink },
+              { backgroundColor: themed.cream, color: themed.ink, borderColor: themed.divider },
             ]}
             testID="manage-members-input"
           />
           <Pressable
             onPress={() => void handleAdd()}
             disabled={adding}
-            style={[styles.addBtn, adding && styles.addBtnDisabled]}
+            style={[
+              styles.addBtn,
+              { backgroundColor: themed.primary },
+              adding && styles.addBtnDisabled,
+            ]}
             testID="manage-members-add"
           >
-            <Text style={styles.addBtnText}>{adding ? '…' : 'Add'}</Text>
+            <Text style={[styles.addBtnText, { color: themed.cream }]}>
+              {adding ? '…' : 'Add'}
+            </Text>
           </Pressable>
         </View>
       ) : null}
 
       {loading && members.length === 0 ? (
         <View style={styles.center}>
-          <ActivityIndicator color={colors.primary} />
+          <ActivityIndicator color={themed.primary} />
         </View>
       ) : (
         <FlatList
@@ -188,7 +178,7 @@ export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
           keyExtractor={(m) => m}
           contentContainerStyle={styles.listContent}
           ListEmptyComponent={
-            <Text style={[text.subtitle, { color: themed.slate, textAlign: 'center', marginTop: space.lg }]}>
+            <Text style={[text.subtitle, styles.empty, { color: themed.slate }]}>
               No members.
             </Text>
           }
@@ -196,15 +186,16 @@ export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
             const isCreatorRow = item === createdBy;
             const isSelf = item === myUserId;
             return (
-              <View style={[styles.row, { backgroundColor: themed.pale }]}>
-                <Avatar userId={item} size={36} />
+              <View style={[styles.row, { borderBottomColor: themed.divider }]}>
                 <View style={styles.rowBody}>
                   <Text style={[styles.rowName, { color: themed.ink }]} numberOfLines={1}>
                     @{item}
                     {isSelf ? ' (you)' : ''}
                   </Text>
                   {isCreatorRow ? (
-                    <Text style={[styles.rowSub, { color: themed.slate }]}>creator</Text>
+                    <Text style={[styles.rowSub, { color: themed.slate }]}>
+                      CREATOR
+                    </Text>
                   ) : null}
                 </View>
                 {isCreator && !isCreatorRow ? (
@@ -213,7 +204,7 @@ export function ManageGroupMembersScreen({ groupId, onBack }: Props) {
                     hitSlop={6}
                     testID={`manage-members-remove-${item}`}
                   >
-                    <Text style={styles.removeText}>Remove</Text>
+                    <Text style={[styles.removeText, { color: themed.slate }]}>Remove</Text>
                   </Pressable>
                 ) : null}
               </View>
@@ -244,40 +235,71 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: space.xs },
   backText: { fontFamily: fonts.inter500, fontSize: 15 },
+
   addRow: {
     flexDirection: 'row',
     gap: space.sm,
     paddingHorizontal: space.lg,
-    paddingBottom: space.sm,
+    paddingBottom: space.md,
   },
+  // Brand §2.4: inputs at 4px radius. Hairline border in `divider` —
+  // the input reads as "frame around the canvas", not a competing
+  // surface.
   input: {
     flex: 1,
+    height: 48,
     paddingHorizontal: space.md,
-    paddingVertical: 12,
-    borderRadius: radius.pill,
-    fontFamily: fonts.inter400,
-    fontSize: 14,
+    borderRadius: 4,
+    borderWidth: StyleSheet.hairlineWidth,
+    fontFamily: font.regular,
+    fontSize: type.body.size,
   },
+  // Brand §6.6 Button (primary): 48 high, 0 radius (sharp,
+  // intentional), 12/24 padding, body weight semibold.
   addBtn: {
-    paddingHorizontal: space.lg,
+    height: 48,
+    paddingHorizontal: 24,
     justifyContent: 'center',
-    backgroundColor: colors.primary,
-    borderRadius: radius.pill,
+    borderRadius: 0,
   },
   addBtnDisabled: { opacity: 0.5 },
-  addBtnText: { color: colors.cream, fontFamily: fonts.inter500, fontSize: 14 },
-  listContent: { paddingHorizontal: space.lg, paddingBottom: space.xxl, gap: space.xs },
+  addBtnText: { fontFamily: font.semibold, fontSize: type.body.size },
+
+  listContent: { paddingBottom: space.xxl },
+  empty: { textAlign: 'center', marginTop: space.lg },
+
+  // Brand §6.8 ListItem: 56 min, 16/20 padding, hairline `text-ghost`
+  // bottom border. No card background, no per-row avatar (the brand
+  // treats handle-as-identity for list rows; the members roster
+  // follows the conversation-list precedent).
   row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: space.md,
-    paddingVertical: space.sm,
-    paddingHorizontal: space.md,
-    borderRadius: radius.avatar,
+    minHeight: 56,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  rowBody: { flex: 1 },
-  rowName: { fontFamily: fonts.inter500, fontSize: 14 },
-  rowSub: { fontFamily: fonts.inter400, fontSize: 11 },
-  removeText: { color: '#C44', fontFamily: fonts.inter500, fontSize: 13 },
+  rowBody: { flex: 1, gap: 2 },
+  rowName: {
+    fontFamily: type.body.weight,
+    fontSize: type.body.size,
+    letterSpacing: type.body.size * type.body.letterSpacingEm,
+  },
+  // "CREATOR" rendered in `meta` style — uppercase + accent-tracking
+  // matches §2.2's section-label treatment, signalling it's a label
+  // about the row, not row content.
+  rowSub: {
+    fontFamily: type.meta.weight,
+    fontSize: type.meta.size,
+    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textTransform: 'uppercase',
+  },
+  // Brand §1: no third color for danger. "Remove" reads as a quiet
+  // text-link in slate; the Alert.alert dialog handles the
+  // are-you-sure gate. Was '#C44' in the previous design — replaced.
+  removeText: { fontFamily: font.medium, fontSize: 13 },
+
   center: { flex: 1, alignItems: 'center', justifyContent: 'center' },
 });
