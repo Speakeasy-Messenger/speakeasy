@@ -17,6 +17,10 @@ buildscript {
         classpath("com.android.tools.build:gradle")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
+        // FCM (push notifications). Reads google-services.json at compile
+        // time and bakes the project_id / api_key into BuildConfig so
+        // @react-native-firebase/messaging can wire to FCM at runtime.
+        classpath("com.google.gms:google-services:4.4.2")
     }
 }
 

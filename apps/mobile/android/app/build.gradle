@@ -1,6 +1,10 @@
 apply plugin: "com.android.application"
 apply plugin: "org.jetbrains.kotlin.android"
 apply plugin: "com.facebook.react"
+// FCM — must come AFTER the application plugin so it can attach itself
+// to the variant graph. Reads `google-services.json` from this module
+// (apps/mobile/android/app/) at evaluation time.
+apply plugin: "com.google.gms.google-services"
 
 // Workspace packages (@speakeasy/shared, /crypto, /vouchflow) compile to
 // `dist/` and are consumed by Metro through the workspace symlink. They
