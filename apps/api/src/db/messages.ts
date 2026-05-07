@@ -30,6 +30,21 @@ export interface BufferedMessage {
    * contains every entry of `targetDevices`.
    */
   deliveredToDevices: string[];
+  /**
+   * Sealed-sender flag (spec §13 / §11 Phase 5g). When true, the
+   * server stores `senderId` for ack routing but suppresses it in
+   * the wire frame forwarded to the recipient + omits it from the
+   * `audit: 'message_send'` log line. Direct messages only —
+   * sealing a group/community message has no meaning (server
+   * already fans out one row per recipient and the inner ciphertext
+   * is recipient-keyed).
+   *
+   * Server has no schema for the inner sealed payload; that's a
+   * mobile-side wrap of `(sender_id, signal_ciphertext)` with the
+   * recipient's identity public key. From the server's perspective
+   * `ciphertext` is opaque either way.
+   */
+  sealed: boolean;
 }
 
 /**

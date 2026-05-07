@@ -169,6 +169,7 @@ export const messages = pgTable(
     skdmGroupId: text('skdm_group_id'),
     targetDevices: jsonb('target_devices').notNull().$type<string[]>().default([]),
     deliveredToDevices: jsonb('delivered_to_devices').notNull().$type<string[]>().default([]),
+    sealed: boolean('sealed').notNull().default(false),
     delivered: boolean('delivered').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),

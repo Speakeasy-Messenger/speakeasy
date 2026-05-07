@@ -19,6 +19,7 @@ export class DrizzleMessagesRepo implements MessagesRepo {
       skdmGroupId: msg.skdmGroupId ?? null,
       targetDevices: sql`${JSON.stringify(msg.targetDevices)}::jsonb`,
       deliveredToDevices: sql`${JSON.stringify(msg.deliveredToDevices)}::jsonb`,
+      sealed: msg.sealed,
       delivered: false,
       createdAt: msg.createdAt ?? new Date(),
       expiresAt: msg.expiresAt,
@@ -56,6 +57,7 @@ export class DrizzleMessagesRepo implements MessagesRepo {
       skdmGroupId: row.skdmGroupId ?? undefined,
       targetDevices: (row.targetDevices as string[]) ?? [],
       deliveredToDevices: (row.deliveredToDevices as string[]) ?? [],
+      sealed: row.sealed ?? false,
     }));
   }
 

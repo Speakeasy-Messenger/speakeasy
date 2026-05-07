@@ -66,7 +66,29 @@ export interface Message {
 
 export type WsClientMsg =
   | { type: 'auth'; token: string }
-  | { type: 'message'; to: string; ciphertext: string; msg_type: ConversationKind }
+  | {
+      type: 'message';
+      to: string;
+      ciphertext: string;
+      msg_type: ConversationKind;
+      /**
+       * Sealed-sender flag (spec §13). When true on a `direct`
+       * message, the server suppresses the `from` field on the
+       * forwarded frame + on the buffer-drain replay, and elides
+       * the sender id from its `audit: 'message_send'` log line.
+       *
+       * The `ciphertext` contents are the sender's responsibility:
+       * they should wrap (sender_id, signal_ciphertext) using
+       * ECIES against the recipient's identity public key, so the
+       * recipient can recover the sender id without the server
+       * leaking it. The server is opaque to the inner format.
+       *
+       * Server ignores the flag for `group` / `community` messages
+       * (sealing fan-out has no obvious meaning + would require
+       * more invasive design).
+       */
+      sealed?: boolean;
+    }
   | { type: 'ack'; message_id: MessageId }
   | { type: 'ping' }
   /**
@@ -92,7 +114,16 @@ export type WsServerMsg =
   | { type: 'authed'; user_id: UserId }
   | {
       type: 'message';
-      from: UserId;
+      /**
+       * Sender of the message. Omitted on sealed-sender direct
+       * messages — the inner ciphertext carries the sender's
+       * identity instead, wrapped against the recipient's identity
+       * key. Recipients should treat absence as "this is sealed,
+       * unwrap to recover sender" rather than as an error.
+       *
+       * Always present on `group` / `community` messages.
+       */
+      from?: UserId;
       ciphertext: string;
       message_id: MessageId;
       msg_type: ConversationKind;
@@ -103,6 +134,13 @@ export type WsServerMsg =
        * incoming frame into the right local conversation without
        * having to re-derive (and without leaking the group id from
        * inside the ciphertext envelope).
+       *
+       * For sealed-sender direct messages, this is computed as
+       * `conversationIdForDirect(senderId, recipientId)` server-side
+       * — it leaks the SET of conversations the recipient is in
+       * (same as before), just not which one a given received
+       * frame came from. Acceptable: the recipient's own client
+       * already knows its conversations.
        */
       conversation_id: string;
     }

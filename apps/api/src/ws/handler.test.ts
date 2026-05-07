@@ -1321,3 +1321,125 @@ describe('ws voice call signaling — Phase 6', () => {
     expect(err2.code).toBe('bad_call_id');
   });
 });
+
+describe('ws sealed sender — Phase 5g (spec §13)', () => {
+  async function authedSocket(
+    userId: string,
+  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+    const ws = await open();
+    const q = new MsgQueue(ws);
+    ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
+    const authed = (await q.next()) as { type: string };
+    expect(authed.type).toBe('authed');
+    return { ws, q };
+  }
+
+  it('forwards a sealed direct message without `from`', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'U0VBTEVE',
+        msg_type: 'direct',
+        sealed: true,
+      }),
+    );
+    const incoming = (await b.q.next()) as Record<string, unknown>;
+    expect(incoming.type).toBe('message');
+    // Critical assertion: NO `from` field on a sealed forward.
+    expect('from' in incoming).toBe(false);
+    expect(incoming.ciphertext).toBe('U0VBTEVE');
+    expect(incoming.msg_type).toBe('direct');
+    // The message_id and conversation_id are still present —
+    // recipient needs them to ack and route locally.
+    expect(typeof incoming.message_id).toBe('string');
+    expect(typeof incoming.conversation_id).toBe('string');
+
+    // Internal ack flow still works — the server records senderId
+    // for routing but doesn't echo it. When bob acks, alice's
+    // `delivered` lands as usual.
+    b.ws.send(
+      JSON.stringify({ type: 'ack', message_id: incoming.message_id }),
+    );
+    const delivered = (await a.q.next()) as { type: string; message_id: string };
+    expect(delivered.type).toBe('delivered');
+    expect(delivered.message_id).toBe(incoming.message_id);
+  });
+
+  it('preserves sealed flag through the buffer drain on reconnect', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'QlVGRkVS',
+        msg_type: 'direct',
+        sealed: true,
+      }),
+    );
+    // Bob isn't connected — message buffers. Settle.
+    await new Promise((r) => setTimeout(r, 30));
+    expect(messagesRepo.buffer.size).toBe(1);
+    const stored = [...messagesRepo.buffer.values()][0]!;
+    expect(stored.sealed).toBe(true);
+    // Internal senderId still recorded (needed for ack routing).
+    expect(stored.senderId).toBe('alice-blue-fox');
+
+    // Bob connects → buffered drain → frame should also lack `from`.
+    const b = await authedSocket('bob-red-bear');
+    const buffered = (await b.q.next()) as Record<string, unknown>;
+    expect(buffered.type).toBe('message');
+    expect('from' in buffered).toBe(false);
+    expect(buffered.ciphertext).toBe('QlVGRkVS');
+  });
+
+  it('ignores sealed=true on group messages — `from` still present', async () => {
+    // Sealing fan-out doesn't make sense (multiple senders, one
+    // ciphertext). Server treats `sealed: true` as a no-op for
+    // group/community to avoid breaking existing decrypt paths.
+    const groupId = newGroupId();
+    await groupRepo.create({ groupId, createdBy: 'alice-blue-fox' });
+    await groupRepo.addMember({
+      groupId,
+      userId: 'bob-red-bear',
+      addedBy: 'alice-blue-fox',
+    });
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: groupId,
+        ciphertext: 'R1JPVVA=',
+        msg_type: 'group',
+        sealed: true, // ignored by server for non-direct
+      }),
+    );
+    const incoming = (await b.q.next()) as Record<string, unknown>;
+    expect(incoming.type).toBe('message');
+    expect(incoming.from).toBe('alice-blue-fox'); // sealing not applied
+    const stored = [...messagesRepo.buffer.values()][0]!;
+    expect(stored.sealed).toBe(false);
+  });
+
+  it('sealed=false (default) preserves the existing `from` behavior', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'TEVHQUNZ',
+        msg_type: 'direct',
+        // sealed omitted entirely
+      }),
+    );
+    const incoming = (await b.q.next()) as Record<string, unknown>;
+    expect(incoming.from).toBe('alice-blue-fox');
+  });
+});

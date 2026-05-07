@@ -213,6 +213,24 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         }
         diag('router', 'message: b64 decoded', { ...frameDesc, bytes: ciphertext.length });
         if (frame.msg_type === 'direct') {
+          // Sealed-sender direct messages omit `from` — recipient is
+          // expected to unwrap the inner envelope to recover sender
+          // identity. Phase A (this commit) ships server-side wire
+          // support but no mobile unwrap path yet — surface a
+          // placeholder bubble + ack so the buffer drains, and log
+          // the event so it's visible on the on-device Diagnostics
+          // screen. Phase B will replace this with real unwrap.
+          if (typeof frame.from !== 'string') {
+            diag('router', 'direct: sealed-sender frame, no unwrap (Phase B)', {
+              msgId: frame.message_id,
+            });
+            deps.ws.enqueueAck(frame.message_id);
+            return;
+          }
+          // After the guard above, `frame.from` is narrowed to string.
+          // Capture it once so the rest of this branch can keep using
+          // the existing logic without per-line non-null assertions.
+          const senderId: string = frame.from;
           void (async () => {
             try {
               let bubble: string;
@@ -225,7 +243,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               // libsignal encrypt). Decode directly instead of running
               // decrypt against a self-paired session that may not exist.
               let attachments: Attachment[] | undefined;
-              if (frame.from === deps.myUserId) {
+              if (senderId === deps.myUserId) {
                 const raw = utf8FromBytes(ciphertext);
                 const payload = decodePayload(raw);
                 bubble = payload.text ?? '';
@@ -238,7 +256,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               } else {
                 try {
                   const plaintext = await deps.signalProtocol.decrypt(
-                    frame.from,
+                    senderId,
                     ciphertext,
                   );
                   const raw = utf8FromBytes(plaintext);
@@ -263,7 +281,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               try {
                 conversationId = deps.conversationIdFor(
                   'direct',
-                  frame.from,
+                  senderId,
                   deps.myUserId,
                 );
               } catch (err) {
@@ -276,14 +294,14 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               }
               diag('router', 'add direct to conversation', {
                 convId: conversationId,
-                from: frame.from,
-                isSelf: frame.from === deps.myUserId,
+                from: senderId,
+                isSelf: senderId === deps.myUserId,
                 textPreview: bubble.slice(0, 24),
               });
               try {
                 deps.addToConversation(conversationId, {
                   id: frame.message_id,
-                  from: frame.from,
+                  from: senderId,
                   text: bubble,
                   attachments,
                   kind: 'direct',
@@ -291,7 +309,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   stage: 'sent',
                 });
                 diag('router', 'addToConversation OK', { convId: conversationId });
-                if (attachments && frame.from !== deps.myUserId) {
+                if (attachments && senderId !== deps.myUserId) {
                   deps.onInboundAttachments?.(attachments);
                 }
               } catch (err) {
@@ -303,12 +321,12 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               }
               deps.ws.enqueueAck(frame.message_id);
               diag('router', 'ack queued', { msgId: frame.message_id });
-              if (decryptedOk && frame.from !== deps.myUserId) {
+              if (decryptedOk && senderId !== deps.myUserId) {
                 deps.notifyInbound?.({
                   msgId: frame.message_id,
-                  from: frame.from,
+                  from: senderId,
                   text: bubble,
-                  target: { kind: 'direct', peerId: frame.from },
+                  target: { kind: 'direct', peerId: senderId },
                 });
               }
             } catch (err) {
@@ -322,6 +340,16 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             }
           })();
         } else if (frame.msg_type === 'group') {
+          // Group/community messages always carry `from` — sealed
+          // sender doesn't apply to fan-out frames. Type narrows
+          // `frame.from` from `string | undefined` to `string`.
+          if (typeof frame.from !== 'string') {
+            diag('router', 'group: missing from (unexpected)', {
+              msgId: frame.message_id,
+            });
+            return;
+          }
+          const groupSenderId: string = frame.from;
           // Server stamps the group id as conversation_id on the frame
           // (added when group messages can't carry it inside the
           // ciphertext envelope). Bucket directly into that group.
@@ -331,16 +359,16 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               // both arrived together on a buffer drain after a
               // reconnect), wait for it to finish so the SenderKey is
               // installed before we try to decrypt.
-              const pendingSkdm = pendingSkdms.get(frame.from);
+              const pendingSkdm = pendingSkdms.get(groupSenderId);
               if (pendingSkdm) {
                 diag('router', 'group: awaiting in-flight SKDM', {
                   msgId: frame.message_id,
-                  from: frame.from,
+                  from: groupSenderId,
                 });
                 await pendingSkdm;
                 diag('router', 'group: SKDM settled, proceeding', {
                   msgId: frame.message_id,
-                  from: frame.from,
+                  from: groupSenderId,
                 });
               }
               let bubble: string;
@@ -348,7 +376,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               let decryptedOk = false;
               try {
                 const plaintext = await deps.groupMessaging.decryptFromGroupMember(
-                  frame.from,
+                  groupSenderId,
                   ciphertext,
                 );
                 const raw = utf8FromBytes(plaintext);
@@ -358,7 +386,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 decryptedOk = true;
                 diag('router', 'group: decrypted', {
                   msgId: frame.message_id,
-                  from: frame.from,
+                  from: groupSenderId,
                   textPreview: bubble.slice(0, 24),
                   attachCount: groupAttachments?.length ?? 0,
                 });
@@ -366,7 +394,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 bubble = decodeBubble(err as Error);
                 diag('router', 'group: decrypt FAILED → bubble', {
                   msgId: frame.message_id,
-                  from: frame.from,
+                  from: groupSenderId,
                   bubble,
                   err: String(err),
                 });
@@ -374,7 +402,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               try {
                 deps.addToConversation(frame.conversation_id, {
                   id: frame.message_id,
-                  from: frame.from,
+                  from: groupSenderId,
                   text: bubble,
                   attachments: groupAttachments,
                   kind: 'group',
@@ -385,7 +413,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   convId: frame.conversation_id,
                   msgId: frame.message_id,
                 });
-                if (groupAttachments && frame.from !== deps.myUserId) {
+                if (groupAttachments && groupSenderId !== deps.myUserId) {
                   deps.onInboundAttachments?.(groupAttachments);
                 }
               } catch (err) {
@@ -398,10 +426,10 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               }
               deps.ws.enqueueAck(frame.message_id);
               diag('router', 'group: ack queued', { msgId: frame.message_id });
-              if (decryptedOk && frame.from !== deps.myUserId) {
+              if (decryptedOk && groupSenderId !== deps.myUserId) {
                 deps.notifyInbound?.({
                   msgId: frame.message_id,
-                  from: frame.from,
+                  from: groupSenderId,
                   text: bubble,
                   target: { kind: 'group', groupId: frame.conversation_id },
                 });
@@ -412,7 +440,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               // the WS subscriber's outer try/catch.
               diag('router', 'group IIFE CRASHED', {
                 msgId: frame.message_id,
-                from: frame.from,
+                from: groupSenderId,
                 err: String(err),
                 stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
               });

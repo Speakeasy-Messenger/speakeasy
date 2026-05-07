@@ -130,9 +130,12 @@ async function deliverBuffered(
         message_id: m.id,
       });
     } else {
+      // Sealed-sender direct messages omit `from` — the recipient
+      // recovers the sender from the inner envelope encrypted to
+      // their identity key.
       send(socket, {
         type: 'message',
-        from: m.senderId,
+        ...(m.sealed ? {} : { from: m.senderId }),
         ciphertext: m.ciphertext.toString('base64'),
         message_id: m.id,
         msg_type: m.msgType,
@@ -296,6 +299,12 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         const ciphertextBuf = Buffer.from(msg.ciphertext, 'base64');
         const expiresAt = new Date(Date.now() + RELAY_TTL_MS);
         const senderUserId = session.userId;
+        // Sealed-sender (spec §13). Only meaningful for direct
+        // messages — group/community fan-out has no single sender to
+        // hide. Server still records senderId internally for ack
+        // routing (`delivered` needs to know who to fire back to);
+        // the suppression is purely on the wire frame + audit log.
+        const sealed = msg.msg_type === 'direct' && msg.sealed === true;
 
         // For direct: one row, one message_id (the value also returned in
         // `delivered` to sender). For group/community: one row per recipient
@@ -322,6 +331,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               expiresAt,
               targetDevices,
               deliveredToDevices: [],
+              sealed,
             });
             // Phase 4: fan-out to ALL live devices for this recipient.
             const peerDevices = deps.connections.getDevices(recipientId);
@@ -329,7 +339,10 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               for (const peer of peerDevices) {
                 send(peer, {
                   type: 'message',
-                  from: senderUserId,
+                  // Sealed-sender direct messages omit `from` — the
+                  // recipient unwraps the inner envelope to recover
+                  // sender identity. See `WsServerMsg.message`.
+                  ...(sealed ? {} : { from: senderUserId }),
                   ciphertext: msg.ciphertext,
                   message_id: rowId,
                   msg_type: msg.msg_type,
@@ -350,6 +363,23 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
             }
           }),
         );
+
+        if (sealed) {
+          deps.log.info(
+            {
+              audit: 'message_send_sealed',
+              messageId: directMessageId,
+              // Deliberately NO senderId in the audit line — that's the
+              // privacy property sealed-sender buys at-rest. The internal
+              // buffer row still has senderId for ack routing; that's a
+              // separate (server-only) leak surface tracked under spec
+              // §13's "v2 sealed sender (server-blind routing)" line.
+              recipient: msg.to,
+              msgType: msg.msg_type,
+            },
+            'sealed direct message persisted',
+          );
+        }
 
         // Phase 4: `delivered` is now emitted cross-instance via the
         // AckRouter (subscribed at attach time in ws/server.ts). Each
@@ -397,6 +427,12 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           skdmGroupId: msg.group_id,
           targetDevices: skdmTargetDevices,
           deliveredToDevices: [],
+          // SKDMs are never sealed — they carry SenderKey bootstrap
+          // material that's already encrypted with the recipient's
+          // 1:1 Signal session, and the recipient needs to know
+          // who sent it to install the SenderKey under the right
+          // attribution.
+          sealed: false,
         });
         const peerDevices = deps.connections.getDevices(msg.to);
         if (peerDevices.length > 0) {
