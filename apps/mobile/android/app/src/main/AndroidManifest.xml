@@ -48,6 +48,17 @@
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
         </intent-filter>
+        <!-- Deep link: speakeasy://add?handle=<handle>. Encoded in
+             user QR codes so the OS camera (or any other QR scanner)
+             can hand off to Speakeasy directly. The MainActivity
+             receives the URI via getIntent()/Linking.getInitialURL
+             and routes to NewChat with the handle prefilled. -->
+        <intent-filter android:autoVerify="false">
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="speakeasy" android:host="add" />
+        </intent-filter>
       </activity>
 
       <!-- CallKeep VoiceConnectionService — required for CallKit/Connection-

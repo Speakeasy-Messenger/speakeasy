@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, StatusBar, View } from 'react-native';
+import { AppState, Linking, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -29,6 +29,7 @@ import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // note below. The bridge module still ships in the bundle so the next
 // release can wire it without another dep dance.
 import { diag } from './src/diag/log.js';
+import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
 
 // Global unhandled-rejection handler — prevents promise rejections
@@ -133,6 +134,44 @@ export default function App() {
       }
       void ensureServerBinding({ signalProtocol, vouchflow });
     })();
+  }, [hydrated, userId]);
+
+  // Deep-link handler: when the user (or a peer) scans a Speakeasy QR
+  // with their phone camera, the OS hands us a `speakeasy://add?handle=…`
+  // URL. We route to the NewChat screen with the handle prefilled so
+  // the recipient can confirm + start the chat in one tap.
+  //
+  // Handles two cases:
+  //   - Cold start: the URL came in via the launching intent. We pull
+  //     it off `Linking.getInitialURL()` and navigate once the user is
+  //     enrolled (otherwise the navigation target doesn't exist yet).
+  //   - Warm: the app is already running; `addEventListener('url')`
+  //     fires synchronously when the OS hands us a new URL.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    let cancelled = false;
+    function handleUrl(url: string | null | undefined): void {
+      if (!url) return;
+      const handle = parseAdd(url);
+      if (!handle) {
+        diag('app', 'deep-link ignored (not a valid handle URL)', { url });
+        return;
+      }
+      if (handle === userId) {
+        diag('app', 'deep-link ignored (self handle)', { handle });
+        return;
+      }
+      diag('app', 'deep-link → NewChat', { handle });
+      navRef.current?.navigate('NewChat', { initialPeerId: handle });
+    }
+    void Linking.getInitialURL().then((url) => {
+      if (!cancelled) handleUrl(url);
+    });
+    const sub = Linking.addEventListener('url', (ev) => handleUrl(ev.url));
+    return () => {
+      cancelled = true;
+      sub.remove();
+    };
   }, [hydrated, userId]);
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.

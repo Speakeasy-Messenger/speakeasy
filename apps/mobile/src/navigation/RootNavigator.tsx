@@ -37,7 +37,7 @@ export type RootStack = {
   Chat: { peerId: string };
   GroupChat: { groupId: string };
   ManageGroupMembers: { groupId: string };
-  NewChat: undefined;
+  NewChat: { initialPeerId?: string } | undefined;
   NewGroup: undefined;
   Diagnostics: undefined;
   InviteFriends: undefined;
@@ -143,13 +143,14 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
               name="NewChat"
               options={{ presentation: 'modal' }}
             >
-              {({ navigation }: NativeStackScreenProps<RootStack, 'NewChat'>) => (
+              {({ navigation, route }: NativeStackScreenProps<RootStack, 'NewChat'>) => (
                 <NewChatScreen
                   onCancel={() => navigation.goBack()}
                   onStart={(peerId) => {
                     openDirect(userId, peerId);
                     navigation.replace('Chat', { peerId });
                   }}
+                  initialPeerId={route.params?.initialPeerId}
                 />
               )}
             </Stack.Screen>

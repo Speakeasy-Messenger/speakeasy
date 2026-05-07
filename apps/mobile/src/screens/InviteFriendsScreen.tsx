@@ -13,8 +13,10 @@ import {
   View,
 } from 'react-native';
 import Contacts from 'react-native-contacts';
+import QRCode from 'react-native-qrcode-svg';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { useIdentity } from '../store/identity.js';
+import { encodeAdd } from '../utils/handle-link.js';
 
 interface Props {
   onBack: () => void;
@@ -119,6 +121,35 @@ export function InviteFriendsScreen({ onBack }: Props) {
     }
   }
 
+  // QR encodes `speakeasy://add?handle=<myUserId>`. Phone-camera apps
+  // on both iOS and Android detect URLs in QR codes and offer to open
+  // them — that hands off to Speakeasy's deep-link intent (Android)
+  // / URL scheme (iOS), which routes the recipient to NewChat with
+  // the handle prefilled.
+  const qrUrl = myUserId ? encodeAdd(myUserId) : undefined;
+
+  function MyQrCard(): React.JSX.Element | null {
+    if (!myUserId) return null;
+    return (
+      <View style={styles.qrCard} testID="invite-qr-card">
+        <Text style={[text.sectionLabel, styles.qrLabel]}>SCAN TO ADD ME</Text>
+        <View style={styles.qrFrame}>
+          {qrUrl ? (
+            <QRCode
+              value={qrUrl}
+              size={180}
+              color={colors.ink}
+              backgroundColor={colors.cream}
+            />
+          ) : null}
+        </View>
+        <Text style={styles.qrHandle} testID="invite-qr-handle">
+          @{myUserId}
+        </Text>
+      </View>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.header}>
@@ -127,6 +158,8 @@ export function InviteFriendsScreen({ onBack }: Props) {
         </Pressable>
         <Text style={text.heroBody}>Invite friends</Text>
       </View>
+
+      <MyQrCard />
 
       {permission === 'pending' ? (
         <View style={styles.center}>
@@ -213,6 +246,33 @@ const styles = StyleSheet.create({
   },
   backBtn: { padding: space.xs },
   backText: { fontFamily: fonts.inter500, fontSize: 15, color: colors.primary },
+
+  qrCard: {
+    alignItems: 'center',
+    gap: space.sm,
+    paddingVertical: space.md,
+    paddingHorizontal: space.lg,
+    marginHorizontal: space.lg,
+    marginTop: space.xs,
+    marginBottom: space.md,
+    backgroundColor: colors.pale,
+    borderRadius: radius.avatar,
+  },
+  qrLabel: {
+    color: colors.slate,
+    letterSpacing: 2,
+  },
+  qrFrame: {
+    padding: space.md,
+    backgroundColor: colors.cream,
+    borderRadius: 8,
+  },
+  qrHandle: {
+    color: colors.ink,
+    fontFamily: fonts.inter500,
+    fontSize: 16,
+    letterSpacing: 0.4,
+  },
 
   center: {
     flex: 1,

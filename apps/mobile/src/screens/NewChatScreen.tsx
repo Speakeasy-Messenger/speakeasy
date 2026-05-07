@@ -19,6 +19,13 @@ interface Props {
   /** Called with the validated peer id on submit. */
   onStart: (peerId: string) => void;
   onCancel: () => void;
+  /**
+   * Pre-fill the input — used by the QR-code add flow (a peer's QR
+   * encodes a `speakeasy://add?handle=<handle>` deep link; the
+   * Linking handler in App.tsx parses it and navigates here with
+   * the handle ready to confirm).
+   */
+  initialPeerId?: string;
 }
 
 /**
@@ -30,9 +37,9 @@ interface Props {
  * this screen is to unblock 1:1 chat between two enrolled devices that
  * exchanged IDs out-of-band.
  */
-export function NewChatScreen({ onStart, onCancel }: Props) {
+export function NewChatScreen({ onStart, onCancel, initialPeerId }: Props) {
   const myUserId = useIdentity((s) => s.userId);
-  const [input, setInput] = useState('');
+  const [input, setInput] = useState(initialPeerId ?? '');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
 

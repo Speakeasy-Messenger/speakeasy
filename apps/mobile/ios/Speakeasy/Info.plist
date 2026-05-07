@@ -51,6 +51,19 @@
 		<string>audio</string>
 		<string>voip</string>
 	</array>
+	<!-- Deep link: speakeasy://add?handle=<handle>. Encoded in user QR
+	     codes so the iOS camera can hand off to Speakeasy directly. -->
+	<key>CFBundleURLTypes</key>
+	<array>
+		<dict>
+			<key>CFBundleURLName</key>
+			<string>xyz.speakeasyapp.app</string>
+			<key>CFBundleURLSchemes</key>
+			<array>
+				<string>speakeasy</string>
+			</array>
+		</dict>
+	</array>
 	<!-- Brand fonts. Place the .ttf files in Speakeasy/Fonts/ and add them to
 	     the Xcode target's "Copy Bundle Resources" build phase before they
 	     resolve at runtime. Filenames must match `src/theme/typography.ts`. -->
