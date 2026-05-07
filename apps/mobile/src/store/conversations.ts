@@ -43,6 +43,18 @@ export interface ChatMessage {
   sentAt: number;
   /** Animated dissolve stage; updated by the local TTL engine. */
   stage: DisappearingStage;
+  /**
+   * For sent messages (`from === 'me'`): true once the server has
+   * fired a `delivered` WS frame for this message_id, meaning the
+   * recipient has acked across all their devices (per Phase 5f
+   * per-device delivery tracking). Surfaces as a `✓✓` glyph on
+   * the bubble. False for inbound messages and for sent messages
+   * still in-flight.
+   *
+   * For 1:1 only — group/community don't emit `delivered` (one
+   * frame per recipient ack would fan out N events; spec §5).
+   */
+  delivered?: boolean;
 }
 
 export interface ConversationState {
@@ -92,6 +104,12 @@ interface ConversationsState {
   openGroup: (groupId: string) => void;
   add: (conversationId: string, msg: ChatMessage) => void;
   setStage: (conversationId: string, msgId: string, stage: DisappearingStage) => void;
+  /**
+   * Flip a sent message's delivered flag to true (response to the
+   * server's `delivered` WS frame). The msgId is the server-assigned
+   * one; the optimistic-echo bubble uses that id, so this matches.
+   */
+  markDelivered: (msgId: string) => void;
   remove: (conversationId: string, msgId: string) => void;
   setTtl: (conversationId: string, ttl: TtlOption) => void;
   setPersistence: (conversationId: string, on: boolean) => void;
@@ -199,6 +217,40 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           },
         },
       };
+    }),
+
+  // The `delivered` server frame doesn't tell us which conversation
+  // the message belongs to — just the message_id. Walk every
+  // conversation looking for a matching message id; flip its
+  // delivered flag if found. This is O(total messages) but the
+  // event is rare (one per sent message acknowledged) and total
+  // messages is small (TTL bounds it). The map-of-messages → flat
+  // list trade-off can come later if profiling demands it.
+  markDelivered: (msgId) =>
+    set((s) => {
+      let touched = false;
+      const next: Record<string, ConversationState> = {};
+      for (const [convId, conv] of Object.entries(s.byId)) {
+        const idx = conv.messages.findIndex((m) => m.id === msgId);
+        if (idx === -1) {
+          next[convId] = conv;
+          continue;
+        }
+        const msg = conv.messages[idx]!;
+        if (msg.delivered) {
+          // Already marked — server may have re-fired due to
+          // multi-device or AckRouter cross-instance redelivery.
+          next[convId] = conv;
+          continue;
+        }
+        const updated: ChatMessage[] = [...conv.messages];
+        updated[idx] = { ...msg, delivered: true };
+        next[convId] = { ...conv, messages: updated };
+        touched = true;
+      }
+      if (!touched) return s;
+      void persist(next);
+      return { byId: next };
     }),
 
   remove: (conversationId, msgId) => {

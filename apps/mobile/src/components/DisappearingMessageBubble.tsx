@@ -44,6 +44,14 @@ export interface DisappearingMessageBubbleProps {
   onTapFile?: (attachment: Attachment) => void;
   /** Fires when the current stage's animation completes. */
   onStageAnimated?: (stage: DisappearingStage) => void;
+  /**
+   * Sent-bubble delivery state — undefined for received bubbles.
+   * `false` = sent but not yet acked across all recipient devices
+   * (renders a single `✓`). `true` = all recipient devices have
+   * acked (renders a `✓✓`). 1:1 only — group/community don't emit
+   * `delivered` per spec §5.
+   */
+  delivered?: boolean;
 }
 
 interface StageTarget {
@@ -80,6 +88,7 @@ export function DisappearingMessageBubble({
   onTapPhoto,
   onTapFile,
   onStageAnimated,
+  delivered,
 }: DisappearingMessageBubbleProps) {
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
@@ -176,6 +185,19 @@ export function DisappearingMessageBubble({
       {text ? (
         <Text style={[styles.text, isSent ? styles.sentText : styles.receivedText]}>{text}</Text>
       ) : null}
+      {/* Read-receipt glyph — only on sent 1:1 bubbles. ✓ = sent +
+          buffered server-side; ✓✓ = recipient acked across all
+          devices. The receipt sits at the trailing edge of the
+          bubble, slightly faded so it never competes with the
+          content. */}
+      {isSent && delivered !== undefined ? (
+        <Text
+          testID="bubble-receipt"
+          style={[styles.receipt, delivered ? styles.receiptDelivered : styles.receiptSent]}
+        >
+          {delivered ? '✓✓' : '✓'}
+        </Text>
+      ) : null}
     </Animated.View>
   );
 }
@@ -211,6 +233,20 @@ const styles = StyleSheet.create({
   },
   sentText: { color: colors.cream },
   receivedText: { color: colors.ink },
+  // Read receipt — small + low-contrast so it never competes with
+  // the message content. Cream-on-brass would blend; we go ink at
+  // ~55% opacity for a "barely there" footprint that's still
+  // legible against the brass sent-bubble.
+  receipt: {
+    fontFamily: fonts.inter500,
+    fontSize: 10,
+    alignSelf: 'flex-end',
+    marginTop: 2,
+    marginRight: -2,
+    letterSpacing: 0.5,
+  },
+  receiptSent: { color: 'rgba(20,9,26,0.55)' },
+  receiptDelivered: { color: 'rgba(20,9,26,0.85)' },
 });
 
 /**

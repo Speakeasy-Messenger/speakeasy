@@ -189,4 +189,47 @@ describe('useConversations', () => {
     useConversations.getState().markRead(CONV);
     expect(useConversations.getState().unreadCountFor(CONV)).toBe(0);
   });
+
+  it('markDelivered flips a sent message to delivered=true regardless of conversation', () => {
+    // The `delivered` WS frame only carries message_id, so the store
+    // walks every conversation. Verify it finds + flips the right one
+    // and leaves siblings alone.
+    const sent: ChatMessage = { ...baseMsg('m-sent'), from: 'me', delivered: false };
+    const other: ChatMessage = { ...baseMsg('m-other'), from: 'me', delivered: false };
+    useConversations.getState().add(CONV, sent);
+    useConversations.getState().add('dm-9999999999999999', other);
+
+    useConversations.getState().markDelivered('m-sent');
+
+    const flipped = useConversations
+      .getState()
+      .byId[CONV]!.messages.find((m) => m.id === 'm-sent');
+    expect(flipped?.delivered).toBe(true);
+    const untouched = useConversations
+      .getState()
+      .byId['dm-9999999999999999']!.messages.find((m) => m.id === 'm-other');
+    expect(untouched?.delivered).toBe(false);
+  });
+
+  it('markDelivered for an unknown msgId is a no-op (no thrash, no spurious touch)', () => {
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('m1'), from: 'me', delivered: false });
+    const before = useConversations.getState().byId;
+    useConversations.getState().markDelivered('missing-id');
+    expect(useConversations.getState().byId).toBe(before);
+  });
+
+  it('markDelivered is idempotent — re-firing the frame does not re-trigger persist', () => {
+    // AckRouter cross-instance redelivery + multi-device acks can both
+    // produce duplicate `delivered` frames. The bubble's flag is
+    // monotone, so we should short-circuit on already-true.
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('m1'), from: 'me', delivered: false });
+    useConversations.getState().markDelivered('m1');
+    const afterFirst = useConversations.getState().byId;
+    useConversations.getState().markDelivered('m1');
+    expect(useConversations.getState().byId).toBe(afterFirst);
+  });
 });

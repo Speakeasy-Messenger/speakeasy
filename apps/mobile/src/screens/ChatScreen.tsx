@@ -228,6 +228,10 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
       kind: 'direct',
       sentAt: Date.now(),
       stage: 'sent',
+      // Single ✓ until the server's `delivered` WS frame flips this
+      // to true (then the bubble renders ✓✓). Failed sends below
+      // omit `delivered` entirely — error bubbles don't show a glyph.
+      delivered: false,
     });
     try {
       let deviceToken = useIdentity.getState().deviceToken;
@@ -354,6 +358,7 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
               attachments={item.attachments}
               stage={item.stage as DisappearingStage}
               variant={item.from === 'me' ? 'sent' : 'received'}
+              delivered={item.delivered}
               onTapPhoto={(a) => setViewerAttachment(a)}
               onTapFile={(a) => void saveAndAnnounceFile(a)}
             />

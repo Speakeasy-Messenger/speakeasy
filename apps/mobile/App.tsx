@@ -279,6 +279,8 @@ export default function App() {
       onPrekeysLow: () => void replenisher.trigger(),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
+      markDelivered: (msgId) =>
+        useConversations.getState().markDelivered(msgId),
       conversationIdFor: (kind, senderId, to) => {
         switch (kind) {
           case 'direct':

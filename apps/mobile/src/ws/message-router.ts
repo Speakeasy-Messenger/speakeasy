@@ -44,6 +44,13 @@ export interface MessageRouterDeps {
   onPrekeysLow: () => void;
   /** Add a chat message to the right conversation. */
   addToConversation: (conversationId: string, msg: ChatMessage) => void;
+  /**
+   * Mark a previously-sent message as delivered. Fires from the
+   * `delivered` WS frame the server emits when the recipient has
+   * acked across all their devices (Phase 5f). Used to render the
+   * `✓✓` glyph on sent bubbles.
+   */
+  markDelivered: (msgId: string) => void;
   /** Resolve a conversation id from a message frame. */
   conversationIdFor: (
     msgType: 'direct' | 'group' | 'community',
@@ -132,9 +139,8 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         return;
 
       case 'delivered':
-        // Phase 5e: client doesn't yet render delivered receipts. Wire
-        // when conversation persistence lands and we want a "✓✓ seen"
-        // affordance.
+        diag('router', 'delivered', { msgId: frame.message_id });
+        deps.markDelivered(frame.message_id);
         return;
 
       case 'prekeys_low':
