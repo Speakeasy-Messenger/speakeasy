@@ -31,8 +31,16 @@ appId: xyz.speakeasyapp.app
 name: Sign-out + re-enroll round-trip (Tier B)
 ---
 
-- clearState
-- clearKeychain
+# Maestro's `clearState` invokes `pm clear` which hung indefinitely
+# on the CI emulator after flow 07 ran the dialer (run 25516840231
+# — pm clear took >5min, hit the per-flow `timeout 300` ceiling).
+# Suspect: WebRTC PeerConnection or InCallManager audio resources
+# leak past orchestrator.endLocally + peer.close() under stress, and
+# the OS waits for those handles to close before completing
+# `pm clear`. Workaround in `tier-b-emulator.yml`: pm clear runs in
+# bash before this flow with its own 60s timeout, so even if it
+# hangs the CI suite proceeds. Skipping the in-flow clearState/
+# clearKeychain avoids re-running the same hung call from Maestro.
 - launchApp
 - tapOn:
     text: "Wait"
