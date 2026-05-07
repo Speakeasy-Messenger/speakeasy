@@ -21,6 +21,13 @@ COPY --from=builder /repo/packages/shared/package.json ./packages/shared/package
 COPY --from=builder /repo/apps/api/dist ./apps/api/dist
 COPY --from=builder /repo/apps/api/package.json ./apps/api/package.json
 
+# `npm run db:migrate` (Fly's release_command) reads its script from
+# the root package.json and migration SQL from infra/migrations/.
+# Both must exist in the runner image — release_command runs a
+# separate one-off VM off the runner image, not the builder.
+COPY --from=builder /repo/package.json ./package.json
+COPY infra/migrations ./infra/migrations
+
 ENV PORT=8080
 EXPOSE 8080
 CMD ["node", "apps/api/dist/server.js"]

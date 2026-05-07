@@ -32,6 +32,28 @@ base image keeps that migration mechanical.
 
 `DATABASE_URL` and `REDIS_URL` are populated by the `attach` commands above.
 
+**Migrations** (Phase 5f):
+
+`infra/migrations/` holds sequential SQL files (`0001_initial.sql`,
+`0002_community_envelopes.sql`, etc.). They're applied by
+`node-pg-migrate` against `DATABASE_URL`.
+
+Local invocation:
+
+```sh
+DATABASE_URL=postgres://user:pass@localhost/speakeasy npm run db:migrate
+# Roll back the most recent migration:
+DATABASE_URL=... npm run db:migrate:down
+```
+
+Production: `release_command = "npm run db:migrate"` in `api.toml`
+runs the migration in a one-off VM on every `flyctl deploy`, before
+any traffic-bearing machine starts. A failed migration aborts the
+deploy without taking the previous version offline. The Dockerfile
+copies `infra/migrations/` and the root `package.json` (where the
+`db:migrate` script lives) into the runner image so the one-off VM
+can find both.
+
 **Volume snapshots** (Postgres):
 
 ```sh

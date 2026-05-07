@@ -13,7 +13,8 @@
     "lint": "turbo run lint",
     "typecheck": "turbo run typecheck",
     "test": "turbo run test",
-    "migrate": "node-pg-migrate -m infra/migrations -j sql up"
+    "db:migrate": "node-pg-migrate -m infra/migrations -j sql up",
+    "db:migrate:down": "node-pg-migrate -m infra/migrations -j sql down"
   },
   "devDependencies": {
     "@types/node": "^22.9.0",
