@@ -19,6 +19,7 @@ import { ManageGroupMembersScreen } from '../screens/ManageGroupMembersScreen.js
 import { NewChatScreen } from '../screens/NewChatScreen.js';
 import { NewGroupScreen } from '../screens/NewGroupScreen.js';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen.js';
+import { AvatarPreviewScreen } from '../screens/AvatarPreviewScreen.js';
 import { InviteFriendsScreen } from '../screens/InviteFriendsScreen.js';
 import { SettingsScreen } from '../screens/SettingsScreen.js';
 import { CallScreen } from '../screens/CallScreen.js';
@@ -40,6 +41,7 @@ export type RootStack = {
   NewChat: { initialPeerId?: string } | undefined;
   NewGroup: undefined;
   Diagnostics: undefined;
+  AvatarPreview: undefined;
   InviteFriends: undefined;
   Settings: undefined;
   Call: undefined;
@@ -122,7 +124,15 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
             </Stack.Screen>
             <Stack.Screen name="Diagnostics">
               {({ navigation }: NativeStackScreenProps<RootStack, 'Diagnostics'>) => (
-                <DiagnosticsScreen onBack={() => navigation.goBack()} />
+                <DiagnosticsScreen
+                  onBack={() => navigation.goBack()}
+                  onOpenAvatarPreview={() => navigation.navigate('AvatarPreview')}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="AvatarPreview">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPreview'>) => (
+                <AvatarPreviewScreen onBack={() => navigation.goBack()} />
               )}
             </Stack.Screen>
             <Stack.Screen name="Settings">

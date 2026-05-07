@@ -24,6 +24,10 @@ import { colors, fonts, radius, space } from '../theme/index.js';
 
 interface Props {
   onBack: () => void;
+  /** Optional dev affordance — opens the avatar/handle/room-mark
+   * preview when wired. Hidden in non-dev builds eventually; for now
+   * just renders a row near the bottom of Diagnostics. */
+  onOpenAvatarPreview?: () => void;
 }
 
 /**
@@ -36,7 +40,7 @@ interface Props {
  * the Conversations screen. Will become opt-in once the alpha is
  * stable enough that we don't routinely need to peek at runtime state.
  */
-export function DiagnosticsScreen({ onBack }: Props) {
+export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
   const [entries, setEntries] = useState<DiagEntry[]>(() => getDiagSnapshot());
   const [lastCrash, setLastCrash] = useState<CapturedCrash | null>(null);
   // Brief visual confirmation after Copy. Reset after 1.5s; the user
@@ -159,6 +163,14 @@ export function DiagnosticsScreen({ onBack }: Props) {
         >
           <Text style={styles.btnTextSecondary}>Clear</Text>
         </Pressable>
+        {onOpenAvatarPreview ? (
+          <Pressable
+            onPress={onOpenAvatarPreview}
+            style={[styles.btn, styles.btnSecondary]}
+          >
+            <Text style={styles.btnTextSecondary}>Avatar preview (dev)</Text>
+          </Pressable>
+        ) : null}
       </View>
     </SafeAreaView>
   );
