@@ -1,5 +1,7 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
+  Animated,
+  Easing,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -11,7 +13,8 @@ import { Button } from '../../components/Button.js';
 import { PortraitTile } from '../../components/PortraitTile.js';
 import { ANIMAL_IDS } from '../../avatars/components.js';
 import { api } from '../../services.js';
-import { brand, font, type as typeScale } from '../../theme/tokens.js';
+import { useColors } from '../../theme/index.js';
+import { brand, font, motion, type as typeScale } from '../../theme/tokens.js';
 import { diag } from '../../diag/log.js';
 
 /**
@@ -36,9 +39,24 @@ interface Props {
 }
 
 export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
+  const themed = useColors();
   const [selected, setSelected] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  // Spec §2.4: "Canvas crossfade: on tap, the brand canvas fades to
+  // workspace canvas (dark or light per OS) over 240ms. This is the
+  // only canvas crossfade in the entire app."
+  //
+  // Implementation: the FaceStep renders on `brand.canvas` aubergine.
+  // On confirm, we fade in an absolute-positioned overlay that's the
+  // *workspace* canvas color over `motion.screen` (240ms). When the
+  // animation completes we call `onPicked`, which is what triggers
+  // identity.setUserId in the parent — App.tsx then swaps the
+  // navigator stack from Onboarding to Authed. By the time the
+  // navigator renders the conversation list, our overlay has already
+  // painted the matching canvas color, so the visible transition is
+  // a single continuous crossfade rather than a hard cut.
+  const crossfade = useRef(new Animated.Value(0)).current;
 
   async function handleConfirm() {
     if (!selected) return;
@@ -46,15 +64,28 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
     setError(undefined);
     try {
       await api.setAvatar(deviceToken, selected);
-      onPicked(selected);
+      // Run the crossfade BEFORE onPicked. Once onPicked fires the
+      // navigator swaps stacks; if we haven't faded the overlay in
+      // by then, the user sees aubergine → snap → workspace.
+      Animated.timing(crossfade, {
+        toValue: 1,
+        duration: motion.screen,
+        easing: Easing.out(Easing.cubic),
+        useNativeDriver: true,
+      }).start(({ finished }) => {
+        if (finished) onPicked(selected);
+      });
     } catch (err) {
       diag('onboarding', 'setAvatar failed', { err: String(err) });
       // Keep the user on this screen — they picked a face, the server
       // didn't accept it. Surfacing inline lets them retry.
       setError(`Could not save face. Try again? (${String(err)})`);
-    } finally {
       setBusy(false);
+      return;
     }
+    // Don't reset busy after a successful path — the overlay stays
+    // up until onPicked fires the navigator swap, and we don't want
+    // a flicker of the disabled button as it un-disables.
   }
 
   return (
@@ -102,6 +133,24 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
           testID="onboarding-face-confirm"
         />
       </View>
+
+      {/* Spec §2.4 canvas crossfade overlay. Workspace canvas color
+          fades in over 240ms; on completion onPicked fires which
+          swaps the navigator stacks. The overlay sits absolute on
+          top of the brand-canvas content; while opacity < 1 the
+          aubergine bleeds through, while opacity = 1 the user
+          visually sees the workspace canvas before the actual
+          conversation list mounts. pointerEvents="none" so the
+          fade doesn't intercept any in-flight taps (in practice
+          the button is disabled by `busy` anyway). */}
+      <Animated.View
+        pointerEvents="none"
+        style={[
+          StyleSheet.absoluteFillObject,
+          { backgroundColor: themed.cream, opacity: crossfade },
+        ]}
+        testID="onboarding-canvas-crossfade"
+      />
     </SafeAreaView>
   );
 }
