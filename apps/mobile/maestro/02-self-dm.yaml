@@ -18,18 +18,18 @@ name: Self-DM round-trip (Tier B)
 - copyTextFrom:
     id: "conversations-userid"
 
-# New chat — FAB on the bottom-right of the Conversations screen
-# (Phase 6 UX rebuild replaced the inline button with this FAB).
+# NEW-CONVERSATION.md §3: FAB opens the Find Someone sheet
+# directly. The handle input is auto-focused, so we just type. Once
+# the lookup resolves, the result card appears with testID
+# `find-sheet-result` — tapping it opens the chat (no separate
+# "Start chat" button anymore).
 - tapOn:
-    id: "conversations-new-chat"
-
-# Enter our own ID as recipient
+    id: "conversations-fab"
 - tapOn:
-    id: "new-chat-peer-id-input"
+    id: "find-sheet-input"
 - inputText: "${maestro.copiedText}"
-
 - tapOn:
-    text: "Start chat"
+    id: "find-sheet-result"
 
 # Send a message. Send button is an accent arrow icon (testID
 # `chat-send`) that only renders once the input has content — brand

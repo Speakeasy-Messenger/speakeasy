@@ -25,36 +25,50 @@ appId: xyz.speakeasyapp.app
     env:
       HANDLE: tester05
 
-# Navigate to new group — secondary FAB (hash icon) on the bottom-right
-# of the Conversations screen (Phase 6 UX rebuild replaced the inline
-# "# New group" button with this FAB).
+# NEW-CONVERSATION.md §3: FAB → Find Someone sheet → "create a room"
+# footer link navigates to the room creation screen.
 - tapOn:
-    id: "conversations-new-group"
+    id: "conversations-fab"
+- tapOn:
+    id: "find-sheet-create-room"
 
 - extendedWaitUntil:
     visible:
       id: "new-group-screen"
     timeout: 10000
 
-# Tap the name input explicitly (don't rely on auto-focus). Then type.
+# NEW-CONVERSATION.md §4: members come in via the find sheet now
+# (no more comma-separated textarea). Add a single peer through the
+# add-to-room mode of the find sheet, then enter the room name, then
+# tap Create in the AppBar.
+
+# Add a member: open the find sheet, type a handle, tap the result.
+#
+# Caveat: the Find Someone sheet now does a real availability check
+# before surfacing the result card, so this requires an *enrolled*
+# peer handle. The previous flow used `quiet-empty-mountain` (a fake
+# handle that the in-memory groups repo accepted without validation
+# of user existence) — that no longer reaches the result-card state.
+# Pre-seeding a fixture peer in the dev server is a follow-up; for
+# now the rest of the flow assumes a peer named `tester05peer` has
+# been enrolled out-of-band.
+- tapOn:
+    id: "new-group-add-member"
+- tapOn:
+    id: "find-sheet-input"
+- inputText: "tester05peer"
+- tapOn:
+    id: "find-sheet-result"
+
+# Name the room.
 - tapOn:
     id: "new-group-name-input"
 - inputText: "weekend plans"
-# Dismiss keyboard so the members input below isn't covered. Pressing
-# Back on Android dismisses the IME first, then the activity — only
-# the IME-dismiss should fire here since the new-group screen still
-# has its own focus.
 - hideKeyboard
 
-# Tap the members input. The IME re-opens; that's fine, since we
-# don't need to interact with anything below this input.
+# Create action lives in the AppBar now (right-aligned).
 - tapOn:
-    id: "new-group-members-input"
-- inputText: "quiet-empty-mountain"
-- hideKeyboard
-
-- tapOn:
-    text: "Create group"
+    id: "new-group-create"
 
 # Success signal: we land on the GroupChatScreen. The chat input is
 # only rendered inside that screen, so its visibility is a clean

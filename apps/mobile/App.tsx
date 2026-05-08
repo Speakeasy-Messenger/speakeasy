@@ -6,6 +6,7 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
+import { useBlocks } from './src/store/blocks.js';
 import { useConversations } from './src/store/conversations.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
@@ -71,6 +72,7 @@ export default function App() {
       void useProfiles.getState().hydrate();
       void useOnboardingCards.getState().hydrate();
       void useCalls.getState().hydrate();
+      void useBlocks.getState().hydrate();
     }
   }, [hydrated]);
 
@@ -162,8 +164,13 @@ export default function App() {
         diag('app', 'deep-link ignored (self handle)', { handle });
         return;
       }
-      diag('app', 'deep-link → NewChat', { handle });
-      navRef.current?.navigate('NewChat', { initialPeerId: handle });
+      // NEW-CONVERSATION.md §6.1: deep-link lands the user on the
+      // conversation list with the Find Someone sheet pre-filled.
+      // The list reads `pendingFindHandle` on mount/focus and pops
+      // the sheet — clearing the field as it consumes it.
+      diag('app', 'deep-link → Find sheet', { handle });
+      useUiState.getState().setPendingFindHandle(handle);
+      navRef.current?.navigate('Home');
     }
     void Linking.getInitialURL().then((url) => {
       if (!cancelled) handleUrl(url);
@@ -385,6 +392,24 @@ export default function App() {
             ? conversationIdForDirect(userId, target.peerId)
             : conversationIdForGroup(target.groupId);
         if (activeConv === targetConv) return;
+        // CONVERSATIONS.md §2.10 / BLOCK.md §3 — per-conversation
+        // mute gates the in-app banner. Background push gating
+        // happens server-side or in the OS notification service
+        // extension (iOS NSE / Android background handler) — those
+        // paths don't see this JS state, so a separate mute-aware
+        // server hint is a follow-up. For foreground/in-app this
+        // is the right gate.
+        const targetConvState =
+          useConversations.getState().byId[targetConv];
+        if (targetConvState?.muted) return;
+        // CLAUDECODENOTE.md §5: don't fire banners while the user
+        // is in a call. Calls are exclusive focus moments — the
+        // banner waits until the call ends. The dedupe set above
+        // means the banner is dropped, not deferred (it'd be stale
+        // by the time the call ends anyway; the conversation list
+        // is the persistent receipt).
+        const activeCall = useCalls.getState().active;
+        if (activeCall && activeCall.stage !== 'ended') return;
         useBanner.getState().show({
           id: msgId,
           sender: from,

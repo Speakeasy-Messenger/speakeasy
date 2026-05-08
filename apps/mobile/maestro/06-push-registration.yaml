@@ -19,17 +19,14 @@ appId: xyz.speakeasyapp.app
 - copyTextFrom:
     id: "conversations-userid"
 
-# Navigate to new chat — FAB on the bottom-right (Phase 6 UX rebuild).
+# NEW-CONVERSATION.md §3: FAB → Find Someone sheet → type → tap result.
 - tapOn:
-    id: "conversations-new-chat"
-
-# Paste own ID and start chat (self-DM). Use testIDs — `placeholder:`
-# is not a Maestro selector property.
+    id: "conversations-fab"
 - tapOn:
-    id: "new-chat-peer-id-input"
+    id: "find-sheet-input"
 - inputText: "${maestro.copiedText}"
 - tapOn:
-    text: "Start chat"
+    id: "find-sheet-result"
 
 # Send a message. Send button is an accent icon (testID `chat-send`)
 # that only renders once the input has content — brand §6.5.

@@ -36,6 +36,13 @@ class WebRtcCallPeer implements CallPeer {
     s: 'connecting' | 'connected' | 'failed' | 'closed',
   ) => void;
   private startedManager = false;
+  // Phase 5 — audio-level polling.
+  // `audioLevelCb` is set when a UI subscribes; the polling loop only
+  // runs while at least one subscriber is alive. We poll instead of
+  // pushing because RN-WebRTC has no AudioLevelObserver event yet, but
+  // every modern WebRTC stack populates `audioLevel` on getStats output.
+  private audioLevelCb?: (levels: { local: number; remote: number }) => void;
+  private audioLevelTimer?: ReturnType<typeof setInterval>;
 
   constructor(iceServers: IceServer[]) {
     this.pc = new RTCPeerConnection({
@@ -248,6 +255,73 @@ class WebRtcCallPeer implements CallPeer {
     };
   }
 
+  /**
+   * Audio-level polling. Spec §5 (in-call animal mouth animation):
+   * sample local + remote `audioLevel` from `pc.getStats()` at ~12 Hz
+   * and push to the subscriber. The mouth scale interpolation lives in
+   * AvatarRenderer; this just produces the raw signal.
+   *
+   * 80ms polling cadence chosen for a balance between responsiveness
+   * (mouth tracks speech onset within one or two frames) and CPU cost
+   * (getStats walks every active stream). Most desktop browsers run
+   * the WebRTC audio-level meter at 100ms; we sit just under that.
+   *
+   * `audioLevel` reported by the spec is RMS-derived and already in
+   * [0, 1] — no normalization needed. Floors at 0.
+   */
+  onAudioLevels(
+    cb: (levels: { local: number; remote: number }) => void,
+  ): () => void {
+    this.audioLevelCb = cb;
+    if (!this.audioLevelTimer) {
+      this.audioLevelTimer = setInterval(() => {
+        void this.sampleAudioLevels();
+      }, 80);
+    }
+    return () => {
+      if (this.audioLevelCb === cb) this.audioLevelCb = undefined;
+      if (!this.audioLevelCb && this.audioLevelTimer) {
+        clearInterval(this.audioLevelTimer);
+        this.audioLevelTimer = undefined;
+      }
+    };
+  }
+
+  private async sampleAudioLevels(): Promise<void> {
+    if (!this.audioLevelCb) return;
+    let local = 0;
+    let remote = 0;
+    try {
+      const stats = await this.pc.getStats();
+      stats.forEach((report: any) => {
+        // Local mic level: `media-source` with kind=audio carries
+        // `audioLevel` (Chrome / RN-WebRTC). Some impls report the same
+        // value on `outbound-rtp` instead — accept either as a fallback.
+        if (
+          (report.type === 'media-source' && report.kind === 'audio') ||
+          (report.type === 'outbound-rtp' && report.kind === 'audio')
+        ) {
+          if (typeof report.audioLevel === 'number') {
+            local = Math.max(local, report.audioLevel);
+          }
+        }
+        // Remote level: `inbound-rtp` audio carries the receive-side
+        // `audioLevel`, computed by the receiver from the decoded
+        // PCM (not the network-side `voiceActivityFlag`).
+        if (report.type === 'inbound-rtp' && report.kind === 'audio') {
+          if (typeof report.audioLevel === 'number') {
+            remote = Math.max(remote, report.audioLevel);
+          }
+        }
+      });
+    } catch {
+      // Silently ignore — getStats can throw mid-teardown. Stale reads
+      // are fine; the next tick gets the next snapshot.
+      return;
+    }
+    this.audioLevelCb?.({ local, remote });
+  }
+
   setMicMuted(muted: boolean): void {
     if (!this.localStream) return;
     for (const track of this.localStream.getAudioTracks()) {
@@ -261,6 +335,11 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   close(): void {
+    if (this.audioLevelTimer) {
+      clearInterval(this.audioLevelTimer);
+      this.audioLevelTimer = undefined;
+    }
+    this.audioLevelCb = undefined;
     try {
       if (this.localStream) {
         for (const t of this.localStream.getTracks()) {

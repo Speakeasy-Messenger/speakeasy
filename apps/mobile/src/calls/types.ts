@@ -72,6 +72,15 @@ export interface CallPeer {
   onLocalIce(cb: (candidate: CallIceCandidate) => void): () => void;
   /** Subscribe to ICE/DTLS connection-state changes. */
   onConnectionStateChange(cb: (state: 'connecting' | 'connected' | 'failed' | 'closed') => void): () => void;
+  /**
+   * Phase 5 — subscribe to per-track audio levels (RMS in [0, 1]) so
+   * the in-call animal portraits can drive their mouth scale from the
+   * actual audio. `local` is our mic, `remote` is the peer's playback.
+   * Implementations should sample at roughly 12–20 Hz; below that the
+   * mouth feels laggy, above that it costs CPU without visible gain.
+   * Optional so non-WebRTC test peers don't have to implement it.
+   */
+  onAudioLevels?(cb: (levels: { local: number; remote: number }) => void): () => void;
   setMicMuted(muted: boolean): void;
   setSpeakerOn(on: boolean): void;
   close(): void;

@@ -15,30 +15,23 @@ appId: xyz.speakeasyapp.app
     env:
       HANDLE: tester04
 
-# Navigate to new chat — FAB on the bottom-right (Phase 6 UX rebuild).
+# NEW-CONVERSATION.md §3: FAB opens the Find Someone sheet directly.
+# Type a non-existent handle; the sheet's state region renders
+# "no one by that name" — no separate error screen.
 - tapOn:
-    id: "conversations-new-chat"
-
-# Wait for new chat screen
+    id: "conversations-fab"
 - extendedWaitUntil:
     visible:
-      id: "new-chat-screen"
+      id: "find-sheet"
     timeout: 10000
 
-# Enter a valid-format but non-existent peer ID
-- inputText: "quiet-empty-mountain"
-
-# Tap start (should fail with "No such user")
 - tapOn:
-    text: "Start chat"
+    id: "find-sheet-input"
+- inputText: "quiet_empty_mountain"
 
-# Verify the error renders. We assert by testID rather than text
-# because the actual error string ("No such user. Speakeasy IDs are
-# case-sensitive — double-check it.") wasn't being matched by
-# Maestro's text regex against the RN accessibility tree even when
-# the screenshot showed it visually present. testID is the resilient
-# selector here.
+# Verify the not-found state renders. The lookup debounces 300ms +
+# the server roundtrip; allow up to 25s for slow CI emulators.
 - extendedWaitUntil:
     visible:
-      id: "new-chat-error"
+      text: "no one by that name"
     timeout: 25000

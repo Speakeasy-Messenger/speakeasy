@@ -208,6 +208,23 @@ export class CallOrchestrator {
   }
 
   /**
+   * Subscribe to per-tick audio levels — `local` = our mic, `remote` =
+   * peer playback, both in [0, 1]. Returns a no-op unsubscribe when
+   * the active peer doesn't implement audio-level polling (e.g. the
+   * in-memory test peer in orchestrator.test.ts) so callers can
+   * always `useEffect`-attach without a capability check.
+   *
+   * Re-subscribes are not auto-routed across peer churn — the
+   * CallScreen mounts after the peer is attached and unmounts before
+   * close, so a single subscribe-on-mount is sufficient.
+   */
+  onAudioLevels(
+    cb: (levels: { local: number; remote: number }) => void,
+  ): () => void {
+    return this.peer?.onAudioLevels?.(cb) ?? (() => {});
+  }
+
+  /**
    * Inbound frame router. Wired into `makeMessageRouter`. Only acts on
    * `call_*` frames; everything else is ignored.
    */

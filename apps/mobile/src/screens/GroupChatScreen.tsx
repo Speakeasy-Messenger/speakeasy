@@ -15,12 +15,14 @@ import {
 import { type Attachment, encodePayload, newMessageId } from '@speakeasy/shared';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
-import { GifPickerSheet } from '../components/GifPickerSheet.js';
-import { CameraIcon, GifIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
+import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
-import { GroupAvatar } from '../components/GroupAvatar.js';
+import { SystemMessageRow } from '../components/SystemMessageRow.js';
+import { Handle } from '../components/Handle.js';
+import { PortraitTile } from '../components/PortraitTile.js';
+import { StatusSquare } from '../components/StatusSquare.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useUiState } from '../store/ui.js';
@@ -109,7 +111,6 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
 
   const [input, setInput] = useState('');
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
-  const [gifSheetOpen, setGifSheetOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
 
   // Phase 2 brand overhaul: groups don't have photos OR custom marks.
@@ -253,15 +254,6 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
     if (photo) await sendOutbound({ attachments: [photo] });
   }
 
-  function handleGif() {
-    setGifSheetOpen(true);
-  }
-
-  async function handleGifPicked(gif: Attachment) {
-    setGifSheetOpen(false);
-    await sendOutbound({ attachments: [gif] });
-  }
-
   function cycleTtl() {
     const order = ['hour', 'day', 'week', 'month', 'off'] as const;
     const idx = order.indexOf(ttl);
@@ -270,9 +262,14 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
 
   const hasInput = input.trim().length > 0;
   const memberCount = group?.members.length ?? 0;
+  const ttlLabel = formatTtl(ttl);
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
+      {/* CONVERSATIONS.md §3.2 + §4.1 group variant. Two-line AppBar:
+          room mark + `# group-name` + status square (line 1), then a
+          meta sub-line `<N> IN THE ROOM · LEAVES IN <TTL>` (line 2).
+          Tapping the title block opens manage-members (no kebab). */}
       <View style={[styles.header, { borderBottomColor: themed.divider }]}>
         {onBack ? (
           <Pressable testID="group-chat-back" onPress={onBack} hitSlop={8} style={styles.back}>
@@ -281,24 +278,25 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
         ) : (
           <View style={styles.back} />
         )}
-        {/* Brand §6.1 AppBar handle. Room mark inline at 32px (Phase 2:
-            deterministic from groupId; no longer tappable since groups
-            don't have a per-room photo to change). */}
-        <View style={styles.avatarBtn} testID="group-chat-avatar">
-          <GroupAvatar groupId={groupId} size={32} />
-        </View>
+        <PortraitTile kind="room" id={groupId} size={28} />
         <Pressable
-          style={styles.headerHandle}
+          style={styles.headerTitle}
           onPress={onManageMembers}
           testID="group-chat-manage-members"
         >
-          <Text style={[styles.handleText, { color: themed.ink }]} numberOfLines={1}>
-            <Text style={{ color: themed.primary }}>#</Text>
-            {' '}
-            {group?.name ?? groupId}
-          </Text>
-          <Text style={[styles.subhead, { color: themed.slate }]} numberOfLines={1}>
-            {memberCount} MEMBER{memberCount === 1 ? '' : 'S'} · TAP TO MANAGE
+          <View style={styles.headerTitleLine}>
+            <Text style={[styles.handleText, { color: themed.ink }]} numberOfLines={1}>
+              <Text style={{ color: themed.primary }}>#</Text>
+              {' '}
+              {group?.name ?? groupId}
+            </Text>
+            <StatusSquare variant="sealed" />
+          </View>
+          <Text
+            style={[styles.headerSub, { color: themed.slate }]}
+            numberOfLines={1}
+          >
+            {memberCount} IN THE ROOM · LEAVES IN {ttlLabel}
           </Text>
         </Pressable>
       </View>
@@ -311,20 +309,44 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
           data={messages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <DisappearingMessageBubble
-              text={
-                item.from === 'me'
-                  ? item.text
-                  : `${item.from}: ${item.text}`
-              }
-              attachments={item.attachments}
-              stage={item.stage as DisappearingStage}
-              variant={item.from === 'me' ? 'sent' : 'received'}
-              onTapPhoto={(a) => setViewerAttachment(a)}
-              onTapFile={(a) => void saveAndAnnounceFile(a)}
-            />
-          )}
+          renderItem={({ item, index }) => {
+            // System messages (joins, leaves, name changes, etc.)
+            // render as centered captions per CONVERSATIONS.md §3.6.
+            if (item.from === 'system') {
+              return <SystemMessageRow text={item.text} />;
+            }
+            // CONVERSATIONS.md §4.2 — group bubbles. Sender attribution
+            // row sits above the FIRST bubble of each non-self burst:
+            // an 18px room/animal portrait + brass `@handle`. The
+            // bubble itself never carries `from:` text anymore — that
+            // duplicated the attribution row and felt noisy under the
+            // brass header.
+            //
+            // Burst boundary = the previous message has a different
+            // `from`, OR this is the first message in the list.
+            const isSelf = item.from === 'me';
+            const prev = index > 0 ? messages[index - 1] : undefined;
+            const showAttribution =
+              !isSelf && (!prev || prev.from !== item.from);
+            return (
+              <View>
+                {showAttribution ? (
+                  <View style={styles.attribution}>
+                    <PortraitTile kind="animal" id={item.from} size={18} />
+                    <Handle value={item.from} variant="caption" />
+                  </View>
+                ) : null}
+                <DisappearingMessageBubble
+                  text={item.text}
+                  attachments={item.attachments}
+                  stage={item.stage as DisappearingStage}
+                  variant={isSelf ? 'sent' : 'received'}
+                  onTapPhoto={(a) => setViewerAttachment(a)}
+                  onTapFile={(a) => void saveAndAnnounceFile(a)}
+                />
+              </View>
+            );
+          }}
           ListFooterComponent={
             <View style={styles.footnote}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
@@ -342,14 +364,6 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
           ]}
         >
           <View style={styles.inputBar}>
-            <Pressable
-              onPress={handleGif}
-              hitSlop={6}
-              style={styles.iconBtn}
-              testID="chat-gif"
-            >
-              <GifIcon size={22} />
-            </Pressable>
             <Pressable
               onPress={handlePaperclip}
               hitSlop={6}
@@ -406,16 +420,29 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
           />
         ) : null}
       </Modal>
-      <GifPickerSheet
-        visible={gifSheetOpen}
-        onClose={() => setGifSheetOpen(false)}
-        onPick={(gif) => void handleGifPicked(gif)}
-      />
     </SafeAreaView>
   );
 }
 
 // utf8ToBytes imported from ../utils/bytes — Hermes-safe.
+
+/** Group AppBar TTL label — same mapping as ChatScreen.formatTtl. */
+function formatTtl(ttl: string): string {
+  switch (ttl) {
+    case 'hour':
+      return '1H';
+    case 'day':
+      return '24H';
+    case 'week':
+      return '7D';
+    case 'month':
+      return '30D';
+    case 'off':
+      return 'OFF';
+    default:
+      return ttl.toUpperCase();
+  }
+}
 
 function SendIcon({ size = 22, color }: { size?: number; color: string }): React.JSX.Element {
   return (
@@ -433,32 +460,44 @@ function SendIcon({ size = 22, color }: { size?: number; color: string }): React
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
-  // Brand §6.1 AppBar — same shape as ChatScreen, but with a leading
-  // 32px group avatar (the only change-photo entry point).
+  // CONVERSATIONS.md §3.2 / §4.1 — two-line AppBar matching ChatScreen.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingHorizontal: 18,
-    paddingTop: space.md,
-    paddingBottom: 14,
+    minHeight: 60,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
     gap: space.sm,
   },
   back: { width: 32, paddingVertical: 4 },
   backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  avatarBtn: { },
-  headerHandle: { flex: 1 },
+  headerTitle: { flex: 1 },
+  headerTitleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+  },
   handleText: {
     fontFamily: font.medium,
     fontSize: type.subtitle.size,
     letterSpacing: type.subtitle.size * type.subtitle.letterSpacingEm,
+    flexShrink: 1,
   },
-  subhead: {
+  headerSub: {
     fontFamily: type.meta.weight,
     fontSize: type.meta.size,
     letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textTransform: 'uppercase',
     marginTop: 2,
+  },
+  attribution: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.xs,
+    marginTop: space.sm,
+    marginBottom: 4,
+    paddingHorizontal: space.xs,
   },
   body: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },

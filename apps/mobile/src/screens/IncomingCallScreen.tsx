@@ -1,10 +1,12 @@
 import React from 'react';
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import { Avatar } from '../components/Avatar.js';
-import { PhoneEndIcon, PhoneIcon } from '../components/icons/CallIcons.js';
+import { Handle } from '../components/Handle.js';
+import { defaultAnimalForUser } from '../avatars/default.js';
+import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { useCalls } from '../store/calls.js';
-import { colors, fonts, space, text } from '../theme/index.js';
-import { callPalette } from '../theme/tokens.js';
+import { useProfiles } from '../store/profiles.js';
+import { brand, font, type as typeScale } from '../theme/tokens.js';
+import { space } from '../theme/index.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -14,35 +16,52 @@ interface Props {
 }
 
 /**
- * Full-screen incoming-call overlay. Mounted by App.tsx when the
- * orchestrator's active state is `incoming_ringing`. Two big buttons:
- * accept (green, bottom-right) and decline (red, bottom-left).
+ * CALLS.md §03 — Incoming call.
+ *
+ * Brand canvas (only call surface that uses it). Big 140×140
+ * portrait of the caller's animal in a brand-surface tile, large
+ * display handle in bone, "wants to speak" sub-line, two equal-
+ * width buttons stacked or side-by-side: Decline (transparent +
+ * faint border) and Accept (brass). No green/red — brass is the
+ * action color, the brand never introduces a third color for an
+ * ambulance/stoplight UI convention.
  */
 export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
   const active = useCalls((s) => s.active);
+  const peerProfile = useProfiles((s) =>
+    active ? s.byUserId[active.peerUserId] : undefined,
+  );
 
   if (!active || active.stage !== 'incoming_ringing') {
     return null;
   }
 
+  const animalId =
+    peerProfile?.selectedAvatarId ?? defaultAnimalForUser(active.peerUserId);
+
   return (
     <SafeAreaView style={styles.root} testID="incoming-call-screen">
-      <View style={styles.peer}>
-        <Avatar userId={active.peerUserId} size={120} />
-        <Text style={[text.subtitle, styles.label]}>SPEAKEASY CALL</Text>
-        <Text style={[text.heroBody, styles.peerHandle]}>@{active.peerUserId}</Text>
-        <Text style={[text.subtitle, styles.subLabel]}>is calling…</Text>
+      <View style={styles.body}>
+        <Text style={styles.eyebrow}>VOICE CALL · INCOMING</Text>
+        <View style={styles.portraitTile}>
+          <AvatarRenderer animalId={animalId} size={Math.round(140 * 0.78)} />
+        </View>
+        <View style={styles.handleRow}>
+          <Handle value={active.peerUserId} variant="display" color={BONE} />
+        </View>
+        <Text style={styles.sub}>wants to speak</Text>
       </View>
-      <View style={styles.controls}>
+
+      <View style={styles.actions}>
         <Pressable
           testID="incoming-decline"
           onPress={() => {
             orchestrator.decline();
             onResolved();
           }}
-          style={styles.declineBtn}
+          style={styles.btnDecline}
         >
-          <PhoneEndIcon size={32} color={colors.cream} />
+          <Text style={styles.btnDeclineText}>Decline</Text>
         </Pressable>
         <Pressable
           testID="incoming-accept"
@@ -50,63 +69,90 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
             void orchestrator.accept();
             onResolved();
           }}
-          style={styles.acceptBtn}
+          style={styles.btnAccept}
         >
-          <PhoneIcon size={32} color={colors.cream} />
+          <Text style={styles.btnAcceptText}>Accept</Text>
         </Pressable>
       </View>
     </SafeAreaView>
   );
 }
 
+const BRASS = '#E5A645';
+const BONE = '#F2E9D8';
+const INK = '#14091A';
+const BRAND_SURFACE = '#1F1126';
+const TEXT_MUTE = 'rgba(242,233,216,0.55)';
+const TEXT_FAINT = 'rgba(242,233,216,0.18)';
+
 const styles = StyleSheet.create({
-  root: {
+  // Brand canvas — never themed. Incoming is a brand moment.
+  root: { flex: 1, backgroundColor: brand.canvas },
+  body: {
     flex: 1,
-    backgroundColor: colors.cream,
-    justifyContent: 'space-between',
-    paddingVertical: space.xl,
-  },
-  peer: {
     alignItems: 'center',
-    gap: space.sm,
-    marginTop: '20%',
+    paddingTop: 60,
+    paddingHorizontal: space.lg,
   },
-  label: {
-    color: colors.primary,
-    fontFamily: fonts.inter500,
+  eyebrow: {
+    fontFamily: typeScale.meta.weight,
     fontSize: 11,
-    letterSpacing: 2,
+    letterSpacing: 0.22 * 11,
+    textTransform: 'uppercase',
+    color: BRASS,
+    marginBottom: 18,
+    fontWeight: '600',
   },
-  peerHandle: {
-    color: colors.ink,
-    fontFamily: fonts.inter500,
-    fontSize: 26,
+  // 140×140 brand-surface tile, sharp corners, faint bone border.
+  portraitTile: {
+    width: 140,
+    height: 140,
+    backgroundColor: BRAND_SURFACE,
+    borderWidth: 1,
+    borderColor: TEXT_FAINT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 24,
   },
-  subLabel: {
-    color: colors.slate,
-    fontFamily: fonts.inter400,
-    fontSize: 14,
+  handleRow: { marginBottom: 8 },
+  sub: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    letterSpacing: 0.22 * 11,
+    textTransform: 'uppercase',
+    color: TEXT_MUTE,
   },
-  controls: {
+  actions: {
     flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingHorizontal: space.xl,
-    paddingBottom: space.xl,
+    paddingHorizontal: space.md,
+    paddingBottom: space.md,
+    gap: 8,
   },
-  declineBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: callPalette.decline,
+  // Decline: transparent + faint bone border. Accept: brass.
+  btnDecline: {
+    flex: 1,
+    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 1,
+    borderColor: TEXT_FAINT,
   },
-  acceptBtn: {
-    width: 76,
-    height: 76,
-    borderRadius: 38,
-    backgroundColor: callPalette.accept,
+  btnDeclineText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: BONE,
+    letterSpacing: 0.5,
+  },
+  btnAccept: {
+    flex: 1,
+    paddingVertical: 16,
     alignItems: 'center',
-    justifyContent: 'center',
+    backgroundColor: BRASS,
+  },
+  btnAcceptText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: INK,
+    letterSpacing: 0.5,
   },
 });

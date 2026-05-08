@@ -46,6 +46,16 @@ interface GroupsState {
    * resync so the local view doesn't drift if a member was removed
    * out-of-band. */
   setMembers: (groupId: string, members: string[]) => void;
+  /** Rename a group locally. The wire broadcast lives in a server
+   * endpoint that doesn't exist yet (`POST /v1/rooms/<id>/name`); for
+   * now the rename is creator-local only. */
+  setName: (groupId: string, name: string) => void;
+  /** Drop a group from the local store entirely. Used by the leave
+   * action when the server-side leave endpoint isn't available — the
+   * user disappears the group from their device. Peers continue to
+   * see the local user as a member until a real `/leave` endpoint
+   * lands. */
+  remove: (groupId: string) => void;
   /** Read persisted state from disk. Idempotent. */
   hydrate: () => Promise<void>;
   /** Wipe groups locally AND on disk. */
@@ -114,6 +124,25 @@ export const useGroups = create<GroupsState>((set, get) => ({
       const newById = { ...s.byId, [groupId]: { ...g, members: [...members] } };
       void persist(newById);
       return { byId: newById };
+    }),
+
+  setName: (groupId, name) =>
+    set((s) => {
+      const g = s.byId[groupId];
+      if (!g) return s;
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === g.name) return s;
+      const newById = { ...s.byId, [groupId]: { ...g, name: trimmed } };
+      void persist(newById);
+      return { byId: newById };
+    }),
+
+  remove: (groupId) =>
+    set((s) => {
+      if (!s.byId[groupId]) return s;
+      const { [groupId]: _gone, ...rest } = s.byId;
+      void persist(rest);
+      return { byId: rest };
     }),
 
   hydrate: async () => {

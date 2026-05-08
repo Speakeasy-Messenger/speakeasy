@@ -1,60 +1,65 @@
 import React from 'react';
-import { Platform, View } from 'react-native';
 import { NavigationContainer, type NavigationContainerRef } from '@react-navigation/native';
 import {
   createNativeStackNavigator,
   type NativeStackScreenProps,
 } from '@react-navigation/native-stack';
-import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import Svg, { Path } from 'react-native-svg';
 import { InAppBanner } from '../components/InAppBanner.js';
 import type { BannerData } from '../store/banner.js';
 import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
-import { CallsScreen } from '../screens/CallsScreen.js';
 import { ChatScreen } from '../screens/ChatScreen.js';
+import { ConversationSettingsScreen } from '../screens/ConversationSettingsScreen.js';
 import { GroupChatScreen } from '../screens/GroupChatScreen.js';
-import { ManageGroupMembersScreen } from '../screens/ManageGroupMembersScreen.js';
-import { NewChatScreen } from '../screens/NewChatScreen.js';
+import { GroupSettingsScreen } from '../screens/GroupSettingsScreen.js';
 import { NewGroupScreen } from '../screens/NewGroupScreen.js';
 import { DiagnosticsScreen } from '../screens/DiagnosticsScreen.js';
 import { AvatarPreviewScreen } from '../screens/AvatarPreviewScreen.js';
-import { InviteFriendsScreen } from '../screens/InviteFriendsScreen.js';
-import { SettingsScreen } from '../screens/SettingsScreen.js';
+import { BlockListScreen } from '../screens/BlockListScreen.js';
+import { SettingsLandingScreen } from '../screens/SettingsLandingScreen.js';
+import { PrivacyScreen } from '../screens/PrivacyScreen.js';
+import { NotificationsScreen } from '../screens/NotificationsScreen.js';
+import { AppearanceScreen } from '../screens/AppearanceScreen.js';
+import { AccountScreen } from '../screens/AccountScreen.js';
+import { AvatarPickerScreen } from '../screens/AvatarPickerScreen.js';
+import { DeleteAccountScreen } from '../screens/DeleteAccountScreen.js';
+import { AboutScreen } from '../screens/AboutScreen.js';
+import { ShareHandleScreen } from '../screens/ShareHandleScreen.js';
 import { CallScreen } from '../screens/CallScreen.js';
 import { IncomingCallScreen } from '../screens/IncomingCallScreen.js';
-import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
-import { PhoneIcon } from '../components/icons/CallIcons.js';
-import { useColors } from '../theme/index.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 export type RootStack = {
   Onboarding: undefined;
   IdReveal: { userId: string };
-  /** Home is the bottom-tab nav: Chats + Calls. */
+  /** Authed root — renders the conversation list directly. The
+   * previous Chats+Calls bottom-tab nav was retired; calls live
+   * inline as system messages in the chat feed (CALLS.md §06). */
   Home: undefined;
   Chat: { peerId: string };
+  ConversationSettings: { peerId: string };
   GroupChat: { groupId: string };
-  ManageGroupMembers: { groupId: string };
-  NewChat: { initialPeerId?: string } | undefined;
+  GroupSettings: { groupId: string };
   NewGroup: undefined;
   Diagnostics: undefined;
   AvatarPreview: undefined;
-  InviteFriends: undefined;
+  ShareHandle: undefined;
+  BlockList: undefined;
   Settings: undefined;
+  Privacy: undefined;
+  Notifications: undefined;
+  Appearance: undefined;
+  Account: undefined;
+  AvatarPicker: undefined;
+  DeleteAccount: undefined;
+  About: undefined;
   Call: undefined;
   IncomingCall: undefined;
 };
 
-type HomeTabs = {
-  Chats: undefined;
-  Calls: undefined;
-};
-
 const Stack = createNativeStackNavigator<RootStack>();
-const Tabs = createBottomTabNavigator<HomeTabs>();
 
 interface RootNavigatorProps {
   navRef: React.RefObject<NavigationContainerRef<RootStack>>;
@@ -69,7 +74,6 @@ interface RootNavigatorProps {
 
 export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNavigatorProps) {
   const userId = useIdentity((s) => s.userId);
-  const openDirect = useConversations((s) => s.openDirect);
 
   return (
     <NavigationContainer ref={navRef}>
@@ -100,17 +104,15 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
           <Stack.Group screenOptions={{}}>
             <Stack.Screen name="Home">
               {({ navigation }: NativeStackScreenProps<RootStack, 'Home'>) => (
-                <HomeTabsView
-                  userId={userId}
-                  callOrchestrator={callOrchestrator}
+                <ConversationsScreen
                   onOpenChat={(peerId) => navigation.navigate('Chat', { peerId })}
-                  onOpenGroup={(groupId) => navigation.navigate('GroupChat', { groupId })}
-                  onNewChat={() => navigation.navigate('NewChat')}
+                  onOpenGroup={(groupId) =>
+                    navigation.navigate('GroupChat', { groupId })
+                  }
                   onNewGroup={() => navigation.navigate('NewGroup')}
                   onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
                   onOpenSettings={() => navigation.navigate('Settings')}
-                  onInviteFriends={() => navigation.navigate('InviteFriends')}
-                  onCallStarted={() => navigation.navigate('Call')}
+                  onShareHandle={() => navigation.navigate('ShareHandle')}
                 />
               )}
             </Stack.Screen>
@@ -119,49 +121,99 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                 <IdRevealScreen
                   userId={route.params?.userId ?? userId}
                   onContinue={() => navigation.replace('Home')}
+                  onShareHandle={() => navigation.navigate('ShareHandle')}
                 />
               )}
             </Stack.Screen>
-            <Stack.Screen name="Diagnostics">
-              {({ navigation }: NativeStackScreenProps<RootStack, 'Diagnostics'>) => (
-                <DiagnosticsScreen
-                  onBack={() => navigation.goBack()}
-                  onOpenAvatarPreview={() => navigation.navigate('AvatarPreview')}
-                />
-              )}
-            </Stack.Screen>
-            <Stack.Screen name="AvatarPreview">
-              {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPreview'>) => (
-                <AvatarPreviewScreen onBack={() => navigation.goBack()} />
-              )}
-            </Stack.Screen>
+            {/* CLAUDECODENOTE.md §3: Diagnostics + AvatarPreview live
+                only in DEBUG / alpha-channel builds. `__DEV__` is
+                React Native's compile-time flag — release builds get
+                a stripped bundle. */}
+            {__DEV__ ? (
+              <>
+                <Stack.Screen name="Diagnostics">
+                  {({ navigation }: NativeStackScreenProps<RootStack, 'Diagnostics'>) => (
+                    <DiagnosticsScreen
+                      onBack={() => navigation.goBack()}
+                      onOpenAvatarPreview={() => navigation.navigate('AvatarPreview')}
+                    />
+                  )}
+                </Stack.Screen>
+                <Stack.Screen name="AvatarPreview">
+                  {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPreview'>) => (
+                    <AvatarPreviewScreen onBack={() => navigation.goBack()} />
+                  )}
+                </Stack.Screen>
+              </>
+            ) : null}
             <Stack.Screen name="Settings">
               {({ navigation }: NativeStackScreenProps<RootStack, 'Settings'>) => (
-                <SettingsScreen
+                <SettingsLandingScreen
                   onBack={() => navigation.goBack()}
-                  onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
-                  onInviteFriends={() => navigation.navigate('InviteFriends')}
+                  onOpenPrivacy={() => navigation.navigate('Privacy')}
+                  onOpenNotifications={() => navigation.navigate('Notifications')}
+                  onOpenAppearance={() => navigation.navigate('Appearance')}
+                  onOpenAccount={() => navigation.navigate('Account')}
+                  onOpenAbout={() => navigation.navigate('About')}
                 />
               )}
             </Stack.Screen>
-            <Stack.Screen name="InviteFriends">
-              {({ navigation }: NativeStackScreenProps<RootStack, 'InviteFriends'>) => (
-                <InviteFriendsScreen onBack={() => navigation.goBack()} />
+            <Stack.Screen name="Privacy">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'Privacy'>) => (
+                <PrivacyScreen
+                  onBack={() => navigation.goBack()}
+                  onOpenBlockList={() => navigation.navigate('BlockList')}
+                />
               )}
             </Stack.Screen>
-            <Stack.Screen
-              name="NewChat"
-              options={{ presentation: 'modal' }}
-            >
-              {({ navigation, route }: NativeStackScreenProps<RootStack, 'NewChat'>) => (
-                <NewChatScreen
-                  onCancel={() => navigation.goBack()}
-                  onStart={(peerId) => {
-                    openDirect(userId, peerId);
-                    navigation.replace('Chat', { peerId });
-                  }}
-                  initialPeerId={route.params?.initialPeerId}
+            <Stack.Screen name="Notifications">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'Notifications'>) => (
+                <NotificationsScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="Appearance">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'Appearance'>) => (
+                <AppearanceScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="Account">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'Account'>) => (
+                <AccountScreen
+                  onBack={() => navigation.goBack()}
+                  onChangeFace={() => navigation.navigate('AvatarPicker')}
+                  onShareHandle={() => navigation.navigate('ShareHandle')}
+                  onDeleteAccount={() => navigation.navigate('DeleteAccount')}
                 />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="AvatarPicker">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPicker'>) => (
+                <AvatarPickerScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="DeleteAccount">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'DeleteAccount'>) => (
+                <DeleteAccountScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="About">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'About'>) => (
+                <AboutScreen
+                  onBack={() => navigation.goBack()}
+                  onOpenDiagnostics={
+                    __DEV__ ? () => navigation.navigate('Diagnostics') : undefined
+                  }
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="ShareHandle">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'ShareHandle'>) => (
+                <ShareHandleScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="BlockList">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'BlockList'>) => (
+                <BlockListScreen onBack={() => navigation.goBack()} />
               )}
             </Stack.Screen>
             <Stack.Screen
@@ -180,6 +232,11 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                 <ChatScreen
                   peerId={route.params.peerId}
                   onBack={() => navigation.goBack()}
+                  onOpenSettings={() =>
+                    navigation.navigate('ConversationSettings', {
+                      peerId: route.params.peerId,
+                    })
+                  }
                   onStartCall={
                     callOrchestrator
                       ? async (peerId) => {
@@ -193,6 +250,17 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                         }
                       : undefined
                   }
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="ConversationSettings">
+              {({
+                navigation,
+                route,
+              }: NativeStackScreenProps<RootStack, 'ConversationSettings'>) => (
+                <ConversationSettingsScreen
+                  peerId={route.params.peerId}
+                  onBack={() => navigation.goBack()}
                 />
               )}
             </Stack.Screen>
@@ -232,20 +300,19 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                 <GroupChatScreen
                   groupId={route.params.groupId}
                   onBack={() => navigation.goBack()}
+                  // GROUP-SETTINGS.md §2: tapping the AppBar title block
+                  // opens the room's full settings screen.
                   onManageMembers={() =>
-                    navigation.navigate('ManageGroupMembers', {
+                    navigation.navigate('GroupSettings', {
                       groupId: route.params.groupId,
                     })
                   }
                 />
               )}
             </Stack.Screen>
-            <Stack.Screen name="ManageGroupMembers">
-              {({
-                navigation,
-                route,
-              }: NativeStackScreenProps<RootStack, 'ManageGroupMembers'>) => (
-                <ManageGroupMembersScreen
+            <Stack.Screen name="GroupSettings">
+              {({ navigation, route }: NativeStackScreenProps<RootStack, 'GroupSettings'>) => (
+                <GroupSettingsScreen
                   groupId={route.params.groupId}
                   onBack={() => navigation.goBack()}
                 />
@@ -258,108 +325,3 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
   );
 }
 
-interface HomeTabsViewProps {
-  userId: string;
-  callOrchestrator?: CallOrchestrator;
-  onOpenChat: (peerId: string) => void;
-  onOpenGroup: (groupId: string) => void;
-  onNewChat: () => void;
-  onNewGroup: () => void;
-  onOpenDiagnostics: () => void;
-  onOpenSettings: () => void;
-  onInviteFriends: () => void;
-  onCallStarted: () => void;
-}
-
-/**
- * Bottom-tab nav under the authed root stack. Two tabs:
- *  - Chats: the existing ConversationsScreen (1:1 + group chats)
- *  - Calls: dialer + local call history
- *
- * Each tab is a leaf; modal screens (Chat, Settings, Call, etc.)
- * push onto the parent stack, so they cover the tab bar — natural
- * UX for "open this conversation" / "answer this call".
- */
-function HomeTabsView({
-  userId,
-  callOrchestrator,
-  onOpenChat,
-  onOpenGroup,
-  onNewChat,
-  onNewGroup,
-  onOpenDiagnostics,
-  onOpenSettings,
-  onInviteFriends,
-  onCallStarted,
-}: HomeTabsViewProps): React.JSX.Element {
-  const themed = useColors();
-  return (
-    <Tabs.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: themed.primary,
-        tabBarInactiveTintColor: themed.slate,
-        tabBarStyle: {
-          backgroundColor: themed.cream,
-          borderTopColor: themed.pale,
-          height: Platform.OS === 'ios' ? 84 : 60,
-          paddingTop: 4,
-        },
-        tabBarLabelStyle: {
-          fontSize: 11,
-          letterSpacing: 1.5,
-          textTransform: 'uppercase',
-        },
-      }}
-    >
-      <Tabs.Screen
-        name="Chats"
-        options={{
-          tabBarIcon: ({ color }) => <ChatsTabIcon color={color} />,
-        }}
-      >
-        {() => (
-          <ConversationsScreen
-            onOpenChat={onOpenChat}
-            onOpenGroup={onOpenGroup}
-            onNewChat={onNewChat}
-            onNewGroup={onNewGroup}
-            onOpenDiagnostics={onOpenDiagnostics}
-            onOpenSettings={onOpenSettings}
-            onInviteFriends={onInviteFriends}
-          />
-        )}
-      </Tabs.Screen>
-      <Tabs.Screen
-        name="Calls"
-        options={{
-          tabBarIcon: ({ color }) => <PhoneIcon size={22} color={color} />,
-        }}
-      >
-        {() => (
-          <CallsScreen
-            orchestrator={callOrchestrator}
-            onCallStarted={onCallStarted}
-          />
-        )}
-      </Tabs.Screen>
-    </Tabs.Navigator>
-  );
-}
-
-function ChatsTabIcon({ color }: { color: string }): React.JSX.Element {
-  return (
-    <View>
-      <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-        <Path
-          d="M4 5 H20 V17 H13 L9 21 V17 H4 Z"
-          stroke={color}
-          strokeWidth={1.6}
-          strokeLinecap="square"
-          strokeLinejoin="miter"
-          fill="none"
-        />
-      </Svg>
-    </View>
-  );
-}

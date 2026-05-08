@@ -6,59 +6,21 @@ import { useTheme } from '../../theme/ThemeProvider.js';
  * Stroke-based icons for the chat input bar — Phosphor-style
  * (1.5px stroke, square caps + joins) per BRANDING1.md §8. No fills.
  *
- * Three icons:
+ * Two icons:
  *
- *  - `GifIcon` — square with a "GIF" wordmark inside. Sits to the
- *    LEFT of the text input, opens the Tenor sheet.
  *  - `PaperclipIcon` — classic paperclip arc. Right of the input,
  *    opens the photos/files picker.
  *  - `CameraIcon` — body + lens circle + viewfinder bump. Right-most,
  *    launches the device camera.
+ *
+ * The previous `GifIcon` + Tenor sheet was removed — GIFs are
+ * deliberately not part of the product (CONVERSATIONS.md §5; spec
+ * note from triage doc on third-party CDN privacy + brand
+ * contradiction).
  */
 interface IconProps {
   size?: number;
   color?: string;
-}
-
-export function GifIcon({ size = 24, color }: IconProps): React.JSX.Element {
-  const theme = useTheme();
-  const stroke = color ?? theme.text;
-  return (
-    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Rect
-        x={3}
-        y={5}
-        width={18}
-        height={14}
-        rx={1}
-        stroke={stroke}
-        strokeWidth={1.5}
-      />
-      {/* G */}
-      <Path
-        d="M9 9 H6.5 V15 H9 V12.5 H7.7"
-        stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-      />
-      {/* I */}
-      <Path
-        d="M11.5 9 V15"
-        stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinecap="square"
-      />
-      {/* F */}
-      <Path
-        d="M14 15 V9 H17.5 M14 12 H16.5"
-        stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-      />
-    </Svg>
-  );
 }
 
 export function PaperclipIcon({ size = 24, color }: IconProps): React.JSX.Element {

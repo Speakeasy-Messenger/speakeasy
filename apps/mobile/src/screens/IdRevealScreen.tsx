@@ -1,99 +1,99 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, SafeAreaView, StyleSheet, Text, View, Easing } from 'react-native';
-import { Button } from '../components/Button.js';
-import { colors, fonts, space, text } from '../theme/index.js';
-import { brand, workspace } from '../theme/tokens.js';
+import {
+  Animated,
+  Easing,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
+import { defaultAnimalForUser } from '../avatars/default.js';
+import { useProfiles } from '../store/profiles.js';
+import { brand, font, type as typeScale } from '../theme/tokens.js';
+import { space } from '../theme/index.js';
 
 interface Props {
   userId: string;
   onContinue: () => void;
+  /** Brand-canvas Share Handle screen, reachable as a side-trip from
+   * here. Back from ShareHandle returns to IdReveal. */
+  onShareHandle: () => void;
 }
 
 /**
- * Spec §14 (April 2026):
- *   - cream bg
- *   - "INTRODUCING" primary-purple, Inter 500 9px / 2px tracking
- *   - 3 ID words stacked in Inter 700 38px ink, primary-purple `·` separators
+ * Post-onboarding identity confirmation (CLAUDECODENOTE.md §1).
  *
- * Motion: words arrive one-at-a-time, 200ms staggered, fading up from 8px.
- * Separators fade in after each word. Total ~800ms.
+ * Brand canvas. 96×96 portrait of the chosen animal. Display-style
+ * handle in bone with brass `@` + brass period. Three short
+ * paragraphs of canonical copy that name the handle, state the
+ * lose-this-device-lose-this-identity trade, and invite the user in.
+ *
+ * Two stacked actions: "Share my handle" secondary, "Open the door"
+ * primary. The note's table maps post-onboarding-first-time → secondary
+ * is share, which is exactly this surface.
+ *
+ * Whole identity stack fades up (opacity 0→1, translateY 8→0) over
+ * 600ms ease-out. The previous staggered-word reveal was retired
+ * along with the old hyphenated id format.
  */
-export function IdRevealScreen({ userId, onContinue }: Props) {
-  // New `@handle` format has no hyphens — render as one block with the
-  // `@` prefix. Legacy 3-word ids retain the staggered-word animation.
-  const words = userId.includes('-') ? userId.split('-') : [`@${userId}`];
-  const wordAnims = useRef(words.map(() => new Animated.Value(0))).current;
-  const sepAnims = useRef(words.slice(0, -1).map(() => new Animated.Value(0))).current;
+export function IdRevealScreen({
+  userId,
+  onContinue,
+  onShareHandle,
+}: Props): React.ReactElement {
+  const profile = useProfiles((s) => s.byUserId[userId]);
+  const animalId = profile?.selectedAvatarId ?? defaultAnimalForUser(userId);
 
+  const reveal = useRef(new Animated.Value(0)).current;
   useEffect(() => {
-    const animations: Animated.CompositeAnimation[] = [];
-    words.forEach((_, i) => {
-      animations.push(
-        Animated.timing(wordAnims[i]!, {
-          toValue: 1,
-          duration: 350,
-          delay: i * 200,
-          easing: Easing.out(Easing.cubic),
-          useNativeDriver: true,
-        }),
-      );
-      if (i < words.length - 1) {
-        animations.push(
-          Animated.timing(sepAnims[i]!, {
-            toValue: 1,
-            duration: 250,
-            delay: i * 200 + 200,
-            useNativeDriver: true,
-          }),
-        );
-      }
-    });
-    Animated.parallel(animations).start();
-  }, [wordAnims, sepAnims, words]);
+    Animated.timing(reveal, {
+      toValue: 1,
+      duration: 600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [reveal]);
+  const translateY = reveal.interpolate({
+    inputRange: [0, 1],
+    outputRange: [8, 0],
+  });
 
   return (
     <SafeAreaView testID="id-reveal-screen" style={styles.root}>
-      <View style={styles.center}>
-        <Text style={[text.introLabel, styles.intro]}>INTRODUCING</Text>
-        <View style={styles.stack}>
-          {words.map((word, i) => (
-            <React.Fragment key={`${i}-${word}`}>
-              <Animated.Text
-                style={[
-                  text.idWord,
-                  styles.word,
-                  {
-                    opacity: wordAnims[i],
-                    transform: [
-                      {
-                        translateY: wordAnims[i]!.interpolate({
-                          inputRange: [0, 1],
-                          outputRange: [8, 0],
-                        }),
-                      },
-                    ],
-                  },
-                ]}
-              >
-                {word}
-              </Animated.Text>
-              {i < words.length - 1 ? (
-                <Animated.Text style={[styles.separator, { opacity: sepAnims[i] }]}>
-                  ·
-                </Animated.Text>
-              ) : null}
-            </React.Fragment>
-          ))}
-        </View>
-        <Text style={styles.tagline}>Say it & leave.</Text>
-      </View>
-      <View style={styles.bottom}>
-        {/* The IdReveal screen renders the userId in a stack of animated
-            words, which Maestro can't easily reassemble. We mirror it
-            into a visible-but-tiny Text node tagged with both testID and
-            accessibilityLabel so Tier B can read it without altering
-            the layout. fontSize: 1 + opacity: 0 keeps it offscreen
-            visually but inside the rendered hierarchy. */}
+      <View style={styles.body}>
+        <Animated.View
+          style={[
+            styles.stack,
+            { opacity: reveal, transform: [{ translateY }] },
+          ]}
+        >
+          <Text style={styles.eyebrow}>YOU'RE IN</Text>
+
+          <View style={styles.portraitTile}>
+            <AvatarRenderer animalId={animalId} size={Math.round(96 * 0.78)} />
+          </View>
+
+          <Text style={styles.copy}>
+            Your handle is{' '}
+            <Text style={styles.copyEm}>
+              <Text style={styles.brass}>@</Text>
+              {userId}
+            </Text>{' '}
+            and your face is the {animalId}.
+          </Text>
+          <Text style={styles.copy}>
+            Nothing about you was used to make either. No phone, no email, no
+            real name. Lose this device, lose this identity — that's the
+            trade.
+          </Text>
+          <Text style={styles.copy}>When you're ready, step inside.</Text>
+        </Animated.View>
+
+        {/* Hidden testID-bearing label for Maestro. The styled stack
+            uses Animated.Text + spans which Maestro can't easily
+            reassemble. */}
         <Text
           testID="id-reveal-userid"
           accessible
@@ -102,36 +102,106 @@ export function IdRevealScreen({ userId, onContinue }: Props) {
         >
           @{userId}
         </Text>
-        <Button
-          label="Get started"
+      </View>
+
+      <View style={styles.actions}>
+        <Pressable
+          onPress={onShareHandle}
+          style={styles.btnSecondary}
+          testID="id-reveal-share"
+        >
+          <Text style={styles.btnSecondaryText}>Share my handle</Text>
+        </Pressable>
+        <Pressable
           onPress={onContinue}
-          tone="primary"
+          style={styles.btnPrimary}
           testID="id-reveal-get-started"
-        />
+        >
+          <Text style={styles.btnPrimaryText}>Open the door</Text>
+        </Pressable>
       </View>
     </SafeAreaView>
   );
 }
 
+const BRASS = '#E5A645';
+const BONE = '#F2E9D8';
+const INK = '#14091A';
+const BRAND_SURFACE = '#1F1126';
+const TEXT_FAINT = 'rgba(242,233,216,0.18)';
+const TEXT_MUTE = 'rgba(242,233,216,0.55)';
+
 const styles = StyleSheet.create({
-  // Spec §7: brand-moment screens render on the brand canvas (aubergine).
-  root: { flex: 1, backgroundColor: brand.canvas, padding: space.lg },
-  center: { flex: 1, alignItems: 'center', justifyContent: 'center', gap: space.lg },
-  intro: { color: colors.primary },
-  stack: { alignItems: 'center', gap: space.sm },
-  word: { color: colors.ink },
-  separator: {
-    fontFamily: fonts.inter500,
-    fontSize: 24,
-    color: colors.primary,
-    paddingVertical: 2,
+  // Brand canvas — never themed.
+  root: { flex: 1, backgroundColor: brand.canvas },
+  body: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: space.lg,
   },
-  tagline: {
-    fontFamily: fonts.inter300,
-    fontSize: 12,
-    color: colors.slate,
-    marginTop: space.xl,
+  stack: { alignItems: 'center', maxWidth: 32 * 8 },
+  // Note §1: eyebrow is meta-style in `text-mute`, not brass.
+  eyebrow: {
+    fontFamily: typeScale.meta.weight,
+    fontSize: 10,
+    letterSpacing: 0.22 * 10,
+    textTransform: 'uppercase',
+    color: TEXT_MUTE,
+    fontWeight: '500',
+    marginBottom: 24,
   },
-  bottom: { gap: space.sm },
-  hiddenLabel: { fontSize: 1, color: colors.cream, height: 1 },
+  portraitTile: {
+    width: 96,
+    height: 96,
+    backgroundColor: BRAND_SURFACE,
+    borderWidth: 1,
+    borderColor: TEXT_FAINT,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 28,
+  },
+  copy: {
+    fontFamily: font.regular,
+    fontSize: 15,
+    lineHeight: 22,
+    color: BONE,
+    textAlign: 'center',
+    marginBottom: 14,
+  },
+  copyEm: {
+    fontFamily: font.medium,
+    color: BONE,
+  },
+  brass: { color: BRASS, fontFamily: font.bold },
+  actions: {
+    paddingHorizontal: space.lg,
+    paddingBottom: space.lg,
+    gap: 8,
+  },
+  btnPrimary: {
+    backgroundColor: BRASS,
+    paddingVertical: 14,
+    alignItems: 'center',
+  },
+  btnPrimaryText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: INK,
+    letterSpacing: 0.5,
+  },
+  btnSecondary: {
+    backgroundColor: 'transparent',
+    paddingVertical: 14,
+    alignItems: 'center',
+    borderWidth: 1,
+    borderColor: TEXT_FAINT,
+  },
+  btnSecondaryText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    color: BONE,
+    letterSpacing: 0.5,
+  },
+  hiddenLabel: { fontSize: 1, color: BRAND_SURFACE, height: 1 },
 });

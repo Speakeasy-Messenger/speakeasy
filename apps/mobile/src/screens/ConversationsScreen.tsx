@@ -1,9 +1,22 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { FlatList, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import {
+  Animated,
+  Easing,
+  FlatList,
+  Pressable,
+  SafeAreaView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
+import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import { GetStartedCards } from '../components/GetStartedCards.js';
+import { Handle } from '../components/Handle.js';
+import { PeepholeMark } from '../components/PeepholeMark.js';
+import { PortraitTile } from '../components/PortraitTile.js';
 import { StatusSquare } from '../components/StatusSquare.js';
+import { useBlocks } from '../store/blocks.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
-import Svg, { Path } from 'react-native-svg';
 import { useColors } from '../theme/index.js';
 import { colors, fonts, space, text } from '../theme/index.js';
 import { font, type } from '../theme/tokens.js';
@@ -11,12 +24,19 @@ import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
+import { useProfiles } from '../store/profiles.js';
+import { useUiState } from '../store/ui.js';
+import { defaultAnimalForUser } from '../avatars/default.js';
 
 interface DirectRow {
   kind: 'direct';
   conversationId: string;
   peerUserId: string;
   preview: string;
+  /** Whether the last message is from the local user (`'me'`). Drives
+   * the optional `you: ` prefix on the preview per CONVERSATIONS.md
+   * §2.4. */
+  previewIsSelf: boolean;
   sortKey: number;
   unread: number;
   lastActivityAt: number;
@@ -27,6 +47,11 @@ interface GroupRow {
   name: string;
   memberCount: number;
   preview: string;
+  /** Sender of the last message: 'me' for outgoing, peer userId
+   * otherwise. The list row renders this as a brass `@sender:` prefix
+   * before the preview text — same brass-glyph treatment as the
+   * AppBar handle. Undefined when the group has no messages yet. */
+  previewSender?: string;
   sortKey: number;
   unread: number;
   lastActivityAt: number;
@@ -36,11 +61,10 @@ type Row = DirectRow | GroupRow;
 interface Props {
   onOpenChat: (peerUserId: string) => void;
   onOpenGroup: (groupId: string) => void;
-  onNewChat: () => void;
   onNewGroup: () => void;
   onOpenDiagnostics: () => void;
   onOpenSettings: () => void;
-  onInviteFriends: () => void;
+  onShareHandle: () => void;
 }
 
 /**
@@ -51,17 +75,24 @@ interface Props {
  */
 export function ConversationsScreen({
   onOpenChat,
+  // onNewChat removed in the deep-link migration — the FAB and the
+  // GetStartedCards "Start a chat" affordance both open the Find
+  // Someone sheet directly, no separate route to NewChat.
   onOpenGroup,
-  onNewChat,
   onNewGroup,
   onOpenSettings,
-  onInviteFriends,
+  onShareHandle,
 }: Props) {
   const userId = useIdentity((s) => s.userId);
   const wsState = useConnection((s) => s.state);
   const conversationsById = useConversations((s) => s.byId);
   const groupsById = useGroups((s) => s.byId);
   const unreadCountFor = useConversations((s) => s.unreadCountFor);
+  const openDirect = useConversations((s) => s.openDirect);
+  const blockedByHandle = useBlocks((s) => s.byHandle);
+  const ownAnimalId = useProfiles((s) =>
+    userId ? s.byUserId[userId]?.selectedAvatarId : undefined,
+  );
   const themed = useColors();
 
   const directRows: DirectRow[] = Object.entries(conversationsById)
@@ -73,6 +104,7 @@ export function ConversationsScreen({
         conversationId,
         peerUserId: c.peerUserId!,
         preview: last?.text ?? 'No messages yet',
+        previewIsSelf: last?.from === 'me',
         sortKey: last?.sentAt ?? c.createdAt,
         unread: unreadCountFor(conversationId),
         lastActivityAt: last?.sentAt ?? c.createdAt,
@@ -88,6 +120,7 @@ export function ConversationsScreen({
       name: g.name,
       memberCount: g.members.length,
       preview: last?.text ?? 'No messages yet',
+      previewSender: last?.from,
       sortKey: last?.sentAt ?? g.createdAt,
       unread: conv ? unreadCountFor(groupId) : 0,
       lastActivityAt: last?.sentAt ?? g.createdAt,
@@ -102,6 +135,24 @@ export function ConversationsScreen({
   // after a short window so the row reverts to its quiet default.
   const [revealedId, setRevealedId] = useState<string | null>(null);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Brass `+` FAB opens the Find Someone sheet (NEW-CONVERSATION.md
+  // §3). Handle search is the common case; "create a room →" lives
+  // in the sheet's footer.
+  const [sheetOpen, setSheetOpen] = useState(false);
+  // Deep-link lands here with a pending handle to look up — open the
+  // sheet pre-filled, then clear so a back-and-forward navigation
+  // doesn't re-pop it. NEW-CONVERSATION.md §6.1.
+  const pendingFindHandle = useUiState((s) => s.pendingFindHandle);
+  const [initialFindHandle, setInitialFindHandle] = useState<string | undefined>(
+    undefined,
+  );
+  useEffect(() => {
+    if (pendingFindHandle) {
+      setInitialFindHandle(pendingFindHandle);
+      setSheetOpen(true);
+      useUiState.getState().setPendingFindHandle(undefined);
+    }
+  }, [pendingFindHandle]);
   useEffect(() => () => {
     if (revealTimer.current) clearTimeout(revealTimer.current);
   }, []);
@@ -116,19 +167,28 @@ export function ConversationsScreen({
       testID="conversations-screen"
       style={[styles.root, { backgroundColor: themed.cream }]}
     >
-      <View style={styles.header}>
-        <View style={styles.headerTop}>
-          <View style={styles.headerLeft}>
-            <Text style={[text.sectionLabel, styles.label, { color: themed.slate }]}>YOU ARE</Text>
-            <View style={styles.youRow}>
-              <Text
-                testID="conversations-userid"
-                style={[text.heroBody, styles.you, { color: themed.ink }]}
-              >
-                @{userId}
-              </Text>
-              <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
-            </View>
+      {/* CONVERSATIONS.md §2.2 — list AppBar with self portrait
+          (28px) + handle + brass status square + settings glyph.
+          Compact, single-line; the longer "YOU ARE"-eyebrow hero from
+          the previous iteration competed with the row content. */}
+      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
+        <View style={styles.headerInner}>
+          {userId ? (
+            <PortraitTile
+              kind="animal"
+              id={ownAnimalId ?? defaultAnimalForUser(userId)}
+              size={28}
+            />
+          ) : (
+            <View style={styles.headerSelfPlaceholder} />
+          )}
+          <View style={styles.headerHandle} testID="conversations-userid">
+            {userId ? (
+              <Handle value={userId} variant="body" />
+            ) : (
+              <Text style={[styles.handlePlaceholder, { color: themed.slate }]}>—</Text>
+            )}
+            <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
           </View>
           <Pressable
             onPress={onOpenSettings}
@@ -152,15 +212,11 @@ export function ConversationsScreen({
         }
         renderItem={({ item }) => {
           const id = item.kind === 'direct' ? item.conversationId : item.groupId;
-          const title = item.kind === 'direct' ? `@${item.peerUserId}` : `# ${item.name}`;
-          const subtitle =
-            item.kind === 'direct'
-              ? item.preview
-              : `${item.memberCount} member${item.memberCount === 1 ? '' : 's'} · ${item.preview}`;
           const onPress = () =>
             item.kind === 'direct' ? onOpenChat(item.peerUserId) : onOpenGroup(item.groupId);
           const showTimestamp = revealedId === id;
           return (
+            <BurningRow conversationId={id}>
             <Pressable
               onPress={onPress}
               onLongPress={() => reveal(id)}
@@ -170,35 +226,76 @@ export function ConversationsScreen({
                 pressed && { backgroundColor: themed.soft },
               ]}
             >
-              <View style={styles.rowBody}>
-                <Text style={[styles.rowTitle, { color: themed.ink }]} numberOfLines={1}>
-                  {title}
-                </Text>
-                <Text style={[styles.rowSubtitle, { color: themed.slate }]} numberOfLines={1}>
-                  {subtitle}
-                </Text>
-                {showTimestamp ? (
-                  <Text
+              {/* Portrait tile — animal for 1:1, room mark for group.
+                  CONVERSATIONS.md §2.4. 36×36 keeps the row's left
+                  edge consistent regardless of which animal renders
+                  (a stag's antlers don't blow out the row). */}
+              {item.kind === 'direct' ? (
+                blockedByHandle[item.peerUserId] ? (
+                  // BLOCK.md §5.4: blocked 1:1 rows render the
+                  // Peephole mark in place of the peer's animal.
+                  <View
                     style={[
-                      styles.rowTimestamp,
-                      { color: themed.slate },
+                      styles.peepholeRow,
+                      {
+                        backgroundColor: themed.pale,
+                        borderColor: themed.divider,
+                      },
                     ]}
                   >
+                    <PeepholeMark size={Math.round(36 * 0.78)} />
+                  </View>
+                ) : (
+                  <PortraitTile kind="animal" id={item.peerUserId} size={36} />
+                )
+              ) : (
+                <PortraitTile kind="room" id={item.groupId} size={36} />
+              )}
+              <View style={styles.rowBody}>
+                {item.kind === 'direct' ? (
+                  // <Handle> renders brass `@` + handle as separate
+                  // spans — same brand glyph treatment as the AppBar
+                  // and elsewhere. Single source for handle rendering.
+                  <Handle value={item.peerUserId} variant="body" />
+                ) : (
+                  <Text
+                    style={[styles.groupName, { color: themed.ink }]}
+                    numberOfLines={1}
+                  >
+                    {item.name}
+                  </Text>
+                )}
+                <Text
+                  style={[styles.rowSubtitle, { color: themed.slate }]}
+                  numberOfLines={1}
+                >
+                  {renderPreview(item, themed.primary)}
+                </Text>
+                {showTimestamp ? (
+                  <Text style={[styles.rowTimestamp, { color: themed.slate }]}>
                     {relativeTime(item.lastActivityAt).toUpperCase()}
                   </Text>
                 ) : null}
               </View>
-              {item.unread > 0 ? (
-                <View style={styles.unread}>
-                  {item.unread > 1 ? (
-                    <Text style={[styles.unreadCount, { color: themed.primary }]}>
-                      {item.unread > 99 ? '99+' : item.unread}
-                    </Text>
-                  ) : null}
-                  <View style={[styles.unreadMark, { backgroundColor: themed.primary }]} />
-                </View>
-              ) : null}
+              {/* Time + unread square right column. CONVERSATIONS.md
+                  §2.4: time is one terse unit (no "5 minutes ago"),
+                  unread is a single 7×7 brass square — no count, no
+                  bold, no badge. Per-row layout reserves the square
+                  slot whether unread or not so widths don't shift on
+                  read-state changes. */}
+              <View style={styles.meta}>
+                <Text style={[styles.metaTime, { color: themed.slate }]}>
+                  {relativeTime(item.lastActivityAt)}
+                </Text>
+                <View
+                  style={[
+                    styles.unreadMark,
+                    { backgroundColor: item.unread > 0 ? themed.primary : 'transparent' },
+                  ]}
+                />
+              </View>
             </Pressable>
+            </BurningRow>
           );
         }}
       />
@@ -206,9 +303,9 @@ export function ConversationsScreen({
       {showGetStarted ? (
         <View style={[styles.getStartedDock, { backgroundColor: themed.cream, borderTopColor: themed.divider }]}>
           <GetStartedCards
-            onInviteFriends={onInviteFriends}
+            onShareHandle={onShareHandle}
             onNewGroup={onNewGroup}
-            onNewChat={onNewChat}
+            onNewChat={() => setSheetOpen(true)}
           />
         </View>
       ) : null}
@@ -221,51 +318,144 @@ export function ConversationsScreen({
         ]}
       >
         <Pressable
-          testID="conversations-new-group"
-          onPress={onNewGroup}
-          style={[styles.fabSecondary, { backgroundColor: themed.pale }]}
-          android_ripple={{ color: themed.soft, borderless: false }}
-        >
-          <HashFabIcon color={themed.primary} />
-        </Pressable>
-        <Pressable
-          testID="conversations-new-chat"
-          onPress={onNewChat}
+          testID="conversations-fab"
+          onPress={() => setSheetOpen(true)}
           style={[styles.fabPrimary, { backgroundColor: themed.primary }]}
           android_ripple={{ color: themed.soft, borderless: false }}
         >
-          <PencilFabIcon color={themed.cream} />
+          <Text style={[styles.fabPlus, { color: themed.cream }]}>+</Text>
         </Pressable>
       </View>
+
+      {/* NEW-CONVERSATION.md §3: Find Someone sheet replaces the
+          previous two-row "new chat / new room" picker. The sheet
+          IS the entry point — handle search is the common case;
+          room creation is the secondary footer link. */}
+      <FindSomeoneSheet
+        visible={sheetOpen}
+        onClose={() => {
+          setSheetOpen(false);
+          setInitialFindHandle(undefined);
+        }}
+        initialHandle={initialFindHandle}
+        onPickPeer={(peerId) => {
+          if (userId) openDirect(userId, peerId);
+          onOpenChat(peerId);
+        }}
+        onCreateRoom={onNewGroup}
+      />
     </SafeAreaView>
   );
 }
 
-function PencilFabIcon({ color }: { color: string }): React.JSX.Element {
+/**
+ * Render the row preview line. For direct chats with an outgoing last
+ * message, prefix `you: ` in `text-mute` (no brass — your own
+ * attribution doesn't need brand emphasis here). For group chats,
+ * prefix `@<sender>: ` in brass + slate, per CONVERSATIONS.md §2.4.
+ *
+ * Returns a React node (mixed-color spans) wrapped inside the parent
+ * Text. The parent's `numberOfLines={1}` truncates the whole line.
+ */
+/**
+ * BURN.md §7 — row-collapse animation.
+ *
+ * When the conversation matches `burningConversationId`, the row
+ * runs a 600ms ease-out collapse: opacity 1 → 0 + maxHeight 80 → 0
+ * (the +16 over the standard 64px row absorbs vertical padding so
+ * the collapse looks clean rather than a flat empty band).
+ *
+ * After completion: drop the conversation from the store and clear
+ * the burn flag. Idempotent — multiple matching rows on the screen
+ * (which shouldn't happen, but defensive) all reach the same end
+ * state.
+ */
+function BurningRow({
+  conversationId,
+  children,
+}: {
+  conversationId: string;
+  children: React.ReactNode;
+}): React.ReactElement {
+  const burningId = useUiState((s) => s.burningConversationId);
+  const isBurning = burningId === conversationId;
+  const removeConvo = useConversations((s) => s.removeConversation);
+  const fade = useRef(new Animated.Value(1)).current;
+  const height = useRef(new Animated.Value(80)).current;
+  const triggered = useRef(false);
+  useEffect(() => {
+    if (!isBurning || triggered.current) return;
+    triggered.current = true;
+    // Spec §5.1 timing — wait 250ms after the screen-pop transition
+    // lands the user on the list, then collapse over 600ms.
+    const t = setTimeout(() => {
+      Animated.parallel([
+        Animated.timing(fade, {
+          toValue: 0,
+          duration: 600,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: false,
+        }),
+        Animated.timing(height, {
+          toValue: 0,
+          duration: 600,
+          easing: Easing.out(Easing.cubic),
+          useNativeDriver: false,
+        }),
+      ]).start(({ finished }) => {
+        if (!finished) return;
+        removeConvo(conversationId);
+        useUiState.getState().setBurningConversationId(undefined);
+      });
+    }, 250);
+    return () => clearTimeout(t);
+  }, [isBurning, conversationId, fade, height, removeConvo]);
+  if (!isBurning) {
+    return <>{children}</>;
+  }
   return (
-    <Svg width={24} height={24} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M3 21 L3 17 L15 5 L19 9 L7 21 Z M14 6 L18 10"
-        stroke={color}
-        strokeWidth={1.6}
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-        fill="none"
-      />
-    </Svg>
+    <Animated.View style={{ opacity: fade, maxHeight: height, overflow: 'hidden' }}>
+      {children}
+    </Animated.View>
   );
 }
 
-function HashFabIcon({ color }: { color: string }): React.JSX.Element {
+function renderPreview(
+  item:
+    | { kind: 'direct'; preview: string; previewIsSelf: boolean }
+    | { kind: 'group'; preview: string; previewSender?: string },
+  brassColor: string,
+): React.ReactNode {
+  if (item.kind === 'direct') {
+    if (item.previewIsSelf) {
+      return (
+        <>
+          <Text>you: </Text>
+          <Text>{item.preview}</Text>
+        </>
+      );
+    }
+    return item.preview;
+  }
+  // group
+  if (!item.previewSender) {
+    // No messages yet — just the literal preview text ("No messages
+    // yet"). Without a sender there's nothing to brass-prefix.
+    return item.preview;
+  }
+  if (item.previewSender === 'me') {
+    return (
+      <>
+        <Text>you: </Text>
+        <Text>{item.preview}</Text>
+      </>
+    );
+  }
   return (
-    <Svg width={22} height={22} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M5 9 H21 M3 15 H19 M9 3 L7 21 M17 3 L15 21"
-        stroke={color}
-        strokeWidth={1.6}
-        strokeLinecap="square"
-      />
-    </Svg>
+    <>
+      <Text style={{ color: brassColor }}>@{item.previewSender}: </Text>
+      <Text>{item.preview}</Text>
+    </>
   );
 }
 
@@ -284,42 +474,59 @@ function relativeTime(ms: number): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
-  header: { gap: space.xs, padding: space.lg, paddingBottom: space.md },
-  headerTop: { flexDirection: 'row', justifyContent: 'space-between', alignItems: 'flex-start' },
-  headerLeft: { gap: space.xs, flex: 1 },
-  label: { color: colors.slate },
-  you: { color: colors.ink, fontFamily: fonts.inter500 },
-  youRow: { flexDirection: 'row', alignItems: 'center', gap: space.sm },
+  // CONVERSATIONS.md §2.2: list AppBar — 56 high, padding 14/14,
+  // 1px text-faint bottom border. Self portrait + handle + brass
+  // status square + settings glyph.
+  header: {
+    paddingHorizontal: space.md,
+    paddingVertical: 14,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  headerInner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+    minHeight: 32,
+  },
+  headerSelfPlaceholder: { width: 28, height: 28 },
+  headerHandle: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.sm,
+  },
+  handlePlaceholder: {
+    fontFamily: font.medium,
+    fontSize: type.body.size,
+  },
   gearBtn: { padding: space.sm },
-  // Per BRANDING1.md §6.8: 56-min height, 16/20 padding, 1px text-ghost
-  // bottom border, NO per-row card background, NO avatar, NO default
-  // timestamp. The whole list reads as one quiet column.
+
+  // CONVERSATIONS.md §2.4: row 64ish (expands w/ content), padding
+  // 14/16, 1px text-ghost bottom border (subtler than text-faint —
+  // these stack and we don't want a ladder), portrait 36×36, 12px
+  // gap to body, body flex: 1.
   listContent: { paddingBottom: space.xl },
   emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
   emptyText: { color: colors.slate },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingVertical: space.md,
-    paddingHorizontal: space.lg,
+    gap: space.md,
+    minHeight: 64,
+    paddingVertical: 14,
+    paddingHorizontal: space.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  rowBody: { flex: 1, gap: 2 },
-  rowTitle: {
-    fontFamily: type.body.weight,
-    fontSize: type.body.size,
-    letterSpacing: type.body.size * type.body.letterSpacingEm,
+  rowBody: { flex: 1, gap: 3, minWidth: 0 },
+  groupName: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    letterSpacing: -0.005 * 14,
   },
   rowSubtitle: {
-    fontFamily: type.caption.weight,
-    fontSize: type.caption.size,
-    letterSpacing: type.caption.size * type.caption.letterSpacingEm,
+    fontFamily: font.regular,
+    fontSize: 12.5,
   },
-  // Long-press reveal — meta-style timestamp slid in beneath the
-  // subtitle. Uppercase + accent-tracking matches the brand's `meta`
-  // scale (§2.2) so it reads as a quiet annotation, not a competing
-  // line of content.
   rowTimestamp: {
     fontFamily: type.meta.weight,
     fontSize: type.meta.size,
@@ -327,24 +534,23 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginTop: 4,
   },
-  // Trailing accent indicator: a 6×6 brass square (matches §6.10
-  // status-square geometry) marks unread rows. When the count is >1,
-  // the number appears in `caption`-sized brass to the left of the
-  // square. count==1 renders the square alone — minimum information,
-  // maximum brand-quiet.
-  unread: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    marginLeft: space.md,
+  // Right-aligned meta column — time on top, unread square below
+  // (or transparent reservation so the row doesn't shift width when
+  // unread state changes).
+  meta: {
+    flexDirection: 'column',
+    alignItems: 'flex-end',
+    gap: 6,
+    flexShrink: 0,
   },
-  unreadCount: {
-    fontFamily: font.medium,
-    fontSize: type.caption.size,
+  metaTime: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    letterSpacing: 0.02 * 11,
   },
   unreadMark: {
-    width: 6,
-    height: 6,
+    width: 7,
+    height: 7,
   },
   getStartedDock: {
     borderTopWidth: StyleSheet.hairlineWidth,
@@ -359,28 +565,26 @@ const styles = StyleSheet.create({
   fabStackAboveDock: {
     bottom: 156,
   },
-  fabPrimary: {
-    width: 56,
-    height: 56,
-    borderRadius: 28,
+  // Brand spec: sharp 52×52 brass square, no rounded corners, no
+  // Material drop shadow. Contrast with the cream canvas is the only
+  // affordance; a soft elevation would betray the brand restraint.
+  peepholeRow: {
+    width: 36,
+    height: 36,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOpacity: 0.18,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 3 },
+    borderWidth: StyleSheet.hairlineWidth,
   },
-  fabSecondary: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
+  fabPrimary: {
+    width: 52,
+    height: 52,
     alignItems: 'center',
     justifyContent: 'center',
-    elevation: 4,
-    shadowColor: '#000',
-    shadowOpacity: 0.14,
-    shadowRadius: 4,
-    shadowOffset: { width: 0, height: 2 },
+  },
+  fabPlus: {
+    fontFamily: font.bold,
+    fontSize: 26,
+    lineHeight: 28,
+    includeFontPadding: false,
   },
 });

@@ -88,8 +88,20 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
     // a flicker of the disabled button as it un-disables.
   }
 
+  // Inverse of `crossfade` — the FaceStep content opacity. We animate
+  // *both* sides of the crossfade (overlay fades in, content fades out)
+  // because in dark mode the brand canvas (#14091A) and the workspace
+  // canvas (#0F0E12) are nearly the same near-black, so a pure overlay
+  // fade is visually a no-op. Fading the content out as well makes the
+  // 240ms transition unambiguous regardless of OS theme.
+  const contentOpacity = crossfade.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1, 0],
+  });
+
   return (
     <SafeAreaView style={styles.root}>
+      <Animated.View style={[styles.contentLayer, { opacity: contentOpacity }]}>
       <View style={styles.header}>
         <Text style={styles.title}>
           Choose your face<Text style={styles.dot}>.</Text>
@@ -110,13 +122,32 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
                   styles.cell,
                   {
                     backgroundColor: brand.surface,
+                    // Border thickness is fixed at 2px regardless of
+                    // selection. Toggling the *color* between faint
+                    // and brass keeps the inner content's available
+                    // box constant — selecting a tile no longer
+                    // shifts the unselected siblings' centering. The
+                    // older `1 → 2` ramp on isSelected caused the
+                    // chosen animal to drift off-center while
+                    // siblings stayed put (counterintuitive: the
+                    // user expects emphasis, not a layout twitch).
                     borderColor: isSelected ? BRASS : TEXT_FAINT,
-                    borderWidth: isSelected ? 2 : 1,
                   },
                 ]}
                 testID={`onboarding-face-${id}`}
               >
-                <PortraitTile kind="animal" id={id} size={64} skipBlink />
+                {/* AVATAR-SYSTEM.md §6.1: selected tile scales to ~86%
+                    of cell vs ~78% unselected. We hand PortraitTile a
+                    fixed 64px and apply the growth via transform on
+                    a wrapper, so the cell footprint is stable + the
+                    centering math is borderless. */}
+                <View
+                  style={{
+                    transform: [{ scale: isSelected ? 1.1 : 1.0 }],
+                  }}
+                >
+                  <PortraitTile kind="animal" id={id} size={64} />
+                </View>
               </Pressable>
             );
           })}
@@ -133,16 +164,17 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
           testID="onboarding-face-confirm"
         />
       </View>
+      </Animated.View>
 
       {/* Spec §2.4 canvas crossfade overlay. Workspace canvas color
-          fades in over 240ms; on completion onPicked fires which
-          swaps the navigator stacks. The overlay sits absolute on
-          top of the brand-canvas content; while opacity < 1 the
-          aubergine bleeds through, while opacity = 1 the user
-          visually sees the workspace canvas before the actual
-          conversation list mounts. pointerEvents="none" so the
-          fade doesn't intercept any in-flight taps (in practice
-          the button is disabled by `busy` anyway). */}
+          fades in over 240ms while the content layer above fades
+          out in lockstep. On completion onPicked fires which swaps
+          the navigator stacks. Two-sided fade is required because
+          dark-mode brand and workspace canvases are nearly the same
+          near-black (#14091A vs #0F0E12) — a pure overlay fade
+          would be invisible to dark-mode users. pointerEvents="none"
+          so the fade doesn't intercept any in-flight taps (in
+          practice the button is disabled by `busy` anyway). */}
       <Animated.View
         pointerEvents="none"
         style={[
@@ -162,6 +194,7 @@ const TEXT_FAINT = 'rgba(242,233,216,0.12)';
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: brand.canvas },
+  contentLayer: { flex: 1 },
   header: { paddingHorizontal: 24, paddingTop: 48 },
   title: {
     fontFamily: font.bold,
@@ -185,6 +218,7 @@ const styles = StyleSheet.create({
     aspectRatio: 1,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: 2,
   },
   bottom: { paddingHorizontal: 24, paddingBottom: 24, gap: 8 },
   error: {

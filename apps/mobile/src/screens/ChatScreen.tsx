@@ -1,6 +1,8 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Alert,
+  Animated,
+  Easing,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -20,13 +22,21 @@ import {
 } from '@speakeasy/shared';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
-import { GifPickerSheet } from '../components/GifPickerSheet.js';
-import { CameraIcon, GifIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
+import { UnblockConfirmSheet } from '../components/BlockSheets.js';
+import { CallTypeSheet } from '../components/CallTypeSheet.js';
+import { FrozenInputBar } from '../components/FrozenInputBar.js';
+import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { PhoneIcon } from '../components/icons/CallIcons.js';
+import { PeepholeMark } from '../components/PeepholeMark.js';
+import { PortraitTile } from '../components/PortraitTile.js';
+import { Handle } from '../components/Handle.js';
+import { StatusSquare } from '../components/StatusSquare.js';
+import { useBlocks } from '../store/blocks.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
 import Svg, { Path } from 'react-native-svg';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
+import { SystemMessageRow } from '../components/SystemMessageRow.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useUiState } from '../store/ui.js';
 import { useIdentity } from '../store/identity.js';
@@ -51,6 +61,9 @@ interface Props {
    * hidden.
    */
   onStartCall?: (peerId: string) => void;
+  /** Open the conversation-settings screen — fired from the AppBar
+   * title-block tap. When omitted, the title block becomes inert. */
+  onOpenSettings?: () => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal in the
@@ -81,7 +94,12 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * `GroupMessagingModule` carry-over). SQLCipher message persistence
  * lands when the conversation store leaves in-memory Zustand.
  */
-export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
+export function ChatScreen({
+  peerId,
+  onBack,
+  onStartCall,
+  onOpenSettings,
+}: Props) {
   const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
   if (!myUserId) {
@@ -99,12 +117,48 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
   const openDirect = useConversations((s) => s.openDirect);
   const markRead = useConversations((s) => s.markRead);
 
+  // BLOCK.md §5: when the local user has blocked this peer, the
+  // chat surface enters frozen mode (Peephole portrait, BLOCKED
+  // sub-line, no call button, FrozenInputBar in place of the
+  // composer). Reads from the local block list — server-side
+  // enforcement is a follow-up per BLOCK.md §10.
+  const isBlocked = useBlocks((s) => s.isBlocked(peerId));
+  const unblockUser = useBlocks((s) => s.unblock);
+  const [unblockSheetOpen, setUnblockSheetOpen] = useState(false);
+  const [callTypeOpen, setCallTypeOpen] = useState(false);
+
   const [input, setInput] = useState('');
   // Tap a photo/gif in the bubble → render this attachment fullscreen
   // in a Modal layered over the chat. Null = closed.
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
-  const [gifSheetOpen, setGifSheetOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
+
+  // BURN.md §5 — feed dissolve. ConvSettings sets
+  // `burningConversationId`; we drive the local fade here. The
+  // animation runs once on entry, then we pop back to the list
+  // (where the row collapse continues). Ref guards re-renders so
+  // we don't restart the animation if the screen re-renders mid-
+  // dissolve.
+  const burningConversationId = useUiState((s) => s.burningConversationId);
+  const isBurning = burningConversationId === conversationId;
+  const burnFade = useRef(new Animated.Value(1)).current;
+  const burnTriggeredRef = useRef(false);
+  useEffect(() => {
+    if (!isBurning || burnTriggeredRef.current) return;
+    burnTriggeredRef.current = true;
+    // Spec §5.1 frame 2: opacity drops to 0.32 instantly, then
+    // animates to 0 over 600ms ease-out. We run a single timing
+    // 1 → 0 — the 0.32 is implicit (the eye sees a gradient pass
+    // through it) and avoiding the snap keeps motion continuous.
+    Animated.timing(burnFade, {
+      toValue: 0,
+      duration: 600,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start(({ finished }) => {
+      if (finished) onBack?.();
+    });
+  }, [isBurning, burnFade, onBack]);
 
   // Ensure the conversation entry exists with the correct peerUserId. If
   // the user navigated here via NewChatScreen this is already done; if they
@@ -198,15 +252,6 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
   async function handleCamera() {
     const photo = await pickFromCamera();
     if (photo) await sendOutbound({ attachments: [photo] });
-  }
-
-  function handleGif() {
-    setGifSheetOpen(true);
-  }
-
-  async function handleGifPicked(gif: Attachment) {
-    setGifSheetOpen(false);
-    await sendOutbound({ attachments: [gif] });
   }
 
   async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
@@ -359,14 +404,17 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
   }
 
   const hasInput = input.trim().length > 0;
-  // Brand §6.1: handle in `text` weight 500, segments joined by `accent`
-  // `·` separators. Speakeasy ids are noun-noun-noun on the wire — split
-  // and re-join with the brass dot for the AppBar treatment. Other
-  // surfaces (list, composer placeholder) keep `@handle` for familiarity.
-  const handleSegments = peerId.split('-').filter(Boolean);
+  const ttlLabel = formatTtl(ttl);
 
   return (
     <SafeAreaView testID="chat-screen" style={[styles.root, { backgroundColor: themed.cream }]}>
+      {/* CONVERSATIONS.md §3.2 — two-line AppBar: peer portrait +
+          handle + brass status square (line 1) + meta-style sub-line
+          `E2E · LEAVES IN <TTL>` (line 2). Tap the title block opens
+          conversation settings (no kebab menu). For now, no settings
+          screen exists at the conversation level — the title block
+          stays unpressable; settings live behind the gear in the
+          conversation list AppBar. */}
       <View style={[styles.header, { borderBottomColor: themed.divider }]}>
         {onBack ? (
           <Pressable testID="chat-back" onPress={onBack} hitSlop={8} style={styles.back}>
@@ -375,22 +423,52 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
         ) : (
           <View style={styles.back} />
         )}
-        <View style={styles.headerHandle}>
-          <Text style={[styles.handleText, { color: themed.ink }]} numberOfLines={1}>
-            {handleSegments.map((seg, i) => (
-              <React.Fragment key={i}>
-                {i > 0 ? (
-                  <Text style={{ color: themed.primary }}> · </Text>
-                ) : null}
-                {seg}
-              </React.Fragment>
-            ))}
+        {/* BLOCK.md §5.1: blocked peers swap the animal portrait for
+            the brass Peephole mark in the same surface tile shape. */}
+        {isBlocked ? (
+          <View
+            style={[
+              styles.peepholeTile,
+              {
+                backgroundColor: themed.pale,
+                borderColor: themed.divider,
+              },
+            ]}
+          >
+            <PeepholeMark size={Math.round(28 * 0.78)} />
+          </View>
+        ) : (
+          <PortraitTile kind="animal" id={peerId} size={28} />
+        )}
+        <Pressable
+          style={styles.headerTitle}
+          onPress={onOpenSettings}
+          testID="chat-title-block"
+          hitSlop={4}
+        >
+          <View style={styles.headerTitleLine}>
+            <Handle value={peerId} variant="body" />
+            {/* Status square — present for the unblocked path. The
+                blocked path drops it (their online state isn't
+                visible to you anymore per BLOCK.md §5.1). */}
+            {!isBlocked ? <StatusSquare variant="offline" /> : null}
+          </View>
+          <Text
+            style={[styles.headerSub, { color: themed.slate }]}
+            numberOfLines={1}
+          >
+            {isBlocked ? 'BLOCKED' : `E2E · LEAVES IN ${ttlLabel}`}
           </Text>
-        </View>
-        {onStartCall ? (
+        </Pressable>
+        {/* CALLS.md §01: tapping ☎ opens the call-type sheet, not
+            an immediate call. The deliberate ~300ms friction is part
+            of the brand discipline — calling is a significant
+            action and should feel that way. Hidden when blocked
+            per BLOCK.md §5.1. */}
+        {onStartCall && !isBlocked ? (
           <Pressable
             testID="chat-call"
-            onPress={() => onStartCall(peerId)}
+            onPress={() => setCallTypeOpen(true)}
             hitSlop={8}
             style={styles.callBtn}
           >
@@ -404,22 +482,32 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.body}
       >
+        {/* BURN.md §5: feed-fade wrapper. AppBar above stays at full
+            opacity so the conversation's identity is recognizable
+            while its content fades — the dissolve reads as a
+            deliberate ending, not a glitch. */}
+        <Animated.View style={{ flex: 1, opacity: burnFade }}>
         <FlatList
           ref={listRef}
           data={messages}
           keyExtractor={(m) => m.id}
           contentContainerStyle={styles.listContent}
-          renderItem={({ item }) => (
-            <DisappearingMessageBubble
-              text={item.text}
-              attachments={item.attachments}
-              stage={item.stage as DisappearingStage}
-              variant={item.from === 'me' ? 'sent' : 'received'}
-              delivered={item.delivered}
-              onTapPhoto={(a) => setViewerAttachment(a)}
-              onTapFile={(a) => void saveAndAnnounceFile(a)}
-            />
-          )}
+          renderItem={({ item }) => {
+            if (item.from === 'system') {
+              return <SystemMessageRow text={item.text} />;
+            }
+            return (
+              <DisappearingMessageBubble
+                text={item.text}
+                attachments={item.attachments}
+                stage={item.stage as DisappearingStage}
+                variant={item.from === 'me' ? 'sent' : 'received'}
+                delivered={item.delivered}
+                onTapPhoto={(a) => setViewerAttachment(a)}
+                onTapFile={(a) => void saveAndAnnounceFile(a)}
+              />
+            );
+          }}
           ListFooterComponent={
             <View style={styles.footnote}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
@@ -435,7 +523,14 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
             send button only fades in once content exists (accent icon,
             no fill behind). The TTL chip is a brand-affordance for the
             ephemerality knob — meta-style label, no border, sits inline
-            on the icon row. */}
+            on the icon row.
+
+            BLOCK.md §5.2: when the conversation is frozen, the whole
+            composer is replaced with the FrozenInputBar (caption "You
+            blocked them." + brass "Unblock"). */}
+        {isBlocked ? (
+          <FrozenInputBar onUnblock={() => setUnblockSheetOpen(true)} />
+        ) : (
         <View
           style={[
             styles.composer,
@@ -443,14 +538,6 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
           ]}
         >
           <View style={styles.inputBar}>
-            <Pressable
-              onPress={handleGif}
-              hitSlop={6}
-              style={styles.iconBtn}
-              testID="chat-gif"
-            >
-              <GifIcon size={22} />
-            </Pressable>
             <Pressable
               onPress={handlePaperclip}
               hitSlop={6}
@@ -493,6 +580,8 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
             ) : null}
           </View>
         </View>
+        )}
+        </Animated.View>
       </KeyboardAvoidingView>
       <Modal
         visible={!!viewerAttachment}
@@ -507,10 +596,19 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
           />
         ) : null}
       </Modal>
-      <GifPickerSheet
-        visible={gifSheetOpen}
-        onClose={() => setGifSheetOpen(false)}
-        onPick={(gif) => void handleGifPicked(gif)}
+      <UnblockConfirmSheet
+        visible={unblockSheetOpen}
+        handle={peerId}
+        onClose={() => setUnblockSheetOpen(false)}
+        onConfirm={() => {
+          setUnblockSheetOpen(false);
+          unblockUser(peerId);
+        }}
+      />
+      <CallTypeSheet
+        visible={callTypeOpen}
+        onClose={() => setCallTypeOpen(false)}
+        onPickVoice={() => onStartCall?.(peerId)}
       />
     </SafeAreaView>
   );
@@ -521,6 +619,29 @@ export function ChatScreen({ peerId, onBack, onStartCall }: Props) {
 // utf8ToBytes / bytesToB64 imported from ../utils/bytes — they're
 // Hermes-safe (no Buffer dependency). The previous Buffer-based inline
 // helpers crashed on first send because Hermes doesn't ship Buffer.
+
+/**
+ * Render the conversation TTL as a meta-style label fragment.
+ * Drives the AppBar sub-line `E2E · LEAVES IN <X>`. Uppercase + terse:
+ * "1H" / "24H" / "7D" / "30D" / "OFF". Keeps consistent with the
+ * spec's `meta` typography (10px, ls 0.18em, uppercase).
+ */
+function formatTtl(ttl: string): string {
+  switch (ttl) {
+    case 'hour':
+      return '1H';
+    case 'day':
+      return '24H';
+    case 'week':
+      return '7D';
+    case 'month':
+      return '30D';
+    case 'off':
+      return 'OFF';
+    default:
+      return ttl.toUpperCase();
+  }
+}
 
 function SendIcon({ size = 22, color }: { size?: number; color: string }): React.JSX.Element {
   // Geometric arrow — sharp endpoints (square caps), no fill, accent
@@ -541,30 +662,41 @@ function SendIcon({ size = 22, color }: { size?: number; color: string }): React
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
-  // Brand §6.1 AppBar: 56 min, canvas bg, 1px text-faint bottom border,
-  // 18 horizontal / 14 bottom padding. Back chevron + handle (with
-  // accent `·` separators) + optional trailing call icon.
+  // CONVERSATIONS.md §3.2: two-line AppBar — 60 high, padding 14/14,
+  // 1px text-faint bottom border. Back chevron + 28px peer portrait
+  // tile + handle/sub stack + optional call icon.
   header: {
     flexDirection: 'row',
     alignItems: 'center',
-    minHeight: 56,
-    paddingHorizontal: 18,
-    paddingTop: space.md,
-    paddingBottom: 14,
+    gap: space.sm,
+    minHeight: 60,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  back: { width: 32, paddingVertical: 4 },
-  // Single ‹ — the chevron is the universal "back" cue; the word "Back"
-  // adds nothing the chevron doesn't already say. Bigger size matches
-  // the brand's geometric, restraint-first ethos.
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  headerHandle: { flex: 1, paddingHorizontal: space.sm },
-  // §6.1: handle in `text` (ink), weight 500. Subtitle scale (17pt) so
-  // the AppBar reads as a quiet anchor, not a hero header.
-  handleText: {
+  back: { width: 28, paddingVertical: 4, alignItems: 'center' },
+  backText: { fontFamily: font.regular, fontSize: 24, lineHeight: 28 },
+  // Frozen-state Peephole portrait — sized to match the standard
+  // animal portrait tile (28×28 surface tile + faint border + 78%
+  // inner mark) so AppBar layout doesn't shift when block toggles.
+  peepholeTile: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
+  },
+  headerTitle: { flex: 1, gap: 2, minWidth: 0 },
+  headerTitleLine: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  headerSub: {
     fontFamily: font.medium,
-    fontSize: type.subtitle.size,
-    letterSpacing: type.subtitle.size * type.subtitle.letterSpacingEm,
+    fontSize: 10,
+    letterSpacing: 0.18 * 10,
+    textTransform: 'uppercase',
   },
   callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
   body: { flex: 1 },

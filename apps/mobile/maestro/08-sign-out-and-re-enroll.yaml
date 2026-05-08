@@ -57,12 +57,12 @@ name: Sign-out + re-enroll round-trip (Tier B)
 - copyTextFrom:
     id: "conversations-userid"
 - tapOn:
-    id: "conversations-new-chat"
+    id: "conversations-fab"
 - tapOn:
-    id: "new-chat-peer-id-input"
+    id: "find-sheet-input"
 - inputText: "${maestro.copiedText}"
 - tapOn:
-    text: "Start chat"
+    id: "find-sheet-result"
 - extendedWaitUntil:
     visible:
       id: "chat-screen"
@@ -127,12 +127,12 @@ name: Sign-out + re-enroll round-trip (Tier B)
 - copyTextFrom:
     id: "conversations-userid"
 - tapOn:
-    id: "conversations-new-chat"
+    id: "conversations-fab"
 - tapOn:
-    id: "new-chat-peer-id-input"
+    id: "find-sheet-input"
 - inputText: "${maestro.copiedText}"
 - tapOn:
-    text: "Start chat"
+    id: "find-sheet-result"
 - extendedWaitUntil:
     visible:
       id: "chat-screen"

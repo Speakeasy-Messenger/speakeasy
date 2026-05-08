@@ -2,8 +2,8 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
-import { colors, fonts, radius, space } from '../theme/index.js';
-import { accent } from '../theme/tokens.js';
+import { radius, space, useColors } from '../theme/index.js';
+import { accent, font } from '../theme/tokens.js';
 
 /**
  * Five-stage dissolve per spec §14 motion #2. **Real Animated transitions,
@@ -91,6 +91,7 @@ export function DisappearingMessageBubble({
   onStageAnimated,
   delivered,
 }: DisappearingMessageBubbleProps) {
+  const themed = useColors();
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const blur = useRef(new Animated.Value(0)).current;
@@ -156,6 +157,11 @@ export function DisappearingMessageBubble({
   const bubbleStyle = [
     styles.base,
     isSent ? styles.sent : styles.received,
+    // themed.receivedBubble varies with the OS mode; the static
+    // `colors.receivedBubble` we used to bake into StyleSheet was
+    // hardcoded to dark-mode surface, which made received bubbles
+    // appear pitch-black on the cream light-mode canvas.
+    isSent ? null : { backgroundColor: themed.receivedBubble },
     {
       opacity,
       transform: [{ scale }],
@@ -184,7 +190,14 @@ export function DisappearingMessageBubble({
         />
       ) : null}
       {text ? (
-        <Text style={[styles.text, isSent ? styles.sentText : styles.receivedText]}>{text}</Text>
+        <Text
+          style={[
+            styles.text,
+            isSent ? styles.sentText : { color: themed.ink },
+          ]}
+        >
+          {text}
+        </Text>
       ) : null}
       {/* Read-receipt glyph — only on sent 1:1 bubbles. ✓ = sent +
           buffered server-side; ✓✓ = recipient acked across all
@@ -211,8 +224,11 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
     marginVertical: 4,
   },
+  // Sent bubble keeps its brass colour (mode-invariant) baked in;
+  // received bubble's `backgroundColor` is overridden inline at render
+  // time so it varies with the OS theme.
   sent: {
-    backgroundColor: colors.sentBubble,
+    backgroundColor: accent.base,
     borderTopLeftRadius: radius.bubble,
     borderTopRightRadius: radius.bubble,
     borderBottomLeftRadius: radius.bubble,
@@ -220,7 +236,6 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-end',
   },
   received: {
-    backgroundColor: colors.receivedBubble,
     borderTopLeftRadius: radius.bubble,
     borderTopRightRadius: radius.bubble,
     borderBottomLeftRadius: radius.bubbleTail,
@@ -228,18 +243,17 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
   },
   text: {
-    fontFamily: fonts.inter400,
+    fontFamily: font.regular,
     fontSize: 15,
     lineHeight: 20,
   },
-  sentText: { color: colors.cream },
-  receivedText: { color: colors.ink },
+  sentText: { color: accent.foreground },
   // Read receipt — small + low-contrast so it never competes with
   // the message content. Cream-on-brass would blend; we go ink at
   // ~55% opacity for a "barely there" footprint that's still
   // legible against the brass sent-bubble.
   receipt: {
-    fontFamily: fonts.inter500,
+    fontFamily: font.medium,
     fontSize: 10,
     alignSelf: 'flex-end',
     marginTop: 2,

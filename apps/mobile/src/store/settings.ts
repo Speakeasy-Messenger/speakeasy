@@ -1,69 +1,156 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
-const STORAGE_KEY = 'speakeasy.settings.v1';
+const STORAGE_KEY = 'speakeasy.settings.v2';
 
 /**
  * What gets shown on the system notification banner. Default is 'rich'
- * — the user explicitly asked for content-rich-by-default behaviour
- * matching other messaging apps. 'private' falls back to a generic
- * "speakeasy: New message" with no sender attribution.
+ * — most users want content-rich notifications. 'private' falls back
+ * to a generic "speakeasy: New message" with no sender attribution.
  *
- * This is per-device by design — the privacy choice is "what does
- * *this* device's lock screen reveal," not a user-account-wide knob.
- * The server respects whichever preference each device most recently
- * sent up via POST /v1/devices/push-token.
+ * Per-device by design — the privacy choice is "what does *this*
+ * device's lock screen reveal," not a user-account-wide knob.
  */
 export type NotificationPrivacy = 'rich' | 'private';
 
+/**
+ * SETTINGS.md — full settings surface state. Each toggle has a
+ * sensible default that doesn't require user input (§1, principle 3).
+ */
 interface SettingsState {
+  // Privacy → Calls
+  allowIncomingCalls: boolean;
+  animateAvatarMouth: boolean;
+  // wakeFromBackground intentionally not in state — toggle is
+  // disabled "Coming soon" per §4.1.
+
+  // Privacy → Findability
+  showOnlineStatus: boolean;
+
+  // Notifications → Messages
+  /** Drives the in-app banner toggle row "Banner when in another
+   * conversation" — same value the original `inAppNotificationsEnabled`
+   * gated. Renamed for spec compliance. */
   inAppNotificationsEnabled: boolean;
+  messageSoundEnabled: boolean;
+  messageVibrationEnabled: boolean;
+  /** "Show preview text" toggle. Drives the per-device push payload
+   * shape via NotificationPrivacy: ON → 'rich', OFF → 'private'. */
   notificationPrivacy: NotificationPrivacy;
+
+  // Notifications → Calls
+  ringtoneEnabled: boolean;
+  vibrateOnIncoming: boolean;
+
   hydrated: boolean;
-  setInAppNotificationsEnabled: (enabled: boolean) => void;
+
+  setAllowIncomingCalls: (v: boolean) => void;
+  setAnimateAvatarMouth: (v: boolean) => void;
+  setShowOnlineStatus: (v: boolean) => void;
+  setInAppNotificationsEnabled: (v: boolean) => void;
+  setMessageSoundEnabled: (v: boolean) => void;
+  setMessageVibrationEnabled: (v: boolean) => void;
   setNotificationPrivacy: (privacy: NotificationPrivacy) => void;
+  setRingtoneEnabled: (v: boolean) => void;
+  setVibrateOnIncoming: (v: boolean) => void;
   hydrate: () => Promise<void>;
   reset: () => Promise<void>;
 }
 
-interface PersistedShape {
-  inAppNotificationsEnabled?: boolean;
-  notificationPrivacy?: NotificationPrivacy;
-}
+type PersistedShape = Partial<
+  Omit<
+    SettingsState,
+    | 'hydrated'
+    | 'setAllowIncomingCalls'
+    | 'setAnimateAvatarMouth'
+    | 'setShowOnlineStatus'
+    | 'setInAppNotificationsEnabled'
+    | 'setMessageSoundEnabled'
+    | 'setMessageVibrationEnabled'
+    | 'setNotificationPrivacy'
+    | 'setRingtoneEnabled'
+    | 'setVibrateOnIncoming'
+    | 'hydrate'
+    | 'reset'
+  >
+>;
+
+const DEFAULTS = {
+  allowIncomingCalls: true,
+  animateAvatarMouth: true,
+  showOnlineStatus: true,
+  inAppNotificationsEnabled: true,
+  messageSoundEnabled: true,
+  messageVibrationEnabled: true,
+  notificationPrivacy: 'rich' as NotificationPrivacy,
+  ringtoneEnabled: true,
+  vibrateOnIncoming: true,
+} as const;
 
 async function persist(s: PersistedShape): Promise<void> {
   try {
     await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(s));
   } catch {
-    // Best-effort. In-memory state is the source of truth for the session.
+    // In-memory state is the source of truth for the session.
   }
 }
 
+function snapshot(s: SettingsState): PersistedShape {
+  return {
+    allowIncomingCalls: s.allowIncomingCalls,
+    animateAvatarMouth: s.animateAvatarMouth,
+    showOnlineStatus: s.showOnlineStatus,
+    inAppNotificationsEnabled: s.inAppNotificationsEnabled,
+    messageSoundEnabled: s.messageSoundEnabled,
+    messageVibrationEnabled: s.messageVibrationEnabled,
+    notificationPrivacy: s.notificationPrivacy,
+    ringtoneEnabled: s.ringtoneEnabled,
+    vibrateOnIncoming: s.vibrateOnIncoming,
+  };
+}
+
 export const useSettings = create<SettingsState>((set, get) => ({
-  inAppNotificationsEnabled: true,
-  notificationPrivacy: 'rich',
+  ...DEFAULTS,
   hydrated: false,
 
-  setInAppNotificationsEnabled: (enabled) => {
-    set({ inAppNotificationsEnabled: enabled });
-    const s = get();
-    void persist({
-      inAppNotificationsEnabled: enabled,
-      notificationPrivacy: s.notificationPrivacy,
-    });
+  setAllowIncomingCalls: (v) => {
+    set({ allowIncomingCalls: v });
+    void persist(snapshot(get()));
   },
-
+  setAnimateAvatarMouth: (v) => {
+    set({ animateAvatarMouth: v });
+    void persist(snapshot(get()));
+  },
+  setShowOnlineStatus: (v) => {
+    set({ showOnlineStatus: v });
+    void persist(snapshot(get()));
+  },
+  setInAppNotificationsEnabled: (v) => {
+    set({ inAppNotificationsEnabled: v });
+    void persist(snapshot(get()));
+  },
+  setMessageSoundEnabled: (v) => {
+    set({ messageSoundEnabled: v });
+    void persist(snapshot(get()));
+  },
+  setMessageVibrationEnabled: (v) => {
+    set({ messageVibrationEnabled: v });
+    void persist(snapshot(get()));
+  },
   setNotificationPrivacy: (privacy) => {
     set({ notificationPrivacy: privacy });
-    const s = get();
-    void persist({
-      inAppNotificationsEnabled: s.inAppNotificationsEnabled,
-      notificationPrivacy: privacy,
-    });
-    // The server-side push of this preference happens via the existing
-    // POST /v1/devices/push-token call. Caller (SettingsScreen) is
-    // responsible for invoking that — we don't reach into services.ts
-    // from a Zustand store to keep this pure / side-effect-free.
+    void persist(snapshot(get()));
+    // Server-side push of this preference happens via POST
+    // /v1/devices/push-token. Caller (NotificationsScreen) is
+    // responsible for invoking it.
+  },
+  setRingtoneEnabled: (v) => {
+    set({ ringtoneEnabled: v });
+    void persist(snapshot(get()));
+  },
+  setVibrateOnIncoming: (v) => {
+    set({ vibrateOnIncoming: v });
+    void persist(snapshot(get()));
   },
 
   hydrate: async () => {
@@ -71,12 +158,12 @@ export const useSettings = create<SettingsState>((set, get) => ({
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as PersistedShape;
-        if (typeof parsed.inAppNotificationsEnabled === 'boolean') {
-          set({ inAppNotificationsEnabled: parsed.inAppNotificationsEnabled });
+        const next: Partial<SettingsState> = {};
+        for (const k of Object.keys(DEFAULTS) as Array<keyof typeof DEFAULTS>) {
+          const v = parsed[k];
+          if (v !== undefined) (next as Record<string, unknown>)[k] = v;
         }
-        if (parsed.notificationPrivacy === 'rich' || parsed.notificationPrivacy === 'private') {
-          set({ notificationPrivacy: parsed.notificationPrivacy });
-        }
+        set(next);
       }
     } catch {
       // Corrupt / missing → keep defaults.
@@ -86,7 +173,7 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
 
   reset: async () => {
-    set({ inAppNotificationsEnabled: true, notificationPrivacy: 'rich' });
+    set({ ...DEFAULTS });
     try {
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch {

@@ -7,15 +7,15 @@ import { useOnboardingCards } from '../store/onboarding-cards.js';
 
 /**
  * Horizontal "Get started" card row for the sparse-conversations
- * empty state. Renders three actionable cards: invite friends,
- * start a group, start a 1:1. Each card has an X dismiss; dismissals
+ * empty state. Renders three actionable cards: share handle, start
+ * a group, start a 1:1. Each card has an X dismiss; dismissals
  * persist via `useOnboardingCards`. The parent (ConversationsScreen)
  * decides when to show the row (currently: <5 conversations + at
  * least one un-dismissed card).
  */
 
 interface Props {
-  onInviteFriends: () => void;
+  onShareHandle: () => void;
   onNewGroup: () => void;
   onNewChat: () => void;
 }
@@ -45,10 +45,10 @@ const CARDS: readonly CardSpec[] = [
   },
   {
     id: 'invite',
-    title: 'Invite friends',
-    subtitle: 'Share your @handle',
+    title: 'Share your handle',
+    subtitle: 'Brand-canvas QR + copy + system share',
     icon: 'mail',
-    onPress: (p) => p.onInviteFriends(),
+    onPress: (p) => p.onShareHandle(),
   },
 ] as const;
 

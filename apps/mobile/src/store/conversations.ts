@@ -82,6 +82,13 @@ export interface ConversationState {
    * Undefined / 0 means nothing has been read yet.
    */
   lastReadAt?: number;
+  /**
+   * Per-conversation notification suppression — set from the
+   * Conversation Settings screen's Mute toggle (CONVERSATIONS.md
+   * §2.10). When true, in-app banners and OS push notifications
+   * for this conversation are dropped. Default false.
+   */
+  muted?: boolean;
 }
 
 interface ConversationsState {
@@ -111,8 +118,13 @@ interface ConversationsState {
    */
   markDelivered: (msgId: string) => void;
   remove: (conversationId: string, msgId: string) => void;
+  /** Drop the entire conversation entry. Used by group leave (the
+   * room disappears from the user's local list) and by 1:1 delete. */
+  removeConversation: (conversationId: string) => void;
   setTtl: (conversationId: string, ttl: TtlOption) => void;
   setPersistence: (conversationId: string, on: boolean) => void;
+  /** Toggle per-conversation notification suppression. */
+  setMuted: (conversationId: string, muted: boolean) => void;
   /** Resolved TTL in seconds, or `null` if `off` / persistence is on. */
   ttlSecondsFor: (conversationId: string) => number | null;
   /** Mark a conversation as read up to the current time. */
@@ -270,6 +282,15 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     void persist(get().byId);
   },
 
+  removeConversation: (conversationId) => {
+    set((s) => {
+      if (!s.byId[conversationId]) return s;
+      const { [conversationId]: _gone, ...rest } = s.byId;
+      return { byId: rest };
+    });
+    void persist(get().byId);
+  },
+
   setTtl: (conversationId, ttl) => {
     set((s) => {
       const c = s.byId[conversationId] ?? emptyConversation('direct');
@@ -283,6 +304,16 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       const c = s.byId[conversationId] ?? emptyConversation('direct');
       return {
         byId: { ...s.byId, [conversationId]: { ...c, persistenceEnabled } },
+      };
+    });
+    void persist(get().byId);
+  },
+
+  setMuted: (conversationId, muted) => {
+    set((s) => {
+      const c = s.byId[conversationId] ?? emptyConversation('direct');
+      return {
+        byId: { ...s.byId, [conversationId]: { ...c, muted } },
       };
     });
     void persist(get().byId);
