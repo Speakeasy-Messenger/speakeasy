@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useMemo, useState } from 'react';
 import {
   FlatList,
   Pressable,
@@ -29,7 +29,18 @@ interface Props {
  */
 export function BlockListScreen({ onBack }: Props): React.ReactElement {
   const themed = useColors();
-  const list = useBlocks((s) => s.list());
+  // Subscribe to the underlying map (stable reference across no-op
+  // updates), then derive the sorted list locally. Calling
+  // `s.list()` directly inside the selector returned a fresh sorted
+  // array every render, which made Zustand's getSnapshot comparator
+  // see a new value on each pass → infinite re-render loop, crashing
+  // the screen on first mount.
+  const byHandle = useBlocks((s) => s.byHandle);
+  const list = useMemo(
+    () =>
+      Object.values(byHandle).sort((a, b) => b.blockedAt - a.blockedAt),
+    [byHandle],
+  );
   const block = useBlocks((s) => s.block);
   const unblock = useBlocks((s) => s.unblock);
   const [unblockTarget, setUnblockTarget] = useState<string | undefined>();

@@ -123,11 +123,10 @@ android {
         applicationId "xyz.speakeasyapp.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // alpha-0.5.0-rc.4 — brand overhaul + Burn / Block / Group
-        // Settings / Settings restructure / system-message renderer
-        // / mute wiring / IdReveal / Phase 5 in-call mouth.
-        versionCode 4
-        versionName "0.5.0-rc.4"
+        // alpha-0.5.0-rc.5 — fix BlockList crash (unstable selector)
+        // + restore Diagnostics access in release alphas.
+        versionCode 5
+        versionName "0.5.0-rc.5"
         // Phase 5b: BuildConfig fields for Vouchflow SDK init. Pulled from
         // android/gradle.properties (the api key is gitignored — see
         // android/gradle.properties.example for the placeholder).

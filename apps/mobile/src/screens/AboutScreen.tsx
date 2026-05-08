@@ -23,8 +23,8 @@ const SUPPORT_EMAIL = 'hello@speakeasy.app';
 
 // Matches apps/mobile/android/app/build.gradle versionName +
 // versionCode. Manual sync until a build-time bake step lands.
-const VERSION = '0.5.0-rc.4';
-const BUILD = '4';
+const VERSION = '0.5.0-rc.5';
+const BUILD = '5';
 
 /**
  * SETTINGS.md §9 — three sections + footer.
@@ -47,7 +47,12 @@ export function AboutScreen({
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleVersionTap() {
-    if (!__DEV__ || !onOpenDiagnostics) return;
+    // 7-tap unlock is enabled in all alpha builds — without it the
+    // user has no way to reach Diagnostics on a release-mode APK,
+    // which is what we ship for sideload testing. When a real
+    // production-vs-alpha build flag exists this can re-gate to
+    // "alpha-only".
+    if (!onOpenDiagnostics) return;
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
     if (tapCountRef.current >= 7) {
@@ -121,7 +126,6 @@ export function AboutScreen({
         <View style={styles.footer}>
           <Pressable
             onPress={handleVersionTap}
-            disabled={!__DEV__}
             hitSlop={8}
             testID="about-version"
           >

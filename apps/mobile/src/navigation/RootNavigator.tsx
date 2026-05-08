@@ -125,27 +125,26 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                 />
               )}
             </Stack.Screen>
-            {/* CLAUDECODENOTE.md §3: Diagnostics + AvatarPreview live
-                only in DEBUG / alpha-channel builds. `__DEV__` is
-                React Native's compile-time flag — release builds get
-                a stripped bundle. */}
-            {__DEV__ ? (
-              <>
-                <Stack.Screen name="Diagnostics">
-                  {({ navigation }: NativeStackScreenProps<RootStack, 'Diagnostics'>) => (
-                    <DiagnosticsScreen
-                      onBack={() => navigation.goBack()}
-                      onOpenAvatarPreview={() => navigation.navigate('AvatarPreview')}
-                    />
-                  )}
-                </Stack.Screen>
-                <Stack.Screen name="AvatarPreview">
-                  {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPreview'>) => (
-                    <AvatarPreviewScreen onBack={() => navigation.goBack()} />
-                  )}
-                </Stack.Screen>
-              </>
-            ) : null}
+            {/* CLAUDECODENOTE.md §3: Diagnostics + AvatarPreview are
+                meant to be debug/alpha only. Until we have a build
+                flag distinguishing alpha-channel from production
+                release, we ship them in all alpha sideloads (the
+                7-tap-version unlock in About → footer is the access
+                gate). When a production pipeline exists, re-gate
+                this block on the alpha flag. */}
+            <Stack.Screen name="Diagnostics">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'Diagnostics'>) => (
+                <DiagnosticsScreen
+                  onBack={() => navigation.goBack()}
+                  onOpenAvatarPreview={() => navigation.navigate('AvatarPreview')}
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="AvatarPreview">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPreview'>) => (
+                <AvatarPreviewScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
             <Stack.Screen name="Settings">
               {({ navigation }: NativeStackScreenProps<RootStack, 'Settings'>) => (
                 <SettingsLandingScreen
