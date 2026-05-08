@@ -31,11 +31,28 @@ const ulid = factory(() => Math.random());
 export const ID_REGEX = /^[a-z]+-[a-z]+-[a-z]+$/;
 
 /**
- * User-chosen handle: lowercase ASCII, must start with a letter, then
- * 2-19 more letters/digits/underscores (3-20 chars total). Stored raw;
- * displayed with an `@` prefix everywhere.
+ * User-chosen handle: lowercase ASCII, 3-20 chars total. Per the
+ * ONBOARDING.md §2.3.2 cutover, the allowed character set widened
+ * from `[a-z0-9_]` to `[a-z0-9._-]`. Generated handles use hyphens
+ * (`amber-quiet-fox`); user-typed handles may use any of the three
+ * separators.
+ *
+ * The regex enforces:
+ *  - first char: letter or digit (no leading separator)
+ *  - last char: letter or digit (no trailing separator)
+ *  - 1–18 middle chars from `[a-z0-9._-]`
+ *
+ * `validateHandle` adds the additional check that no two separators
+ * appear consecutively (regex would get unwieldy; a single
+ * `/[._-]{2}/` post-filter is clearer).
+ *
+ * Stored raw; displayed with an `@` prefix everywhere.
  */
-export const HANDLE_REGEX = /^[a-z][a-z0-9_]{2,19}$/;
+export const HANDLE_REGEX = /^[a-z0-9][a-z0-9._-]{1,18}[a-z0-9]$/;
+
+/** Two-or-more consecutive separators reject post-regex. Spec §2.3.2:
+ * "no double symbols" (`..`, `--`, `__`, `.-`, `-_`, etc.). */
+const CONSECUTIVE_SEPARATORS = /[._-]{2}/;
 
 /**
  * Handles we don't let users claim. Mostly impersonation hazards
@@ -67,6 +84,7 @@ export function isHandle(value: string): boolean {
 export type HandleRejectReason = 'invalid' | 'reserved';
 export function validateHandle(value: string): HandleRejectReason | undefined {
   if (!HANDLE_REGEX.test(value)) return 'invalid';
+  if (CONSECUTIVE_SEPARATORS.test(value)) return 'invalid';
   if (RESERVED_HANDLES.has(value)) return 'reserved';
   return undefined;
 }

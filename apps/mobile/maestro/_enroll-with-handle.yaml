@@ -1,37 +1,57 @@
-# Shared sub-flow: complete enrollment with a chosen handle.
+# Shared sub-flow: complete enrollment via the Phase 3 4-screen
+# onboarding flow.
 #
-# OnboardingScreen requires the user to type a handle, see the
-# server-side availability check come back "available", and only then
-# tap Continue (the button is disabled until availability.kind ===
-# 'available').
+# Steps:
+#   01 Door     — tap "Open the door"
+#   02 Room     — tap "Step inside"
+#   03 Handle   — type handle → wait for "available" → tap "This one's mine"
+#                 → BiometricPrompt subflow (PIN 0000 on the emulator)
+#   04 Face     — tap the first animal tile → tap "Open the door"
 #
 # Each Tier B run boots a fresh in-memory api server, so any well-formed
 # handle is available. Callers don't need to thread a unique value
 # through — the in-runner namespace is empty at flow start.
 #
 # Pre-conditions:
-#   - App is launched and OnboardingScreen is on top.
+#   - App is launched and Door step is on top.
 #   - clearState / clearKeychain has run (we leave that to the parent
 #     flow so it can run before launchApp).
 #
 # Post-conditions:
 #   - Vouchflow attestation finished.
+#   - Selected animal persisted via api.setAvatar.
 #   - Conversations tab is visible and conversations-userid renders the
 #     resolved user id (= the handle the caller picked).
 #
 # Args (set via env or `runFlow`'s env block):
-#   HANDLE — handle to enroll, lowercase a-z0-9_ only, 3-20 chars.
+#   HANDLE — handle to enroll, lowercase 3-20 chars matching the new
+#            HANDLE_REGEX (a-z 0-9 . - _; no leading/trailing or
+#            consecutive separators).
 
 appId: xyz.speakeasyapp.app
 ---
 
+# ─── Step 01: Door ───
 - extendedWaitUntil:
     visible:
-      id: "onboarding-screen"
+      id: "onboarding-door-continue"
     timeout: 30000
+- tapOn:
+    id: "onboarding-door-continue"
 
-# Tap the handle input and type the chosen handle. The input
-# auto-strips any non-handle chars, but we provide a clean string.
+# ─── Step 02: The room ───
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-room-continue"
+    timeout: 10000
+- tapOn:
+    id: "onboarding-room-continue"
+
+# ─── Step 03: Handle ───
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-handle"
+    timeout: 10000
 - tapOn:
     id: "onboarding-handle"
 - inputText: ${HANDLE}
@@ -39,20 +59,17 @@ appId: xyz.speakeasyapp.app
 # Belt-and-suspenders ANR mitigation: a hung Pixel Launcher can
 # pop "isn't responding" mid-flow and steal focus, blanking the
 # handle field we just typed into. The CI script disables the
-# launcher (pm disable-user) but if that didn't take, dismiss the
-# dialog. Optional → no-op when the dialog isn't there.
+# launcher (pm disable-user) but if that didn't take, dismiss.
 - tapOn:
     text: "Wait"
     optional: true
 
-# Wait for the availability check to settle. The status text reads
-# "@{handle} is available." once the server confirms — that's also
-# when the Continue button stops being disabled. 30s gives the
-# Vouchflow attestation + handle-availability round-trip a generous
-# margin on a cold-boot CI emulator.
+# Availability indicator reads "available" (lowercase, no @ prefix —
+# spec §2.3.1 indicator copy). 30s for the cold-boot CI emulator's
+# slower network.
 - extendedWaitUntil:
     visible:
-      text: "@${HANDLE} is available."
+      text: "available"
     timeout: 30000
 
 - tapOn:
@@ -63,21 +80,28 @@ appId: xyz.speakeasyapp.app
 # com.android.systemui. Type 0000 to dismiss.
 - runFlow: _unlock-biometric-prompt.yaml
 
-# Race condition (documented in 01-enroll.yaml comments): after
-# setUserId the navigator flips to the authed stack; the
-# navigation.replace('IdReveal') in OnboardingScreen may lose the race.
-# Wait directly for the conversations tab.
-#
-# Belt-and-suspenders: post-enrollment a system Alert may pop on
-# top of the conversations screen, blocking the testID. Tier B run
-# 25513081609 hit this — a near-empty AlertDialog with just an "OK"
-# button covered the screen after biometric. Source unidentified
-# (no AlertDialog in our app code or react-native-callkeep; possibly
-# from a linked native module's permission flow). Optional tap →
-# no-op when the dialog isn't there.
+# Defensive: any post-claim system Alert dismisses cleanly.
 - tapOn:
     text: "OK"
     optional: true
+
+# ─── Step 04: Face ───
+# Spec §2.4: 12-animal grid, 3×4. Tap any cell — the first one is fine
+# since the Tier B harness only verifies the flow completes, not which
+# animal is rendered. Then "Open the door" advances into the workspace.
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-face-fox"
+    timeout: 15000
+- tapOn:
+    id: "onboarding-face-fox"
+- tapOn:
+    id: "onboarding-face-confirm"
+
+# Race condition (documented in 01-enroll.yaml): after setUserId the
+# navigator flips to the authed stack; the navigation.replace
+# ('IdReveal') in the parent route may lose the race. Wait directly
+# for the conversations tab.
 - extendedWaitUntil:
     visible:
       id: "conversations-userid"

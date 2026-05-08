@@ -9,7 +9,7 @@ import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import Svg, { Path } from 'react-native-svg';
 import { InAppBanner } from '../components/InAppBanner.js';
 import type { BannerData } from '../store/banner.js';
-import { OnboardingScreen } from '../screens/OnboardingScreen.js';
+import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
 import { CallsScreen } from '../screens/CallsScreen.js';
@@ -80,14 +80,14 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
         {!userId ? (
           <Stack.Screen name="Onboarding">
             {({ navigation }: NativeStackScreenProps<RootStack, 'Onboarding'>) => (
-              <OnboardingScreen
-                // Side-effect of enrollment is `useIdentity.setUserId()`,
-                // which flips this stack to the authed Group below; the
-                // Group's initial route is Conversations. The `replace`
-                // here is a no-op once the stacks swap, but kept for
-                // clarity that the intended UX is post-enroll → IdReveal.
-                // (IdReveal is a one-time celebration; if missed via the
-                // race, it's accessible from a future "show my id" link.)
+              <OnboardingFlow
+                // Phase 3: 4-screen flow (Door / Room / Handle / Face).
+                // The Face step is the one that calls
+                // `identity.setUserId()`, which flips this stack to
+                // the authed Group below. `replace` is a no-op once
+                // the stacks swap; kept for the IdReveal celebration
+                // path (which fires only on first-time enrollment;
+                // re-installs land in the Group directly).
                 onEnrolled={(id) => navigation.replace('IdReveal', { userId: id })}
               />
             )}

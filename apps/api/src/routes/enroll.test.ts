@@ -73,7 +73,11 @@ describe('POST /v1/enroll', () => {
 
   it('rejects invalid handle format with 400 invalid_user_id', async () => {
     const app = await makeApp();
-    for (const bad of ['ab', '1abc', 'al-ice', 'ALICE!']) {
+    // Phase 3 brand overhaul (ONBOARDING.md §2.3.2): widened set —
+    // digit-starts and `.-_` mid-handle now valid. Remaining failure
+    // modes: too short, uppercase, leading/trailing or consecutive
+    // separators.
+    for (const bad of ['ab', 'ALICE!', '-abc', 'abc-', 'al--ice', 'a..b']) {
       const res = await app.inject({
         method: 'POST',
         url: '/v1/enroll',

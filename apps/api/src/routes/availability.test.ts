@@ -34,7 +34,11 @@ describe('GET /v1/users/availability', () => {
 
   it('returns reason=invalid for malformed handles', async () => {
     const app = await makeApp();
-    for (const bad of ['ab', '1abc', 'al-ice', 'ALICE!']) {
+    // Phase 3 brand overhaul (ONBOARDING.md §2.3.2): handles widened
+    // to allow digit-starts and `.-_` mid-handle. Inputs that still
+    // fail: too short (<3), uppercase / special chars, leading or
+    // trailing separator, consecutive separators.
+    for (const bad of ['ab', 'ALICE!', '-abc', 'abc-', 'al--ice', 'a..b']) {
       const res = await app.inject({
         method: 'GET',
         url: `/v1/users/availability?id=${encodeURIComponent(bad)}`,
