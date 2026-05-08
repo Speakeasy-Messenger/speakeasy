@@ -52,7 +52,10 @@ describe('GET /v1/users/:id', () => {
     expect(body.id).toBe('silent-golden-hawk');
     expect(body.public_key).toBe(Buffer.from('hawk-pk').toString('base64'));
     expect(typeof body.created_at).toBe('string');
-    expect(body.avatar_b64).toBeNull();
+    // Phase 2 brand overhaul: animal id replaces the JPEG blob field.
+    // Null when the user hasn't picked one yet (mobile falls back to a
+    // deterministic-from-userId default for rendering).
+    expect(body.selected_avatar_id).toBeNull();
     await app.close();
   });
 
@@ -92,9 +95,8 @@ describe('GET /v1/users/:id', () => {
 });
 
 describe('PUT /v1/users/me/avatar', () => {
-  it('sets the avatar and the next GET reflects it', async () => {
+  it('sets the selected animal and the next GET reflects it', async () => {
     const { app, repo } = await makeApp();
-    const sample = Buffer.from('jpeg-bytes').toString('base64');
     const put = await app.inject({
       method: 'PUT',
       url: '/v1/users/me/avatar',
@@ -102,7 +104,7 @@ describe('PUT /v1/users/me/avatar', () => {
         authorization: 'Bearer dvt_silent-golden-hawk',
         'content-type': 'application/json',
       },
-      payload: { avatar_b64: sample },
+      payload: { animal_id: 'fox' },
     });
     expect(put.statusCode).toBe(204);
 
@@ -111,16 +113,16 @@ describe('PUT /v1/users/me/avatar', () => {
       url: '/v1/users/silent-golden-hawk',
       headers: { authorization: 'Bearer dvt_silent-golden-hawk' },
     });
-    expect(get.json().avatar_b64).toBe(sample);
+    expect(get.json().selected_avatar_id).toBe('fox');
 
     // Repo state matches what we queried.
-    expect((await repo.findById('silent-golden-hawk'))?.avatarB64).toBe(sample);
+    expect((await repo.findById('silent-golden-hawk'))?.selectedAvatarId).toBe('fox');
     await app.close();
   });
 
-  it('clears the avatar when null is sent', async () => {
+  it('clears the selection when null is sent', async () => {
     const { app, repo } = await makeApp();
-    await repo.setAvatar('silent-golden-hawk', 'old-avatar-b64');
+    await repo.setSelectedAvatar('silent-golden-hawk', 'fox');
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/users/me/avatar',
@@ -128,16 +130,18 @@ describe('PUT /v1/users/me/avatar', () => {
         authorization: 'Bearer dvt_silent-golden-hawk',
         'content-type': 'application/json',
       },
-      payload: { avatar_b64: null },
+      payload: { animal_id: null },
     });
     expect(res.statusCode).toBe(204);
-    expect((await repo.findById('silent-golden-hawk'))?.avatarB64).toBeUndefined();
+    expect((await repo.findById('silent-golden-hawk'))?.selectedAvatarId).toBeUndefined();
     await app.close();
   });
 
-  it('rejects oversized payloads (200KB cap)', async () => {
+  it('rejects animal ids outside the launch set', async () => {
+    // Typo guard. If this didn't fire, a peer could set
+    // `selected_avatar_id = "i-am-an-elephant"` and break renders on
+    // every other client (no matching SVG → blank tile).
     const { app } = await makeApp();
-    const tooBig = 'A'.repeat(200_001);
     const res = await app.inject({
       method: 'PUT',
       url: '/v1/users/me/avatar',
@@ -145,9 +149,10 @@ describe('PUT /v1/users/me/avatar', () => {
         authorization: 'Bearer dvt_silent-golden-hawk',
         'content-type': 'application/json',
       },
-      payload: { avatar_b64: tooBig },
+      payload: { animal_id: 'unicorn' },
     });
     expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('unknown_animal_id');
     await app.close();
   });
 
@@ -157,7 +162,7 @@ describe('PUT /v1/users/me/avatar', () => {
       method: 'PUT',
       url: '/v1/users/me/avatar',
       headers: { 'content-type': 'application/json' },
-      payload: { avatar_b64: 'AAA=' },
+      payload: { animal_id: 'fox' },
     });
     expect(res.statusCode).toBe(401);
     await app.close();

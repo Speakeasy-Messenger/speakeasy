@@ -5,7 +5,7 @@ interface Stored {
   bundle: PreKeyBundleInput;
   createdAt: Date;
   deviceToken: string;
-  avatarB64?: string;
+  selectedAvatarId?: string;
 }
 
 /** In-memory repo for tests. Not safe for concurrent use across processes. */
@@ -38,7 +38,7 @@ export class InMemoryUserRepo implements UserRepo {
       id: userId,
       publicKey: u.publicKey,
       createdAt: u.createdAt,
-      avatarB64: u.avatarB64,
+      selectedAvatarId: u.selectedAvatarId,
     };
   }
 
@@ -46,9 +46,9 @@ export class InMemoryUserRepo implements UserRepo {
     return this.byDeviceToken.get(deviceToken);
   }
 
-  async setAvatar(userId: string, avatarB64: string | undefined): Promise<void> {
+  async setSelectedAvatar(userId: string, animalId: string | undefined): Promise<void> {
     const u = this.users.get(userId);
     if (!u) return; // caller's `requireAuth` already proved enrollment
-    u.avatarB64 = avatarB64;
+    u.selectedAvatarId = animalId;
   }
 }

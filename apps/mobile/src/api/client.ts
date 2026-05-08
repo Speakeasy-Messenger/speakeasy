@@ -103,15 +103,16 @@ export class ApiClient {
   }
 
   /**
-   * Fetch group metadata (creator + avatar). Member-only; outsiders
-   * get 403. The mobile UI uses this to lazy-load the avatar and to
-   * decide whether to show the "Change photo" affordance (creator
-   * only).
+   * Fetch group metadata (creator). Member-only; outsiders get 403.
+   *
+   * Phase 2 brand overhaul: dropped the `avatar_b64` field. Groups
+   * don't have photos OR custom marks — the mobile client renders the
+   * deterministic geometric room mark from `groupId` on the fly.
    */
   async fetchGroup(
     deviceToken: string,
     groupId: string,
-  ): Promise<{ id: string; created_by: string; avatar_b64: string | null }> {
+  ): Promise<{ id: string; created_by: string }> {
     const res = await this.doFetch(
       `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}`,
       { headers: { authorization: `Bearer ${deviceToken}` } },
@@ -129,55 +130,31 @@ export class ApiClient {
     return (await res.json()) as {
       id: string;
       created_by: string;
-      avatar_b64: string | null;
     };
   }
 
-  /**
-   * Set or clear the group's avatar. Server enforces creator-only;
-   * a non-creator member gets `ApiError(403, 'not_creator')`.
-   */
-  async setGroupAvatar(
-    deviceToken: string,
-    groupId: string,
-    b64: string | null,
-  ): Promise<void> {
-    const res = await this.doFetch(
-      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}/avatar`,
-      {
-        method: 'PUT',
-        headers: {
-          authorization: `Bearer ${deviceToken}`,
-          'content-type': 'application/json',
-        },
-        body: JSON.stringify({ avatar_b64: b64 }),
-      },
-    );
-    if (res.status !== 204) {
-      let code: string | undefined;
-      try {
-        const j = (await res.json()) as { error?: string };
-        code = j?.error;
-      } catch {
-        /* ignore */
-      }
-      throw new ApiError(res.status, code);
-    }
-  }
+  // setGroupAvatar removed in Phase 2 — groups don't have photos OR
+  // custom marks. The mobile client renders the room mark from the
+  // group id locally; nothing to PUT.
 
   /**
-   * Set or clear the caller's avatar. `b64` is a base64-encoded JPEG;
-   * pass `null` (or empty) to clear. Server caps payload at 200KB on
-   * the wire — the picker downsizes to ~256px well under that.
+   * Set or clear the caller's selected animal avatar. `animalId` is
+   * one of the launch-set ids (fox / owl / raven / hare / stag /
+   * whale / moth / octopus / heron / bear / cat / bat). Pass `null`
+   * to clear — the next render falls back to a deterministic-from-
+   * userId default per `defaultAnimalForUser`.
+   *
+   * Phase 2 brand overhaul: replaces the previous `setAvatar(b64)`
+   * JPEG-blob path. Server doesn't store JPEGs at all.
    */
-  async setAvatar(deviceToken: string, b64: string | null): Promise<void> {
+  async setAvatar(deviceToken: string, animalId: string | null): Promise<void> {
     const res = await this.doFetch(`${this.baseUrl}/v1/users/me/avatar`, {
       method: 'PUT',
       headers: {
         authorization: `Bearer ${deviceToken}`,
         'content-type': 'application/json',
       },
-      body: JSON.stringify({ avatar_b64: b64 }),
+      body: JSON.stringify({ animal_id: animalId }),
     });
     if (res.status !== 204) {
       let code: string | undefined;
@@ -192,9 +169,12 @@ export class ApiClient {
   }
 
   /**
-   * Fetch a peer's public-key + avatar etc. The conversations list
-   * uses this to lazy-load other users' avatars (the data is
-   * server-side, plaintext for the alpha).
+   * Fetch a peer's public-key + their selected animal id. The
+   * profiles store calls this to lazy-populate `selectedAvatarId`
+   * for rendering remote portrait tiles.
+   *
+   * Phase 2 brand overhaul: response shape changed —
+   * `avatar_b64` (JPEG blob) → `selected_avatar_id` (string).
    */
   async fetchUser(
     deviceToken: string,
@@ -203,7 +183,7 @@ export class ApiClient {
     id: string;
     public_key: string;
     created_at: string;
-    avatar_b64: string | null;
+    selected_avatar_id: string | null;
   }> {
     const res = await this.doFetch(`${this.baseUrl}/v1/users/${encodeURIComponent(userId)}`, {
       headers: { authorization: `Bearer ${deviceToken}` },
@@ -222,7 +202,7 @@ export class ApiClient {
       id: string;
       public_key: string;
       created_at: string;
-      avatar_b64: string | null;
+      selected_avatar_id: string | null;
     };
   }
 

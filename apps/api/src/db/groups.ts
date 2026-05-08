@@ -4,8 +4,8 @@ export const SMALL_GROUP_MAX_MEMBERS = 100;
 export interface GroupSummary {
   id: string;
   createdBy: string;
-  /** base64 JPEG, ~256px square, plaintext. Undefined = no avatar set. */
-  avatarB64?: string;
+  // No avatar field — Phase 2 dropped group photos in favor of the
+  // deterministic geometric room mark client-side. AVATAR-SYSTEM.md §7.
 }
 
 export interface GroupRepo {
@@ -35,12 +35,6 @@ export interface GroupRepo {
     groupId: string;
     userId: string;
   }): Promise<number | 'group_missing' | 'not_member' | 'cannot_remove_creator'>;
-  /** Existence + avatar + creator lookup. Undefined when the group is missing. */
+  /** Existence + creator lookup. Undefined when the group is missing. */
   findById(groupId: string): Promise<GroupSummary | undefined>;
-  /**
-   * Set or clear (`undefined`) the group's avatar. Caller must enforce
-   * the creator-only policy upstream — this method writes whatever is
-   * passed.
-   */
-  setAvatar(groupId: string, avatarB64: string | undefined): Promise<void>;
 }

@@ -163,10 +163,11 @@ describe('GET /v1/groups/:id', () => {
       headers: callerHeader('bob'),
     });
     expect(res.statusCode).toBe(200);
+    // Phase 2 brand overhaul: groups dropped the `avatar_b64` field.
+    // Mobile renders the deterministic geometric room mark from `id`.
     expect(res.json()).toEqual({
       id: 'grp-test',
       created_by: 'alice',
-      avatar_b64: null,
     });
     await app.close();
   });
@@ -195,72 +196,9 @@ describe('GET /v1/groups/:id', () => {
   });
 });
 
-describe('PUT /v1/groups/:id/avatar', () => {
-  async function setupGroup() {
-    const { app, repo } = await makeApp();
-    await repo.create({ groupId: 'grp-test', createdBy: 'alice' });
-    await repo.addMember({ groupId: 'grp-test', userId: 'bob', addedBy: 'alice' });
-    return { app, repo };
-  }
-
-  it('lets the creator set the avatar; GET reflects it', async () => {
-    const { app } = await setupGroup();
-    const sample = Buffer.from('group-jpeg').toString('base64');
-    const put = await app.inject({
-      method: 'PUT',
-      url: '/v1/groups/grp-test/avatar',
-      headers: { ...callerHeader('alice'), 'content-type': 'application/json' },
-      payload: { avatar_b64: sample },
-    });
-    expect(put.statusCode).toBe(204);
-    const get = await app.inject({
-      method: 'GET',
-      url: '/v1/groups/grp-test',
-      headers: callerHeader('alice'),
-    });
-    expect(get.json().avatar_b64).toBe(sample);
-    await app.close();
-  });
-
-  it('403 not_creator when a non-creator member tries', async () => {
-    const { app } = await setupGroup();
-    const res = await app.inject({
-      method: 'PUT',
-      url: '/v1/groups/grp-test/avatar',
-      headers: { ...callerHeader('bob'), 'content-type': 'application/json' },
-      payload: { avatar_b64: 'AAA=' },
-    });
-    expect(res.statusCode).toBe(403);
-    expect(res.json().error).toBe('not_creator');
-    await app.close();
-  });
-
-  it('null clears the avatar', async () => {
-    const { app, repo } = await setupGroup();
-    await repo.setAvatar('grp-test', 'old-avatar');
-    const res = await app.inject({
-      method: 'PUT',
-      url: '/v1/groups/grp-test/avatar',
-      headers: { ...callerHeader('alice'), 'content-type': 'application/json' },
-      payload: { avatar_b64: null },
-    });
-    expect(res.statusCode).toBe(204);
-    expect((await repo.findById('grp-test'))?.avatarB64).toBeUndefined();
-    await app.close();
-  });
-
-  it('404 for a missing group', async () => {
-    const { app } = await makeApp();
-    const res = await app.inject({
-      method: 'PUT',
-      url: '/v1/groups/grp-nope/avatar',
-      headers: { ...callerHeader('alice'), 'content-type': 'application/json' },
-      payload: { avatar_b64: 'AAA=' },
-    });
-    expect(res.statusCode).toBe(404);
-    await app.close();
-  });
-});
+// PUT /v1/groups/:id/avatar tests removed in Phase 2 — the route is
+// gone (groups have no per-room photo or custom mark; the room mark
+// is derived from the group id, see AVATAR-SYSTEM.md §7).
 
 describe('GET /v1/groups/:id/members', () => {
   it('returns the roster + creator for a member', async () => {

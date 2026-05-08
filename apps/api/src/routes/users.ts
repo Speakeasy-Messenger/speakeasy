@@ -8,25 +8,47 @@ interface Params {
 }
 
 /**
- * Avatars are user-supplied base64 JPEGs. The mobile picker downsizes
- * to ~256px before upload, so a valid avatar is well under 100KB. Cap
- * at 200KB on the wire as defense in depth — anything larger almost
- * certainly came from a misbehaving client and we don't want it
- * occupying a Postgres TEXT column.
+ * Server-known animal ids. Mobile clients render the matching SVG;
+ * unknown ids cause the client to fall back to a deterministic-from-
+ * userId default. Centralized here so that:
+ *   - The PUT route can reject ids the launch set doesn't include
+ *     (typo guard, prevents a peer setting `selected_avatar_id =
+ *     "i-am-an-elephant"` and breaking other clients' renders).
+ *   - When we add a new animal in v2 we update this list and ship a
+ *     new server build; old clients gracefully fall back rather than
+ *     showing a black tile.
  */
-const MAX_AVATAR_B64_LENGTH = 200_000;
+const KNOWN_ANIMAL_IDS = new Set([
+  'fox',
+  'owl',
+  'raven',
+  'hare',
+  'stag',
+  'whale',
+  'moth',
+  'octopus',
+  'heron',
+  'bear',
+  'cat',
+  'bat',
+]);
 
 interface AvatarBody {
-  /** base64 JPEG, or empty string / null to clear. */
-  avatar_b64: string | null;
+  /** Animal id from the launch set, or null to clear. */
+  animal_id: string | null;
 }
 
 /**
- * GET /v1/users/:id — public-key + existence + avatar lookup.
+ * GET /v1/users/:id — public-key + existence + selected animal lookup.
  * Vouchflow-gated to mitigate enumeration attacks; only authenticated
  * callers can probe.
  *
- * PUT /v1/users/me/avatar — set or clear the caller's avatar.
+ * PUT /v1/users/me/avatar — set or clear the caller's selected animal.
+ *
+ * AVATAR-SYSTEM.md §8 sunset note: this endpoint previously accepted a
+ * `avatar_b64` JPEG payload. It now accepts an `animal_id` string from
+ * the launch set. Server doesn't store JPEGs at all — `users.avatar_b64`
+ * was dropped in migration 0009.
  */
 export async function registerUserRoutes(
   app: FastifyInstance,
@@ -46,7 +68,7 @@ export async function registerUserRoutes(
         id: u.id,
         public_key: u.publicKey.toString('base64'),
         created_at: u.createdAt.toISOString(),
-        avatar_b64: u.avatarB64 ?? null,
+        selected_avatar_id: u.selectedAvatarId ?? null,
       });
     },
   );
@@ -58,11 +80,14 @@ export async function registerUserRoutes(
       schema: {
         body: {
           type: 'object',
-          required: ['avatar_b64'],
+          required: ['animal_id'],
           properties: {
-            avatar_b64: {
+            animal_id: {
+              // Bounded length, but the real validation is the
+              // launch-set check below — the schema only protects us
+              // against junk strings.
               type: ['string', 'null'],
-              maxLength: MAX_AVATAR_B64_LENGTH,
+              maxLength: 32,
             },
           },
         },
@@ -71,9 +96,11 @@ export async function registerUserRoutes(
     async (request, reply) => {
       const userId = request.auth?.userId;
       if (!userId) return reply.code(401).send({ error: 'not_enrolled' });
-      const raw = request.body.avatar_b64;
-      const next = raw && raw.length > 0 ? raw : undefined;
-      await opts.repo.setAvatar(userId, next);
+      const raw = request.body.animal_id;
+      if (raw !== null && !KNOWN_ANIMAL_IDS.has(raw)) {
+        return reply.code(400).send({ error: 'unknown_animal_id' });
+      }
+      await opts.repo.setSelectedAvatar(userId, raw ?? undefined);
       return reply.code(204).send();
     },
   );

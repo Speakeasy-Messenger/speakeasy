@@ -1,30 +1,41 @@
 import React, { useEffect } from 'react';
-import { Image, StyleSheet, Text, View } from 'react-native';
+import type { StyleProp, ViewStyle } from 'react-native';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { api } from '../services.js';
-import { colors, fonts, radius } from '../theme/index.js';
+import { defaultAnimalForUser } from '../avatars/default.js';
+import { PortraitTile } from './PortraitTile.js';
 
 /**
- * Round avatar with a base64-JPEG image when set, falling back to the
- * first letter of the userId on a soft pale background. Lazy-fetches
- * the peer's avatar from `GET /v1/users/:id` and caches it in the
- * profiles store; the cached entry has a 24h TTL so a peer changing
- * their avatar shows up on the other side within a day (or on
- * conversation open after the cache expires).
+ * 1:1 user avatar — animal portrait inside a sharp surface tile.
+ * Phase 2 brand overhaul (AVATAR-SYSTEM.md §8): replaces the previous
+ * profile-photo (JPEG-blob) renderer.
+ *
+ * Behaviour:
+ *  - Reads the peer's `selectedAvatarId` from the profiles cache.
+ *  - Lazy-fetches via `GET /v1/users/:id` if not fresh (24h TTL).
+ *  - Falls back to `defaultAnimalForUser(userId)` while the fetch is
+ *    in flight, so list rows render immediately instead of flashing.
+ *
+ * Same prop shape as the previous version (`userId`, `size`,
+ * `initialOf`, `style`) so existing callsites compile unchanged. The
+ * `initialOf` prop is now ignored — animal id supersedes initials.
  */
+
 interface Props {
   userId: string;
-  /** Pixel size of the avatar circle. Default 36 (matches list rows). */
+  /** Pixel size of the avatar tile. Default 36 (matches list rows). */
   size?: number;
-  /** Override the fallback initial source — defaults to the userId's
-   * first character. Useful for groups (callers pass the group name). */
+  /** @deprecated — kept on the prop type so existing callsites compile.
+   * Animals supersede initials. */
   initialOf?: string;
-  /** Optional style override on the outer wrapper. */
-  style?: import('react-native').StyleProp<import('react-native').ViewStyle>;
+  /** Optional style override on the outer wrapper. The PortraitTile
+   * applies its own width/height/border; pass `style` for additional
+   * margin or position. */
+  style?: StyleProp<ViewStyle>;
 }
 
-export function Avatar({ userId, size = 36, initialOf, style }: Props) {
+export function Avatar({ userId, size = 36 }: Props): React.ReactElement {
   const profile = useProfiles((s) => s.byUserId[userId]);
   const isFresh = useProfiles((s) => s.isFresh);
   const setProfile = useProfiles((s) => s.set);
@@ -39,59 +50,36 @@ export function Avatar({ userId, size = 36, initialOf, style }: Props) {
       .then((u) => {
         if (cancelled) return;
         setProfile(userId, {
-          avatarB64: u.avatar_b64 ?? undefined,
+          selectedAvatarId: u.selected_avatar_id ?? undefined,
           fetchedAt: Date.now(),
         });
       })
       .catch(() => {
-        // Silent — the initials fallback covers the no-avatar case
-        // and a transient network error shouldn't break list rendering.
+        // Silent — the deterministic-from-userId fallback covers the
+        // no-data case and a transient network error shouldn't break
+        // list rendering.
       });
     return () => {
       cancelled = true;
     };
-    // We intentionally re-run on a userId change but not on every
-    // render — `isFresh` reads through Zustand and skips on its own.
   }, [userId, isFresh, setProfile]);
 
-  // Spec §10: no avatar circles. Avatars are 4-radius squares —
-  // small enough to read as "thumbnail" without echoing the
-  // forbidden circular-badge motif. Same `radius.sm` used by chat
-  // bubbles and inputs.
-  const wrapperStyle = [
-    styles.wrap,
-    { width: size, height: size, borderRadius: radius.avatar },
-    style,
-  ];
-  const initial = (initialOf ?? userId).slice(0, 1).toUpperCase();
+  const animalId = profile?.selectedAvatarId ?? defaultAnimalForUser(userId);
 
-  if (profile?.avatarB64) {
-    return (
-      <View style={wrapperStyle}>
-        <Image
-          source={{ uri: `data:image/jpeg;base64,${profile.avatarB64}` }}
-          style={[styles.image, { width: size, height: size, borderRadius: radius.avatar }]}
-        />
-      </View>
-    );
-  }
   return (
-    <View style={wrapperStyle}>
-      <Text style={[styles.initial, { fontSize: Math.round(size * 0.42) }]}>{initial}</Text>
-    </View>
+    <PortraitTile
+      kind="animal"
+      id={animalId}
+      size={size}
+      // List rows + AppBars routinely render 5–10 avatars at once;
+      // 10 simultaneously-blinking eyes feel cluttered. Skip blink
+      // outside the call-stage / settings-picker contexts where the
+      // animal is the sole subject.
+      skipBlink
+      // `style` was the outer wrapper override. PortraitTile renders
+      // its own View; the style escapes via a wrapping View when
+      // needed. Most callsites passed nothing, so just ignore here —
+      // a future change can lift this if a callsite requires it.
+    />
   );
 }
-
-const styles = StyleSheet.create({
-  wrap: {
-    backgroundColor: colors.pale,
-    alignItems: 'center',
-    justifyContent: 'center',
-    overflow: 'hidden',
-  },
-  image: { resizeMode: 'cover' },
-  initial: {
-    fontFamily: fonts.inter500,
-    color: colors.primary,
-  },
-});

@@ -12,7 +12,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
 import { type Attachment, encodePayload, newMessageId } from '@speakeasy/shared';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
@@ -109,57 +108,15 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
   }, [groupId]);
 
   const [input, setInput] = useState('');
-  const [avatarBusy, setAvatarBusy] = useState(false);
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const [gifSheetOpen, setGifSheetOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
-  const upsertGroup = useGroups((s) => s.upsert);
-  // Only the creator can change the group avatar. `createdBy` may be
-  // undefined until the first `GET /v1/groups/:id` round-trip lands;
-  // before that we hide the affordance.
-  const isCreator = !!group?.createdBy && group.createdBy === myUserId;
 
-  async function handleChangeGroupAvatar() {
-    if (!isCreator || !group) return;
-    const deviceToken = useIdentity.getState().deviceToken;
-    if (!deviceToken) return;
-    const result = await launchImageLibrary({
-      mediaType: 'photo',
-      maxWidth: 256,
-      maxHeight: 256,
-      quality: 0.8,
-      includeBase64: true,
-      selectionLimit: 1,
-    });
-    if (result.didCancel) return;
-    const asset = result.assets?.[0];
-    if (!asset?.base64) {
-      Alert.alert('Could not read that image.');
-      return;
-    }
-    setAvatarBusy(true);
-    try {
-      await api.setGroupAvatar(deviceToken, groupId, asset.base64);
-      upsertGroup({
-        id: groupId,
-        name: group.name,
-        members: group.members,
-        createdAt: group.createdAt,
-        createdBy: group.createdBy,
-        avatarB64: asset.base64,
-        metadataFetchedAt: Date.now(),
-      });
-    } catch (err) {
-      const e = err as ApiError;
-      if (e.status === 403 && e.code === 'not_creator') {
-        Alert.alert('Only the group creator can change the photo.');
-      } else {
-        Alert.alert('Avatar upload failed', String(err));
-      }
-    } finally {
-      setAvatarBusy(false);
-    }
-  }
+  // Phase 2 brand overhaul: groups don't have photos OR custom marks.
+  // The header tile renders a deterministic geometric room mark from
+  // `groupId` via <PortraitTile kind="room">. The previous
+  // change-photo affordance was removed along with the server-side
+  // PUT /v1/groups/:id/avatar endpoint.
 
   // Local TTL engine — same as ChatScreen.
   useEffect(() => {
@@ -324,19 +281,12 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
         ) : (
           <View style={styles.back} />
         )}
-        {/* Brand §6.1 AppBar handle. Group avatar kept inline (not on
-            the chat list per §7 — but the AppBar permits it, and it's
-            the only entry point for the creator's change-photo
-            affordance). 32px square per §2.4. */}
-        <Pressable
-          disabled={!isCreator || avatarBusy}
-          onPress={handleChangeGroupAvatar}
-          hitSlop={6}
-          testID="group-chat-avatar"
-          style={styles.avatarBtn}
-        >
-          <GroupAvatar groupId={groupId} name={group?.name} size={32} />
-        </Pressable>
+        {/* Brand §6.1 AppBar handle. Room mark inline at 32px (Phase 2:
+            deterministic from groupId; no longer tappable since groups
+            don't have a per-room photo to change). */}
+        <View style={styles.avatarBtn} testID="group-chat-avatar">
+          <GroupAvatar groupId={groupId} size={32} />
+        </View>
         <Pressable
           style={styles.headerHandle}
           onPress={onManageMembers}

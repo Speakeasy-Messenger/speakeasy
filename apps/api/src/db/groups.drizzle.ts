@@ -175,22 +175,11 @@ export class DrizzleGroupRepo implements GroupRepo {
       .select({
         id: groups.id,
         createdBy: groups.createdBy,
-        avatarB64: groups.avatarB64,
       })
       .from(groups)
       .where(eq(groups.id, groupId))
       .limit(1);
     const row = rows[0];
-    return row
-      ? { id: row.id, createdBy: row.createdBy, avatarB64: row.avatarB64 ?? undefined }
-      : undefined;
-  }
-
-  async setAvatar(groupId: string, avatarB64: string | undefined): Promise<void> {
-    const db = getDb();
-    await db
-      .update(groups)
-      .set({ avatarB64: avatarB64 ?? null })
-      .where(eq(groups.id, groupId));
+    return row ? { id: row.id, createdBy: row.createdBy } : undefined;
   }
 }

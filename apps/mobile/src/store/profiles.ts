@@ -2,22 +2,25 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
 
 /**
- * Cache of `userId → { avatarB64?, fetchedAt }`. Filled by the avatar
- * loader hook (lazy GET /v1/users/:id) and by the local user's own
- * setAvatar round-trip. Persisted across cold starts so the
- * conversations list doesn't re-flicker on every launch.
+ * Cache of `userId → { selectedAvatarId?, fetchedAt }`. Filled by the
+ * <Avatar> component on first render (lazy GET /v1/users/:id) and by
+ * the local user's own setAvatar round-trip. Persisted across cold
+ * starts so the conversations list doesn't re-flicker on every launch.
  *
- * Stored values are plaintext server-side for the alpha — see the
- * server-side `users.avatar_b64` comment for the v2 encryption story.
+ * Phase 2 brand overhaul: was `avatarB64` (JPEG blob); now stores the
+ * peer's selected animal id. Bumped storage key v1 → v2 so old cached
+ * blobs fall off cleanly without a migration step (the data lives only
+ * for `TTL_MS` between fetches anyway).
  */
 
-const STORAGE_KEY = 'speakeasy.profiles.v1';
+const STORAGE_KEY = 'speakeasy.profiles.v2';
 
-const TTL_MS = 24 * 60 * 60 * 1000; // re-fetch a peer's avatar at most once a day
+const TTL_MS = 24 * 60 * 60 * 1000; // re-fetch a peer's profile at most once a day
 
 export interface PeerProfile {
-  /** base64 JPEG, or undefined if the peer has no avatar set. */
-  avatarB64?: string;
+  /** Animal id from the launch set, or undefined if the peer hasn't
+   * selected one yet (rendering falls back to defaultAnimalForUser). */
+  selectedAvatarId?: string;
   /** ms epoch when we last hit the server for this peer. */
   fetchedAt: number;
 }

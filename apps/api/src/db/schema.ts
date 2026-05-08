@@ -28,12 +28,18 @@ export const users = pgTable(
      */
     deviceToken: text('device_token').notNull(),
     /**
-     * Optional avatar — base64-encoded JPEG, square, downsized client-
-     * side to ~256px. Plaintext for the alpha (per-user profile-key
-     * encryption is a separate v2 effort). Nullable so users without
-     * one render initials.
+     * Animal id picked in the avatar picker (Phase 2 brand overhaul,
+     * AVATAR-SYSTEM.md §8). One of the 12 launch ids: fox / owl /
+     * raven / hare / stag / whale / moth / octopus / heron / bear /
+     * cat / bat. Nullable for users enrolled before Phase 2 OR users
+     * who haven't reached onboarding's "Choose your face" screen —
+     * mobile clients fall back to a deterministic-from-userId default.
+     *
+     * Replaces the old `avatar_b64` JPEG column. Server doesn't store
+     * photos at all anymore; the column was dropped via migration
+     * 0009_animal_avatars.sql.
      */
-    avatarB64: text('avatar_b64'),
+    selectedAvatarId: text('selected_avatar_id'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({
@@ -58,8 +64,11 @@ export const groups = pgTable('groups', {
   createdBy: text('created_by')
     .notNull()
     .references(() => users.id),
-  /** See `users.avatar_b64` — plaintext base64 JPEG, nullable. */
-  avatarB64: text('avatar_b64'),
+  // Per AVATAR-SYSTEM.md §7, groups don't have photos OR custom marks
+  // — the room-mark glyph is deterministic from `id`. Customization
+  // here would create exactly the social-signaling pressure ("our
+  // group has the cool icon") the no-identity ethos rejects. The
+  // `avatar_b64` column was dropped in migration 0009.
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
 });
 

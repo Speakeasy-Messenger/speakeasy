@@ -9,8 +9,9 @@ import {
   Text,
   View,
 } from 'react-native';
-import { launchImageLibrary } from 'react-native-image-picker';
-import { Avatar } from '../components/Avatar.js';
+import { PortraitTile } from '../components/PortraitTile.js';
+import { ANIMAL_IDS, ANIMALS } from '../avatars/components.js';
+import { defaultAnimalForUser } from '../avatars/default.js';
 import { colors, fonts, radius, space, text } from '../theme/index.js';
 import { font, type } from '../theme/tokens.js';
 import { useIdentity } from '../store/identity.js';
@@ -49,10 +50,15 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
   const notificationPrivacy = useSettings((s) => s.notificationPrivacy);
   const setNotificationPrivacy = useSettings((s) => s.setNotificationPrivacy);
   const setProfile = useProfiles((s) => s.set);
+  const ownProfile = useProfiles((s) => (userId ? s.byUserId[userId] : undefined));
   const themePref = useThemePref((s) => s.preference);
   const setThemePref = useThemePref((s) => s.set);
-  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [busy, setBusy] = useState(false);
   const themed = useColors();
+
+  const selectedAnimalId =
+    ownProfile?.selectedAvatarId ?? (userId ? defaultAnimalForUser(userId) : 'fox');
 
   const handleCopyId = () => {
     if (!userId) return;
@@ -60,60 +66,29 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
     Alert.alert('Copied!', `@${userId}`);
   };
 
-  async function handleChangeAvatar() {
+  async function handlePickAnimal(animalId: string) {
     if (!userId) return;
     const deviceToken = useIdentity.getState().deviceToken;
     if (!deviceToken) {
       Alert.alert('Sign in again — device token missing.');
       return;
     }
-    const result = await launchImageLibrary({
-      mediaType: 'photo',
-      maxWidth: 256,
-      maxHeight: 256,
-      quality: 0.8,
-      includeBase64: true,
-      selectionLimit: 1,
-    });
-    if (result.didCancel) return;
-    const asset = result.assets?.[0];
-    if (!asset?.base64) {
-      Alert.alert('Could not read that image. Try another?');
-      return;
-    }
-    setAvatarBusy(true);
+    setBusy(true);
+    // Optimistic local update so the grid + profile preview update
+    // instantly. The server round-trip below either confirms or
+    // rolls back.
+    const previousId = ownProfile?.selectedAvatarId;
+    setProfile(userId, { selectedAvatarId: animalId, fetchedAt: Date.now() });
     try {
-      await api.setAvatar(deviceToken, asset.base64);
-      setProfile(userId, { avatarB64: asset.base64, fetchedAt: Date.now() });
+      await api.setAvatar(deviceToken, animalId);
+      setPickerOpen(false);
     } catch (err) {
-      Alert.alert('Avatar upload failed', String(err));
+      // Rollback the optimistic write so the UI doesn't lie.
+      setProfile(userId, { selectedAvatarId: previousId, fetchedAt: Date.now() });
+      Alert.alert('Could not save avatar', String(err));
     } finally {
-      setAvatarBusy(false);
+      setBusy(false);
     }
-  }
-
-  function handleClearAvatar() {
-    if (!userId) return;
-    const deviceToken = useIdentity.getState().deviceToken;
-    if (!deviceToken) return;
-    Alert.alert('Remove avatar?', 'This shows your initials again.', [
-      { text: 'Cancel', style: 'cancel' },
-      {
-        text: 'Remove',
-        style: 'destructive',
-        onPress: async () => {
-          setAvatarBusy(true);
-          try {
-            await api.setAvatar(deviceToken, null);
-            setProfile(userId, { avatarB64: undefined, fetchedAt: Date.now() });
-          } catch (err) {
-            Alert.alert('Failed to remove avatar', String(err));
-          } finally {
-            setAvatarBusy(false);
-          }
-        },
-      },
-    ]);
   }
 
   // Toggle "Show sender" → flip the local store, then push the new
@@ -165,12 +140,12 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
         <SectionLabel color={themed.slate}>PROFILE</SectionLabel>
         <View style={styles.profileBlock}>
           <Pressable
-            onPress={avatarBusy ? undefined : handleChangeAvatar}
+            onPress={() => setPickerOpen((v) => !v)}
             hitSlop={4}
             testID="settings-change-avatar"
           >
             {userId ? (
-              <Avatar userId={userId} size={56} />
+              <PortraitTile kind="animal" id={selectedAnimalId} size={56} />
             ) : (
               <View style={[styles.profileAvatarPlaceholder, { backgroundColor: themed.pale }]} />
             )}
@@ -185,23 +160,44 @@ export function SettingsScreen({ onBack, onOpenDiagnostics, onInviteFriends }: P
               </TextLink>
               <Text style={[styles.actionSep, { color: themed.divider }]}>·</Text>
               <TextLink
-                onPress={avatarBusy ? undefined : handleChangeAvatar}
+                onPress={() => setPickerOpen((v) => !v)}
                 color={themed.primary}
-                disabled={avatarBusy}
+                disabled={busy}
               >
-                {avatarBusy ? '…' : 'Change photo'}
-              </TextLink>
-              <Text style={[styles.actionSep, { color: themed.divider }]}>·</Text>
-              <TextLink
-                onPress={avatarBusy ? undefined : handleClearAvatar}
-                color={themed.slate}
-                disabled={avatarBusy}
-              >
-                Remove
+                {pickerOpen ? 'Done' : 'Change face'}
               </TextLink>
             </View>
           </View>
         </View>
+
+        {pickerOpen ? (
+          <View style={styles.pickerGrid} testID="settings-avatar-picker">
+            {ANIMAL_IDS.map((id) => {
+              const active = id === selectedAnimalId;
+              return (
+                <Pressable
+                  key={id}
+                  onPress={() => void handlePickAnimal(id)}
+                  hitSlop={2}
+                  style={[
+                    styles.pickerCell,
+                    {
+                      backgroundColor: themed.pale,
+                      borderColor: active ? themed.primary : themed.divider,
+                      borderWidth: active ? 2 : StyleSheet.hairlineWidth,
+                    },
+                  ]}
+                  testID={`settings-avatar-${id}`}
+                >
+                  <PortraitTile kind="animal" id={id} size={56} skipBlink />
+                  <Text style={[styles.pickerLabel, { color: themed.slate }]}>
+                    {ANIMALS[id]?.meta.name ?? id}
+                  </Text>
+                </Pressable>
+              );
+            })}
+          </View>
+        ) : null}
 
         {/* ── Appearance ── */}
         <SectionLabel color={themed.slate}>APPEARANCE</SectionLabel>
@@ -479,6 +475,30 @@ const styles = StyleSheet.create({
   actionSep: {
     fontSize: 13,
     paddingHorizontal: 2,
+  },
+
+  // Animal picker grid — Phase 2 brand overhaul. Renders inline below
+  // the profile block when the user taps "Change face". Sharp tiles,
+  // 3 columns × 4 rows = 12 launch animals. Selected tile gets a 2px
+  // accent border (matches AVATAR-SYSTEM.md §6.1's first-run picker).
+  pickerGrid: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: space.sm,
+    paddingHorizontal: space.lg,
+    paddingTop: space.sm,
+    paddingBottom: space.md,
+  },
+  pickerCell: {
+    width: 88,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: space.sm,
+    gap: 4,
+  },
+  pickerLabel: {
+    fontFamily: font.regular,
+    fontSize: type.caption.size,
   },
 
   // Per BRANDING1.md §6.8 — 56-min height, 16/20 padding (we use 20

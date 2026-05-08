@@ -192,6 +192,46 @@ export default function App() {
     const ws = getWsClient(getToken);
     ws.connect();
 
+    // Phase 2 brand overhaul: ensure the server has a recorded
+    // selectedAvatarId for this user. New enrollments don't yet pass
+    // through the avatar picker (Phase 3 onboarding rewrite); without
+    // this catch-up, peers fetching this user's profile would see
+    // null and fall back to the default — which is the deterministic
+    // hash of userId, but writing it explicitly avoids an extra round
+    // trip every render. Best-effort, fire-and-forget.
+    void (async () => {
+      const own = useProfiles.getState().byUserId[userId];
+      if (own?.selectedAvatarId) return;
+      const dt = await getToken().catch(() => undefined);
+      if (!dt) return;
+      try {
+        const fresh = await api.fetchUser(dt, userId);
+        if (fresh.selected_avatar_id) {
+          useProfiles.getState().set(userId, {
+            selectedAvatarId: fresh.selected_avatar_id,
+            fetchedAt: Date.now(),
+          });
+          return;
+        }
+        // Server doesn't know either — set the deterministic default so
+        // the user has a stable identity without needing to visit
+        // Settings. The user can pick a different one any time via
+        // Settings → Change face.
+        const { defaultAnimalForUser } = await import(
+          './src/avatars/default.js'
+        );
+        const seeded = defaultAnimalForUser(userId);
+        await api.setAvatar(dt, seeded);
+        useProfiles.getState().set(userId, {
+          selectedAvatarId: seeded,
+          fetchedAt: Date.now(),
+        });
+      } catch {
+        // Non-fatal — peers will fall back to defaultAnimalForUser on
+        // their side too. No user-visible breakage.
+      }
+    })();
+
     // Phase 5d: register push token on every app start. Token can
     // rotate (FCM invalidates on app reinstall, OS update). Best-effort.
     // Errors are non-fatal — push is a nice-to-have, not a blocker.

@@ -42,7 +42,7 @@ export class DrizzleUserRepo implements UserRepo {
         id: users.id,
         publicKey: users.publicKey,
         createdAt: users.createdAt,
-        avatarB64: users.avatarB64,
+        selectedAvatarId: users.selectedAvatarId,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -53,7 +53,7 @@ export class DrizzleUserRepo implements UserRepo {
           id: row.id,
           publicKey: row.publicKey,
           createdAt: row.createdAt,
-          avatarB64: row.avatarB64 ?? undefined,
+          selectedAvatarId: row.selectedAvatarId ?? undefined,
         }
       : undefined;
   }
@@ -68,11 +68,11 @@ export class DrizzleUserRepo implements UserRepo {
     return rows[0]?.id;
   }
 
-  async setAvatar(userId: string, avatarB64: string | undefined): Promise<void> {
+  async setSelectedAvatar(userId: string, animalId: string | undefined): Promise<void> {
     const db = getDb();
     await db
       .update(users)
-      .set({ avatarB64: avatarB64 ?? null })
+      .set({ selectedAvatarId: animalId ?? null })
       .where(eq(users.id, userId));
   }
 }

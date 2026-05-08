@@ -25,8 +25,9 @@ export interface Group {
    * affordance to the creator.
    */
   createdBy?: string;
-  /** Group avatar (base64 JPEG). Mirrored from `GET /v1/groups/:id`. */
-  avatarB64?: string;
+  // No avatar field — Phase 2 dropped group photos entirely. Group
+  // visual identity is the deterministic geometric room mark, derived
+  // client-side from `id` (see `<RoomMark roomId={id}>`).
   /** ms epoch of the last `GET /v1/groups/:id` round-trip. */
   metadataFetchedAt?: number;
 }
@@ -76,7 +77,6 @@ export const useGroups = create<GroupsState>((set, get) => ({
             name: group.name || existing.name,
             members: Array.from(new Set([...existing.members, ...group.members])),
             createdBy: group.createdBy ?? existing.createdBy,
-            avatarB64: group.avatarB64 ?? existing.avatarB64,
             metadataFetchedAt: group.metadataFetchedAt ?? existing.metadataFetchedAt,
           }
         : group;

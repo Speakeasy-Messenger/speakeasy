@@ -9,12 +9,6 @@ interface AddMemberBody {
 interface IdParam {
   id: string;
 }
-interface AvatarBody {
-  /** base64 JPEG, or null to clear. Same 200KB cap as user avatars. */
-  avatar_b64: string | null;
-}
-
-const MAX_AVATAR_B64_LENGTH = 200_000;
 
 export async function registerGroupRoutes(
   app: FastifyInstance,
@@ -162,46 +156,14 @@ export async function registerGroupRoutes(
       return reply.send({
         id: summary.id,
         created_by: summary.createdBy,
-        avatar_b64: summary.avatarB64 ?? null,
       });
     },
   );
 
-  /**
-   * PUT /v1/groups/:id/avatar — set or clear the group's photo. Only
-   * the creator can change it (matches the user's ask). The body is
-   * the base64 JPEG, or `null` / empty to clear.
-   */
-  app.put<{ Params: IdParam; Body: AvatarBody }>(
-    '/v1/groups/:id/avatar',
-    {
-      preHandler: requireAuth,
-      schema: {
-        body: {
-          type: 'object',
-          required: ['avatar_b64'],
-          properties: {
-            avatar_b64: {
-              type: ['string', 'null'],
-              maxLength: MAX_AVATAR_B64_LENGTH,
-            },
-          },
-        },
-      },
-    },
-    async (request, reply) => {
-      const callerId = request.auth?.userId;
-      if (!callerId) return reply.code(403).send({ error: 'not_enrolled' });
-      const { id: groupId } = request.params;
-      const summary = await opts.repo.findById(groupId);
-      if (!summary) return reply.code(404).send({ error: 'group_missing' });
-      if (summary.createdBy !== callerId) {
-        return reply.code(403).send({ error: 'not_creator' });
-      }
-      const raw = request.body.avatar_b64;
-      const next = raw && raw.length > 0 ? raw : undefined;
-      await opts.repo.setAvatar(groupId, next);
-      return reply.code(204).send();
-    },
-  );
+  // PUT /v1/groups/:id/avatar dropped in Phase 2 — groups don't have
+  // photos OR custom marks. The mobile client renders the
+  // deterministic geometric room mark from the group id (see
+  // `apps/mobile/src/avatars/RoomMark.tsx`). Per AVATAR-SYSTEM.md §7:
+  // customization here would create the social-signaling pressure
+  // ("our group has the cool icon") the no-identity ethos rejects.
 }
