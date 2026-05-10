@@ -16,6 +16,7 @@ import { ApiError } from '../api/client.js';
 import { api } from '../services.js';
 import { useBlocks } from '../store/blocks.js';
 import { useIdentity } from '../store/identity.js';
+import { diag } from '../diag/log.js';
 import { space, useColors } from '../theme/index.js';
 import { font, scrim, type as typeScale } from '../theme/tokens.js';
 
@@ -113,6 +114,13 @@ export function FindSomeoneSheet({
     setInput(initialHandle ?? '');
     setState({ kind: 'empty' });
   }, [visible, initialHandle]);
+
+  // Diag — modal lifecycle. Helps narrow down where the rc.27 "FAB
+  // freeze" report manifests: did the modal even mount, did it
+  // unmount, etc.
+  useEffect(() => {
+    diag('ui', 'find-sheet visibility', { visible: String(visible), mode });
+  }, [visible, mode]);
 
   // Focused-border colour: brass while focused, faint otherwise.
   const [focused, setFocused] = useState(false);
@@ -218,48 +226,82 @@ export function FindSomeoneSheet({
       visible={visible}
       transparent
       animationType="slide"
-      onRequestClose={onClose}
+      onRequestClose={() => {
+        diag('ui', 'find-sheet onRequestClose (back btn)');
+        onClose();
+      }}
       statusBarTranslucent
     >
-      {/* Scrim Pressable is the modal's root, with the sheet rendered
-          inside it absolutely-positioned at the bottom. Earlier alphas
-          tried sibling Pressable + box-none wrap layouts, but on
-          Android the touch-pass-through to the scrim was unreliable —
-          taps in the empty area fell into a void instead of dismissing,
-          which read as "frozen" to the user. With the sheet *inside*
-          the scrim Pressable, the hit-test is unambiguous: anywhere
-          outside the sheet hits the scrim's onPress. */}
-      <Pressable
-        style={[styles.scrim, { backgroundColor: scrim.modal }]}
-        onPress={onClose}
-        testID="find-sheet-scrim"
-      >
-      <Pressable
-        style={[
-          styles.sheet,
-          { backgroundColor: themed.cream, borderTopColor: themed.divider },
-        ]}
-        onPress={(e) => {
-          // Swallow the press so it doesn't bubble to the scrim's
-          // onPress and dismiss the modal whenever the user taps
-          // inside the sheet (text input, buttons, etc.).
-          e.stopPropagation();
-        }}
-        testID="find-sheet"
-      >
+      {/* Layout: a plain View as the modal root, an absolute-fill
+          Pressable scrim BEHIND the sheet, and the sheet absolutely
+          positioned at the bottom IN FRONT of the scrim. No
+          pointerEvents="box-none" gymnastics, no nested Pressables.
+          Tapping outside the sheet area hits the scrim's onPress.
+          Tapping inside the sheet hits its own touchables; events
+          do not reach the scrim because the sheet is layered on top. */}
+      <View style={styles.modalRoot}>
+        <Pressable
+          style={[StyleSheet.absoluteFill, { backgroundColor: scrim.modal }]}
+          onPress={() => {
+            diag('ui', 'find-sheet scrim tap → close');
+            onClose();
+          }}
+          testID="find-sheet-scrim"
+        />
+        <View
+          style={[
+            styles.sheet,
+            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+          ]}
+          testID="find-sheet"
+        >
         <View style={styles.sheetHeader}>
-          <View style={[styles.grab, { backgroundColor: themed.divider }]} />
-          {/* Visible × close button — unmistakable dismiss affordance.
-              The scrim still works, but several testers reported feeling
-              the page was "frozen" because they didn't realize tapping
-              outside dismissed. The X removes that ambiguity. */}
+          {/* Long-press the grab handle to copy diag to clipboard.
+              Backup escape hatch in case the user perceives the modal
+              as frozen — works regardless of scrim/× responsiveness. */}
           <Pressable
-            onPress={onClose}
+            onLongPress={() => {
+              void (async () => {
+                try {
+                  const { formatDiag, getDiagSnapshot } = await import(
+                    '../diag/log.js'
+                  );
+                  const Clipboard = (
+                    await import('@react-native-clipboard/clipboard')
+                  ).default;
+                  Clipboard.setString(formatDiag(getDiagSnapshot()));
+                  diag('ui', 'find-sheet grab long-press → diag copied');
+                } catch (err) {
+                  diag('ui', 'find-sheet grab long-press → copy failed', {
+                    err: String(err),
+                  });
+                }
+              })();
+            }}
+            delayLongPress={1200}
+            hitSlop={16}
+            style={styles.grabPressable}
+            testID="find-sheet-grab"
+          >
+            <View style={[styles.grab, { backgroundColor: themed.divider }]} />
+          </Pressable>
+          {/* Visible × close button — unmistakable dismiss affordance.
+              Sized 44×44 (Android tap-target minimum) and outlined so
+              it's impossible to miss. */}
+          <Pressable
+            onPress={() => {
+              diag('ui', 'find-sheet × tap → close');
+              onClose();
+            }}
             hitSlop={12}
-            style={styles.closeBtn}
+            style={({ pressed }) => [
+              styles.closeBtn,
+              { borderColor: themed.divider },
+              pressed && { backgroundColor: themed.soft },
+            ]}
             testID="find-sheet-close"
           >
-            <Text style={[styles.closeGlyph, { color: themed.slate }]}>×</Text>
+            <Text style={[styles.closeGlyph, { color: themed.ink }]}>×</Text>
           </Pressable>
         </View>
 
@@ -338,8 +380,8 @@ export function FindSomeoneSheet({
             </Pressable>
           </View>
         ) : null}
-      </Pressable>
-      </Pressable>
+        </View>
+      </View>
     </Modal>
   );
 }
@@ -516,17 +558,24 @@ function ResultCard({
 }
 
 const styles = StyleSheet.create({
-  // Scrim fills the modal root and stacks the sheet bottom-aligned.
-  // It's a Pressable, so any tap outside the sheet hits onPress and
-  // dismisses. The sheet inside calls e.stopPropagation() in its
-  // own onPress so taps inside the sheet don't bubble up.
-  scrim: { flex: 1, justifyContent: 'flex-end' },
+  // Modal root — fills the modal viewport. The scrim Pressable is
+  // absoluteFill BEHIND the sheet; the sheet is absolutely positioned
+  // at the bottom. No nested Pressables, no pointerEvents juggling.
+  modalRoot: { flex: 1 },
   sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: space.lg,
     paddingTop: space.md,
     paddingBottom: space.xl,
     borderTopWidth: StyleSheet.hairlineWidth,
-    minHeight: '60%',
+    // Fixed minHeight (instead of '60%') — percentage minHeight inside
+    // a Modal can compute to 0 on some Android builds, leaving the
+    // sheet invisibly tall and the user staring at a darkened scrim
+    // wondering what to do.
+    minHeight: 480,
   },
   // Header row: grab handle centered, close × on the right.
   sheetHeader: {
@@ -534,6 +583,13 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: space.md,
+    minHeight: 44,
+  },
+  grabPressable: {
+    paddingVertical: 12,
+    paddingHorizontal: 20,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   grab: {
     width: 36,
@@ -542,16 +598,17 @@ const styles = StyleSheet.create({
   closeBtn: {
     position: 'absolute',
     right: 0,
-    top: -4,
-    width: 32,
-    height: 32,
+    top: 0,
+    width: 44,
+    height: 44,
     alignItems: 'center',
     justifyContent: 'center',
+    borderWidth: StyleSheet.hairlineWidth,
   },
   closeGlyph: {
     fontFamily: font.regular,
-    fontSize: 26,
-    lineHeight: 28,
+    fontSize: 28,
+    lineHeight: 30,
   },
   title: {
     fontFamily: font.bold,
