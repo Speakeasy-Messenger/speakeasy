@@ -5,8 +5,8 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { useCalls } from '../store/calls.js';
 import { useProfiles } from '../store/profiles.js';
-import { brand, font, type as typeScale } from '../theme/tokens.js';
-import { space } from '../theme/index.js';
+import { font, type as typeScale } from '../theme/tokens.js';
+import { space, useColors } from '../theme/index.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -15,18 +15,29 @@ interface Props {
   onResolved: () => void;
 }
 
+// Brass-button text is always dark — on the brass fill, the cream
+// foreground is illegible regardless of mode. Kept as a hex literal
+// rather than threading themed.ink because in dark mode themed.ink is
+// cream, which would invert the contrast.
+const BRASS_BTN_INK = '#14091A';
+
 /**
  * CALLS.md §03 — Incoming call.
  *
- * Brand canvas (only call surface that uses it). Big 140×140
- * portrait of the caller's animal in a brand-surface tile, large
- * display handle in bone, "wants to speak" sub-line, two equal-
- * width buttons stacked or side-by-side: Decline (transparent +
- * faint border) and Accept (brass). No green/red — brass is the
- * action color, the brand never introduces a third color for an
- * ambulance/stoplight UI convention.
+ * Big 140×140 portrait of the caller's animal in a surface-tinted
+ * tile, large display handle, "wants to speak" sub-line, two equal-
+ * width buttons: Decline (transparent + faint border) and Accept
+ * (brass). No green/red — brass is the action color, the brand never
+ * introduces a third color for an ambulance/stoplight UI convention.
+ *
+ * Themed (rc.54+): originally hardcoded to `brand.canvas` as a
+ * "brand moment", but the user's theme preference wins on their own
+ * device. Brass accent + decline outline still come from the brand
+ * palette via `useColors().primary` so the action surfaces stay
+ * consistent across modes.
  */
 export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
+  const themed = useColors();
   const active = useCalls((s) => s.active);
   const peerProfile = useProfiles((s) =>
     active ? s.byUserId[active.peerUserId] : undefined,
@@ -41,18 +52,26 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
   const isVideo = active.kind === 'video';
 
   return (
-    <SafeAreaView style={styles.root} testID="incoming-call-screen">
+    <SafeAreaView
+      style={[styles.root, { backgroundColor: themed.cream }]}
+      testID="incoming-call-screen"
+    >
       <View style={styles.body}>
-        <Text style={styles.eyebrow}>
+        <Text style={[styles.eyebrow, { color: themed.primary }]}>
           {isVideo ? 'VIDEO CALL · INCOMING' : 'VOICE CALL · INCOMING'}
         </Text>
-        <View style={styles.portraitTile}>
+        <View
+          style={[
+            styles.portraitTile,
+            { backgroundColor: themed.pale, borderColor: themed.divider },
+          ]}
+        >
           <AvatarRenderer animalId={animalId} size={Math.round(140 * 0.78)} />
         </View>
         <View style={styles.handleRow}>
-          <Handle value={active.peerUserId} variant="display" color={BONE} />
+          <Handle value={active.peerUserId} variant="display" color={themed.ink} />
         </View>
-        <Text style={styles.sub}>
+        <Text style={[styles.sub, { color: themed.slate }]}>
           {isVideo ? 'wants to video-call' : 'wants to speak'}
         </Text>
       </View>
@@ -64,9 +83,9 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
             orchestrator.decline();
             onResolved();
           }}
-          style={styles.btnDecline}
+          style={[styles.btnDecline, { borderColor: themed.divider }]}
         >
-          <Text style={styles.btnDeclineText}>Decline</Text>
+          <Text style={[styles.btnDeclineText, { color: themed.ink }]}>Decline</Text>
         </Pressable>
         <Pressable
           testID="incoming-accept"
@@ -74,25 +93,17 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
             void orchestrator.accept();
             onResolved();
           }}
-          style={styles.btnAccept}
+          style={[styles.btnAccept, { backgroundColor: themed.primary }]}
         >
-          <Text style={styles.btnAcceptText}>Accept</Text>
+          <Text style={[styles.btnAcceptText, { color: BRASS_BTN_INK }]}>Accept</Text>
         </Pressable>
       </View>
     </SafeAreaView>
   );
 }
 
-const BRASS = '#E5A645';
-const BONE = '#F2E9D8';
-const INK = '#14091A';
-const BRAND_SURFACE = '#1F1126';
-const TEXT_MUTE = 'rgba(242,233,216,0.55)';
-const TEXT_FAINT = 'rgba(242,233,216,0.18)';
-
 const styles = StyleSheet.create({
-  // Brand canvas — never themed. Incoming is a brand moment.
-  root: { flex: 1, backgroundColor: brand.canvas },
+  root: { flex: 1 },
   body: {
     flex: 1,
     alignItems: 'center',
@@ -104,17 +115,13 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.22 * 11,
     textTransform: 'uppercase',
-    color: BRASS,
     marginBottom: 18,
     fontWeight: '600',
   },
-  // 140×140 brand-surface tile, sharp corners, faint bone border.
   portraitTile: {
     width: 140,
     height: 140,
-    backgroundColor: BRAND_SURFACE,
     borderWidth: 1,
-    borderColor: TEXT_FAINT,
     alignItems: 'center',
     justifyContent: 'center',
     marginBottom: 24,
@@ -125,7 +132,6 @@ const styles = StyleSheet.create({
     fontSize: 11,
     letterSpacing: 0.22 * 11,
     textTransform: 'uppercase',
-    color: TEXT_MUTE,
   },
   actions: {
     flexDirection: 'row',
@@ -133,31 +139,26 @@ const styles = StyleSheet.create({
     paddingBottom: space.md,
     gap: 8,
   },
-  // Decline: transparent + faint bone border. Accept: brass.
   btnDecline: {
     flex: 1,
     paddingVertical: 16,
     alignItems: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,
-    borderColor: TEXT_FAINT,
   },
   btnDeclineText: {
     fontFamily: font.medium,
     fontSize: 14,
-    color: BONE,
     letterSpacing: 0.5,
   },
   btnAccept: {
     flex: 1,
     paddingVertical: 16,
     alignItems: 'center',
-    backgroundColor: BRASS,
   },
   btnAcceptText: {
     fontFamily: font.medium,
     fontSize: 14,
-    color: INK,
     letterSpacing: 0.5,
   },
 });

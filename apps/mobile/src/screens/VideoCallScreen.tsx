@@ -12,6 +12,7 @@ import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import {
   MicIcon,
   PhoneEndIcon,
+  SpeakerIcon,
 } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
 import { useCalls } from '../store/calls.js';
@@ -232,6 +233,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               size={26}
               muted={active.micMuted}
               color={active.micMuted ? themed.cream : '#FFF'}
+            />
+          </Pressable>
+          <Pressable
+            testID="video-call-speaker"
+            onPress={() => orchestrator.setSpeakerOn(!active.speakerOn)}
+            style={[
+              styles.controlBtn,
+              active.speakerOn && { backgroundColor: themed.primary },
+            ]}
+          >
+            <SpeakerIcon
+              size={26}
+              active={active.speakerOn}
+              color={active.speakerOn ? themed.cream : '#FFF'}
             />
           </Pressable>
           <Pressable
