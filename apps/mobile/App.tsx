@@ -550,6 +550,18 @@ export default function App() {
           },
           msgId,
         );
+        // rc.50: log which branch fires so the next "no foreground
+        // notifications" report tells us at a glance whether the
+        // banner was suppressed (and why) or actually shown. Without
+        // this, "no banner" could be 5 different things and each diag
+        // round-trip is one less narrowing pass.
+        diag('banner', `decision: ${decision.kind}`, {
+          msgId,
+          from,
+          activeConv: useUiState.getState().activeConversationId,
+          inAppEnabled:
+            useSettings.getState().inAppNotificationsEnabled,
+        });
         if (decision.kind === 'show') {
           useBanner.getState().show(decision.banner);
         }

@@ -458,6 +458,18 @@ export class CallOrchestrator {
     });
     this.connStateUnsub = peer.onConnectionStateChange((state) => {
       if (!this.active) return;
+      // rc.50: log the call's stage when WebRTC fires a state change
+      // so the next "call dropped before I could answer" report has
+      // actionable data. The video-call-during-ringing-closes-on-its-
+      // own bug from tester2 had no diag explaining why — only that
+      // connectionstate went straight to 'closed' without 'connecting'
+      // or 'failed' first.
+      diag('call', 'peer connectionStateChange', {
+        peerState: state,
+        callStage: this.active.stage,
+        kind: this.active.kind,
+        callId: this.active.callId,
+      });
       if (state === 'connected') {
         this.transition('connected', { connectedAt: this.now() });
       } else if (state === 'failed') {
