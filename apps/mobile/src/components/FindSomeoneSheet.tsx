@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
-  Modal,
+  BackHandler,
   Pressable,
   StyleSheet,
   Text,
@@ -115,12 +115,28 @@ export function FindSomeoneSheet({
     setState({ kind: 'empty' });
   }, [visible, initialHandle]);
 
-  // Diag — modal lifecycle. Helps narrow down where the rc.27 "FAB
-  // freeze" report manifests: did the modal even mount, did it
-  // unmount, etc.
+  // Diag — overlay lifecycle. The rc.27→rc.29 freeze reports were
+  // *because the React Native Modal never rendered* on Samsung dark-
+  // mode + statusBarTranslucent: the JS thread hung mid-render and
+  // every touch handler died. rc.30 drops Modal entirely and uses an
+  // inline absolute-fill overlay rendered as part of the parent
+  // screen's tree, so this log fires the same as any other component.
   useEffect(() => {
     diag('ui', 'find-sheet visibility', { visible: String(visible), mode });
   }, [visible, mode]);
+
+  // Android back button — dismiss the sheet when visible. Intercept
+  // the hardware-back event ahead of the navigator's default handler,
+  // matching what RN's Modal used to do for us.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      diag('ui', 'find-sheet backHandler → close');
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
 
   // Focused-border colour: brass while focused, faint otherwise.
   const [focused, setFocused] = useState(false);
@@ -221,25 +237,20 @@ export function FindSomeoneSheet({
         ? "They won't know they were blocked."
         : "Speakeasy doesn't have a directory. Type their handle exactly.";
 
+  // Render nothing when invisible — saves a frame's worth of layout.
+  if (!visible) return <View testID="find-sheet-hidden" />;
+
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={() => {
-        diag('ui', 'find-sheet onRequestClose (back btn)');
-        onClose();
-      }}
-      statusBarTranslucent
+    <View
+      style={styles.overlay}
+      testID="find-sheet-overlay"
     >
-      {/* Layout: a plain View as the modal root, an absolute-fill
-          Pressable scrim BEHIND the sheet, and the sheet absolutely
-          positioned at the bottom IN FRONT of the scrim. No
-          pointerEvents="box-none" gymnastics, no nested Pressables.
-          Tapping outside the sheet area hits the scrim's onPress.
-          Tapping inside the sheet hits its own touchables; events
-          do not reach the scrim because the sheet is layered on top. */}
-      <View style={styles.modalRoot}>
+      {/* No <Modal> — Android Samsung One UI dark mode +
+          statusBarTranslucent + slide animation reproducibly hung the
+          JS thread on render in rc.27→rc.29. Replaced with an inline
+          absolute-fill View rendered as a sibling of the screen's
+          content. Behavior identical to a bottom sheet, but fully
+          inside our React tree — no native Modal portal involved. */}
         <Pressable
           style={[StyleSheet.absoluteFill, { backgroundColor: scrim.modal }]}
           onPress={() => {
@@ -381,8 +392,7 @@ export function FindSomeoneSheet({
           </View>
         ) : null}
         </View>
-      </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -558,10 +568,16 @@ function ResultCard({
 }
 
 const styles = StyleSheet.create({
-  // Modal root — fills the modal viewport. The scrim Pressable is
-  // absoluteFill BEHIND the sheet; the sheet is absolutely positioned
-  // at the bottom. No nested Pressables, no pointerEvents juggling.
-  modalRoot: { flex: 1 },
+  // Overlay — fills the parent screen's tree (rendered as a sibling
+  // of the FAB stack inside ConversationsScreen). pointerEvents="box-
+  // none" lets taps land on the scrim Pressable / sheet directly,
+  // which is fine because the View itself has no styles that need
+  // touch interception.
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    elevation: 1000, // Android: float above the FAB
+    zIndex: 1000,    // iOS / web: same
+  },
   sheet: {
     position: 'absolute',
     left: 0,

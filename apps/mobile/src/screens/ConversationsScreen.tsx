@@ -10,10 +10,15 @@ import {
   View,
 } from 'react-native';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
-import { GetStartedCards } from '../components/GetStartedCards.js';
+import {
+  GetStartedCards,
+  GET_STARTED_CARD_IDS,
+} from '../components/GetStartedCards.js';
+import { useOnboardingCards } from '../store/onboarding-cards.js';
 import { Handle } from '../components/Handle.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import { PortraitTile } from '../components/PortraitTile.js';
+import { Avatar } from '../components/Avatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { useBlocks } from '../store/blocks.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
@@ -27,6 +32,7 @@ import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { useUiState } from '../store/ui.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
+import { diag } from '../diag/log.js';
 
 interface DirectRow {
   kind: 'direct';
@@ -128,7 +134,19 @@ export function ConversationsScreen({
   });
 
   const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
-  const showGetStarted = rows.length < 5;
+  // Dock the get-started cards above the FAB when the user has 1–4
+  // conversations (still building their room). At zero, the empty
+  // hero renders the same cards inline — the dock would duplicate
+  // them. At 5+, the user's room is full enough that the cards
+  // become noise. Once every card is dismissed, the dock collapses
+  // and the FAB drops back to its default bottom position (the FAB
+  // had been propped up by `fabStackAboveDock`'s 156px to make room
+  // for the dock — once nothing's there, that lift is dead space).
+  const dismissedCards = useOnboardingCards((s) => s.dismissed);
+  const allCardsDismissed =
+    GET_STARTED_CARD_IDS.every((id) => dismissedCards[id]);
+  const showGetStarted =
+    rows.length > 0 && rows.length < 5 && !allCardsDismissed;
 
   // The brand spec hides timestamps by default and reveals on
   // long-press (§7). Track which row id is currently revealed; clear
@@ -192,6 +210,27 @@ export function ConversationsScreen({
           </View>
           <Pressable
             onPress={onOpenSettings}
+            // Long-press → emergency diag dump to clipboard. If a UI
+            // bug elsewhere blocks navigation to Diagnostics (rc.25
+            // FAB-freeze report), this escape hatch lets the user
+            // capture the diag log without having to traverse the
+            // settings tree.
+            onLongPress={() => {
+              void (async () => {
+                try {
+                  const { formatDiag, getDiagSnapshot } = await import(
+                    '../diag/log.js'
+                  );
+                  const Clipboard = (
+                    await import('@react-native-clipboard/clipboard')
+                  ).default;
+                  Clipboard.setString(formatDiag(getDiagSnapshot()));
+                } catch {
+                  /* clipboard unavailable — best-effort */
+                }
+              })();
+            }}
+            delayLongPress={1500}
             hitSlop={8}
             style={styles.gearBtn}
             testID="conversations-settings-btn"
@@ -206,9 +245,46 @@ export function ConversationsScreen({
         keyExtractor={(r) => (r.kind === 'direct' ? r.conversationId : r.groupId)}
         contentContainerStyle={rows.length === 0 ? styles.emptyContainer : styles.listContent}
         ListEmptyComponent={
-          <Text style={[text.subtitle, styles.emptyText, { color: themed.slate }]}>
-            No conversations yet.
-          </Text>
+          // Centered hero — workspace canvas, 64px self-portrait
+          // + display handle with brass `@` + brand-voice copy line
+          // + inline GetStartedCards. Replaces the bare
+          // "No conversations yet." text. The dock-mode GetStarted
+          // pad is suppressed for this case (would duplicate the
+          // cards rendered inline here).
+          <View style={styles.emptyHero} testID="conversations-empty-hero">
+            {/* Upper block — portrait + handle + voice line, vertically
+                centered in the empty area's top ~60%. Anchored as a
+                discrete unit so the lower cards block has its own
+                breathing room rather than reading as the same group. */}
+            <View style={styles.emptyHeroTop}>
+              {userId ? (
+                <PortraitTile
+                  kind="animal"
+                  id={ownAnimalId ?? defaultAnimalForUser(userId)}
+                  size={64}
+                />
+              ) : null}
+              {userId ? (
+                <View style={styles.emptyHeroHandle}>
+                  <Handle value={userId} variant="display" />
+                </View>
+              ) : null}
+              <Text style={[styles.emptyHeroLine, { color: themed.slate }]}>
+                your room's quiet — share your handle to fill it
+                <Text style={{ color: themed.primary }}>.</Text>
+              </Text>
+            </View>
+            {/* Lower block — get-started cards, separated from the
+                hero so they read as a distinct call-to-action affordance
+                rather than caboose to the voice line above. */}
+            <View style={styles.emptyHeroCards}>
+              <GetStartedCards
+                onShareHandle={onShareHandle}
+                onNewGroup={onNewGroup}
+                onNewChat={() => setSheetOpen(true)}
+              />
+            </View>
+          </View>
         }
         renderItem={({ item }) => {
           const id = item.kind === 'direct' ? item.conversationId : item.groupId;
@@ -246,7 +322,7 @@ export function ConversationsScreen({
                     <PeepholeMark size={Math.round(36 * 0.78)} />
                   </View>
                 ) : (
-                  <PortraitTile kind="animal" id={item.peerUserId} size={36} />
+                  <Avatar userId={item.peerUserId} size={36} />
                 )
               ) : (
                 <PortraitTile kind="room" id={item.groupId} size={36} />
@@ -319,7 +395,34 @@ export function ConversationsScreen({
       >
         <Pressable
           testID="conversations-fab"
-          onPress={() => setSheetOpen(true)}
+          onPress={() => {
+            diag('ui', 'fab tap → open find sheet', { sheetWasOpen: sheetOpen });
+            setSheetOpen(true);
+          }}
+          // Long-press FAB → silently copy diag log to clipboard. The
+          // FAB is always on screen and its touch path is the single
+          // surface that we *know* still works regardless of overlay
+          // state. Long-press fires before onPress is dispatched, so
+          // holding the FAB never accidentally opens the sheet.
+          onLongPress={() => {
+            void (async () => {
+              try {
+                const { formatDiag, getDiagSnapshot } = await import(
+                  '../diag/log.js'
+                );
+                const Clipboard = (
+                  await import('@react-native-clipboard/clipboard')
+                ).default;
+                Clipboard.setString(formatDiag(getDiagSnapshot()));
+                diag('ui', 'fab long-press → diag copied to clipboard');
+              } catch (err) {
+                diag('ui', 'fab long-press → copy failed', {
+                  err: String(err),
+                });
+              }
+            })();
+          }}
+          delayLongPress={1500}
           style={[styles.fabPrimary, { backgroundColor: themed.primary }]}
           android_ripple={{ color: themed.soft, borderless: false }}
         >
@@ -506,8 +609,36 @@ const styles = StyleSheet.create({
   // these stack and we don't want a ladder), portrait 36×36, 12px
   // gap to body, body flex: 1.
   listContent: { paddingBottom: space.xl },
-  emptyContainer: { flex: 1, alignItems: 'center', justifyContent: 'center' },
+  emptyContainer: {
+    flex: 1,
+    alignItems: 'stretch',
+    justifyContent: 'center',
+    paddingHorizontal: space.lg,
+  },
   emptyText: { color: colors.slate },
+  emptyHero: {
+    flex: 1,
+    alignItems: 'center',
+    // Two stacked blocks: upper (portrait+handle+line) takes the
+    // upper half, lower (cards) sits in its own 40% with breathing
+    // room above. `space-around` gives both blocks symmetrical
+    // padding from the edges of the empty area, which reads as
+    // intentionally laid out rather than centered-by-accident.
+    justifyContent: 'space-around',
+    paddingVertical: space.xl,
+  },
+  emptyHeroTop: { alignItems: 'center', gap: 14 },
+  emptyHeroHandle: { marginTop: -4 },
+  emptyHeroLine: {
+    fontFamily: font.regular,
+    fontSize: type.caption.size,
+    lineHeight: 20,
+    textAlign: 'center',
+    maxWidth: 32 * 8,
+    marginTop: 4,
+    marginBottom: 12,
+  },
+  emptyHeroCards: { alignSelf: 'stretch', marginHorizontal: -space.lg },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
