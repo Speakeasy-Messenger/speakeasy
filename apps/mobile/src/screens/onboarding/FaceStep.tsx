@@ -11,7 +11,7 @@ import {
 } from 'react-native';
 import { Button } from '../../components/Button.js';
 import { PortraitTile } from '../../components/PortraitTile.js';
-import { ANIMAL_IDS } from '../../avatars/components.js';
+import { FREE_AVATARS } from '../../avatars/catalog.js';
 import { api } from '../../services.js';
 import { useColors } from '../../theme/index.js';
 import { brand, font, motion, type as typeScale } from '../../theme/tokens.js';
@@ -111,7 +111,8 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.grid}>
-          {ANIMAL_IDS.map((id) => {
+          {FREE_AVATARS.map((entry) => {
+            const id = entry.id;
             const isSelected = id === selected;
             return (
               <Pressable
@@ -136,18 +137,13 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
                 ]}
                 testID={`onboarding-face-${id}`}
               >
-                {/* AVATAR-SYSTEM.md §6.1: selected tile scales to ~86%
-                    of cell vs ~78% unselected. We hand PortraitTile a
-                    fixed 64px and apply the growth via transform on
-                    a wrapper, so the cell footprint is stable + the
-                    centering math is borderless. */}
-                <View
-                  style={{
-                    transform: [{ scale: isSelected ? 1.1 : 1.0 }],
-                  }}
-                >
-                  <PortraitTile kind="animal" id={id} size={64} />
-                </View>
+                {/* Selection signal is the brass border only. The
+                    earlier `scale: 1.1` on the PortraitTile pushed
+                    avatars whose SVG extends to the viewBox edge
+                    (notably the owl's ear tips) past the cell's brass
+                    border at the top edge. Border alone reads cleanly
+                    as "selected" without the overflow. */}
+                <PortraitTile kind="animal" id={id} size={64} />
               </Pressable>
             );
           })}

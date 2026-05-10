@@ -5,6 +5,7 @@ import { DoorStep } from './DoorStep.js';
 import { RoomStep } from './RoomStep.js';
 import { HandleStep } from './HandleStep.js';
 import { FaceStep } from './FaceStep.js';
+import { PermissionsStep } from './PermissionsStep.js';
 
 /**
  * Onboarding orchestrator — Phase 3 brand overhaul.
@@ -32,7 +33,7 @@ interface Props {
   onEnrolled: (userId: string) => void;
 }
 
-type Step = 'door' | 'room' | 'handle' | 'face';
+type Step = 'door' | 'room' | 'handle' | 'face' | 'permissions';
 
 interface ClaimedIdentity {
   userId: string;
@@ -69,16 +70,30 @@ export function OnboardingFlow({ onEnrolled }: Props): React.ReactElement {
           deviceToken={claimed.deviceToken}
           onPicked={(animalId) => {
             // Persist locally so the conversation list renders the
-            // user's selected animal immediately. App.tsx's startup
-            // catch-up would do this on next launch, but we prefer
-            // the immediate-render path since the user just picked.
+            // user's selected animal immediately when we eventually
+            // flip into Conversations. We do NOT call setUserId here
+            // anymore — that would trigger App.tsx's auth-routing
+            // flip and skip the Permissions step. setUserId is called
+            // by the Permissions step's onContinue.
             useProfiles.getState().set(claimed.userId, {
               selectedAvatarId: animalId,
               fetchedAt: Date.now(),
             });
-            // Setting deviceToken first → setUserId triggers the
-            // App-level routing flip, and the WS auth that follows
-            // immediately reads the token off the store.
+            setStep('permissions');
+          }}
+        />
+      );
+    case 'permissions':
+      if (!claimed) {
+        // Same defensive path as 'face' — shouldn't hit; recover by
+        // restarting the handle flow.
+        setStep('handle');
+        return <HandleStep onClaimed={(args) => { setClaimed(args); setStep('face'); }} />;
+      }
+      return (
+        <PermissionsStep
+          onContinue={() => {
+            // Now flip the App-level routing into Conversations.
             useIdentity.getState().setDeviceToken(claimed.deviceToken);
             useIdentity.getState().setUserId(claimed.userId);
             onEnrolled(claimed.userId);

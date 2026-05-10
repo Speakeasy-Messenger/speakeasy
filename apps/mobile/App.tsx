@@ -7,6 +7,7 @@ import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
 import { useBlocks } from './src/store/blocks.js';
+import { useOwnership } from './src/store/ownership.js';
 import { useConversations } from './src/store/conversations.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
@@ -18,6 +19,7 @@ import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
 import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
+import { decideBanner } from './src/notifications/banner-policy.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
@@ -31,8 +33,10 @@ import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // ships in the bundle for the future lazy-start callsite (orchestrator
 // or CallScreen mount).
 import { diag } from './src/diag/log.js';
+import { requestStartupPermissions } from './src/permissions/startup.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
+import { SplashScreen } from './src/components/SplashScreen.js';
 
 // Global unhandled-rejection handler — prevents promise rejections
 // from crashing the RN host on Android.
@@ -48,6 +52,14 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
   if (typeof _origHandler === 'function') _origHandler(e, isFatal);
 });
 
+/**
+ * Minimum visible duration for the SplashScreen. Hydration completes
+ * in ~50–200ms on a warm cache; without a floor the splash flashes
+ * and disappears before it lands as a brand moment. 1500ms is the
+ * shortest we can get away with that still reads as intentional.
+ */
+const SPLASH_MIN_DURATION_MS = 1500;
+
 export default function App() {
   const userId = useIdentity((s) => s.userId);
   const hydrated = useIdentity((s) => s.hydrated);
@@ -56,6 +68,16 @@ export default function App() {
   // RootNavigator below would never see the orchestrator. State triggers
   // a re-render and the navigator picks up the new prop on next pass.
   const [callOrchestrator, setCallOrchestrator] = useState<CallOrchestrator | undefined>(undefined);
+  // Splash hold flag. We render the splash while either (a) stores
+  // are still hydrating OR (b) the minimum-display timer hasn't
+  // elapsed. The two AND together give us "splash visible at least
+  // SPLASH_MIN_DURATION_MS even if hydration is instant".
+  const [splashHoldElapsed, setSplashHoldElapsed] = useState(false);
+  useEffect(() => {
+    const t = setTimeout(() => setSplashHoldElapsed(true), SPLASH_MIN_DURATION_MS);
+    return () => clearTimeout(t);
+  }, []);
+  const showSplash = !hydrated || !splashHoldElapsed;
 
   // Pull persisted identity AND conversations off disk on first mount.
   // Renders a blank screen until both are done so the navigator doesn't
@@ -73,6 +95,7 @@ export default function App() {
       void useOnboardingCards.getState().hydrate();
       void useCalls.getState().hydrate();
       void useBlocks.getState().hydrate();
+      void useOwnership.getState().hydrate();
     }
   }, [hydrated]);
 
@@ -98,6 +121,19 @@ export default function App() {
   // attestation universe — reset identity so the navigator falls
   // back to Onboarding instead of leaving the user stranded on a
   // dead Conversations screen.
+  // Idempotent permission catch-up for already-onboarded users. New
+  // installs see the dedicated PermissionsStep at end of onboarding;
+  // existing installs (whose users were enrolled before the step
+  // existed) get prompted here on first launch of rc.39+. The OS only
+  // shows a prompt for permissions never decided on, so this is safe
+  // to call every launch — already-granted/already-denied = no-op.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    void requestStartupPermissions().catch((err) =>
+      diag('app', 'startup permissions catch-up threw', { err: String(err) }),
+    );
+  }, [hydrated, userId]);
+
   useEffect(() => {
     if (!hydrated || !userId) return;
     void (async () => {
@@ -253,7 +289,13 @@ export default function App() {
           // (Android) Play Services aren't installed. Silently
           // degrades: messages still arrive via WS reconnect on app
           // resume; just no system banner while backgrounded.
-          diag('push', 'no token (firebase unlinked or permission denied)');
+          //
+          // The native service stashes the specific failure reason on
+          // itself so we can capture which branch fired into diag.
+          const reason =
+            (pushNotifications as { lastFailureReason?: string })
+              .lastFailureReason ?? 'unknown';
+          diag('push', 'no token', { reason });
           return;
         }
         const privacy = useSettings.getState().notificationPrivacy;
@@ -315,6 +357,8 @@ export default function App() {
         ensureSessionWithPeer,
         onStateChange: (call) => useCalls.getState().setActive(call),
         onCallFinished: (entry) => useCalls.getState().recordHistory(entry),
+        getAllowIncomingCalls: () =>
+          useSettings.getState().allowIncomingCalls,
       });
       setCallOrchestrator(callOrch);
     } catch (err) {
@@ -384,38 +428,29 @@ export default function App() {
       notifyInbound: ({ msgId, from, text, target }) => {
         if (notifiedMsgIds.has(msgId)) return;
         notifiedMsgIds.add(msgId);
-        if (!useSettings.getState().inAppNotificationsEnabled) return;
-        // Suppress when the user is already on this conversation's screen.
-        const activeConv = useUiState.getState().activeConversationId;
-        const targetConv =
-          target.kind === 'direct'
-            ? conversationIdForDirect(userId, target.peerId)
-            : conversationIdForGroup(target.groupId);
-        if (activeConv === targetConv) return;
-        // CONVERSATIONS.md §2.10 / BLOCK.md §3 — per-conversation
-        // mute gates the in-app banner. Background push gating
-        // happens server-side or in the OS notification service
-        // extension (iOS NSE / Android background handler) — those
-        // paths don't see this JS state, so a separate mute-aware
-        // server hint is a follow-up. For foreground/in-app this
-        // is the right gate.
-        const targetConvState =
-          useConversations.getState().byId[targetConv];
-        if (targetConvState?.muted) return;
-        // CLAUDECODENOTE.md §5: don't fire banners while the user
-        // is in a call. Calls are exclusive focus moments — the
-        // banner waits until the call ends. The dedupe set above
-        // means the banner is dropped, not deferred (it'd be stale
-        // by the time the call ends anyway; the conversation list
-        // is the persistent receipt).
-        const activeCall = useCalls.getState().active;
-        if (activeCall && activeCall.stage !== 'ended') return;
-        useBanner.getState().show({
-          id: msgId,
-          sender: from,
-          text,
-          target,
-        });
+        // The branching logic (global toggle / active-conv suppress
+        // / per-conversation mute / in-call suppress) lives in
+        // `banner-policy.ts` so unit tests can exercise each branch
+        // without spinning up a navigator or harness.
+        const decision = decideBanner(
+          {
+            myUserId: userId,
+            inboundFrom: from,
+            inboundText: text,
+            inboundTarget: target,
+            inAppNotificationsEnabled:
+              useSettings.getState().inAppNotificationsEnabled,
+            activeConversationId:
+              useUiState.getState().activeConversationId,
+            isMuted: (cid) =>
+              !!useConversations.getState().byId[cid]?.muted,
+            activeCall: useCalls.getState().active,
+          },
+          msgId,
+        );
+        if (decision.kind === 'show') {
+          useBanner.getState().show(decision.banner);
+        }
       },
     });
 
@@ -475,7 +510,7 @@ export default function App() {
     <SafeAreaProvider>
       <ThemeProvider>
         <ThemedStatusBar />
-        {hydrated ? (
+        {!showSplash ? (
           <RootNavigator
             navRef={navRef}
             callOrchestrator={callOrchestrator}
@@ -488,7 +523,7 @@ export default function App() {
             }}
           />
         ) : (
-          <View style={{ flex: 1, backgroundColor: colors.cream }} />
+          <SplashScreen />
         )}
       </ThemeProvider>
     </SafeAreaProvider>
