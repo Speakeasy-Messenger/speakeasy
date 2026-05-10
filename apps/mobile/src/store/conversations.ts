@@ -215,7 +215,19 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       // legitimately distinct message.
       if (c.messages.some((m) => m.id === msg.id)) return s;
       let peerUserId = c.peerUserId;
-      if (msg.kind === 'direct' && !peerUserId && msg.from !== 'me') {
+      // Capture the peer's userId on first inbound message for direct
+      // conversations. Skip the system pseudo-sender — call-end logs
+      // and other system bubbles use `from: 'system'`, which would
+      // otherwise create a phantom @system conversation entry on the
+      // list screen instead of attaching the log to the actual peer's
+      // chat. (User report: incoming-call log appearing under @system
+      // for friends who hadn't messaged the local user yet.)
+      if (
+        msg.kind === 'direct' &&
+        !peerUserId &&
+        msg.from !== 'me' &&
+        msg.from !== 'system'
+      ) {
         peerUserId = msg.from;
       }
       return {

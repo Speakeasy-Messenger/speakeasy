@@ -334,6 +334,11 @@ export class CallOrchestrator {
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallOfferPayload;
       const kind = payload.kind ?? 'audio';
+      diag('call', 'handleIncomingOffer: decrypted', {
+        fromUserId,
+        callId,
+        kind,
+      });
       const iceServers = await this.fetchIceServers();
       const peer = await this.deps.peerFactory.create({
         iceServers,
@@ -350,6 +355,11 @@ export class CallOrchestrator {
         stageEnteredAt: this.now(),
         micMuted: false,
         speakerOn: kind === 'video',
+        kind,
+      });
+      diag('call', 'handleIncomingOffer: ringing', {
+        fromUserId,
+        callId,
         kind,
       });
       this.armRingTimeout();

@@ -100,7 +100,12 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
 
     if (prev && !active && !wroteEndMsgRef.current && myUserId) {
       wroteEndMsgRef.current = true;
-      const cid = conversationIdForDirect(myUserId, prev.peerUserId);
+      // Ensure the conversation row exists with the right peerUserId
+      // BEFORE the system bubble lands — otherwise `add()` would
+      // create a fresh entry with no peerUserId and the list screen
+      // mislabels it. Particularly bites incoming calls from friends
+      // who haven't sent a 1:1 message yet.
+      const cid = useConversations.getState().openDirect(myUserId, prev.peerUserId);
       let text: string | undefined;
       if (everConnectedRef.current && prev.connectedAt) {
         const sec = Math.floor((Date.now() - prev.connectedAt) / 1000);

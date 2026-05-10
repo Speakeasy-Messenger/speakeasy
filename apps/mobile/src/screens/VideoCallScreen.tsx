@@ -67,7 +67,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
 
     if (prev && !active && !wroteEndMsgRef.current && myUserId) {
       wroteEndMsgRef.current = true;
-      const cid = conversationIdForDirect(myUserId, prev.peerUserId);
+      // See CallScreen for rationale — openDirect ensures the
+      // conversation row exists with the right peerUserId before
+      // the system bubble lands.
+      const cid = useConversations.getState().openDirect(myUserId, prev.peerUserId);
       let text: string | undefined;
       if (everConnectedRef.current && prev.connectedAt) {
         const sec = Math.floor((Date.now() - prev.connectedAt) / 1000);

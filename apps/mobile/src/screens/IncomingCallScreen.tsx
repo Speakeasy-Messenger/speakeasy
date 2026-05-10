@@ -38,18 +38,23 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
 
   const animalId =
     peerProfile?.selectedAvatarId ?? defaultAnimalForUser(active.peerUserId);
+  const isVideo = active.kind === 'video';
 
   return (
     <SafeAreaView style={styles.root} testID="incoming-call-screen">
       <View style={styles.body}>
-        <Text style={styles.eyebrow}>VOICE CALL · INCOMING</Text>
+        <Text style={styles.eyebrow}>
+          {isVideo ? 'VIDEO CALL · INCOMING' : 'VOICE CALL · INCOMING'}
+        </Text>
         <View style={styles.portraitTile}>
           <AvatarRenderer animalId={animalId} size={Math.round(140 * 0.78)} />
         </View>
         <View style={styles.handleRow}>
           <Handle value={active.peerUserId} variant="display" color={BONE} />
         </View>
-        <Text style={styles.sub}>wants to speak</Text>
+        <Text style={styles.sub}>
+          {isVideo ? 'wants to video-call' : 'wants to speak'}
+        </Text>
       </View>
 
       <View style={styles.actions}>
