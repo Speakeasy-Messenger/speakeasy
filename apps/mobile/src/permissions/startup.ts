@@ -2,49 +2,44 @@ import { PermissionsAndroid, Platform } from 'react-native';
 import { diag } from '../diag/log.js';
 
 /**
- * Request the runtime permissions Speakeasy needs to function smoothly.
+ * Notifications permission catch-up at app launch.
  *
- * - POST_NOTIFICATIONS (Android 13+) — push notifications. Without it,
- *   FCM-delivered banners are silently dropped (rc.27→rc.32 reproducer).
- * - CAMERA — video calls + the chat composer's "Camera" attachment
- *   button. Without it, getUserMedia({ video: true }) silently fails.
- * - RECORD_AUDIO — voice + video calls. The first call would otherwise
- *   raise the system prompt mid-dial; pre-asking at onboarding keeps
- *   that moment clean.
+ * POST_NOTIFICATIONS (Android 13+) has no natural moment-of-use the
+ * way mic and camera do (the only signal that "you'd want a banner
+ * right now" is a banner trying to fire — too late), so it stays as
+ * an upfront ask: surfaced once in onboarding (rc.50+: `PermissionsStep`
+ * row) and re-checked on every launch in case a prior install never
+ * saw the dedicated step.
  *
- * Idempotent: the OS only shows a prompt for permissions the user
- * hasn't decided on yet. Already-granted = no-op; already-denied =
- * no-op (the OS suppresses the second ask after the user picked
- * "Don't ask again"). Safe to call at app launch + at the end of
- * onboarding.
+ * Mic and camera moved to just-in-time prompts as of rc.51 — see
+ * `permissions/runtime.ts`. The user gets asked at the moment they
+ * make a call (mic) or send a photo / start a video call (camera),
+ * which both reads better and yields higher grant rates.
+ *
+ * Idempotent: OS suppresses the prompt for any permission already
+ * decided on, so this is safe to call every launch.
  */
 export async function requestStartupPermissions(): Promise<void> {
   if (Platform.OS !== 'android') return;
-  const perms: Array<{ name: string; key: string }> = [];
-  const P = PermissionsAndroid.PERMISSIONS as Record<string, string | undefined>;
-  if (Platform.Version >= 33 && P.POST_NOTIFICATIONS) {
-    perms.push({ name: 'notifications', key: P.POST_NOTIFICATIONS });
-  }
-  if (P.CAMERA) perms.push({ name: 'camera', key: P.CAMERA });
-  if (P.RECORD_AUDIO) perms.push({ name: 'mic', key: P.RECORD_AUDIO });
-
-  for (const p of perms) {
-    try {
-      const already = await PermissionsAndroid.check(
-        p.key as Parameters<typeof PermissionsAndroid.check>[0],
-      );
-      if (already) {
-        diag('perm', `${p.name}: already granted`);
-        continue;
-      }
-      const result = await PermissionsAndroid.request(
-        p.key as Parameters<typeof PermissionsAndroid.request>[0],
-      );
-      diag('perm', `${p.name}: requested`, { result });
-    } catch (err) {
-      diag('perm', `${p.name}: request threw (continuing)`, {
-        err: String(err),
-      });
+  if (Platform.Version < 33) return;
+  const perm = (PermissionsAndroid.PERMISSIONS as Record<string, string | undefined>)
+    .POST_NOTIFICATIONS;
+  if (!perm) return;
+  try {
+    const already = await PermissionsAndroid.check(
+      perm as Parameters<typeof PermissionsAndroid.check>[0],
+    );
+    if (already) {
+      diag('perm', 'notifications: already granted');
+      return;
     }
+    const result = await PermissionsAndroid.request(
+      perm as Parameters<typeof PermissionsAndroid.request>[0],
+    );
+    diag('perm', 'notifications: requested', { result });
+  } catch (err) {
+    diag('perm', 'notifications: request threw (continuing)', {
+      err: String(err),
+    });
   }
 }

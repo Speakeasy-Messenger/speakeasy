@@ -5,14 +5,16 @@ import { requestStartupPermissions } from '../../permissions/startup.js';
 import { brand, font, type as typeScale } from '../../theme/tokens.js';
 
 /**
- * Onboarding screen 05 — Permissions.
+ * Onboarding screen 05 — Notifications permission.
  *
- * After the Face step. Three rows explaining what each permission
- * does, then a single "Continue" button that fires the requests in
- * sequence. The user's actual decisions are owned by the OS — we
- * don't gate further onboarding on grants. Anything denied can be
- * re-prompted later (CAMERA gets re-asked at first video call;
- * notifications via system Settings).
+ * After the Face step. One row explaining notifications, then a
+ * single "Continue" button that fires the request. The user's
+ * decision is owned by the OS — we don't gate further onboarding on
+ * the grant. Denied can be re-granted via system Settings.
+ *
+ * Mic and camera moved to just-in-time prompts as of rc.51 — asked
+ * at first call / first photo capture / first video call. See
+ * `permissions/runtime.ts`. This step used to ask all three.
  *
  * Same brand-canvas layout as DoorStep / RoomStep so the visual
  * lineage stays coherent into the closing moments of onboarding.
@@ -26,14 +28,6 @@ const ITEMS: Array<{ title: string; sub: string }> = [
   {
     title: 'Notifications.',
     sub: "So you don't miss a message while the app is closed.",
-  },
-  {
-    title: 'Camera.',
-    sub: 'For video calls and the camera button in chats.',
-  },
-  {
-    title: 'Microphone.',
-    sub: 'For voice and video calls.',
   },
 ];
 
@@ -54,11 +48,11 @@ export function PermissionsStep({ onContinue }: Props): React.ReactElement {
     <SafeAreaView style={styles.root}>
       <View style={styles.content}>
         <Text style={styles.title}>
-          A few things from your phone<Text style={styles.dot}>.</Text>
+          One thing from your phone<Text style={styles.dot}>.</Text>
         </Text>
         <Text style={styles.sub}>
-          Speakeasy never asks for personal data. These are OS permissions
-          your phone controls. Skip any and re-grant later from Settings.
+          Speakeasy never asks for personal data. This is an OS permission
+          your phone controls. Skip it and re-grant later from Settings.
         </Text>
         <View style={styles.list}>
           {ITEMS.map((p) => (

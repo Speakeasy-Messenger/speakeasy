@@ -14,6 +14,10 @@ import type {
   CallOfferPayload,
 } from '@speakeasy/shared';
 import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './types.js';
+import {
+  ensureCameraPermission,
+  ensureMicPermission,
+} from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
 
 /**
@@ -371,8 +375,22 @@ class WebRtcCallPeer implements CallPeer {
 
   private async ensureLocalStream(): Promise<void> {
     if (this.localStream) return;
+    // Just-in-time mic + camera permission. Mic is asked on the first
+    // call (caller's createOffer or callee's createAnswer); camera on
+    // the first video call. iOS handles both via Info.plist + the OS
+    // dialog raised by getUserMedia and these helpers no-op. On
+    // denial we throw a typed error so the orchestrator can end the
+    // call cleanly — the helper has already shown the Open Settings
+    // alert if the user previously picked "Don't ask again".
+    const mic = await ensureMicPermission();
+    if (mic !== 'granted') {
+      throw new Error(`mic permission ${mic}`);
+    }
     if (this.mediaKind === 'video') {
-      await ensureCameraPermission();
+      const cam = await ensureCameraPermission();
+      if (cam !== 'granted') {
+        throw new Error(`camera permission ${cam}`);
+      }
     }
     this.ensureManager();
     const stream = (await mediaDevices.getUserMedia({
@@ -472,34 +490,6 @@ class WebRtcCallPeer implements CallPeer {
     } catch (err) {
       diag('webrtc', 'ringback stop error', { err: String(err) });
     }
-  }
-}
-
-/**
- * Request CAMERA at runtime on Android. iOS handles camera permission
- * via the system dialog raised by getUserMedia (gated by the
- * NSCameraUsageDescription Info.plist string). On Android, getUserMedia
- * silently fails with NotAllowedError if CAMERA was never granted, so
- * we ask explicitly first.
- */
-async function ensureCameraPermission(): Promise<void> {
-  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-  const { PermissionsAndroid, Platform } = require('react-native') as {
-    Platform: { OS: string };
-    PermissionsAndroid: {
-      PERMISSIONS: { CAMERA: string };
-      RESULTS: { GRANTED: string };
-      check: (perm: string) => Promise<boolean>;
-      request: (perm: string) => Promise<string>;
-    };
-  };
-  if (Platform.OS !== 'android') return;
-  const perm = PermissionsAndroid.PERMISSIONS.CAMERA;
-  const already = await PermissionsAndroid.check(perm);
-  if (already) return;
-  const result = await PermissionsAndroid.request(perm);
-  if (result !== PermissionsAndroid.RESULTS.GRANTED) {
-    throw new Error(`camera permission denied (${result})`);
   }
 }
 

@@ -2,6 +2,7 @@ import { launchCamera, launchImageLibrary } from 'react-native-image-picker';
 import DocumentPicker from 'react-native-document-picker';
 import RNFS from 'react-native-fs';
 import type { Attachment } from '@speakeasy/shared';
+import { ensureCameraPermission } from '../permissions/runtime.js';
 
 /**
  * Per-attachment caps. Multi-select photo grids stack on top of each
@@ -77,6 +78,12 @@ export async function pickGif(): Promise<Attachment | null> {
  * or when the camera is unavailable.
  */
 export async function pickFromCamera(): Promise<Attachment | null> {
+  // Just-in-time camera permission — first time the user taps the
+  // Camera attachment button. On denial, the helper has already
+  // shown the Open Settings alert if applicable; return null so the
+  // chat screen treats it the same as a cancel.
+  const cam = await ensureCameraPermission();
+  if (cam !== 'granted') return null;
   const result = await launchCamera({
     mediaType: 'photo',
     maxWidth: PHOTO_MAX_W,
