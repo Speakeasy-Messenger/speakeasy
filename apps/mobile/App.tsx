@@ -73,11 +73,21 @@ export default function App() {
   // elapsed. The two AND together give us "splash visible at least
   // SPLASH_MIN_DURATION_MS even if hydration is instant".
   const [splashHoldElapsed, setSplashHoldElapsed] = useState(false);
+  // Tracks whether the rc.45 fresh-install identity recovery probe
+  // has run. Declared up here (not next to its useEffect below)
+  // because `showSplash` needs it.
+  const [recoveryDone, setRecoveryDone] = useState(false);
   useEffect(() => {
     const t = setTimeout(() => setSplashHoldElapsed(true), SPLASH_MIN_DURATION_MS);
     return () => clearTimeout(t);
   }, []);
-  const showSplash = !hydrated || !splashHoldElapsed;
+  // Hold the splash through the recovery probe so users with a
+  // restorable identity don't see Onboarding flash before being
+  // routed to Conversations. The probe finishes in ~300–800ms on
+  // a warm Vouchflow keystore, comfortably inside the 1500ms
+  // SPLASH_MIN_DURATION_MS floor.
+  const showSplash =
+    !hydrated || !splashHoldElapsed || (!userId && !recoveryDone);
 
   // Pull persisted identity AND conversations off disk on first mount.
   // Renders a blank screen until both are done so the navigator doesn't
@@ -98,6 +108,48 @@ export default function App() {
       void useOwnership.getState().hydrate();
     }
   }, [hydrated]);
+
+  // Fresh-install identity recovery (rc.45). After hydrate completes,
+  // if there's no cached userId, ask Vouchflow for a device token and
+  // probe `GET /v1/users/me`. If the server recognizes the device,
+  // restore identity directly — the user skips onboarding entirely.
+  // If the probe 404s (genuinely new device) or errors, fall through
+  // to the regular onboarding flow.
+  //
+  // Vouchflow's hardware-anchored attestation survives uninstall, so
+  // the same deviceToken comes back on reinstall — that's what makes
+  // this work. Before rc.45, reinstalling forced a new @-handle.
+  // (recoveryDone is declared up top with the other splash-related
+  // state since `showSplash` reads it.)
+  useEffect(() => {
+    if (!hydrated || userId || recoveryDone) return;
+    void (async () => {
+      try {
+        diag('app', 'identity recovery: probing /v1/users/me');
+        const r = await vouchflow.verify({ context: 'login' });
+        const me = await api.fetchMe(r.deviceToken);
+        if (me) {
+          diag('app', 'identity recovery: restored', { userId: me.id });
+          if (me.selected_avatar_id) {
+            useProfiles.getState().set(me.id, {
+              selectedAvatarId: me.selected_avatar_id,
+              fetchedAt: Date.now(),
+            });
+          }
+          useIdentity.getState().setDeviceToken(r.deviceToken);
+          useIdentity.getState().setUserId(me.id);
+        } else {
+          diag('app', 'identity recovery: no user bound — onboarding');
+        }
+      } catch (err) {
+        diag('app', 'identity recovery: failed (falling through)', {
+          err: String(err),
+        });
+      } finally {
+        setRecoveryDone(true);
+      }
+    })();
+  }, [hydrated, userId, recoveryDone]);
 
   // After hydration, if we have a cached identity, refresh
   // authentication eagerly before any authed request can fire.

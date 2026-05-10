@@ -100,6 +100,33 @@ export async function registerUserRoutes(
     },
   );
 
+  /**
+   * GET /v1/users/me — identity recovery. Returns the user bound to
+   * the caller's Vouchflow deviceToken, or 404 if no user has been
+   * enrolled with this device. Mobile uses this on fresh-install
+   * cold start: if Vouchflow attestation succeeds and the server
+   * recognizes the deviceToken, the client restores identity locally
+   * and skips onboarding entirely. The previous behavior forced a
+   * new handle on every reinstall, which lost @-handles permanently
+   * (the original userId still existed server-side, just orphaned).
+   */
+  app.get(
+    '/v1/users/me',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const userId = request.auth?.userId;
+      if (!userId) return reply.code(404).send({ error: 'not_enrolled' });
+      const u = await opts.repo.findById(userId);
+      if (!u) return reply.code(404).send({ error: 'not_found' });
+      return reply.send({
+        id: u.id,
+        public_key: u.publicKey.toString('base64'),
+        created_at: u.createdAt.toISOString(),
+        selected_avatar_id: u.selectedAvatarId ?? null,
+      });
+    },
+  );
+
   app.put<{ Body: AvatarBody }>(
     '/v1/users/me/avatar',
     {

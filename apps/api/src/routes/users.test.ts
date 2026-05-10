@@ -94,6 +94,48 @@ describe('GET /v1/users/:id', () => {
   });
 });
 
+describe('GET /v1/users/me — fresh-install identity recovery', () => {
+  it('returns the user bound to the deviceToken', async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/users/me',
+      // The mock validator binds dvt_<id> → user_id. Mobile clients
+      // hit this endpoint after a fresh install with their persisted
+      // Vouchflow deviceToken to recover their previous identity
+      // without going through the Handle picker again.
+      headers: { authorization: 'Bearer dvt_silent-golden-hawk' },
+    });
+    expect(res.statusCode).toBe(200);
+    const body = res.json();
+    expect(body.id).toBe('silent-golden-hawk');
+    expect(body.public_key).toBe(Buffer.from('hawk-pk').toString('base64'));
+    expect(body.selected_avatar_id).toBeNull();
+    await app.close();
+  });
+
+  it('404 when the deviceToken has no user bound', async () => {
+    const { app } = await makeApp();
+    // dvt_<unknown>: validator says "ok with userId=unknown", but the
+    // user repo has no row for that id — same path a stale token
+    // would take after the user was removed server-side.
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/users/me',
+      headers: { authorization: 'Bearer dvt_no-such-user' },
+    });
+    expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('401 without bearer', async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({ method: 'GET', url: '/v1/users/me' });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});
+
 describe('PUT /v1/users/me/avatar', () => {
   it('sets the selected animal and the next GET reflects it', async () => {
     const { app, repo } = await makeApp();

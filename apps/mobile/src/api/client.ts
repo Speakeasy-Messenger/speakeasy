@@ -207,6 +207,50 @@ export class ApiClient {
   }
 
   /**
+   * Fresh-install identity recovery. Calls `GET /v1/users/me` with the
+   * Vouchflow-attested deviceToken; server returns the user_id bound
+   * to that token (404 if none). Mobile uses this to skip onboarding
+   * after a reinstall — the device's hardware-anchored Vouchflow
+   * attestation survives the app being deleted, and the server's
+   * `users.device_token` index resolves it back to the original
+   * userId.
+   *
+   * Returns `null` on 404 (genuinely no user) or any auth/network
+   * error — caller falls through to onboarding rather than blocking.
+   */
+  async fetchMe(
+    deviceToken: string,
+  ): Promise<
+    | {
+        id: string;
+        public_key: string;
+        created_at: string;
+        selected_avatar_id: string | null;
+      }
+    | null
+  > {
+    try {
+      const res = await this.doFetch(`${this.baseUrl}/v1/users/me`, {
+        headers: { authorization: `Bearer ${deviceToken}` },
+      });
+      if (res.status === 200) {
+        return (await res.json()) as {
+          id: string;
+          public_key: string;
+          created_at: string;
+          selected_avatar_id: string | null;
+        };
+      }
+      if (res.status === 404) return null;
+      // 401/500/etc — don't restore identity from a flaky probe;
+      // let onboarding take over and the user can retry.
+      return null;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
    * Check whether a candidate handle is available for enrollment.
    * Returns the same shape as the server: `{available, reason?}` where
    * `reason` is one of `'invalid' | 'reserved' | 'taken'`.
