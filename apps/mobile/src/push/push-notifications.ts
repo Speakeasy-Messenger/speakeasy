@@ -29,7 +29,18 @@ export interface PushNotificationService {
  * emulator without Play Services, or the package isn't linked).
  */
 export class NativePushNotificationService implements PushNotificationService {
+  /**
+   * Last reason we returned `undefined`. Surfaced via `lastFailureReason`
+   * so App.tsx can log the *specific* branch into the diag stream
+   * instead of a generic "no token" message — earlier alphas reported
+   * "firebase unlinked or permission denied" generically and we
+   * couldn't tell which path was failing without rebuilding to add
+   * one-off logs.
+   */
+  lastFailureReason: string | undefined;
+
   async getToken(): Promise<PushTokenResult | undefined> {
+    this.lastFailureReason = undefined;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
       const { NativeModules, Platform } = require('react-native') as {
@@ -40,28 +51,44 @@ export class NativePushNotificationService implements PushNotificationService {
       // trying to import the JS wrapper — avoids a hard crash in Hermes
       // when the native module isn't available.
       if (!NativeModules.RNFBMessagingModule && !NativeModules.RNFirebaseMessaging) {
+        const moduleKeys = Object.keys(NativeModules)
+          .filter((k) => /^(RNFB|RNFirebase|Firebase)/i.test(k))
+          .slice(0, 5);
+        this.lastFailureReason = `native_module_missing (saw matching keys: ${moduleKeys.join(',') || 'none'})`;
         return undefined;
       }
+      // @react-native-firebase/messaging v24+ — use the *modular* API.
+      // The v6-style namespaced default (`messaging.default.messaging()`)
+      // does not have a `.messaging` property, so calling it threw
+      // "undefined is not a function" in rc.27 testing. Modular API
+      // takes a messaging instance returned from `getMessaging()` and
+      // operates on it via free functions.
       // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-      const messaging = require('@react-native-firebase/messaging') as {
-        default: {
-          messaging: () => {
-            getToken: () => Promise<string>;
-            hasPermission: () => Promise<number>;
-            requestPermission: () => Promise<number>;
-          };
-        };
+      const fcm = require('@react-native-firebase/messaging') as {
+        getMessaging: () => unknown;
+        getToken: (m: unknown) => Promise<string>;
+        hasPermission: (m: unknown) => Promise<number>;
+        requestPermission: (m: unknown) => Promise<number>;
       };
-      const m = messaging.default.messaging();
-      const authStatus = await m.hasPermission();
+      const m = fcm.getMessaging();
+      const authStatus = await fcm.hasPermission(m);
+      // 1 = AUTHORIZED, 2 = PROVISIONAL (iOS quiet), 0 = DENIED, -1 = NOT_DETERMINED.
+      // Android always returns AUTHORIZED from this call.
       if (authStatus !== 1 && authStatus !== 2) {
-        const requested = await m.requestPermission();
-        if (requested !== 1 && requested !== 2) return undefined;
+        const requested = await fcm.requestPermission(m);
+        if (requested !== 1 && requested !== 2) {
+          this.lastFailureReason = `permission_denied (status=${requested})`;
+          return undefined;
+        }
       }
-      const token = await m.getToken();
-      if (!token) return undefined;
+      const token = await fcm.getToken(m);
+      if (!token) {
+        this.lastFailureReason = 'getToken_returned_empty';
+        return undefined;
+      }
       return { pushToken: token, platform: Platform.OS === 'ios' ? 'ios' : 'android' };
-    } catch {
+    } catch (err) {
+      this.lastFailureReason = `exception: ${(err as Error).message ?? String(err)}`;
       return undefined;
     }
   }
