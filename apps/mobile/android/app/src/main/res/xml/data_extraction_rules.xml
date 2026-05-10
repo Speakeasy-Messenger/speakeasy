@@ -1,0 +1,28 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Android 12+ replacement for backup_rules.xml. Splits cloud backup
+  (Google Drive, e.g. for uninstall/reinstall) and device-to-device
+  transfer rules. Speakeasy treats both the same: include AsyncStorage
+  + RN settings; exclude the Signal SQLCipher DB and any Vouchflow
+  attestation state.
+
+  See backup_rules.xml for rationale.
+-->
+<data-extraction-rules>
+  <cloud-backup>
+    <exclude domain="database" path="speakeasy.db" />
+    <exclude domain="database" path="speakeasy.db-journal" />
+    <exclude domain="database" path="speakeasy.db-wal" />
+    <exclude domain="database" path="speakeasy.db-shm" />
+    <exclude domain="sharedpref" path="vouchflow_attestation.xml" />
+    <exclude domain="sharedpref" path="vouchflow.xml" />
+  </cloud-backup>
+  <device-transfer>
+    <exclude domain="database" path="speakeasy.db" />
+    <exclude domain="database" path="speakeasy.db-journal" />
+    <exclude domain="database" path="speakeasy.db-wal" />
+    <exclude domain="database" path="speakeasy.db-shm" />
+    <exclude domain="sharedpref" path="vouchflow_attestation.xml" />
+    <exclude domain="sharedpref" path="vouchflow.xml" />
+  </device-transfer>
+</data-extraction-rules>

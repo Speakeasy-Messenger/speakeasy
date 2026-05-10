@@ -127,9 +127,20 @@ export default function App() {
       try {
         diag('app', 'identity recovery: probing /v1/users/me');
         const r = await vouchflow.verify({ context: 'login' });
+        // Logs the deviceToken prefix so when recovery fails we can
+        // see at a glance whether Vouchflow returned the user's
+        // previous token (server should recognize it) vs a freshly-
+        // minted one (server will 404 → onboarding). The latter is
+        // the LocalDevValidator dev-build behavior on uninstall —
+        // the production hardware-anchored attestation preserves it.
+        const tokenPrefix = r.deviceToken.slice(0, 16);
+        diag('app', 'identity recovery: vouchflow returned', { tokenPrefix });
         const me = await api.fetchMe(r.deviceToken);
         if (me) {
-          diag('app', 'identity recovery: restored', { userId: me.id });
+          diag('app', 'identity recovery: restored', {
+            userId: me.id,
+            tokenPrefix,
+          });
           if (me.selected_avatar_id) {
             useProfiles.getState().set(me.id, {
               selectedAvatarId: me.selected_avatar_id,
@@ -139,7 +150,9 @@ export default function App() {
           useIdentity.getState().setDeviceToken(r.deviceToken);
           useIdentity.getState().setUserId(me.id);
         } else {
-          diag('app', 'identity recovery: no user bound — onboarding');
+          diag('app', 'identity recovery: no user bound — onboarding', {
+            tokenPrefix,
+          });
         }
       } catch (err) {
         diag('app', 'identity recovery: failed (falling through)', {

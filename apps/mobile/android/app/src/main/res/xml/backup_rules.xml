@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Auto Backup rules (Android < 12, API < 31). The newer
+  data_extraction_rules.xml takes precedence on Android 12+.
+
+  Goal: preserve identity (userId + deviceToken) across uninstall so
+  reinstalling on the same Google account lands the user back in their
+  account without going through onboarding. Per the comment in
+  SpeakeasyDb.kt, Vouchflow's `verify({existingDeviceToken})` recovers
+  the prior token if one is passed in — but we lose that opportunity
+  if AsyncStorage is wiped.
+
+  Excluded for security:
+    - databases/speakeasy.db (+ -journal/-wal): Signal SQLCipher
+      encrypted store. Backing this up to Google Drive (even encrypted)
+      crosses the spec §1 trust boundary. Reinstall starts with fresh
+      keys — peers will need to renegotiate sessions, but the @-handle
+      is what matters for the alpha-tester pain point.
+    - Any Vouchflow attestation files: the device-bound attestation
+      shouldn't be hauled across devices.
+-->
+<full-backup-content>
+  <exclude domain="database" path="speakeasy.db" />
+  <exclude domain="database" path="speakeasy.db-journal" />
+  <exclude domain="database" path="speakeasy.db-wal" />
+  <exclude domain="database" path="speakeasy.db-shm" />
+  <exclude domain="sharedpref" path="vouchflow_attestation.xml" />
+  <exclude domain="sharedpref" path="vouchflow.xml" />
+</full-backup-content>

@@ -1,6 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, SafeAreaView, StyleSheet, View } from 'react-native';
-import { Door } from '../../brand/Door.js';
+import { CipherS } from '../../brand/CipherS.js';
 import { Wordmark } from '../../components/Wordmark.js';
 import { Button } from '../../components/Button.js';
 import { brand, motion } from '../../theme/tokens.js';
@@ -9,8 +9,13 @@ import { brand, motion } from '../../theme/tokens.js';
  * Onboarding screen 01 — Door.
  * Spec: ONBOARDING.md §2.1.
  *
- * Brand-canvas (aubergine) full-frame. Door mark + wordmark + tagline,
- * primary button "Open the door". 240ms fade-in on first paint.
+ * Brand-canvas (aubergine) full-frame. CipherS mark (the three offset
+ * bars used on the app icon, splash, and notification icon — primary
+ * brand mark per BRANDING.md §1) + wordmark + tagline + primary
+ * button "Open the door". The earlier Door silhouette read as a
+ * different brand (icon vs onboarding mismatch on first launch); rc.46
+ * unifies on CipherS so the splash → onboarding handoff is visually
+ * continuous. 240ms fade-in on first paint.
  */
 
 interface Props {
@@ -39,7 +44,7 @@ export function DoorStep({ onContinue }: Props): React.ReactElement {
   return (
     <SafeAreaView style={styles.root}>
       <Animated.View style={[styles.center, { opacity: fade }]}>
-        <Door size={88} />
+        <CipherS size={96} />
         <View style={styles.spacer32} />
         {/* Force bone (workspace-dark text) on the aubergine brand
             canvas regardless of current mode — the canvas itself is
