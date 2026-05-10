@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   SafeAreaView,
@@ -7,12 +7,15 @@ import {
   View,
 } from 'react-native';
 import { RTCView } from 'react-native-webrtc';
+import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import {
   MicIcon,
   PhoneEndIcon,
 } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
 import { useCalls } from '../store/calls.js';
+import { useConversations } from '../store/conversations.js';
+import { useIdentity } from '../store/identity.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, type as typeScale } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
@@ -35,10 +38,53 @@ interface Props {
 export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const themed = useColors();
   const active = useCalls((s) => s.active);
+  const myUserId = useIdentity((s) => s.userId);
 
   const [localUrl, setLocalUrl] = useState<string | undefined>();
   const [remoteUrl, setRemoteUrl] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState('');
+
+  // CALLS.md §06 — drop a system message into the chat feed when the
+  // call ends. Same shape as the audio CallScreen logic:
+  //   - completed         → `video call · M:SS.`
+  //   - missed incoming   → `@<peer> video-called. you missed it.`
+  //   - cancelled outgoing → `you video-called. no answer.`
+  const addMessage = useConversations((s) => s.add);
+  const everConnectedRef = useRef(false);
+  const wasIncomingRef = useRef(false);
+  const wasCallerRef = useRef(false);
+  const wroteEndMsgRef = useRef(false);
+  useEffect(() => {
+    if (!active) return;
+    if (active.stage === 'connected') everConnectedRef.current = true;
+    if (active.stage === 'incoming_ringing') wasIncomingRef.current = true;
+    if (active.isCaller) wasCallerRef.current = true;
+    if (active.stage === 'ended' && !wroteEndMsgRef.current && myUserId) {
+      wroteEndMsgRef.current = true;
+      const cid = conversationIdForDirect(myUserId, active.peerUserId);
+      let text: string | undefined;
+      if (everConnectedRef.current && active.connectedAt) {
+        const sec = Math.floor((Date.now() - active.connectedAt) / 1000);
+        const mm = Math.floor(sec / 60);
+        const ss = String(sec % 60).padStart(2, '0');
+        text = `video call · ${mm}:${ss}.`;
+      } else if (wasIncomingRef.current) {
+        text = `@${active.peerUserId} video-called. you missed it.`;
+      } else if (wasCallerRef.current) {
+        text = `you video-called. no answer.`;
+      }
+      if (text) {
+        addMessage(cid, {
+          id: newMessageId(),
+          from: 'system',
+          text,
+          kind: 'direct',
+          sentAt: Date.now(),
+          stage: 'sent',
+        });
+      }
+    }
+  }, [active, addMessage, myUserId]);
 
   // Subscribe to the local + remote stream URLs from the peer. The
   // orchestrator exposes the active peer reference; calling

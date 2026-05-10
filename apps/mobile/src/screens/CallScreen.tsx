@@ -67,21 +67,29 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   const remoteAmp = useRef(new Animated.Value(0)).current;
 
   // CALLS.md §06 — drop a single system message into the chat feed
-  // when the call ends. Two variants:
-  //   - completed call → `voice call · M:SS.` (we ever connected)
-  //   - missed incoming → `@<peer> called. you missed it.`
-  //     (incoming_ringing → ended without connecting)
-  // Outgoing-without-answer doesn't write a message — the caller
-  // already knows. We dedupe via a ref so re-renders during the
-  // 1.2s ended-frame window can't double-write.
+  // when the call ends. Variants:
+  //   - completed call         → `voice call · M:SS.`
+  //   - missed incoming        → `@<peer> called. you missed it.`
+  //   - cancelled outgoing     → `you called. no answer.`
+  //
+  // Earlier alphas suppressed the "outgoing no-answer" line on the
+  // theory that "the caller already knows", but that left a gap in
+  // the chat history (user reported tapping `+` then giving up
+  // mid-ring → nothing in the conversation). Recording it makes the
+  // chat log a faithful record of every attempt.
+  //
+  // Dedupe via a ref so re-renders during the 1.2s ended-frame window
+  // can't double-write.
   const addMessage = useConversations((s) => s.add);
   const everConnectedRef = useRef(false);
   const wasIncomingRef = useRef(false);
+  const wasCallerRef = useRef(false);
   const wroteEndMsgRef = useRef(false);
   useEffect(() => {
     if (!active) return;
     if (active.stage === 'connected') everConnectedRef.current = true;
     if (active.stage === 'incoming_ringing') wasIncomingRef.current = true;
+    if (active.isCaller) wasCallerRef.current = true;
     if (active.stage === 'ended' && !wroteEndMsgRef.current && myUserId) {
       wroteEndMsgRef.current = true;
       const cid = conversationIdForDirect(myUserId, active.peerUserId);
@@ -93,6 +101,8 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
         text = `voice call · ${mm}:${ss}.`;
       } else if (wasIncomingRef.current) {
         text = `@${active.peerUserId} called. you missed it.`;
+      } else if (wasCallerRef.current) {
+        text = `you called. no answer.`;
       }
       if (text) {
         addMessage(cid, {
