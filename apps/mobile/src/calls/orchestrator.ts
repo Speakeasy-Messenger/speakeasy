@@ -11,6 +11,10 @@ import type { ApiClient } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { ensureSessionWithPeer as EnsureSessionFn } from '../crypto/session.js';
 import { b64ToBytes, bytesToB64, utf8FromBytes, utf8ToBytes } from '../utils/bytes.js';
+import {
+  ensureCameraPermission,
+  ensureMicPermission,
+} from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
 import type {
   ActiveCall,
@@ -75,6 +79,9 @@ export interface CallHistoryEntry {
   /** Connected-to-ended duration in seconds; 0 if call never connected. */
   durationSec: number;
   reason: CallEndedReason;
+  /** Audio or video — the chat-history system bubble distinguishes
+   *  "voice call · 0:42." from "video call · 0:42." */
+  kind: 'audio' | 'video';
 }
 
 /**
@@ -363,6 +370,16 @@ export class CallOrchestrator {
         kind,
       });
       this.armRingTimeout();
+      // rc.55: warm up the OS permission prompts in parallel with the
+      // ringing UI. Without this, the prompts fire inside `gUM` only
+      // after the user taps Accept — and on a permission-cold device
+      // tapping through Allow takes 5–15s, during which the caller's
+      // PC sits in have-local-offer with no answer and (commonly)
+      // they hang up. Fire-and-forget: ensureMicPermission is
+      // idempotent, so a redundant prompt from a later gUM call is
+      // a no-op. ICE / SDP setup is already done above so this
+      // doesn't gate any wire-side work.
+      void this.warmUpPermissions(kind);
     } catch (err) {
       diag('call', 'incoming offer FAILED', {
         fromUserId,
@@ -537,6 +554,32 @@ export class CallOrchestrator {
     }
   }
 
+  /**
+   * rc.55: prompt for mic (and camera, if video) permissions while
+   * the IncomingCallScreen is up. iOS no-ops these (system handles
+   * via Info.plist). On Android, the OS dialog overlays the call
+   * screen and the user grants while the call is still ringing —
+   * by the time they tap Accept, gUM is instant. Without this,
+   * permissions fired inside `accept() → createAnswer() → gUM` and
+   * the 5–15s of dialog tapping pushed the caller past their PC's
+   * answer-window. Idempotent — a second call to ensureMicPermission
+   * after the user has decided is a no-op.
+   */
+  private async warmUpPermissions(kind: 'audio' | 'video'): Promise<void> {
+    try {
+      const mic = await ensureMicPermission();
+      diag('call', 'warmup mic', { result: mic });
+      if (kind === 'video') {
+        const cam = await ensureCameraPermission();
+        diag('call', 'warmup camera', { result: cam });
+      }
+    } catch (err) {
+      diag('call', 'warmup permissions threw (continuing)', {
+        err: String(err),
+      });
+    }
+  }
+
   private setActive(call: ActiveCall): void {
     this.active = call;
     this.deps.onStateChange(call);
@@ -572,6 +615,7 @@ export class CallOrchestrator {
       endedAt,
       durationSec: connectedAt ? Math.round((endedAt - connectedAt) / 1000) : 0,
       reason,
+      kind: ended.kind,
     });
     this.cleanup();
     // Clear `active` after onStateChange has seen the `ended` snapshot

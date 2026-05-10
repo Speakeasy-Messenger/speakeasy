@@ -9,10 +9,8 @@ import {
 import { CipherS } from '../brand/CipherS.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
-import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useCalls } from '../store/calls.js';
-import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
@@ -66,69 +64,12 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   const localAmp = useRef(new Animated.Value(0)).current;
   const remoteAmp = useRef(new Animated.Value(0)).current;
 
-  // CALLS.md §06 — drop a single system message into the chat feed
-  // when the call ends. Variants:
-  //   - completed call         → `voice call · M:SS.`
-  //   - missed incoming        → `@<peer> called. you missed it.`
-  //   - cancelled outgoing     → `you called. no answer.`
-  //
-  // rc.36 attempted this by checking `active.stage === 'ended'`. Bug:
-  // the orchestrator synchronously transitions setActive(ended) then
-  // setActive(undefined), and React 18 batches both store updates so
-  // CallScreen's useEffect only ever sees `active === undefined`.
-  // The 'ended' branch literally never fires.
-  //
-  // rc.43: track prev active in a ref. When it transitions from
-  // defined → undefined, use the prev snapshot to write the message.
-  // We also keep observing intermediate stages for `everConnected`
-  // and `wasIncoming` since those don't get recomputed from prev.
-  const addMessage = useConversations((s) => s.add);
-  const everConnectedRef = useRef(false);
-  const wasIncomingRef = useRef(false);
-  const wasCallerRef = useRef(false);
-  const wroteEndMsgRef = useRef(false);
-  const prevActiveRef = useRef<typeof active>(undefined);
-  useEffect(() => {
-    const prev = prevActiveRef.current;
-    prevActiveRef.current = active;
-
-    if (active) {
-      if (active.stage === 'connected') everConnectedRef.current = true;
-      if (active.stage === 'incoming_ringing') wasIncomingRef.current = true;
-      if (active.isCaller) wasCallerRef.current = true;
-    }
-
-    if (prev && !active && !wroteEndMsgRef.current && myUserId) {
-      wroteEndMsgRef.current = true;
-      // Ensure the conversation row exists with the right peerUserId
-      // BEFORE the system bubble lands — otherwise `add()` would
-      // create a fresh entry with no peerUserId and the list screen
-      // mislabels it. Particularly bites incoming calls from friends
-      // who haven't sent a 1:1 message yet.
-      const cid = useConversations.getState().openDirect(myUserId, prev.peerUserId);
-      let text: string | undefined;
-      if (everConnectedRef.current && prev.connectedAt) {
-        const sec = Math.floor((Date.now() - prev.connectedAt) / 1000);
-        const mm = Math.floor(sec / 60);
-        const ss = String(sec % 60).padStart(2, '0');
-        text = `voice call · ${mm}:${ss}.`;
-      } else if (wasIncomingRef.current) {
-        text = `@${prev.peerUserId} called. you missed it.`;
-      } else if (wasCallerRef.current) {
-        text = `you called. no answer.`;
-      }
-      if (text) {
-        addMessage(cid, {
-          id: newMessageId(),
-          from: 'system',
-          text,
-          kind: 'direct',
-          sentAt: Date.now(),
-          stage: 'sent',
-        });
-      }
-    }
-  }, [active, addMessage, myUserId]);
+  // CALLS.md §06 — chat-history system bubble for call end.
+  // Moved (rc.55) to the orchestrator's `onCallFinished` deps
+  // callback in App.tsx so it fires once per terminal call regardless
+  // of whether this screen is still mounted, and isn't fragile to
+  // back-to-back calls where a fresh outgoing call replaces `active`
+  // before the intermediate `undefined` render commits.
 
   useEffect(() => {
     if (active?.stage !== 'connected' || !active.connectedAt) {

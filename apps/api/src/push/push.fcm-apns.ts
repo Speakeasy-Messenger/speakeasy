@@ -105,7 +105,25 @@ export class FcmApnsPushProvider implements PushProvider {
       sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
     }
     const responses = await Promise.all(sends);
+    const totalSuccesses = responses.reduce((acc, r) => acc + r.successCount, 0);
     const totalFailures = responses.reduce((acc, r) => acc + r.failureCount, 0);
+    // rc.55: log every push attempt with its outcome so the next
+    // "@x didn't get a push" report is a single fly-logs grep away
+    // from knowing whether FCM accepted, rejected, or never tried.
+    // Token preview on first 8 chars only (real tokens are ~150 chars
+    // and shouldn't be in logs in full).
+    // eslint-disable-next-line no-console
+    console.info(
+      {
+        userId: notice.userId,
+        kind,
+        deviceCount: withPush.length,
+        successes: totalSuccesses,
+        failures: totalFailures,
+        tokenPreview: withPush[0]?.pushToken?.slice(0, 8),
+      },
+      'push notify: attempted',
+    );
     if (totalFailures > 0) {
       const allFailed = responses.flatMap((r) => r.responses.filter((x) => !x.success));
       // eslint-disable-next-line no-console

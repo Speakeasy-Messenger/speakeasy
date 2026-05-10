@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import {
   Pressable,
   SafeAreaView,
@@ -8,7 +8,6 @@ import {
 } from 'react-native';
 import { RTCView } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
-import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import {
   MicIcon,
   PhoneEndIcon,
@@ -16,8 +15,6 @@ import {
 } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
 import { useCalls } from '../store/calls.js';
-import { useConversations } from '../store/conversations.js';
-import { useIdentity } from '../store/identity.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, type as typeScale } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
@@ -40,61 +37,16 @@ interface Props {
 export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const themed = useColors();
   const active = useCalls((s) => s.active);
-  const myUserId = useIdentity((s) => s.userId);
 
   const [localUrl, setLocalUrl] = useState<string | undefined>();
   const [remoteUrl, setRemoteUrl] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState('');
 
-  // See CallScreen's matching block for the full rationale: rc.36's
-  // `active.stage === 'ended'` check never fires because the orchestrator
-  // synchronously batches ended → undefined into a single React render.
-  // rc.43 uses a prev-active ref to detect the defined→undefined edge.
-  const addMessage = useConversations((s) => s.add);
-  const everConnectedRef = useRef(false);
-  const wasIncomingRef = useRef(false);
-  const wasCallerRef = useRef(false);
-  const wroteEndMsgRef = useRef(false);
-  const prevActiveRef = useRef<typeof active>(undefined);
-  useEffect(() => {
-    const prev = prevActiveRef.current;
-    prevActiveRef.current = active;
-
-    if (active) {
-      if (active.stage === 'connected') everConnectedRef.current = true;
-      if (active.stage === 'incoming_ringing') wasIncomingRef.current = true;
-      if (active.isCaller) wasCallerRef.current = true;
-    }
-
-    if (prev && !active && !wroteEndMsgRef.current && myUserId) {
-      wroteEndMsgRef.current = true;
-      // See CallScreen for rationale — openDirect ensures the
-      // conversation row exists with the right peerUserId before
-      // the system bubble lands.
-      const cid = useConversations.getState().openDirect(myUserId, prev.peerUserId);
-      let text: string | undefined;
-      if (everConnectedRef.current && prev.connectedAt) {
-        const sec = Math.floor((Date.now() - prev.connectedAt) / 1000);
-        const mm = Math.floor(sec / 60);
-        const ss = String(sec % 60).padStart(2, '0');
-        text = `video call · ${mm}:${ss}.`;
-      } else if (wasIncomingRef.current) {
-        text = `@${prev.peerUserId} video-called. you missed it.`;
-      } else if (wasCallerRef.current) {
-        text = `you video-called. no answer.`;
-      }
-      if (text) {
-        addMessage(cid, {
-          id: newMessageId(),
-          from: 'system',
-          text,
-          kind: 'direct',
-          sentAt: Date.now(),
-          stage: 'sent',
-        });
-      }
-    }
-  }, [active, addMessage, myUserId]);
+  // Chat-history bubble for call end is emitted from the orchestrator's
+  // onCallFinished deps callback in App.tsx (rc.55). Was previously a
+  // screen-side useEffect keyed on `prev && !active`, which dropped
+  // bubbles when a new outgoing call replaced `active` before React
+  // committed the intermediate undefined render.
 
   // Subscribe to the local + remote stream URLs from the peer. The
   // orchestrator exposes the active peer reference; calling

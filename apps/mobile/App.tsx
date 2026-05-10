@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Linking, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { conversationIdForCommunity, conversationIdForDirect, conversationIdForGroup } from '@speakeasy/shared';
+import {
+  conversationIdForCommunity,
+  conversationIdForDirect,
+  conversationIdForGroup,
+  newMessageId,
+} from '@speakeasy/shared';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
@@ -24,7 +29,7 @@ import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vo
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
-import { CallOrchestrator } from './src/calls/orchestrator.js';
+import { CallOrchestrator, type CallHistoryEntry } from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
@@ -60,6 +65,44 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
  * shortest we can get away with that still reads as intentional.
  */
 const SPLASH_MIN_DURATION_MS = 1500;
+
+/**
+ * rc.55: write the system bubble for a finished call into the
+ * direct conversation with the peer. Was in CallScreen / VideoCallScreen
+ * useEffects keyed on `prev && !active` — fragile when a fresh
+ * outgoing call replaced `active` before React committed the
+ * intermediate `undefined` render, which dropped the bubble for
+ * back-to-back calls.
+ *
+ * Now driven from the orchestrator's `onCallFinished` deps callback,
+ * which fires exactly once per terminal call regardless of UI state.
+ */
+function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
+  const cid = useConversations.getState().openDirect(myUserId, entry.peerUserId);
+  const wasIncoming = !entry.isCaller;
+  const everConnected = entry.durationSec > 0 || entry.reason === 'completed';
+  const noun = entry.kind === 'video' ? 'video call' : 'voice call';
+  const verbedIncoming = entry.kind === 'video' ? 'video-called' : 'called';
+  let text: string;
+  if (everConnected) {
+    const sec = entry.durationSec;
+    const mm = Math.floor(sec / 60);
+    const ss = String(sec % 60).padStart(2, '0');
+    text = `${noun} · ${mm}:${ss}.`;
+  } else if (wasIncoming) {
+    text = `@${entry.peerUserId} ${verbedIncoming}. you missed it.`;
+  } else {
+    text = entry.kind === 'video' ? 'you video-called. no answer.' : 'you called. no answer.';
+  }
+  useConversations.getState().add(cid, {
+    id: newMessageId(),
+    from: 'system',
+    text,
+    kind: 'direct',
+    sentAt: Date.now(),
+    stage: 'sent',
+  });
+}
 
 export default function App() {
   const userId = useIdentity((s) => s.userId);
@@ -414,7 +457,19 @@ export default function App() {
         send: (frame) => ws.send(frame),
         ensureSessionWithPeer,
         onStateChange: (call) => useCalls.getState().setActive(call),
-        onCallFinished: (entry) => useCalls.getState().recordHistory(entry),
+        onCallFinished: (entry) => {
+          useCalls.getState().recordHistory(entry);
+          // rc.55: write the chat-history system bubble here, not in
+          // CallScreen/VideoCallScreen. The screen-side useEffect was
+          // gated on `prev && !active`, which is fragile when a fresh
+          // outgoing call replaces `active` before React commits the
+          // intermediate `undefined` render. The orchestrator's
+          // onCallFinished fires exactly once per terminal call, so
+          // this is the right place. Idempotent if the screen-side
+          // path also runs (dedupe by message id is already in
+          // conversations.add).
+          writeCallEndedBubble(userId, entry);
+        },
         getAllowIncomingCalls: () =>
           useSettings.getState().allowIncomingCalls,
       });
