@@ -1,6 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
-  Alert,
   FlatList,
   KeyboardAvoidingView,
   Modal,
@@ -14,6 +13,7 @@ import {
 } from 'react-native';
 import { type Attachment, encodePayload, newMessageId } from '@speakeasy/shared';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
@@ -22,6 +22,7 @@ import { DisappearingMessageBubble } from '../components/DisappearingMessageBubb
 import { SystemMessageRow } from '../components/SystemMessageRow.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
+import { Avatar } from '../components/Avatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
@@ -111,6 +112,7 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
 
   const [input, setInput] = useState('');
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
+  const [attachOpen, setAttachOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
 
   // Phase 2 brand overhaul: groups don't have photos OR custom marks.
@@ -229,29 +231,27 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
     }
   }
 
-  async function handlePaperclip() {
-    Alert.alert('Attach', 'Pick a source.', [
-      {
-        text: 'Photos',
-        onPress: async () => {
-          const photos = await pickPhotos();
-          if (photos.length) await sendOutbound({ attachments: photos });
-        },
-      },
-      {
-        text: 'File',
-        onPress: async () => {
-          const file = await pickFile();
-          if (file) await sendOutbound({ attachments: [file] });
-        },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+  // Paperclip → bottom sheet matching the 1:1 ChatScreen path
+  // (rc.37). Three explicit options (Photo / Camera / Document) so a
+  // gallery JPG always travels with kind: 'image' and renders inline
+  // at the recipient instead of as a generic file-icon placeholder.
+  function handlePaperclip() {
+    setAttachOpen(true);
+  }
+
+  async function handlePickPhoto() {
+    const photos = await pickPhotos({ selectionLimit: 1 });
+    if (photos.length > 0) await sendOutbound({ attachments: photos });
   }
 
   async function handleCamera() {
     const photo = await pickFromCamera();
     if (photo) await sendOutbound({ attachments: [photo] });
+  }
+
+  async function handlePickFile() {
+    const file = await pickFile();
+    if (file) await sendOutbound({ attachments: [file] });
   }
 
   function cycleTtl() {
@@ -332,7 +332,7 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
               <View>
                 {showAttribution ? (
                   <View style={styles.attribution}>
-                    <PortraitTile kind="animal" id={item.from} size={18} />
+                    <Avatar userId={item.from} size={18} />
                     <Handle value={item.from} variant="caption" />
                   </View>
                 ) : null}
@@ -347,11 +347,11 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
               </View>
             );
           }}
-          ListFooterComponent={
-            <View style={styles.footnote}>
+          ListHeaderComponent={
+            <View style={styles.tagline}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
-              <Text style={[styles.footnoteText, { color: themed.slate }]}>
-                MESSAGES DISAPPEAR AFTER THEY'RE SEEN
+              <Text style={[styles.taglineText, { color: themed.slate }]}>
+                END-TO-END ENCRYPTED · LEAVES IN {ttlLabel}
               </Text>
             </View>
           }
@@ -420,6 +420,13 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
           />
         ) : null}
       </Modal>
+      <AttachmentSheet
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onPickPhoto={() => void handlePickPhoto()}
+        onPickCamera={() => void handleCamera()}
+        onPickFile={() => void handlePickFile()}
+      />
     </SafeAreaView>
   );
 }
@@ -501,15 +508,16 @@ const styles = StyleSheet.create({
   },
   body: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },
-  footnote: {
+  tagline: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.sm,
-    marginTop: space.lg,
+    marginBottom: space.lg,
+    paddingTop: space.md,
   },
   dot: { width: 6, height: 6 },
-  footnoteText: {
+  taglineText: {
     fontFamily: type.meta.weight,
     fontSize: type.meta.size,
     letterSpacing: type.meta.size * type.meta.letterSpacingEm,
