@@ -43,10 +43,41 @@ export class NativePushNotificationService implements PushNotificationService {
     this.lastFailureReason = undefined;
     try {
       // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-      const { NativeModules, Platform } = require('react-native') as {
+      const { NativeModules, PermissionsAndroid, Platform } = require(
+        'react-native',
+      ) as {
         NativeModules: Record<string, unknown>;
-        Platform: { OS: string };
+        PermissionsAndroid: {
+          PERMISSIONS: { POST_NOTIFICATIONS?: string };
+          RESULTS: { GRANTED: string };
+          check: (perm: string) => Promise<boolean>;
+          request: (perm: string) => Promise<string>;
+        };
+        Platform: { OS: string; Version: number };
       };
+
+      // Android 13+ (API 33) requires POST_NOTIFICATIONS at runtime.
+      // Without this, FCM accepts the message and the OS silently
+      // drops the banner — every push from rc.27→rc.32 was lost
+      // exactly because of this. Request once; subsequent calls return
+      // immediately. Older Android versions don't expose the
+      // permission key, so check before referencing it.
+      if (
+        Platform.OS === 'android' &&
+        Platform.Version >= 33 &&
+        PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS
+      ) {
+        const perm = PermissionsAndroid.PERMISSIONS.POST_NOTIFICATIONS;
+        const already = await PermissionsAndroid.check(perm);
+        if (!already) {
+          const result = await PermissionsAndroid.request(perm);
+          if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+            this.lastFailureReason = `android_post_notifications_denied (${result})`;
+            return undefined;
+          }
+        }
+      }
+
       // Check if the Firebase Messaging native module is linked before
       // trying to import the JS wrapper — avoids a hard crash in Hermes
       // when the native module isn't available.

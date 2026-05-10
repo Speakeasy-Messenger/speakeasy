@@ -1,4 +1,5 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
     <!-- Optional. Used by the InviteFriendsScreen to populate a list
@@ -6,6 +7,14 @@
          Discovery (matching contacts to existing speakeasy users) is
          deliberately NOT done — contact data never leaves the device. -->
     <uses-permission android:name="android.permission.READ_CONTACTS" />
+
+    <!-- Push notifications. Android 13+ (API 33) requires this permission
+         at runtime; without it, the OS silently drops every FCM-delivered
+         banner. rc.27→rc.32 had every other piece of push wiring working
+         (token registered, FCM accepted, server delivered) but no banner
+         appeared on device until this was added. Requested via
+         PermissionsAndroid in push-notifications.ts. -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <!-- Phase 6 voice calling: WebRTC + ConnectionService prerequisites. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
@@ -60,6 +69,26 @@
             <data android:scheme="speakeasy" android:host="add" />
         </intent-filter>
       </activity>
+
+      <!-- FCM default notification icon + channel. Without these,
+           Android 8+ falls back to the launcher icon (which is colored,
+           and the system will reject it as a notification icon — silently
+           drops the banner) and a generic channel that may not be
+           visible in the notification shade. The icon is a white-on-
+           transparent vector drawable in res/drawable. The channel id
+           is created on first delivery if it doesn't exist. -->
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_icon"
+        android:resource="@drawable/ic_notification"
+        tools:replace="android:resource" />
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_color"
+        android:resource="@color/notification_brass"
+        tools:replace="android:resource" />
+      <meta-data
+        android:name="com.google.firebase.messaging.default_notification_channel_id"
+        android:value="speakeasy_default"
+        tools:replace="android:value" />
 
       <!-- CallKeep VoiceConnectionService — required for CallKit/Connection-
            Service ring UI on Android. The lib's own AndroidManifest.xml

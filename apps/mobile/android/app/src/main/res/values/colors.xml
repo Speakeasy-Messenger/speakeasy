@@ -2,4 +2,8 @@
 <resources>
     <!-- Adaptive icon background — cream from spec §14 palette. -->
     <color name="ic_launcher_background">#F7F6F3</color>
+    <!-- FCM accent color for the small notification icon. Brand brass
+         from spec §1 palette. The system tints the silhouette icon to
+         this color when rendering the notification. -->
+    <color name="notification_brass">#E5A645</color>
 </resources>
