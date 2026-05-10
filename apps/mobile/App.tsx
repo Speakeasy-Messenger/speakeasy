@@ -134,6 +134,24 @@ export default function App() {
     );
   }, [hydrated, userId]);
 
+  // Load (or generate) the local SpeakeasySignalStore identity key.
+  // OnboardingFlow's RoomStep calls this once at signup; subsequent
+  // app launches need to reload the persisted key into the native
+  // module's memory. Without it, group send (which builds an SKDM
+  // signed by the identity key) fails immediately with
+  // "SpeakeasySignalStore not initialized — call generateIdentityKey
+  // first" — direct messages happen to work because their session
+  // setup goes through `ensureSessionWithPeer` which loads on demand.
+  // Idempotent: the native module returns the existing key on a re-call.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    void signalProtocol.generateIdentityKey().catch((err) => {
+      diag('app', 'identity-key load FAILED — group send will error', {
+        err: String(err),
+      });
+    });
+  }, [hydrated, userId]);
+
   useEffect(() => {
     if (!hydrated || !userId) return;
     void (async () => {
