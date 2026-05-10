@@ -17,9 +17,11 @@ import {
 import {
   conversationIdForDirect,
   encodePayload,
+  isFeedbackHandle,
   newMessageId,
   type Attachment,
 } from '@speakeasy/shared';
+import { APP_VERSION as FEEDBACK_APP_VERSION } from './AboutScreen.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
@@ -118,6 +120,7 @@ export function ChatScreen({
   const setPersistence = useConversations((s) => s.setPersistence);
   const openDirect = useConversations((s) => s.openDirect);
   const markRead = useConversations((s) => s.markRead);
+  const markDelivered = useConversations((s) => s.markDelivered);
 
   // BLOCK.md §5: when the local user has blocked this peer, the
   // chat surface enters frozen mode (Peephole portrait, BLOCKED
@@ -266,6 +269,7 @@ export function ChatScreen({
       convId: conversationId,
       peerId,
       isSelf: peerId === myUserId,
+      isFeedback: isFeedbackHandle(peerId),
       hasAttachments: !!attachments,
       attachCount: attachments?.length ?? 0,
     });
@@ -289,6 +293,20 @@ export function ChatScreen({
         const r = await vouchflow.verify({ context: 'login' });
         useIdentity.getState().setDeviceToken(r.deviceToken);
         deviceToken = r.deviceToken;
+      }
+      // @feedback fork — POST plaintext to /v1/feedback (NOT E2E),
+      // skip Signal session + WS dispatch. Attachments aren't
+      // supported here yet (text only); the user sees a banner above
+      // the chat making the channel intent clear.
+      if (isFeedbackHandle(peerId)) {
+        if (text) {
+          await api.submitFeedback(deviceToken, text, FEEDBACK_APP_VERSION);
+          // Mark immediately as delivered — there's no remote ack
+          // round-trip; the POST 200 IS the ack.
+          markDelivered(id);
+        }
+        diag('chat', 'feedback submitted', { len: text?.length ?? 0 });
+        return;
       }
       const isSelf = peerId === myUserId;
       // Pack the text + attachments into the v1 envelope. Pre-rebrand
@@ -458,7 +476,11 @@ export function ChatScreen({
             style={[styles.headerSub, { color: themed.slate }]}
             numberOfLines={1}
           >
-            {isBlocked ? 'BLOCKED' : `E2E · LEAVES IN ${ttlLabel}`}
+            {isBlocked
+              ? 'BLOCKED'
+              : isFeedbackHandle(peerId)
+                ? 'NOT E2E'
+                : `E2E · LEAVES IN ${ttlLabel}`}
           </Text>
         </Pressable>
         {/* CALLS.md §01: tapping ☎ opens the call-type sheet, not
@@ -466,7 +488,7 @@ export function ChatScreen({
             of the brand discipline — calling is a significant
             action and should feel that way. Hidden when blocked
             per BLOCK.md §5.1. */}
-        {onStartCall && !isBlocked ? (
+        {onStartCall && !isBlocked && !isFeedbackHandle(peerId) ? (
           <Pressable
             testID="chat-call"
             onPress={() => setCallTypeOpen(true)}
@@ -513,7 +535,9 @@ export function ChatScreen({
             <View style={styles.tagline}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
               <Text style={[styles.taglineText, { color: themed.slate }]}>
-                END-TO-END ENCRYPTED · LEAVES IN {ttlLabel}
+                {isFeedbackHandle(peerId)
+                  ? 'NOT E2E · GOES TO THE DEV TEAM'
+                  : `END-TO-END ENCRYPTED · LEAVES IN ${ttlLabel}`}
               </Text>
             </View>
           }
@@ -539,22 +563,29 @@ export function ChatScreen({
           ]}
         >
           <View style={styles.inputBar}>
-            <Pressable
-              onPress={handlePaperclip}
-              hitSlop={6}
-              style={styles.iconBtn}
-              testID="chat-attach"
-            >
-              <PaperclipIcon size={22} />
-            </Pressable>
-            <Pressable
-              onPress={handleCamera}
-              hitSlop={6}
-              style={styles.iconBtn}
-              testID="chat-camera"
-            >
-              <CameraIcon size={22} />
-            </Pressable>
+            {/* @feedback is text-only — attachments aren't stored in
+                /v1/feedback yet. Hide the paperclip + camera buttons
+                so the affordances match the channel's capabilities. */}
+            {!isFeedbackHandle(peerId) ? (
+              <>
+                <Pressable
+                  onPress={handlePaperclip}
+                  hitSlop={6}
+                  style={styles.iconBtn}
+                  testID="chat-attach"
+                >
+                  <PaperclipIcon size={22} />
+                </Pressable>
+                <Pressable
+                  onPress={handleCamera}
+                  hitSlop={6}
+                  style={styles.iconBtn}
+                  testID="chat-camera"
+                >
+                  <CameraIcon size={22} />
+                </Pressable>
+              </>
+            ) : null}
             <TextInput
               testID="chat-input"
               style={[styles.input, { color: themed.ink }]}

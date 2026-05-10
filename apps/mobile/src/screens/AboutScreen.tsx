@@ -24,8 +24,12 @@ const SUPPORT_EMAIL = 'hello@speakeasy.app';
 
 // Matches apps/mobile/android/app/build.gradle versionName +
 // versionCode. Manual sync until a build-time bake step lands.
-const VERSION = '0.5.0-rc.37';
-const BUILD = '37';
+// Re-exported so other modules (e.g. ChatScreen for feedback
+// app_version field) reference a single source of truth.
+export const APP_VERSION = '0.5.0-rc.38';
+export const APP_BUILD = '38';
+const VERSION = APP_VERSION;
+const BUILD = APP_BUILD;
 
 /**
  * SETTINGS.md §9 — three sections + footer.

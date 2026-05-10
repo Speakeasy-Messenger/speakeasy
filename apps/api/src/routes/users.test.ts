@@ -156,6 +156,27 @@ describe('PUT /v1/users/me/avatar', () => {
     await app.close();
   });
 
+  it('accepts paid avatar ids (rc.6 catalog expansion)', async () => {
+    // rc.6 added 12 rare + 4 legendary ids to KNOWN_ANIMAL_IDS.
+    // Server doesn't gate ownership — that's the purchase-side
+    // concern. It just stores whatever the client claims.
+    const { app, repo } = await makeApp();
+    for (const id of ['lynx', 'raven', 'dragon', 'phoenix', 'pigeon']) {
+      const res = await app.inject({
+        method: 'PUT',
+        url: '/v1/users/me/avatar',
+        headers: {
+          authorization: 'Bearer dvt_silent-golden-hawk',
+          'content-type': 'application/json',
+        },
+        payload: { animal_id: id },
+      });
+      expect(res.statusCode, `setAvatar(${id})`).toBe(204);
+      expect((await repo.findById('silent-golden-hawk'))?.selectedAvatarId).toBe(id);
+    }
+    await app.close();
+  });
+
   it('401 without bearer', async () => {
     const { app } = await makeApp();
     const res = await app.inject({

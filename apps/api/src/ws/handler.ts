@@ -212,6 +212,20 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
       } catch (err) {
         const code =
           err instanceof VouchflowValidationError ? err.reason : 'auth_failed';
+        // Log the underlying error so we can diagnose anything that
+        // throws after the `authed` send (a non-Vouchflow error here
+        // is almost always a downstream DB / Redis issue silently
+        // becoming `auth_failed` on the wire — see 0011 migration's
+        // header for the precedent that motivated this log).
+        deps.log.warn(
+          {
+            err,
+            userId: session?.userId,
+            deviceToken: session?.deviceToken,
+            code,
+          },
+          'ws auth/post-auth threw',
+        );
         sendError(socket, code, 'authentication failed');
         socket.close(4004, code);
       }

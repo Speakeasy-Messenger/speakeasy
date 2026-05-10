@@ -18,10 +18,19 @@ interface Params {
  *     new server build; old clients gracefully fall back rather than
  *     showing a black tile.
  */
+/**
+ * Canonical set lives in `apps/mobile/src/avatars/catalog.ts`. We
+ * duplicate the ids here as a typo-guard only — server doesn't gate
+ * ownership of paid avatars (RevenueCat does that on the client at
+ * purchase time). Keep this list in sync when CATALOG changes;
+ * rc.6 expanded it from 12 free animals to 12 free + 12 rare + 4
+ * legendary, and renamed `raven` (free) → `pigeon`.
+ */
 const KNOWN_ANIMAL_IDS = new Set([
+  // free 12
   'fox',
   'owl',
-  'raven',
+  'pigeon',
   'hare',
   'stag',
   'whale',
@@ -31,6 +40,24 @@ const KNOWN_ANIMAL_IDS = new Set([
   'bear',
   'cat',
   'bat',
+  // rare 12
+  'lynx',
+  'koi',
+  'raven',
+  'frog',
+  'snake',
+  'peacock',
+  'hawk',
+  'squirrel',
+  'crab',
+  'beetle',
+  'anglerfish',
+  'seahorse',
+  // legendary 4
+  'dragon',
+  'phoenix',
+  'turtle',
+  'manticore',
 ]);
 
 interface AvatarBody {

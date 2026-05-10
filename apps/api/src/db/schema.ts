@@ -1,5 +1,7 @@
+import { sql } from 'drizzle-orm';
 import {
   boolean,
+  check,
   customType,
   index,
   integer,
@@ -89,14 +91,21 @@ export const groupMembers = pgTable(
   }),
 );
 
-export const communities = pgTable('communities', {
-  id: text('id').primaryKey(),
-  createdBy: text('created_by')
-    .notNull()
-    .references(() => users.id),
-  ttlDays: integer('ttl_days').notNull().default(7),
-  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-});
+export const communities = pgTable(
+  'communities',
+  {
+    id: text('id').primaryKey(),
+    createdBy: text('created_by')
+      .notNull()
+      .references(() => users.id),
+    ttlDays: integer('ttl_days').notNull().default(7),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    // Mirrors `communities_ttl_days_check` in 0001_initial.sql.
+    ttlDaysPositive: check('communities_ttl_days_check', sql`${t.ttlDays} > 0`),
+  }),
+);
 
 /**
  * Channel-key envelopes — spec §4b. Channel key K is wrapped once per
@@ -140,6 +149,11 @@ export const communityMembers = pgTable(
   (t) => ({
     pk: primaryKey({ columns: [t.communityId, t.userId] }),
     userIdx: index('community_members_user_idx').on(t.userId),
+    // Mirrors `community_members_role_check` in 0001_initial.sql.
+    roleEnum: check(
+      'community_members_role_check',
+      sql`${t.role} IN ('member', 'moderator')`,
+    ),
   }),
 );
 
@@ -165,6 +179,11 @@ export const devices = pgTable(
   },
   (t) => ({
     userIdx: index('devices_user_idx').on(t.userId),
+    // Mirrors `devices_platform_check` in 0003_devices.sql.
+    platformEnum: check(
+      'devices_platform_check',
+      sql`${t.platform} IS NULL OR ${t.platform} IN ('ios', 'android')`,
+    ),
   }),
 );
 
@@ -189,7 +208,32 @@ export const messages = pgTable(
   },
   (t) => ({
     conversationIdx: index('messages_conversation_idx').on(t.conversation, t.createdAt),
-    expiresIdx: index('messages_expires_idx').on(t.expiresAt),
+    // Partial index — only indexes undelivered rows. Per
+    // 0001_initial.sql; the prod DB already has the partial form.
+    // `index().where()` is the drizzle-orm primitive that captures it.
+    expiresIdx: index('messages_expires_idx')
+      .on(t.expiresAt)
+      .where(sql`${t.delivered} = FALSE`),
     recipientIdx: index('messages_recipient_idx').on(t.recipientId),
+    // Mirrors `messages_msg_type_check` in 0001_initial.sql.
+    msgTypeEnum: check(
+      'messages_msg_type_check',
+      sql`${t.msgType} IN ('direct', 'group', 'community')`,
+    ),
   }),
 );
+
+/**
+ * User-submitted feedback for the dev team. The `@feedback` handle is
+ * special-cased in the availability route (always taken) and on the
+ * mobile send path (POST /v1/feedback instead of WS-encrypt-and-send).
+ * Plaintext on purpose — opt-in by the user, not E2E.
+ */
+export const feedback = pgTable('feedback', {
+  id: text('id').primaryKey(),
+  senderUserId: text('sender_user_id').notNull(),
+  appVersion: text('app_version'),
+  text: text('text').notNull(),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
+});

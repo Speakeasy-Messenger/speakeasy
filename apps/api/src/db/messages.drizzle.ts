@@ -35,11 +35,34 @@ export class DrizzleMessagesRepo implements MessagesRepo {
       .select()
       .from(messages)
       .where(
+        // Two bugs lived in the prior version of this query:
+        //
+        // 1. `??` was used hoping for the JDBC-style escape that some
+        //    drivers translate to a literal `?`. node-postgres (8.20.0)
+        //    does NOT perform that translation; PostgreSQL received
+        //    `??` and threw `42883: operator does not exist: jsonb ?? text`
+        //    on every call, throwing inside `deliverBuffered` and
+        //    cascading into the rapid WS auth-then-close cycle the
+        //    rc.8 user reported.
+        //
+        // 2. `target_devices @> '[]'::jsonb` was meant as the
+        //    "legacy: no targets specified at insert time → any device
+        //    drains" shortcut. But `@> '[]'` is a tautology for jsonb
+        //    arrays (every set contains the empty set), so the OR
+        //    short-circuited to true and the predicate degraded to
+        //    just `recipient_id = $1` — every device would have
+        //    drained every undelivered message. Replaced with
+        //    `jsonb_array_length(...) = 0` to match the memory impl's
+        //    `m.targetDevices.length === 0` semantics.
+        //
+        // The repo's vitest tests use the in-memory impl, so neither
+        // bug surfaced in CI. Mirror the in-memory behavior here as
+        // the contract.
         sql`${messages.recipientId} = ${recipientId} AND (
-          ${messages.targetDevices} @> '[]'::jsonb
+          jsonb_array_length(${messages.targetDevices}) = 0
           OR (
-            ${messages.targetDevices}::jsonb ?? ${deviceToken}
-            AND NOT (${messages.deliveredToDevices}::jsonb ?? ${deviceToken})
+            ${messages.targetDevices}::jsonb ? ${deviceToken}
+            AND NOT (${messages.deliveredToDevices}::jsonb ? ${deviceToken})
           )
         )`,
       )

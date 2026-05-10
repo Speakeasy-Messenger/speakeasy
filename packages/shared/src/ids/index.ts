@@ -65,6 +65,12 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set([
   'speakeasy', 'official', 'team', 'app',
   'self', 'anonymous', 'anon',
   'noreply', 'no_reply', 'security', 'abuse',
+  // Special-cased handle for in-app feedback. The mobile client routes
+  // messages addressed to @feedback through POST /v1/feedback (non-E2E,
+  // opt-in by the user) and the API server's availability route returns
+  // it as `taken` so users can reach the chat. Reserving it here means
+  // no user can claim it via /v1/enroll.
+  'feedback',
 ]);
 
 export const GROUP_ID_REGEX = /^grp-[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -125,4 +131,21 @@ export function newCallId(): string {
 
 export function isCallId(value: string): boolean {
   return CALL_ID_REGEX.test(value);
+}
+
+/**
+ * The reserved handle used for in-app feedback. Messages addressed to
+ * this user on the mobile client take a separate (non-E2E) HTTP path
+ * — see `POST /v1/feedback`. The server's availability route
+ * special-cases this handle as "taken" so users can't claim it but
+ * can still send messages to it.
+ */
+export const FEEDBACK_HANDLE = 'feedback';
+
+export function isFeedbackHandle(handle: string): boolean {
+  return handle.toLowerCase() === FEEDBACK_HANDLE;
+}
+
+export function newFeedbackId(): string {
+  return `fb-${ulid()}`;
 }

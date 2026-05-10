@@ -370,6 +370,38 @@ export class ApiClient {
    * live WebSocket. Must be called after enrollment (deviceToken is
    * required in the auth header).
    */
+  /**
+   * Submit user-typed feedback (addressed to @feedback in the chat
+   * UI). NOT end-to-end — this is the explicit non-E2E channel for
+   * "send a bug report to the dev team". Server stores the row in the
+   * `feedback` table; opt-in by user, surfaced as a banner in the chat.
+   */
+  async submitFeedback(
+    deviceToken: string,
+    text: string,
+    appVersion?: string,
+  ): Promise<void> {
+    const body: Record<string, unknown> = { text };
+    if (appVersion) body.app_version = appVersion;
+    const res = await this.doFetch(`${this.baseUrl}/v1/feedback`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 200) return;
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
   async registerPushToken(
     deviceToken: string,
     pushToken: string,

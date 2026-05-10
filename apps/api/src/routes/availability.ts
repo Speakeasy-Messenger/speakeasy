@@ -1,5 +1,5 @@
 import type { FastifyInstance, preHandlerHookHandler } from 'fastify';
-import { validateHandle } from '@speakeasy/shared';
+import { isFeedbackHandle, validateHandle } from '@speakeasy/shared';
 import type { UserRepo } from '../db/users.js';
 
 interface Query {
@@ -36,6 +36,14 @@ export async function registerAvailabilityRoute(
     },
     async (req, reply) => {
       const id = (req.query.id ?? '').trim().toLowerCase();
+      // `@feedback` is a reserved handle used for in-app feedback (see
+      // routes/feedback.ts). Surface it as `taken` so the FindSomeone
+      // sheet treats it as found and lets the user open a chat —
+      // mobile send path special-cases this peer and POSTs to
+      // /v1/feedback instead of going through the encrypted WS path.
+      if (isFeedbackHandle(id)) {
+        return reply.send({ available: false, reason: 'taken' });
+      }
       const reason = validateHandle(id);
       if (reason) {
         return reply.send({ available: false, reason });

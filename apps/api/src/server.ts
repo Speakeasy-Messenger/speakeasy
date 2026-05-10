@@ -52,6 +52,7 @@ import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
 import { registerDeviceRoutes } from './routes/devices.js';
+import { registerFeedbackRoute } from './routes/feedback.js';
 import {
   registerTurnRoutes,
   turnProviderFromEnv,
@@ -204,6 +205,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Resolve it once so both paths share the same instance.
   const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
   await registerDeviceRoutes(app, { devices });
+  await registerFeedbackRoute(app);
   const turnProvider = opts.turnProvider ?? turnProviderFromEnv();
   await registerTurnRoutes(app, { provider: turnProvider });
 
