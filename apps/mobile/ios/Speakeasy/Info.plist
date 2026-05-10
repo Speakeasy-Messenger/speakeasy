@@ -43,6 +43,11 @@
 	     terse and on-brand — this is the iOS permission prompt copy. -->
 	<key>NSMicrophoneUsageDescription</key>
 	<string>Speakeasy needs the microphone to make voice calls.</string>
+	<!-- Phase 6 video calling: WebRTC needs the camera. iOS gates
+	     getUserMedia({ video: true }) on this string being present;
+	     omitting it crashes the app the moment a video call starts. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Speakeasy needs the camera for video calls. The video stream is end-to-end encrypted with the peer; nothing is recorded or stored on a server.</string>
 	<!-- VoIP + audio background modes — VoIP keeps the app's network
 	     stack alive so an in-flight call survives a screen lock; audio
 	     keeps the call audio session running while the screen is off. -->
