@@ -2,22 +2,28 @@
   FCM default notification icon — the small icon shown in the
   notification shade and on the lockscreen. Android 8+ requires it to
   be a single-color silhouette on transparent background; the system
-  tints it (typically to white on the dark notification background).
+  tints it (typically to white on the dark notification background)
+  but the meta-data `default_notification_color` lets us override the
+  tint to brand brass.
 
-  Brand: a simple door silhouette — speakeasy's recurring mark — kept
-  geometric and chunky so it reads at 12dp. The frame, jamb-line, and
-  peephole dot match the marketing Door mark.
+  Brand: the Cipher S — three offset bars forming an abstract "S" /
+  three-redacted-bars motif. Same primary brand mark used on the
+  splash screen and the call screen. Geometry mirrors
+  src/brand/CipherS.tsx (Rect-by-Rect, viewport 100×100).
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
     android:height="24dp"
-    android:viewportWidth="24"
-    android:viewportHeight="24"
+    android:viewportWidth="100"
+    android:viewportHeight="100"
     android:tint="?attr/colorControlNormal">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M5,2 L19,2 L19,22 L5,22 Z M7,4 L7,20 L17,20 L17,4 Z" />
+      android:pathData="M5,20 L65,20 L65,34 L5,34 Z" />
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M14.5,12 m-1,0 a1,1 0 1,0 2,0 a1,1 0 1,0 -2,0" />
+      android:pathData="M35,43 L95,43 L95,57 L35,57 Z" />
+  <path
+      android:fillColor="@android:color/white"
+      android:pathData="M5,66 L65,66 L65,80 L5,80 Z" />
 </vector>
