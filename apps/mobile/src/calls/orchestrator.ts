@@ -49,6 +49,13 @@ export interface CallOrchestratorDeps {
   /** Notify the UI store of state changes. Called on every transition. */
   onStateChange: (call: ActiveCall | undefined) => void;
   /**
+   * Per SETTINGS.md §4.1 — when the user has flipped "Allow incoming
+   * calls" off, the orchestrator auto-declines without surfacing a
+   * ringing UI. Optional so tests don't have to inject it (treated
+   * as "always allow" when undefined).
+   */
+  getAllowIncomingCalls?: () => boolean;
+  /**
    * Called once a call has reached a terminal state. UI uses this to
    * record an entry in the local call history.
    */
@@ -97,9 +104,13 @@ export class CallOrchestrator {
 
   /**
    * Local user dials `peerUserId`. Returns the new callId so the UI can
-   * navigate to the CallScreen keyed off it.
+   * navigate to the CallScreen keyed off it. Defaults to audio; pass
+   * `'video'` to negotiate a camera track via VideoCallScreen.
    */
-  async startOutgoing(peerUserId: string): Promise<string> {
+  async startOutgoing(
+    peerUserId: string,
+    kind: 'audio' | 'video' = 'audio',
+  ): Promise<string> {
     if (this.active) {
       throw new Error('busy: another call is already active');
     }
@@ -114,9 +125,12 @@ export class CallOrchestrator {
       stage: 'outgoing_dialing',
       stageEnteredAt: this.now(),
       micMuted: false,
-      speakerOn: false,
+      // Video calls default to speaker on — earpiece doesn't make sense
+      // when the user is looking at the screen. Audio stays on earpiece.
+      speakerOn: kind === 'video',
+      kind,
     });
-    diag('call', 'startOutgoing', { callId, peerUserId });
+    diag('call', 'startOutgoing', { callId, peerUserId, kind });
 
     try {
       const iceServers = await this.fetchIceServers();
@@ -124,10 +138,12 @@ export class CallOrchestrator {
       const peer = await this.deps.peerFactory.create({
         iceServers,
         role: 'caller',
+        mediaKind: kind,
       });
       diag('call', 'peer created');
       this.attachPeer(peer);
-      const offer = await peer.createOffer();
+      const peerOffer = await peer.createOffer();
+      const offer: CallOfferPayload = { ...peerOffer, kind };
       diag('call', 'offer created', { sdpLen: offer.sdp.length });
       await this.sendEncrypted(peerUserId, callId, 'call_offer', offer);
       diag('call', 'offer sent', { peerUserId, callId });
@@ -184,12 +200,23 @@ export class CallOrchestrator {
       this.active.stage === 'outgoing_ringing'
         ? 'cancel'
         : 'hangup';
-    this.deps.send({
-      type: 'call_end',
-      to: this.active.peerUserId,
-      call_id: this.active.callId,
-      reason: wireReason,
-    });
+    // Wrap the WS send so a non-authed socket (e.g. flapped mid-
+    // ringing) doesn't throw out of hangup() and crash the screen.
+    // The endLocally() teardown below MUST run regardless — local
+    // cleanup is what frees the mic + audio session + UI state.
+    // The server's auth-timeout will eventually drop the orphan.
+    try {
+      this.deps.send({
+        type: 'call_end',
+        to: this.active.peerUserId,
+        call_id: this.active.callId,
+        reason: wireReason,
+      });
+    } catch (err) {
+      diag('call', 'hangup send failed (continuing local teardown)', {
+        err: String(err),
+      });
+    }
     const localReason: CallEndedReason =
       wireReason === 'cancel' ? 'cancel' : 'completed';
     this.endLocally(localReason);
@@ -222,6 +249,21 @@ export class CallOrchestrator {
     cb: (levels: { local: number; remote: number }) => void,
   ): () => void {
     return this.peer?.onAudioLevels?.(cb) ?? (() => {});
+  }
+
+  /**
+   * Video-call helpers — pass through to the active peer. Audio peers
+   * return undefined / no-op subscriptions so VideoCallScreen can call
+   * these unconditionally without checking the call kind.
+   */
+  getLocalStreamURL(): string | undefined {
+    return this.peer?.getLocalStreamURL?.();
+  }
+  onRemoteStreamURL(cb: (url: string | undefined) => void): () => void {
+    return this.peer?.onRemoteStreamURL?.(cb) ?? (() => {});
+  }
+  async flipCamera(): Promise<void> {
+    await this.peer?.flipCamera?.();
   }
 
   /**
@@ -272,10 +314,32 @@ export class CallOrchestrator {
       diag('call', 'incoming offer rejected: busy', { fromUserId, callId });
       return;
     }
+    // SETTINGS.md §4.1: "Allow incoming calls" toggle. When off,
+    // we auto-decline with `decline` and never surface a ringing
+    // UI. Same wire-level behavior as the user tapping Decline,
+    // so the caller's side rings out naturally.
+    if (this.deps.getAllowIncomingCalls?.() === false) {
+      this.deps.send({
+        type: 'call_end',
+        to: fromUserId,
+        call_id: callId,
+        reason: 'decline',
+      });
+      diag('call', 'incoming offer auto-declined (toggle off)', {
+        fromUserId,
+        callId,
+      });
+      return;
+    }
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallOfferPayload;
+      const kind = payload.kind ?? 'audio';
       const iceServers = await this.fetchIceServers();
-      const peer = await this.deps.peerFactory.create({ iceServers, role: 'callee' });
+      const peer = await this.deps.peerFactory.create({
+        iceServers,
+        role: 'callee',
+        mediaKind: kind,
+      });
       this.attachPeer(peer);
       await peer.setRemoteOffer(payload);
       this.setActive({
@@ -285,7 +349,8 @@ export class CallOrchestrator {
         stage: 'incoming_ringing',
         stageEnteredAt: this.now(),
         micMuted: false,
-        speakerOn: false,
+        speakerOn: kind === 'video',
+        kind,
       });
       this.armRingTimeout();
     } catch (err) {

@@ -19,6 +19,14 @@
     <!-- Phase 6 voice calling: WebRTC + ConnectionService prerequisites. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
+    <!-- Phase 6 video calling: camera + the API 34+ foreground-service
+         type. CAMERA is requested at runtime via PermissionsAndroid
+         immediately before getUserMedia({ video: true }) — see
+         VideoCallScreen / orchestrator.startOutgoing(kind='video'). -->
+    <uses-permission android:name="android.permission.CAMERA" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CAMERA" />
+    <uses-feature android:name="android.hardware.camera" android:required="false" />
+    <uses-feature android:name="android.hardware.camera.front" android:required="false" />
     <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.BLUETOOTH" />

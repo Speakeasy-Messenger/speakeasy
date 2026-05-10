@@ -18,12 +18,14 @@ interface Props {
   visible: boolean;
   onClose: () => void;
   onPickVoice: () => void;
+  onPickVideo: () => void;
 }
 
 export function CallTypeSheet({
   visible,
   onClose,
   onPickVoice,
+  onPickVideo,
 }: Props): React.ReactElement {
   const themed = useColors();
   return (
@@ -86,31 +88,34 @@ export function CallTypeSheet({
               </View>
             </Pressable>
 
-            {/* Video is deferred (Phase 5b scope) — rendered disabled
-                so the picker layout matches the spec without claiming
-                a capability we don't have. */}
-            <View
-              style={[
+            <Pressable
+              onPress={() => {
+                onClose();
+                onPickVideo();
+              }}
+              style={({ pressed }) => [
                 styles.option,
-                styles.optionDisabled,
-                { backgroundColor: themed.pale, borderColor: themed.divider },
+                {
+                  backgroundColor: pressed ? themed.soft : themed.pale,
+                  borderColor: themed.divider,
+                },
               ]}
-              testID="call-type-video-disabled"
+              testID="call-type-video"
             >
               <View
                 style={[styles.optionIcon, { borderColor: themed.divider }]}
               >
-                <SquareIcon color={themed.slate} />
+                <SquareIcon color={themed.primary} />
               </View>
               <View style={styles.optionText}>
-                <Text style={[styles.optionName, { color: themed.slate }]}>
+                <Text style={[styles.optionName, { color: themed.ink }]}>
                   Video call
                 </Text>
                 <Text style={[styles.optionDesc, { color: themed.slate }]}>
-                  Coming soon.
+                  Camera + voice. Front camera by default.
                 </Text>
               </View>
-            </View>
+            </Pressable>
           </View>
 
           <Pressable

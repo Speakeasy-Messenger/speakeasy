@@ -28,6 +28,8 @@ import { AboutScreen } from '../screens/AboutScreen.js';
 import { ShareHandleScreen } from '../screens/ShareHandleScreen.js';
 import { CallScreen } from '../screens/CallScreen.js';
 import { IncomingCallScreen } from '../screens/IncomingCallScreen.js';
+import { VideoCallScreen } from '../screens/VideoCallScreen.js';
+import { useCalls } from '../store/calls.js';
 import { useIdentity } from '../store/identity.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
@@ -199,9 +201,12 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
               {({ navigation }: NativeStackScreenProps<RootStack, 'About'>) => (
                 <AboutScreen
                   onBack={() => navigation.goBack()}
-                  onOpenDiagnostics={
-                    __DEV__ ? () => navigation.navigate('Diagnostics') : undefined
-                  }
+                  // Always pass — release-mode alpha builds need the
+                  // Diagnostics row reachable. The AboutScreen still
+                  // gates the row visibility on the prop being defined,
+                  // so when alpha → production this re-gates by passing
+                  // `undefined` outside `__ALPHA__`.
+                  onOpenDiagnostics={() => navigation.navigate('Diagnostics')}
                 />
               )}
             </Stack.Screen>
@@ -238,13 +243,14 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                   }
                   onStartCall={
                     callOrchestrator
-                      ? async (peerId) => {
+                      ? async (peerId, kind) => {
                           try {
-                            await callOrchestrator.startOutgoing(peerId);
+                            await callOrchestrator.startOutgoing(peerId, kind);
                             navigation.navigate('Call');
                           } catch {
-                            // already busy / self-call; ignore — orchestrator
-                            // surfaces details via diag()
+                            // already busy / self-call / camera denied;
+                            // ignore — orchestrator surfaces details
+                            // via diag()
                           }
                         }
                       : undefined
@@ -270,7 +276,7 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
                   options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
                 >
                   {({ navigation }: NativeStackScreenProps<RootStack, 'Call'>) => (
-                    <CallScreen
+                    <CallSwitcher
                       orchestrator={callOrchestrator}
                       onClosed={() => navigation.goBack()}
                     />
@@ -321,6 +327,28 @@ export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNav
         )}
       </Stack.Navigator>
     </NavigationContainer>
+  );
+}
+
+/**
+ * Picks between CallScreen (audio: animal portraits + speech rings) and
+ * VideoCallScreen (full-bleed remote video + PiP local) based on the
+ * orchestrator's active call kind. Reads from useCalls so the screen
+ * also flips correctly on incoming offers (where the kind isn't known
+ * until handleIncomingOffer runs).
+ */
+function CallSwitcher({
+  orchestrator,
+  onClosed,
+}: {
+  orchestrator: CallOrchestrator;
+  onClosed: () => void;
+}): React.ReactElement {
+  const kind = useCalls((s) => s.active?.kind ?? 'audio');
+  return kind === 'video' ? (
+    <VideoCallScreen orchestrator={orchestrator} onClosed={onClosed} />
+  ) : (
+    <CallScreen orchestrator={orchestrator} onClosed={onClosed} />
   );
 }
 

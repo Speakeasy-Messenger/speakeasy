@@ -13,7 +13,7 @@ import type {
   CallIcePayload,
   CallOfferPayload,
 } from '@speakeasy/shared';
-import type { CallPeer, CallPeerFactory, IceServer } from './types.js';
+import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './types.js';
 import { diag } from '../diag/log.js';
 
 /**
@@ -31,11 +31,14 @@ import { diag } from '../diag/log.js';
 class WebRtcCallPeer implements CallPeer {
   private readonly pc: RTCPeerConnection;
   private localStream?: MediaStream;
+  private remoteStream?: MediaStream;
   private localIceCb?: (c: CallIceCandidate) => void;
   private connStateCb?: (
     s: 'connecting' | 'connected' | 'failed' | 'closed',
   ) => void;
+  private remoteStreamCb?: (url: string | undefined) => void;
   private startedManager = false;
+  private cameraFacing: 'user' | 'environment' = 'user';
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
   // runs while at least one subscriber is alive. We poll instead of
@@ -44,7 +47,7 @@ class WebRtcCallPeer implements CallPeer {
   private audioLevelCb?: (levels: { local: number; remote: number }) => void;
   private audioLevelTimer?: ReturnType<typeof setInterval>;
 
-  constructor(iceServers: IceServer[]) {
+  constructor(iceServers: IceServer[], private readonly mediaKind: CallMediaKind = 'audio') {
     this.pc = new RTCPeerConnection({
       iceServers: iceServers.map((s) => ({
         urls: s.urls,
@@ -106,17 +109,27 @@ class WebRtcCallPeer implements CallPeer {
       diag('webrtc', 'icegatheringstate', { state: s });
     });
 
-    // Attach the track event so the inbound audio stream gets routed
-    // to the device speaker. We don't render anything (audio-only).
+    // Attach the track event so inbound media gets routed. Audio runs
+    // through the device speaker via InCallManager; video streams need
+    // the URL surfaced via onRemoteStreamURL so VideoCallScreen can
+    // render an RTCView.
     pcAny.addEventListener('track', (ev: any) => {
-      const remoteStream: MediaStream | undefined = ev.streams?.[0];
+      const stream: MediaStream | undefined = ev.streams?.[0];
       diag('webrtc', 'remote track', {
         kind: ev.track?.kind,
-        hasStream: !!remoteStream,
+        hasStream: !!stream,
       });
-      // Once we have remote media, ensure the audio session is hot.
-      // InCallManager.start is idempotent.
       this.ensureManager();
+      // The first stream containing a video track is the one we render.
+      // Re-fires of `track` for additional audio tracks within the same
+      // stream are ignored — we keep the first stream URL stable.
+      if (stream && (this.mediaKind === 'video' || ev.track?.kind === 'video')) {
+        if (!this.remoteStream) {
+          this.remoteStream = stream;
+          const url = (stream as { toURL?: () => string }).toURL?.();
+          this.remoteStreamCb?.(url);
+        }
+      }
     });
   }
 
@@ -358,22 +371,135 @@ class WebRtcCallPeer implements CallPeer {
 
   private async ensureLocalStream(): Promise<void> {
     if (this.localStream) return;
+    if (this.mediaKind === 'video') {
+      await ensureCameraPermission();
+    }
     this.ensureManager();
     const stream = (await mediaDevices.getUserMedia({
       audio: true,
-      video: false,
+      video:
+        this.mediaKind === 'video'
+          ? {
+              // Front camera by default — phone-call etiquette. The
+              // VideoCallScreen exposes a flip control via flipCamera().
+              facingMode: this.cameraFacing,
+              // 720p target. RN-WebRTC will negotiate down on weak
+              // networks via the SDP; this is just the upper bound.
+              width: { ideal: 1280 },
+              height: { ideal: 720 },
+              frameRate: { ideal: 30, max: 30 },
+            }
+          : false,
     })) as MediaStream;
     this.localStream = stream;
     for (const track of stream.getAudioTracks()) {
       this.pc.addTrack(track as MediaStreamTrack, stream);
     }
+    if (this.mediaKind === 'video') {
+      for (const track of stream.getVideoTracks()) {
+        this.pc.addTrack(track as MediaStreamTrack, stream);
+      }
+    }
+  }
+
+  getLocalStreamURL(): string | undefined {
+    return (this.localStream as { toURL?: () => string } | undefined)?.toURL?.();
+  }
+
+  onRemoteStreamURL(cb: (url: string | undefined) => void): () => void {
+    this.remoteStreamCb = cb;
+    // Fire immediately if the stream already arrived before the
+    // subscription (callee path can hit this).
+    if (this.remoteStream) {
+      const url = (this.remoteStream as { toURL?: () => string }).toURL?.();
+      cb(url);
+    }
+    return () => {
+      if (this.remoteStreamCb === cb) this.remoteStreamCb = undefined;
+    };
+  }
+
+  async flipCamera(): Promise<void> {
+    if (this.mediaKind !== 'video' || !this.localStream) return;
+    // RN-WebRTC's local video tracks expose `_switchCamera()` as a
+    // non-standard convenience that toggles facingMode without re-
+    // negotiating. Cheaper than tearing down the track + getUserMedia
+    // again. Falls back to a manual replace if the helper is missing.
+    for (const track of this.localStream.getVideoTracks()) {
+      const t = track as unknown as { _switchCamera?: () => void };
+      if (typeof t._switchCamera === 'function') {
+        t._switchCamera();
+      }
+    }
+    this.cameraFacing = this.cameraFacing === 'user' ? 'environment' : 'user';
   }
 
   private ensureManager(): void {
     if (this.startedManager) return;
-    InCallManager.start({ media: 'audio' });
+    // `auto: true` lets the OS pick earpiece for audio-only calls
+    // (the natural default for a phone-call style flow). The previous
+    // implicit speakerphone routing was a user complaint — calls
+    // would broadcast on speaker the moment they connected. The
+    // user's mute / speaker controls in CallScreen still flip
+    // `setForceSpeakerphoneOn(true|false)` on demand.
+    InCallManager.start({ media: 'audio', auto: true });
+    InCallManager.setForceSpeakerphoneOn(false);
     InCallManager.setKeepScreenOn(true);
     this.startedManager = true;
+  }
+
+  /**
+   * Start playing the system ringback tone — what the *caller* hears
+   * while their device is still trying to reach the peer. Stopped by
+   * `stopRingback()` once the peer answers.
+   *
+   * Per CALLS.md §02 we want a calmer, owl-with-forest-ambient bed
+   * eventually. For Phase 1 the system default ringtone is a
+   * placeholder — at least it stops the silent-while-waiting
+   * sensation users were reporting.
+   */
+  startRingback(): void {
+    try {
+      InCallManager.startRingback('_DEFAULT_');
+    } catch (err) {
+      diag('webrtc', 'ringback start error', { err: String(err) });
+    }
+  }
+
+  stopRingback(): void {
+    try {
+      InCallManager.stopRingback();
+    } catch (err) {
+      diag('webrtc', 'ringback stop error', { err: String(err) });
+    }
+  }
+}
+
+/**
+ * Request CAMERA at runtime on Android. iOS handles camera permission
+ * via the system dialog raised by getUserMedia (gated by the
+ * NSCameraUsageDescription Info.plist string). On Android, getUserMedia
+ * silently fails with NotAllowedError if CAMERA was never granted, so
+ * we ask explicitly first.
+ */
+async function ensureCameraPermission(): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  const { PermissionsAndroid, Platform } = require('react-native') as {
+    Platform: { OS: string };
+    PermissionsAndroid: {
+      PERMISSIONS: { CAMERA: string };
+      RESULTS: { GRANTED: string };
+      check: (perm: string) => Promise<boolean>;
+      request: (perm: string) => Promise<string>;
+    };
+  };
+  if (Platform.OS !== 'android') return;
+  const perm = PermissionsAndroid.PERMISSIONS.CAMERA;
+  const already = await PermissionsAndroid.check(perm);
+  if (already) return;
+  const result = await PermissionsAndroid.request(perm);
+  if (result !== PermissionsAndroid.RESULTS.GRANTED) {
+    throw new Error(`camera permission denied (${result})`);
   }
 }
 
@@ -402,6 +528,6 @@ function waitForInitialIce(pc: RTCPeerConnection, maxMs: number): Promise<void> 
 
 export const reactNativeWebRtcPeerFactory: CallPeerFactory = {
   async create(opts): Promise<CallPeer> {
-    return new WebRtcCallPeer(opts.iceServers);
+    return new WebRtcCallPeer(opts.iceServers, opts.mediaKind ?? 'audio');
   },
 };

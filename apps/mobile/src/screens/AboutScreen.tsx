@@ -24,8 +24,8 @@ const SUPPORT_EMAIL = 'hello@speakeasy.app';
 
 // Matches apps/mobile/android/app/build.gradle versionName +
 // versionCode. Manual sync until a build-time bake step lands.
-const VERSION = '0.5.0-rc.34';
-const BUILD = '34';
+const VERSION = '0.5.0-rc.35';
+const BUILD = '35';
 
 /**
  * SETTINGS.md §9 — three sections + footer.

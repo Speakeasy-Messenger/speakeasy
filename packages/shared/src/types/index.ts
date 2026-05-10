@@ -224,6 +224,12 @@ export interface CallOfferPayload {
   sdp: string;
   /** Initial trickle-ICE candidates known at offer time (may be []). */
   candidates: CallIceCandidate[];
+  /**
+   * Media kind. Older clients (rc.34 and earlier) won't set this; absent
+   * is interpreted as 'audio' for backwards compat — voice-only is the
+   * historical default and never set this field.
+   */
+  kind?: 'audio' | 'video';
 }
 
 export interface CallAnswerPayload {

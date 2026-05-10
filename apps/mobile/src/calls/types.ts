@@ -30,6 +30,8 @@ export type CallEndedReason =
   | 'completed'
   | 'failed';
 
+export type CallMediaKind = 'audio' | 'video';
+
 export interface ActiveCall {
   callId: string;
   peerUserId: string;
@@ -46,6 +48,13 @@ export interface ActiveCall {
   micMuted: boolean;
   /** Speakerphone routing toggle (vs earpiece). */
   speakerOn: boolean;
+  /**
+   * Media negotiated for this call. Audio is the historical default;
+   * video adds a camera track and renders RTCViews instead of avatars.
+   * Set at startOutgoing time on the caller, and at handleIncomingOffer
+   * time on the callee from the offer payload's `kind` field.
+   */
+  kind: CallMediaKind;
 }
 
 /**
@@ -84,6 +93,24 @@ export interface CallPeer {
   setMicMuted(muted: boolean): void;
   setSpeakerOn(on: boolean): void;
   close(): void;
+  /**
+   * Video-only — return the local MediaStream URL (used by RTCView
+   * `streamURL`) when the call has a video track. Audio-only peers
+   * return undefined. Optional so test peers don't have to implement
+   * it. Returns the stream's toURL() result.
+   */
+  getLocalStreamURL?(): string | undefined;
+  /**
+   * Video-only — subscribe to the remote MediaStream URL once it
+   * arrives. Fired on the `track` event with kind=video. Returns an
+   * unsubscribe function.
+   */
+  onRemoteStreamURL?(cb: (url: string | undefined) => void): () => void;
+  /**
+   * Video-only — flip between front-facing (user) and rear (environment)
+   * camera. No-op for audio peers.
+   */
+  flipCamera?(): Promise<void>;
 }
 
 /**
@@ -96,6 +123,12 @@ export interface CallPeerFactory {
     iceServers: IceServer[];
     /** Direction matters for some WebRTC SDP munging. */
     role: 'caller' | 'callee';
+    /**
+     * Audio default. When 'video' the peer requests camera + mic from
+     * `getUserMedia` and adds both tracks; the orchestrator routes the
+     * remote stream URL into the VideoCallScreen.
+     */
+    mediaKind?: CallMediaKind;
   }): Promise<CallPeer>;
 }
 

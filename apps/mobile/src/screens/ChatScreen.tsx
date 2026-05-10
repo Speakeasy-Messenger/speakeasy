@@ -20,7 +20,7 @@ import {
   newMessageId,
   type Attachment,
 } from '@speakeasy/shared';
-import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import { pickFile, pickFromCamera } from '../attachments/pick.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { CallTypeSheet } from '../components/CallTypeSheet.js';
@@ -29,6 +29,7 @@ import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js'
 import { PhoneIcon } from '../components/icons/CallIcons.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import { PortraitTile } from '../components/PortraitTile.js';
+import { Avatar } from '../components/Avatar.js';
 import { Handle } from '../components/Handle.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { useBlocks } from '../store/blocks.js';
@@ -60,7 +61,7 @@ interface Props {
    * test rendering ChatScreen in isolation), the call entry point is
    * hidden.
    */
-  onStartCall?: (peerId: string) => void;
+  onStartCall?: (peerId: string, kind: 'audio' | 'video') => void;
   /** Open the conversation-settings screen — fired from the AppBar
    * title-block tap. When omitted, the title block becomes inert. */
   onOpenSettings?: () => void;
@@ -226,27 +227,14 @@ export function ChatScreen({
     void sendOutbound({ text: trimmed });
   }
 
-  // WhatsApp-style direct affordances — no nested action sheet.
-  // Paperclip is the only one that branches (Photos vs Files), since
-  // those two pickers are functionally distinct on Android.
+  // WhatsApp-style direct affordances — no nested action sheet, no
+  // intermediate alert. Paperclip = file picker; the system DocumentPicker's
+  // `allFiles` type already includes images, so users who want to attach
+  // a photo from storage can pick it through the same UI. Camera has its
+  // own button.
   async function handlePaperclip() {
-    Alert.alert('Attach', 'Pick a source.', [
-      {
-        text: 'Photos',
-        onPress: async () => {
-          const photos = await pickPhotos();
-          if (photos.length) await sendOutbound({ attachments: photos });
-        },
-      },
-      {
-        text: 'File',
-        onPress: async () => {
-          const file = await pickFile();
-          if (file) await sendOutbound({ attachments: [file] });
-        },
-      },
-      { text: 'Cancel', style: 'cancel' },
-    ]);
+    const file = await pickFile();
+    if (file) await sendOutbound({ attachments: [file] });
   }
 
   async function handleCamera() {
@@ -438,7 +426,7 @@ export function ChatScreen({
             <PeepholeMark size={Math.round(28 * 0.78)} />
           </View>
         ) : (
-          <PortraitTile kind="animal" id={peerId} size={28} />
+          <Avatar userId={peerId} size={28} />
         )}
         <Pressable
           style={styles.headerTitle}
@@ -508,11 +496,11 @@ export function ChatScreen({
               />
             );
           }}
-          ListFooterComponent={
-            <View style={styles.footnote}>
+          ListHeaderComponent={
+            <View style={styles.tagline}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
-              <Text style={[styles.footnoteText, { color: themed.slate }]}>
-                MESSAGES DISAPPEAR AFTER THEY'RE SEEN
+              <Text style={[styles.taglineText, { color: themed.slate }]}>
+                END-TO-END ENCRYPTED · LEAVES IN {ttlLabel}
               </Text>
             </View>
           }
@@ -608,7 +596,8 @@ export function ChatScreen({
       <CallTypeSheet
         visible={callTypeOpen}
         onClose={() => setCallTypeOpen(false)}
-        onPickVoice={() => onStartCall?.(peerId)}
+        onPickVoice={() => onStartCall?.(peerId, 'audio')}
+        onPickVideo={() => onStartCall?.(peerId, 'video')}
       />
     </SafeAreaView>
   );
@@ -701,19 +690,23 @@ const styles = StyleSheet.create({
   callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
   body: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },
-  // Footnote at the foot of the list — `meta`-style uppercase tag
-  // ("MESSAGES DISAPPEAR AFTER THEY'RE SEEN") prefaced by the §6.10
-  // brass square. The dot is the only color outside text-mute, pulling
-  // attention to the disappearance promise.
-  footnote: {
+  // Tagline at the head of the list — `meta`-style uppercase
+  // ("END-TO-END ENCRYPTED · LEAVES IN <TTL>") prefaced by the §6.10
+  // brass square. Was at the bottom (ListFooterComponent) but it
+  // tested as a "rolling tail of the chat" rather than the trust
+  // statement it's meant to be — moved to the head so it reads as
+  // the conversation's ground truth instead of an afterthought.
+  // The dot is the only color outside text-mute.
+  tagline: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: space.sm,
-    marginTop: space.lg,
+    marginBottom: space.lg,
+    paddingTop: space.md,
   },
   dot: { width: 6, height: 6 },
-  footnoteText: {
+  taglineText: {
     fontFamily: type.meta.weight,
     fontSize: type.meta.size,
     letterSpacing: type.meta.size * type.meta.letterSpacingEm,
