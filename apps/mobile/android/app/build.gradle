@@ -123,10 +123,89 @@ android {
         applicationId "xyz.speakeasyapp.app"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        // alpha-0.5.0-rc.5 — fix BlockList crash (unstable selector)
-        // + restore Diagnostics access in release alphas.
-        versionCode 5
-        versionName "0.5.0-rc.5"
+        // alpha-0.5.0-rc.27 — second pass at the FAB freeze:
+        //   - dropped autoFocus on the find-sheet input. On some
+        //     Androids the keyboard reveal races the modal slide-up
+        //     and lands a touch-intercepting layer on top of the
+        //     sheet, presenting as a frozen page.
+        //   - long-press on the conversations AppBar gear copies
+        //     the diag log straight to the clipboard. Needed because
+        //     a freeze that blocks navigation also blocks the path
+        //     to Diagnostics → Copy logs; this is the escape hatch.
+        // alpha-0.5.0-rc.26 —
+        //   - splash holds for ≥1500ms (was disappearing in
+        //     <200ms on warm cache)
+        //   - FindSomeoneSheet wrapped with pointerEvents="box-none"
+        //     wrap matching CallTypeSheet's pattern (suspect: rc.25
+        //     "freeze after tapping +" was an Android sibling-
+        //     absolute hit-test issue with the scrim)
+        //   - FAB tap now logged to diag so the next dump captures
+        //     whether the freeze fires before or after sheet open
+        // alpha-0.5.0-rc.25 — fix turtle hooks-mismatch. The diag
+        // boundary captured "Rendered more hooks than during the
+        // previous render." for turtle. Root cause: babel's worklet
+        // transform of `useAnimatedProps(closure-over-params)`
+        // inside a custom hook called repeatedly (7×ShellShimmer +
+        // 2×FlipperPaddle) generated an IIFE worklet factory that
+        // ran each render. Reanimated's internal subscription
+        // tracking saw the resulting "new worklet identity" and
+        // varied its hook count between first paint and re-render.
+        // Fix: each cell + flipper extracted into its own component
+        // instance — every `useAnimatedProps` site is at a fixed
+        // hook position. Same pattern applied to koi (4 fins) and
+        // lynx (2 tufts) to head off identical issues.
+        // alpha-0.5.0-rc.24 — turtle reanimated. lunchbox2 wears
+        // turtle (legendary) — the rc.21 across-the-board revert
+        // had silently kept turtle static through rc.22/23. Now
+        // restored: 6 shell-cells shimmer in a slow opacity wave
+        // and front/rear flippers paddle in counter-phase. Both
+        // continuous + time-driven (no audio gate), so they're
+        // visible the moment the avatar paints.
+        // alpha-0.5.0-rc.23 — owl ringtone + raven continuous head
+        // bob as a definitive worklet-runtime test. rc.22 left raven
+        // looking static because its head tilt only fires on
+        // amplitude > 0.5 (i.e. live audio); a non-call view of
+        // raven looked indistinguishable from "reanimated never
+        // ran". rc.23 swaps to a continuous ±6° bob — if raven nods
+        // gently regardless of audio, the worklet runtime is alive
+        // and the cache fix held. Ringback now uses
+        // `ringback_owl.mp3` (raw resource).
+        //
+        // alpha-0.5.0-rc.22 — reanimated comeback (3 animals as
+        // canaries: raven, lynx, koi). rc.17 actually had reanimated
+        // working in source, but Metro had cached pre-rc.17 babel
+        // transforms (without the reanimated plugin pass) so the
+        // worklet hashes never made it into the production bundle.
+        // Verified: clean-cache bundle has 397 __workletHash markers
+        // vs the rc.20 production bundle's 2 (only reanimated's
+        // internals). Cache-cleared rebuild captures the real
+        // transforms. If raven animates correctly on this build,
+        // rc.23 restores the other 13 paid avatars to reanimated.
+        // alpha-0.5.0-rc.21 — restore avatar visibility + call fixes:
+        //   - all 16 paid avatars reverted to static rc.13 art
+        //     (reanimated worklet runtime was throwing in production
+        //     even with the entry-point init from rc.20). Signature
+        //     animations deferred until reanimated can be debugged
+        //     on a real device.
+        //   - hangup() wraps the WS send so a flapped socket can't
+        //     crash the call screen (user reported crash on cancel)
+        //   - eyebrow drops the redundant "RINGING" — the state
+        //     caption already says it
+        //   - FAB collapses back to default position when every
+        //     get-started card is dismissed
+        // alpha-0.5.0-rc.20 — fix rc.19 launch crash + call audio:
+        //   - reanimated forced-init at index.js entry so the worklet
+        //     runtime is ready before paid-avatar renders touch it
+        //   - AvatarErrorBoundary around AnimalSvg so a bad render
+        //     can't crash the whole screen (rc.19 reproducer was a
+        //     paid-avatar wear path firing useSharedValue too early)
+        //   - call audio: explicit earpiece default (was implicit
+        //     speakerphone in some flows); InCallManager.start
+        //     uses auto routing now
+        //   - outgoing-call ringback (system default tone) plays
+        //     while waiting for the peer to answer
+        versionCode 28
+        versionName "0.5.0-rc.28"
         // Phase 5b: BuildConfig fields for Vouchflow SDK init. Pulled from
         // android/gradle.properties (the api key is gitignored — see
         // android/gradle.properties.example for the placeholder).

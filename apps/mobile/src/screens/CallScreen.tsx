@@ -1,11 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Animated, Easing, Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
-import Svg, { Path } from 'react-native-svg';
+import InCallManager from 'react-native-incall-manager';
 import {
   MicIcon,
   PhoneEndIcon,
   SpeakerIcon,
 } from '../components/icons/CallIcons.js';
+import { CipherS } from '../brand/CipherS.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
@@ -14,6 +15,7 @@ import { useCalls } from '../store/calls.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
+import { useSettings } from '../store/settings.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, type as typeScale } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
@@ -125,8 +127,13 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   // peer connection is still negotiating and stats are noisy; after
   // close the orchestrator unsubscribes us anyway, but the explicit
   // gate keeps the JS poll quiet during ring.
+  // SETTINGS.md §4.1: when "Animate avatar mouth" is off, skip the
+  // audio-level subscription entirely — the mouths hold at idle and
+  // the speech-ring is suppressed. Cheaper than running the poll
+  // and ignoring it.
+  const animateMouth = useSettings((s) => s.animateAvatarMouth);
   useEffect(() => {
-    if (active?.stage !== 'connected') return;
+    if (active?.stage !== 'connected' || !animateMouth) return;
     const unsubscribe = orchestrator.onAudioLevels(({ local, remote }) => {
       // Mute zeros the local amplitude — the spec mouth-at-rest pose
       // matches "I'm not speaking" so this is the natural cue.
@@ -145,7 +152,7 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
       }).start();
     });
     return unsubscribe;
-  }, [active?.stage, active?.micMuted, orchestrator, localAmp, remoteAmp]);
+  }, [active?.stage, active?.micMuted, animateMouth, orchestrator, localAmp, remoteAmp]);
 
   // Auto-dismiss after the orchestrator clears `active`.
   useEffect(() => {
@@ -154,6 +161,41 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
       return () => clearTimeout(t);
     }
   }, [active, onClosed]);
+
+  // CALLS.md §02 — outgoing pre-connect view shows a pulsing brass
+  // brand mark in place of the peer portrait. The peer's animal
+  // doesn't surface until the call connects (then it dissolves into
+  // the connected layout).
+  // Computed BEFORE the `if (!active) return` guard below so the
+  // ringback effect (which depends on it) is called unconditionally
+  // — React requires hook order be stable across renders, and an
+  // ended call drops `active` to undefined which would otherwise
+  // skip a hook.
+  const isOutgoingPreConnect =
+    active?.stage === 'outgoing_dialing' || active?.stage === 'outgoing_ringing';
+
+  // Ringback while we're calling — `incallmanager_ringback.mp3` is
+  // bundled in android raw resources. Passing `_BUNDLE_` to InCallManager
+  // resolves to that filename specifically (the lib hardcodes the
+  // lookup key); arbitrary names silently fall back to the system
+  // default ringtone, which is what the rc.23 attempt did.
+  useEffect(() => {
+    if (isOutgoingPreConnect) {
+      try {
+        InCallManager.startRingback('_BUNDLE_');
+      } catch {
+        /* InCallManager unavailable in non-native test envs — fine */
+      }
+      return () => {
+        try {
+          InCallManager.stopRingback();
+        } catch {
+          /* ignore */
+        }
+      };
+    }
+    return undefined;
+  }, [isOutgoingPreConnect]);
 
   if (!active) {
     return (
@@ -176,13 +218,6 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
     ended: 'Call ended',
   };
 
-  // CALLS.md §02 — outgoing pre-connect view shows a pulsing brass
-  // Door mark in place of the peer portrait. The peer's animal
-  // doesn't surface until the call connects (then it dissolves into
-  // the connected layout).
-  const isOutgoingPreConnect =
-    active.stage === 'outgoing_dialing' || active.stage === 'outgoing_ringing';
-
   if (isOutgoingPreConnect) {
     return (
       <SafeAreaView
@@ -190,15 +225,26 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
         testID="call-screen"
       >
         <View style={styles.outgoing}>
-          <DoorMark themed={themed} />
+          {/* Ringing rings emanate from the Door mark while the call
+              is dialing or ringing. Three staggered concentric brass
+              rings expand outward and fade — the classic "we're
+              trying to reach them" visual. Earlier alphas had only
+              the Door pulse, which tested as too subtle to read as
+              an active call attempt. */}
+          <View style={styles.outgoingDoorWrap}>
+            <RingingRings primary={themed.primary} />
+            <BrandPulse />
+          </View>
           <Text style={[styles.outgoingEyebrow, { color: themed.slate }]}>
-            VOICE CALL · {active.stage === 'outgoing_dialing' ? 'CALLING' : 'RINGING'}
+            VOICE CALL
           </Text>
           <View style={styles.outgoingHandle}>
             <Handle value={active.peerUserId} variant="display" />
           </View>
           <Text style={[styles.outgoingState, { color: themed.slate }]}>
-            tap to wait
+            {active.stage === 'outgoing_dialing'
+              ? 'reaching them'
+              : 'their phone is ringing'}
             <Text style={{ color: themed.primary }}>.</Text>
           </Text>
         </View>
@@ -302,14 +348,13 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
 }
 
 /**
- * Pulsing brass Door mark — the loading state for an outgoing
- * call per CALLS.md §02. Opacity loops 60% ↔ 100% over 1.5s.
+ * Pulsing brand mark — the loading state for an outgoing call. Was
+ * the Door mark per CALLS.md §02; swapped to the CipherS glyph in
+ * rc.19 for visual continuity with the app icon and splash screen
+ * (the Door mark only appears in onboarding/IdReveal and tested as
+ * out-of-place here). Opacity loops 60% ↔ 100% over 1.5s.
  */
-function DoorMark({
-  themed,
-}: {
-  themed: ReturnType<typeof useColors>;
-}): React.ReactElement {
+function BrandPulse(): React.ReactElement {
   const opacity = useRef(new Animated.Value(0.6)).current;
   useEffect(() => {
     const loop = Animated.loop(
@@ -333,20 +378,78 @@ function DoorMark({
   }, [opacity]);
   return (
     <Animated.View
-      style={{ width: 72, height: 72, marginBottom: 28, opacity }}
-      testID="call-door-mark"
+      style={{ opacity }}
+      testID="call-brand-pulse"
     >
-      <Svg width={72} height={72} viewBox="0 0 100 100">
-        {/* Trapezoidal door slab with two latitude slits punched
-            through (evenOdd fill rule). Brand restraint: the door
-            is the loading state, no spinner. */}
-        <Path
-          d="M5 10 L75 10 L85 90 L15 90 Z M35 32 H79 V40 H35 Z M17 60 H61 V68 H17 Z"
-          fill={themed.primary}
-          fillRule="evenodd"
-        />
-      </Svg>
+      <CipherS size={84} />
     </Animated.View>
+  );
+}
+
+/**
+ * Three concentric brass rings emanating from the Door mark on the
+ * outgoing pre-connect view. Each ring expands from scale 1.0 → 1.8
+ * and fades opacity 0.5 → 0 over 1.6s; the three are staggered by
+ * 533ms so the cycle reads as a continuous wave of waves. Pure
+ * decorative — the call state's actual live data lives in the eyebrow
+ * label one row down.
+ */
+function RingingRings({ primary }: { primary: string }): React.ReactElement {
+  const ring1 = useRef(new Animated.Value(0)).current;
+  const ring2 = useRef(new Animated.Value(0)).current;
+  const ring3 = useRef(new Animated.Value(0)).current;
+
+  useEffect(() => {
+    const period = 1600;
+    const stagger = period / 3;
+    function animate(v: Animated.Value, delay: number) {
+      v.setValue(0);
+      const loop = Animated.loop(
+        Animated.sequence([
+          Animated.delay(delay),
+          Animated.timing(v, {
+            toValue: 1,
+            duration: period,
+            easing: Easing.out(Easing.cubic),
+            useNativeDriver: true,
+          }),
+        ]),
+      );
+      loop.start();
+      return loop;
+    }
+    const l1 = animate(ring1, 0);
+    const l2 = animate(ring2, stagger);
+    const l3 = animate(ring3, stagger * 2);
+    return () => {
+      l1.stop();
+      l2.stop();
+      l3.stop();
+    };
+  }, [ring1, ring2, ring3]);
+
+  function ringStyle(v: Animated.Value) {
+    return {
+      position: 'absolute' as const,
+      width: 144,
+      height: 144,
+      borderWidth: 1,
+      borderColor: primary,
+      transform: [
+        {
+          scale: v.interpolate({ inputRange: [0, 1], outputRange: [1, 1.8] }),
+        },
+      ],
+      opacity: v.interpolate({ inputRange: [0, 1], outputRange: [0.5, 0] }),
+    };
+  }
+
+  return (
+    <>
+      <Animated.View pointerEvents="none" style={ringStyle(ring1)} />
+      <Animated.View pointerEvents="none" style={ringStyle(ring2)} />
+      <Animated.View pointerEvents="none" style={ringStyle(ring3)} />
+    </>
   );
 }
 
@@ -427,6 +530,15 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     paddingHorizontal: space.lg,
+  },
+  // Wraps the Door mark + the RingingRings overlay so the rings
+  // emanate centered on the Door without affecting siblings' layout.
+  outgoingDoorWrap: {
+    width: 144,
+    height: 144,
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: 28,
   },
   outgoingEyebrow: {
     fontFamily: typeScale.meta.weight,

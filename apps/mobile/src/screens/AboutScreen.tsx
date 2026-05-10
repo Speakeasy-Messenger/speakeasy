@@ -19,12 +19,13 @@ interface Props {
 
 const PRIVACY_URL = 'https://speakeasyapp.xyz/privacy';
 const TERMS_URL = 'https://speakeasyapp.xyz/terms';
+const OPEN_SOURCE_URL = 'https://speakeasyapp.xyz/open-source';
 const SUPPORT_EMAIL = 'hello@speakeasy.app';
 
 // Matches apps/mobile/android/app/build.gradle versionName +
 // versionCode. Manual sync until a build-time bake step lands.
-const VERSION = '0.5.0-rc.5';
-const BUILD = '5';
+const VERSION = '0.5.0-rc.28';
+const BUILD = '28';
 
 /**
  * SETTINGS.md §9 — three sections + footer.
@@ -107,10 +108,7 @@ export function AboutScreen({
           kind="drilldown"
           title="Open source"
           description="Libraries we build on."
-          onPress={() => {
-            // §9.3 OpenSourceListScreen — auto-generated dependency
-            // list. Stubbed for now; opens nothing in MVP.
-          }}
+          onPress={() => void Linking.openURL(OPEN_SOURCE_URL)}
         />
 
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
@@ -122,6 +120,26 @@ export function AboutScreen({
           description={SUPPORT_EMAIL}
           onPress={() => void Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
         />
+
+        {/* Alpha-only — surfaces the Diagnostics screen as a regular
+            row instead of behind the 7-tap version unlock (which has
+            been unreliable on release-mode builds). When alpha →
+            production this block re-gates behind the alpha flag and
+            the 7-tap unlock returns as the dev-only path. */}
+        {onOpenDiagnostics ? (
+          <>
+            <Text style={[styles.sectionLabel, { color: themed.slate }]}>
+              ALPHA
+            </Text>
+            <SettingsListItem
+              kind="drilldown"
+              title="Diagnostics"
+              description="Logs, last crash, entitlement reset."
+              onPress={onOpenDiagnostics}
+              testID="about-diagnostics-row"
+            />
+          </>
+        ) : null}
 
         <View style={styles.footer}>
           <Pressable

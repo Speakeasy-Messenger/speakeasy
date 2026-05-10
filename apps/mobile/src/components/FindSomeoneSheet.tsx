@@ -221,19 +221,47 @@ export function FindSomeoneSheet({
       onRequestClose={onClose}
       statusBarTranslucent
     >
+      {/* Scrim Pressable is the modal's root, with the sheet rendered
+          inside it absolutely-positioned at the bottom. Earlier alphas
+          tried sibling Pressable + box-none wrap layouts, but on
+          Android the touch-pass-through to the scrim was unreliable —
+          taps in the empty area fell into a void instead of dismissing,
+          which read as "frozen" to the user. With the sheet *inside*
+          the scrim Pressable, the hit-test is unambiguous: anywhere
+          outside the sheet hits the scrim's onPress. */}
       <Pressable
         style={[styles.scrim, { backgroundColor: scrim.modal }]}
         onPress={onClose}
         testID="find-sheet-scrim"
-      />
-      <View
+      >
+      <Pressable
         style={[
           styles.sheet,
           { backgroundColor: themed.cream, borderTopColor: themed.divider },
         ]}
+        onPress={(e) => {
+          // Swallow the press so it doesn't bubble to the scrim's
+          // onPress and dismiss the modal whenever the user taps
+          // inside the sheet (text input, buttons, etc.).
+          e.stopPropagation();
+        }}
         testID="find-sheet"
       >
-        <View style={[styles.grab, { backgroundColor: themed.divider }]} />
+        <View style={styles.sheetHeader}>
+          <View style={[styles.grab, { backgroundColor: themed.divider }]} />
+          {/* Visible × close button — unmistakable dismiss affordance.
+              The scrim still works, but several testers reported feeling
+              the page was "frozen" because they didn't realize tapping
+              outside dismissed. The X removes that ambiguity. */}
+          <Pressable
+            onPress={onClose}
+            hitSlop={12}
+            style={styles.closeBtn}
+            testID="find-sheet-close"
+          >
+            <Text style={[styles.closeGlyph, { color: themed.slate }]}>×</Text>
+          </Pressable>
+        </View>
 
         <Text style={[styles.title, { color: themed.ink }]}>
           {/* Brass period — brand punctuation per spec §3.1. */}
@@ -264,7 +292,10 @@ export function FindSomeoneSheet({
             autoCorrect={false}
             autoComplete="off"
             spellCheck={false}
-            autoFocus
+            // autoFocus removed — Android can race the keyboard reveal
+            // against the Modal's slide-up animation, leaving touch
+            // input intercepted by the keyboard layer until the user
+            // taps elsewhere. Causes the rc.25 "FAB freeze" feel.
             selectionColor={themed.primary}
             placeholderTextColor={themed.slate}
           />
@@ -307,7 +338,8 @@ export function FindSomeoneSheet({
             </Pressable>
           </View>
         ) : null}
-      </View>
+      </Pressable>
+      </Pressable>
     </Modal>
   );
 }
@@ -484,23 +516,42 @@ function ResultCard({
 }
 
 const styles = StyleSheet.create({
-  scrim: { ...StyleSheet.absoluteFillObject },
+  // Scrim fills the modal root and stacks the sheet bottom-aligned.
+  // It's a Pressable, so any tap outside the sheet hits onPress and
+  // dismisses. The sheet inside calls e.stopPropagation() in its
+  // own onPress so taps inside the sheet don't bubble up.
+  scrim: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
     paddingHorizontal: space.lg,
     paddingTop: space.md,
     paddingBottom: space.xl,
     borderTopWidth: StyleSheet.hairlineWidth,
     minHeight: '60%',
   },
+  // Header row: grab handle centered, close × on the right.
+  sheetHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    marginBottom: space.md,
+  },
   grab: {
-    alignSelf: 'center',
     width: 36,
     height: 3,
-    marginBottom: space.md,
+  },
+  closeBtn: {
+    position: 'absolute',
+    right: 0,
+    top: -4,
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  closeGlyph: {
+    fontFamily: font.regular,
+    fontSize: 26,
+    lineHeight: 28,
   },
   title: {
     fontFamily: font.bold,
