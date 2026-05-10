@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import { RTCView } from 'react-native-webrtc';
+import InCallManager from 'react-native-incall-manager';
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import {
   MicIcon,
@@ -136,6 +137,31 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       return () => clearTimeout(t);
     }
   }, [active, onClosed]);
+
+  // Outgoing-pre-connect ringback. Mirrors the audio CallScreen path
+  // — same incallmanager_ringback.mp3 (owl-with-forest-ambient bed)
+  // bundled in res/raw via _BUNDLE_. Hook is run unconditionally with
+  // the gate inside, same shape as the rc.28 fix in CallScreen, so
+  // the hook count stays stable across the active=null teardown.
+  const isOutgoingPreConnect =
+    active?.stage === 'outgoing_dialing' || active?.stage === 'outgoing_ringing';
+  useEffect(() => {
+    if (isOutgoingPreConnect) {
+      try {
+        InCallManager.startRingback('_BUNDLE_');
+      } catch {
+        /* ignore — non-native test env */
+      }
+      return () => {
+        try {
+          InCallManager.stopRingback();
+        } catch {
+          /* ignore */
+        }
+      };
+    }
+    return undefined;
+  }, [isOutgoingPreConnect]);
 
   if (!active) {
     return (

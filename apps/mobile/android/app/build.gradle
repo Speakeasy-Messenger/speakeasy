@@ -204,8 +204,8 @@ android {
         //     uses auto routing now
         //   - outgoing-call ringback (system default tone) plays
         //     while waiting for the peer to answer
-        versionCode 43
-        versionName "0.5.0-rc.43"
+        versionCode 44
+        versionName "0.5.0-rc.44"
         // Phase 5b: BuildConfig fields for Vouchflow SDK init. Pulled from
         // android/gradle.properties (the api key is gitignored — see
         // android/gradle.properties.example for the placeholder).

@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import {
   Alert,
+  BackHandler,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -458,24 +459,27 @@ function NameEditSheet({
   useEffect(() => {
     if (visible) setDraft(currentName);
   }, [visible, currentName]);
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
   const trimmed = draft.trim();
   const valid =
     trimmed.length > 0 && trimmed.length <= NAME_MAX && trimmed !== currentName;
+  if (!visible) return <View testID="name-edit-hidden" />;
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
+    <View style={styles.sheetOverlay} testID="name-edit-overlay">
       <Pressable
-        style={[styles.sheetScrim, { backgroundColor: scrim.modal }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: scrim.modal }]}
         onPress={onClose}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.sheetWrap}
+        style={StyleSheet.absoluteFill}
         pointerEvents="box-none"
       >
         <View
@@ -546,7 +550,7 @@ function NameEditSheet({
           </View>
         </View>
       </KeyboardAvoidingView>
-    </Modal>
+    </View>
   );
 }
 
@@ -564,63 +568,69 @@ function RemoveMemberSheet({
   onConfirm,
 }: RemoveMemberSheetProps): React.ReactElement {
   const themed = useColors();
+  // Same inline-overlay pattern as FindSomeoneSheet after rc.30 dropped
+  // RN Modal. Native Modal + box-none wrap froze the entire app on
+  // Android Samsung One UI dark mode + statusBarTranslucent — same
+  // class of bug the FAB freeze hit. User reported the remove button
+  // freezes everything; fix is to ditch Modal here too.
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
+  if (!visible) return <View testID="remove-member-hidden" />;
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
+    <View style={styles.sheetOverlay} testID="remove-member-overlay">
       <Pressable
-        style={[styles.sheetScrim, { backgroundColor: scrim.modal }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: scrim.modal }]}
         onPress={onClose}
       />
-      <View style={styles.sheetWrap} pointerEvents="box-none">
-        <View
-          style={[
-            styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
-          ]}
-        >
-          <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />
-          <Text style={[styles.sheetTitle, { color: themed.ink }]}>
-            Remove <Text style={{ color: themed.primary }}>@</Text>
-            {handle}
-            <Text style={{ color: themed.primary }}>.</Text>
-          </Text>
-          <Text style={[styles.sheetBody, { color: themed.slate }]}>
-            <Text style={{ color: themed.ink, fontFamily: font.medium }}>
-              They won't see new messages here.
-            </Text>{' '}
-            They can be re-added later.
-            {'\n\n'}
-            Messages they've already received stay on their device until the
-            timer runs out — Speakeasy can't reach into someone's phone to
-            delete what's already there.
-          </Text>
-          <View style={styles.sheetActions}>
-            <Pressable
-              onPress={onClose}
-              style={[styles.btnSecondary, { borderColor: themed.divider }]}
-            >
-              <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>
-                Cancel
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={onConfirm}
-              style={[styles.btnPrimary, { backgroundColor: themed.primary }]}
-              testID="remove-member-confirm"
-            >
-              <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
-                Remove
-              </Text>
-            </Pressable>
-          </View>
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: themed.cream, borderTopColor: themed.divider },
+        ]}
+      >
+        <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />
+        <Text style={[styles.sheetTitle, { color: themed.ink }]}>
+          Remove <Text style={{ color: themed.primary }}>@</Text>
+          {handle}
+          <Text style={{ color: themed.primary }}>.</Text>
+        </Text>
+        <Text style={[styles.sheetBody, { color: themed.slate }]}>
+          <Text style={{ color: themed.ink, fontFamily: font.medium }}>
+            They won't see new messages here.
+          </Text>{' '}
+          They can be re-added later.
+          {'\n\n'}
+          Messages they've already received stay on their device until the
+          timer runs out — Speakeasy can't reach into someone's phone to
+          delete what's already there.
+        </Text>
+        <View style={styles.sheetActions}>
+          <Pressable
+            onPress={onClose}
+            style={[styles.btnSecondary, { borderColor: themed.divider }]}
+          >
+            <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>
+              Cancel
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={onConfirm}
+            style={[styles.btnPrimary, { backgroundColor: themed.primary }]}
+            testID="remove-member-confirm"
+          >
+            <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
+              Remove
+            </Text>
+          </Pressable>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -642,66 +652,67 @@ function LeaveRoomSheet({
   onConfirm,
 }: LeaveRoomSheetProps): React.ReactElement {
   const themed = useColors();
+  useEffect(() => {
+    if (!visible) return;
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => {
+      onClose();
+      return true;
+    });
+    return () => sub.remove();
+  }, [visible, onClose]);
+  if (!visible) return <View testID="leave-room-hidden" />;
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
+    <View style={styles.sheetOverlay} testID="leave-room-overlay">
       <Pressable
-        style={[styles.sheetScrim, { backgroundColor: scrim.modal }]}
+        style={[StyleSheet.absoluteFill, { backgroundColor: scrim.modal }]}
         onPress={onClose}
       />
-      <View style={styles.sheetWrap} pointerEvents="box-none">
-        <View
-          style={[
-            styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
-          ]}
-        >
-          <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />
-          <Text style={[styles.sheetTitle, { color: themed.ink }]}>
-            Leave {roomName}
-            <Text style={{ color: themed.primary }}>.</Text>
-          </Text>
-          <Text style={[styles.sheetBody, { color: themed.slate }]}>
-            You'll lose access to new messages.
-            {isCreator && nextCreator ? (
-              <>
-                {'\n\n'}
-                Since you're the creator, the role will pass to{' '}
-                <Text style={{ color: themed.ink, fontFamily: font.medium }}>
-                  <Text style={{ color: themed.primary }}>@</Text>
-                  {nextCreator}
-                </Text>{' '}
-                — the next member who joined.
-              </>
-            ) : null}
-          </Text>
-          <View style={styles.sheetActions}>
-            <Pressable
-              onPress={onClose}
-              style={[styles.btnSecondary, { borderColor: themed.divider }]}
-            >
-              <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>
-                Stay
-              </Text>
-            </Pressable>
-            <Pressable
-              onPress={onConfirm}
-              style={[styles.btnPrimary, { backgroundColor: themed.primary }]}
-              testID="leave-room-confirm"
-            >
-              <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
-                Leave
-              </Text>
-            </Pressable>
-          </View>
+      <View
+        style={[
+          styles.sheet,
+          { backgroundColor: themed.cream, borderTopColor: themed.divider },
+        ]}
+      >
+        <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />
+        <Text style={[styles.sheetTitle, { color: themed.ink }]}>
+          Leave {roomName}
+          <Text style={{ color: themed.primary }}>.</Text>
+        </Text>
+        <Text style={[styles.sheetBody, { color: themed.slate }]}>
+          You'll lose access to new messages.
+          {isCreator && nextCreator ? (
+            <>
+              {'\n\n'}
+              Since you're the creator, the role will pass to{' '}
+              <Text style={{ color: themed.ink, fontFamily: font.medium }}>
+                <Text style={{ color: themed.primary }}>@</Text>
+                {nextCreator}
+              </Text>{' '}
+              — the next member who joined.
+            </>
+          ) : null}
+        </Text>
+        <View style={styles.sheetActions}>
+          <Pressable
+            onPress={onClose}
+            style={[styles.btnSecondary, { borderColor: themed.divider }]}
+          >
+            <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>
+              Stay
+            </Text>
+          </Pressable>
+          <Pressable
+            onPress={onConfirm}
+            style={[styles.btnPrimary, { backgroundColor: themed.primary }]}
+            testID="leave-room-confirm"
+          >
+            <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
+              Leave
+            </Text>
+          </Pressable>
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -876,9 +887,22 @@ const styles = StyleSheet.create({
   },
 
   // Sheets — shared visual language across all three.
+  // sheetScrim / sheetWrap are vestigial (kept for the Save-name sheet
+  // which still uses the legacy Modal-wrap pattern) — RemoveMember
+  // and LeaveRoom moved to inline-overlay in rc.44 to dodge the same
+  // RN-Modal-on-Samsung freeze that hit the FAB in rc.27.
   sheetScrim: { ...StyleSheet.absoluteFillObject },
   sheetWrap: { flex: 1, justifyContent: 'flex-end' },
+  sheetOverlay: {
+    ...StyleSheet.absoluteFillObject,
+    elevation: 1000,
+    zIndex: 1000,
+  },
   sheet: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
     paddingHorizontal: 22,
     paddingTop: 16,
     paddingBottom: 28,

@@ -502,6 +502,31 @@ export default function App() {
             diag('app', 'reconnect threw', { err: String(err) });
           }
         }
+      } else if (next === 'background' || next === 'inactive') {
+        // Close the WS proactively so the server routes incoming
+        // messages through push instead of the (still-alive)
+        // WebSocket. Without this, Android can keep the TCP socket
+        // open for minutes after the app backgrounds, during which
+        // messages arrive via WS but no system banner is shown
+        // (the in-app banner only fires when the app is foreground).
+        // User-reported: friend not getting push notifications even
+        // though server-side push token is registered + FCM accepts.
+        // Reconnect on `active` happens above and is fast, so brief
+        // foreground returns don't lose any state.
+        //
+        // Skip when there's an active call — closing the WS during
+        // a call would drop the call_ice/call_end frames mid-stream.
+        const callActive = !!useCalls.getState().active;
+        if (ws.getState() === 'authed' && !callActive) {
+          diag('app', 'AppState background → closing WS for push routing');
+          try {
+            ws.close();
+          } catch (err) {
+            diag('app', 'background close threw', { err: String(err) });
+          }
+        } else if (callActive) {
+          diag('app', 'AppState background → keeping WS (call active)');
+        }
       }
     });
 
