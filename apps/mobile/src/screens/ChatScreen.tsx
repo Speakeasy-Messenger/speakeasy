@@ -20,7 +20,8 @@ import {
   newMessageId,
   type Attachment,
 } from '@speakeasy/shared';
-import { pickFile, pickFromCamera } from '../attachments/pick.js';
+import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { CallTypeSheet } from '../components/CallTypeSheet.js';
@@ -127,6 +128,7 @@ export function ChatScreen({
   const unblockUser = useBlocks((s) => s.unblock);
   const [unblockSheetOpen, setUnblockSheetOpen] = useState(false);
   const [callTypeOpen, setCallTypeOpen] = useState(false);
+  const [attachOpen, setAttachOpen] = useState(false);
 
   const [input, setInput] = useState('');
   // Tap a photo/gif in the bubble → render this attachment fullscreen
@@ -227,19 +229,30 @@ export function ChatScreen({
     void sendOutbound({ text: trimmed });
   }
 
-  // WhatsApp-style direct affordances — no nested action sheet, no
-  // intermediate alert. Paperclip = file picker; the system DocumentPicker's
-  // `allFiles` type already includes images, so users who want to attach
-  // a photo from storage can pick it through the same UI. Camera has its
-  // own button.
-  async function handlePaperclip() {
-    const file = await pickFile();
-    if (file) await sendOutbound({ attachments: [file] });
+  // Paperclip → bottom sheet with Photo / Camera / Document choices.
+  // Earlier alphas wired the paperclip directly to the document picker
+  // for "WhatsApp-style directness", but that meant a JPG picked through
+  // the OS document chooser arrived as `kind: 'file'` — receiving end
+  // rendered a generic file-icon placeholder instead of the actual
+  // image. The sheet makes intent explicit at picker time so photos
+  // picked here always travel with `kind: 'image'`.
+  function handlePaperclip() {
+    setAttachOpen(true);
+  }
+
+  async function handlePickPhoto() {
+    const photos = await pickPhotos({ selectionLimit: 1 });
+    if (photos.length > 0) await sendOutbound({ attachments: photos });
   }
 
   async function handleCamera() {
     const photo = await pickFromCamera();
     if (photo) await sendOutbound({ attachments: [photo] });
+  }
+
+  async function handlePickFile() {
+    const file = await pickFile();
+    if (file) await sendOutbound({ attachments: [file] });
   }
 
   async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
@@ -598,6 +611,13 @@ export function ChatScreen({
         onClose={() => setCallTypeOpen(false)}
         onPickVoice={() => onStartCall?.(peerId, 'audio')}
         onPickVideo={() => onStartCall?.(peerId, 'video')}
+      />
+      <AttachmentSheet
+        visible={attachOpen}
+        onClose={() => setAttachOpen(false)}
+        onPickPhoto={() => void handlePickPhoto()}
+        onPickCamera={() => void handleCamera()}
+        onPickFile={() => void handlePickFile()}
       />
     </SafeAreaView>
   );
