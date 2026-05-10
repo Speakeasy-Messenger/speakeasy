@@ -254,10 +254,35 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
             messageId: msg.message_id,
             senderId: result.senderId,
             instanceId: deps.instanceId,
+            kind: 'delivered',
           });
         }
         // 'pending' (other devices haven't acked yet) and 'not_found'
         // both produce no further side effect.
+        return;
+      }
+      case 'read': {
+        // Phase 6 read receipts. Recipient signals to the original
+        // sender that the message has been visibly opened. We do not
+        // persist anything server-side — the read state is a UI
+        // affordance and only matters when the sender is online to
+        // receive it. Cross-instance route via AckRouter so the
+        // sender's connection (which may be on the other Fly machine)
+        // gets the frame.
+        if (
+          typeof msg.to !== 'string' ||
+          typeof msg.message_id !== 'string'
+        ) {
+          sendError(socket, 'invalid_target', 'read.to + message_id required');
+          return;
+        }
+        void deps.ackRouter.announce({
+          messageId: msg.message_id,
+          senderId: msg.to, // who to notify (= original sender)
+          instanceId: deps.instanceId,
+          kind: 'read',
+          fromUserId: session.userId, // who read it
+        });
         return;
       }
       case 'message': {

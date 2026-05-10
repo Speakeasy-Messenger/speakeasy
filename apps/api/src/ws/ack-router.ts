@@ -9,10 +9,24 @@
 
 export interface AckEvent {
   messageId: string;
-  /** Sender to notify with `delivered`. */
+  /** User to notify (the original sender of `messageId`). */
   senderId: string;
   /** Originating instance — used to skip self-notifications. */
   instanceId: string;
+  /**
+   * Event kind. Defaults to 'delivered' for backwards compatibility
+   * with subscribers that pre-date read receipts.
+   *   - 'delivered' → emit `{type:'delivered', message_id}` to senderId
+   *   - 'read'      → emit `{type:'read', from: readerUserId, message_id}`
+   */
+  kind?: 'delivered' | 'read';
+  /**
+   * Recipient who triggered the event. For `read` this is who opened
+   * the chat — used to populate the server frame's `from` field.
+   * Optional for delivered (the receiving device is implicit from
+   * the message recipient set).
+   */
+  fromUserId?: string;
 }
 
 export type AckListener = (ev: AckEvent) => void;

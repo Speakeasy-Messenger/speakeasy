@@ -182,6 +182,40 @@ export function ChatScreen({
     markRead(conversationId);
   }, [conversationId, markRead, messages.length]);
 
+  // Real read receipts (Phase 6): emit a `read` WS frame for every
+  // inbound 1:1 message currently visible in this chat. Track which
+  // ids we've already reported via a ref so re-renders (e.g. from
+  // the dissolve stage ticker) don't fan out duplicate frames. Skip
+  // self-DMs (peerId === myUserId), feedback chat (no peer to
+  // notify), and group/community kinds (the wire frame is 1:1 only).
+  const readSentRef = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    if (peerId === myUserId) return;
+    if (isFeedbackHandle(peerId)) return;
+    const ws = getWsClient(async () => {
+      const cached = useIdentity.getState().deviceToken;
+      if (cached) return cached;
+      const r = await vouchflow.verify({ context: 'login' });
+      useIdentity.getState().setDeviceToken(r.deviceToken);
+      return r.deviceToken;
+    });
+    if (ws.getState() !== 'authed') return;
+    for (const m of messages) {
+      if (m.from !== peerId) continue;
+      if (m.kind !== 'direct') continue;
+      if (readSentRef.current.has(m.id)) continue;
+      readSentRef.current.add(m.id);
+      try {
+        ws.send({ type: 'read', to: peerId, message_id: m.id });
+      } catch (err) {
+        // Drop the id back so a future render can retry once the
+        // WS reconnects.
+        readSentRef.current.delete(m.id);
+        diag('chat', 'read send threw (will retry)', { err: String(err) });
+      }
+    }
+  }, [peerId, myUserId, messages]);
+
   // Track the active conversation so the in-app message banner can
   // suppress itself when the user is already staring at this chat.
   useEffect(() => {
@@ -526,6 +560,7 @@ export function ChatScreen({
                 stage={item.stage as DisappearingStage}
                 variant={item.from === 'me' ? 'sent' : 'received'}
                 delivered={item.delivered}
+                read={!!item.readAt}
                 onTapPhoto={(a) => setViewerAttachment(a)}
                 onTapFile={(a) => void saveAndAnnounceFile(a)}
               />

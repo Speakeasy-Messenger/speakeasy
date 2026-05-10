@@ -426,6 +426,8 @@ export default function App() {
         useConversations.getState().add(conversationId, msg),
       markDelivered: (msgId) =>
         useConversations.getState().markDelivered(msgId),
+      markMessageRead: (msgId, readAt) =>
+        useConversations.getState().markMessageRead(msgId, readAt),
       conversationIdFor: (kind, senderId, to) => {
         switch (kind) {
           case 'direct':

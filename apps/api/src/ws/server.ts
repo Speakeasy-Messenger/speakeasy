@@ -69,14 +69,23 @@ export function attachWebsocket(
   });
 
   // Phase 4: cross-instance ack routing. When ANY instance emits an ack
-  // event, this instance forwards the `delivered` frame to every device of
-  // the sender (multi-device fan-out).
+  // event, this instance forwards the appropriate frame to every device
+  // of the original sender (multi-device fan-out).
+  // Phase 6: `kind` switches between `delivered` (server-acked by
+  // recipient device) and `read` (recipient opened the chat).
   const unsubscribe = opts.ackRouter.subscribe((ev) => {
+    const kind = ev.kind ?? 'delivered';
+    const frame =
+      kind === 'read'
+        ? {
+            type: 'read' as const,
+            from: ev.fromUserId,
+            message_id: ev.messageId,
+          }
+        : { type: 'delivered' as const, message_id: ev.messageId };
     for (const senderSocket of opts.connections.getDevices(ev.senderId)) {
       if (senderSocket.readyState !== WebSocket.OPEN) continue;
-      senderSocket.send(
-        JSON.stringify({ type: 'delivered', message_id: ev.messageId }),
-      );
+      senderSocket.send(JSON.stringify(frame));
     }
   });
 

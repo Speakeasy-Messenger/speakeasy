@@ -55,6 +55,16 @@ export interface ChatMessage {
    * frame per recipient ack would fan out N events; spec §5).
    */
   delivered?: boolean;
+  /**
+   * Wall-clock ms when the recipient opened the chat with this
+   * message in view. Set on inbound `read` server frames. Surfaces
+   * on sent bubbles as a brass `✓✓` (vs slate `✓✓` for delivered-
+   * but-not-read). Undefined while the message is still unread.
+   *
+   * 1:1 only — group/community read receipts are deferred for the
+   * same room-activity-leak reason as the `read` frame.
+   */
+  readAt?: number;
 }
 
 export interface ConversationState {
@@ -117,6 +127,12 @@ interface ConversationsState {
    * one; the optimistic-echo bubble uses that id, so this matches.
    */
   markDelivered: (msgId: string) => void;
+  /**
+   * Stamp `readAt` on a sent message — fires when the server forwards
+   * a `read` WS frame from the original recipient. UI flips ✓✓ from
+   * slate to brass.
+   */
+  markMessageRead: (msgId: string, readAt: number) => void;
   remove: (conversationId: string, msgId: string) => void;
   /** Drop the entire conversation entry. Used by group leave (the
    * room disappears from the user's local list) and by 1:1 delete. */
@@ -257,6 +273,33 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         }
         const updated: ChatMessage[] = [...conv.messages];
         updated[idx] = { ...msg, delivered: true };
+        next[convId] = { ...conv, messages: updated };
+        touched = true;
+      }
+      if (!touched) return s;
+      void persist(next);
+      return { byId: next };
+    }),
+
+  markMessageRead: (msgId, readAt) =>
+    set((s) => {
+      let touched = false;
+      const next: Record<string, ConversationState> = {};
+      for (const [convId, conv] of Object.entries(s.byId)) {
+        const idx = conv.messages.findIndex((m) => m.id === msgId);
+        if (idx === -1) {
+          next[convId] = conv;
+          continue;
+        }
+        const msg = conv.messages[idx]!;
+        if (msg.readAt) {
+          // Already stamped (multi-device fan-out, server redelivery).
+          next[convId] = conv;
+          continue;
+        }
+        const updated: ChatMessage[] = [...conv.messages];
+        // Implicitly delivered (you can't read what wasn't delivered).
+        updated[idx] = { ...msg, readAt, delivered: true };
         next[convId] = { ...conv, messages: updated };
         touched = true;
       }

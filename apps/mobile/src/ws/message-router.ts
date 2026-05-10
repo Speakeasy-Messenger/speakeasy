@@ -51,6 +51,13 @@ export interface MessageRouterDeps {
    * `✓✓` glyph on sent bubbles.
    */
   markDelivered: (msgId: string) => void;
+  /**
+   * Stamp a sent message as visibly read. Fires from the `read` WS
+   * frame the server forwards from the original recipient when they
+   * open the chat. Surfaces as a brass `✓✓` (vs slate for delivered-
+   * but-unread).
+   */
+  markMessageRead: (msgId: string, readAt: number) => void;
   /** Resolve a conversation id from a message frame. */
   conversationIdFor: (
     msgType: 'direct' | 'group' | 'community',
@@ -141,6 +148,14 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
       case 'delivered':
         diag('router', 'delivered', { msgId: frame.message_id });
         deps.markDelivered(frame.message_id);
+        return;
+
+      case 'read':
+        diag('router', 'read', {
+          msgId: frame.message_id,
+          from: frame.from,
+        });
+        deps.markMessageRead(frame.message_id, Date.now());
         return;
 
       case 'prekeys_low':

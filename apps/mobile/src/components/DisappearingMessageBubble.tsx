@@ -53,6 +53,14 @@ export interface DisappearingMessageBubbleProps {
    * `delivered` per spec §5.
    */
   delivered?: boolean;
+  /**
+   * Sent-bubble read state — `true` once the original recipient has
+   * opened the chat with this message in view (Phase 6 read receipts,
+   * `read` WS frame). Renders a brass-tinted `✓✓` instead of the slate
+   * delivered glyph. Implies delivered. Undefined for received
+   * bubbles.
+   */
+  read?: boolean;
 }
 
 interface StageTarget {
@@ -90,6 +98,7 @@ export function DisappearingMessageBubble({
   onTapFile,
   onStageAnimated,
   delivered,
+  read,
 }: DisappearingMessageBubbleProps) {
   const themed = useColors();
   const opacity = useRef(new Animated.Value(1)).current;
@@ -207,9 +216,16 @@ export function DisappearingMessageBubble({
       {isSent && delivered !== undefined ? (
         <Text
           testID="bubble-receipt"
-          style={[styles.receipt, delivered ? styles.receiptDelivered : styles.receiptSent]}
+          style={[
+            styles.receipt,
+            read
+              ? styles.receiptRead
+              : delivered
+                ? styles.receiptDelivered
+                : styles.receiptSent,
+          ]}
         >
-          {delivered ? '✓✓' : '✓'}
+          {delivered || read ? '✓✓' : '✓'}
         </Text>
       ) : null}
     </Animated.View>
@@ -265,8 +281,17 @@ const styles = StyleSheet.create({
   // in both dark and light modes — the bubble is brand-invariant per
   // §6.3 ("brass + ink in dark, brass + ink in light"), so the receipt
   // stays put too.
-  receiptSent: { color: `${accent.foreground}8C` }, // 0x8C ≈ 55%
-  receiptDelivered: { color: `${accent.foreground}D9` }, // 0xD9 ≈ 85%
+  // Visual contrast tuned so the sent/delivered transition is
+  // unmistakable at-a-glance. Was 55% ↔ 85% opacity (too subtle —
+  // tested as "the receipt doesn't change"). Now 35% ↔ 100% with a
+  // weight bump on delivered so ✓ → ✓✓ reads as a real state shift.
+  receiptSent: { color: `${accent.foreground}59` }, // 0x59 ≈ 35%
+  receiptDelivered: { color: accent.foreground, fontWeight: '700' as const },
+  // Read = bone-on-brass (cream foreground) so the glyph visibly
+  // shifts hue when the recipient opens the chat. Distinct enough
+  // from delivered's ink-on-brass to read at a glance without an
+  // extra glyph or motion.
+  receiptRead: { color: '#F2E9D8', fontWeight: '700' as const },
 });
 
 /**

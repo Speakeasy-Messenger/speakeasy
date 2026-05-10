@@ -90,6 +90,16 @@ export type WsClientMsg =
       sealed?: boolean;
     }
   | { type: 'ack'; message_id: MessageId }
+  /**
+   * Read receipt — recipient signals to the original sender that
+   * `message_id` has been visibly opened (chat scrolled into view).
+   * Server forwards as a `read` server frame to `to`. 1:1 only for
+   * now (group reads would leak room activity beyond what spec §13
+   * commits to). Plaintext on the wire — the message_id is already
+   * known to both parties; the timing is the only new bit, and that
+   * leaks the same information the existing `delivered` frame does.
+   */
+  | { type: 'read'; to: UserId; message_id: MessageId }
   | { type: 'ping' }
   /**
    * Sender Key Distribution Message — bootstrap envelope for group
@@ -145,6 +155,12 @@ export type WsServerMsg =
       conversation_id: string;
     }
   | { type: 'delivered'; message_id: MessageId }
+  /**
+   * Counterpart to the `read` client frame. The recipient (`from`)
+   * has opened the chat and `message_id` is now visibly read. Only
+   * fires for 1:1 messages.
+   */
+  | { type: 'read'; from: UserId; message_id: MessageId }
   | { type: 'pong' }
   | { type: 'error'; code: string; message: string }
   /**
