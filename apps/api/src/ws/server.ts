@@ -11,6 +11,8 @@ import type { AckRouter } from './ack-router.js';
 import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
+import { createCallOfferBuffer } from './call-offer-buffer.js';
+import type { CallOfferBuffer } from './call-offer-buffer.js';
 
 export interface AttachWsOptions {
   validator: Validator;
@@ -24,6 +26,11 @@ export interface AttachWsOptions {
   push: PushProvider;
   devices: DevicesRepo;
   users: UserRepo;
+  /**
+   * Optional injected buffer (tests). When omitted, one is created
+   * per attachWebsocket call with the default 30s ringing TTL.
+   */
+  callBuffer?: CallOfferBuffer;
   /** Path on which to accept upgrades. Default: /ws */
   path?: string;
 }
@@ -42,6 +49,7 @@ export function attachWebsocket(
 ): WebSocketServer {
   const path = opts.path ?? '/ws';
   const wss = new WebSocketServer({ noServer: true });
+  const callBuffer = opts.callBuffer ?? createCallOfferBuffer();
 
   app.server.on('upgrade', (req, socket, head) => {
     if (req.url !== path) {
@@ -63,6 +71,7 @@ export function attachWebsocket(
         push: opts.push,
         devices: opts.devices,
         users: opts.users,
+        callBuffer,
         log: app.log,
       });
     });

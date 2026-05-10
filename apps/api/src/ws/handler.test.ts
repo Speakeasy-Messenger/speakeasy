@@ -1313,6 +1313,111 @@ describe('ws voice call signaling — Phase 6', () => {
     expect(pushProvider.calls).toHaveLength(1);
   });
 
+  it('delivers a buffered call_offer when the callee reconnects within the ringing window', async () => {
+    // Reproduces tester3 → lunchbox4 from rc.50: callee backgrounded,
+    // WS closed, caller sent the offer mid-window. Pre-buffer fix
+    // the offer was discarded; now it's held briefly and replayed
+    // on reconnect.
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'late-callee-jaguar',
+        call_id: 'call-01HZZZBUFFEREDOFFERBBBBBBB',
+        ciphertext: 'QlVGRkVSRURPRkZFUg==',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    // Push fires (existing behavior) AND the offer is held in the
+    // call buffer. Now the callee connects.
+    const b = await authedSocket('late-callee-jaguar');
+    // After the `authed` frame the handler drains buffered messages
+    // (none) and then any buffered call signaling.
+    const frames: Array<{ type: string }> = [];
+    for (let i = 0; i < 2; i += 1) {
+      try {
+        frames.push((await b.q.next(300)) as { type: string });
+      } catch {
+        break;
+      }
+    }
+    const offer = frames.find((f) => f.type === 'call_offer') as
+      | { type: string; from: string; call_id: string; ciphertext: string }
+      | undefined;
+    expect(offer).toBeDefined();
+    expect(offer!.from).toBe('alice-blue-fox');
+    expect(offer!.call_id).toBe('call-01HZZZBUFFEREDOFFERBBBBBBB');
+    expect(offer!.ciphertext).toBe('QlVGRkVSRURPRkZFUg==');
+  });
+
+  it('delivers buffered call_ice frames that arrived after the offer', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'late-callee-fox',
+        call_id: 'call-01HZZZBUFFEREDICECCCCCCCC',
+        ciphertext: 'T0ZG',
+      }),
+    );
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_ice',
+        to: 'late-callee-fox',
+        call_id: 'call-01HZZZBUFFEREDICECCCCCCCC',
+        ciphertext: 'SUNFMQ==',
+      }),
+    );
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_ice',
+        to: 'late-callee-fox',
+        call_id: 'call-01HZZZBUFFEREDICECCCCCCCC',
+        ciphertext: 'SUNFMg==',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    const b = await authedSocket('late-callee-fox');
+    const collected: Array<{ type: string; ciphertext: string }> = [];
+    for (let i = 0; i < 4; i += 1) {
+      try {
+        collected.push((await b.q.next(300)) as { type: string; ciphertext: string });
+      } catch {
+        break;
+      }
+    }
+    const offer = collected.find((f) => f.type === 'call_offer');
+    const ices = collected.filter((f) => f.type === 'call_ice');
+    expect(offer?.ciphertext).toBe('T0ZG');
+    // ICE delivered in arrival order, after the offer.
+    expect(ices.map((f) => f.ciphertext)).toEqual(['SUNFMQ==', 'SUNFMg==']);
+  });
+
+  it('call_end to an offline callee clears the buffer so reconnect does not ring stale', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'late-callee-owl',
+        call_id: 'call-01HZZZBUFFEREDENDDDDDDDDDD',
+        ciphertext: 'T0ZG',
+      }),
+    );
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'late-callee-owl',
+        call_id: 'call-01HZZZBUFFEREDENDDDDDDDDDD',
+        reason: 'cancel',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    const b = await authedSocket('late-callee-owl');
+    // Callee should see no buffered call frames — just the `authed`
+    // (consumed inside authedSocket) and nothing else.
+    await expect(b.q.next(200)).rejects.toThrow(/timeout/);
+  });
+
   it('rejects call to self and missing fields', async () => {
     const a = await authedSocket('alice-blue-fox');
     a.ws.send(

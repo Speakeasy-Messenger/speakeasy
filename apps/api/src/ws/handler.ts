@@ -24,6 +24,7 @@ import type { AckRouter } from './ack-router.js';
 import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
+import type { CallOfferBuffer } from './call-offer-buffer.js';
 
 const AUTH_TIMEOUT_MS = 10_000;
 const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // spec §5: 7-day relay buffer
@@ -41,6 +42,12 @@ interface Deps {
   push: PushProvider;
   devices: DevicesRepo;
   users: UserRepo;
+  /**
+   * Ringing-window buffer for call signaling addressed to a recipient
+   * with no live WS. Drained on auth. See call-offer-buffer.ts for
+   * the why.
+   */
+  callBuffer: CallOfferBuffer;
 }
 
 interface AuthedSession {
@@ -209,6 +216,31 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         // Per-device aware: rows acked by *this* deviceToken on a previous
         // connection won't be re-drained (Phase 5f).
         await deliverBuffered(session.userId, session.deviceToken, socket, deps);
+        // Drain any in-flight call signaling that arrived while the
+        // user was offline (e.g. WS closed for push routing in the
+        // background → caller sent offer → user taps push and
+        // reconnects). Without this, the offer + early ICE frames
+        // are dropped and the call never reaches the call screen.
+        // 30-second TTL on the buffer side caps how stale this can be.
+        const pendingCall = deps.callBuffer.drain(session.userId);
+        if (pendingCall.length > 0) {
+          for (const f of pendingCall) {
+            send(socket, {
+              type: f.type,
+              from: f.fromUserId,
+              call_id: f.callId,
+              ciphertext: f.ciphertext,
+            });
+          }
+          deps.log.info(
+            {
+              userId: session.userId,
+              count: pendingCall.length,
+              callId: pendingCall[0]!.callId,
+            },
+            'delivered buffered call signaling',
+          );
+        }
       } catch (err) {
         const code =
           err instanceof VouchflowValidationError ? err.reason : 'auth_failed';
@@ -561,11 +593,41 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               .catch((err) =>
                 deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
               );
+            // Buffer the offer for the ringing window so when the
+            // pushed-awake device reconnects, the orchestrator gets
+            // the offer it would otherwise have missed. TTL handled
+            // by the buffer; replaced if a fresh offer arrives.
+            deps.callBuffer.put(msg.to, {
+              type: 'call_offer',
+              fromUserId: session.userId,
+              callId: msg.call_id,
+              ciphertext: msg.ciphertext as string,
+            });
+          } else if (msg.type === 'call_ice') {
+            // Trickle ICE candidates that arrived after a buffered
+            // offer. The buffer ignores ICE frames that don't match
+            // a currently-buffered call (no offer = no anchor SDP).
+            deps.callBuffer.put(msg.to, {
+              type: 'call_ice',
+              fromUserId: session.userId,
+              callId: msg.call_id,
+              ciphertext: msg.ciphertext as string,
+            });
+          } else if (msg.type === 'call_end') {
+            // Caller gave up before the callee reconnected. Drop the
+            // buffered offer so it doesn't surface as a stale ring.
+            deps.callBuffer.clear(msg.to, msg.call_id);
           }
-          // call_answer / call_ice / call_end to an offline peer is a
-          // best-effort no-op. (call_end specifically is fine to drop —
-          // the peer's local timeout will produce the same outcome.)
+          // call_answer to an offline peer is a best-effort no-op
+          // (peer's local timeout produces the same outcome).
           return;
+        }
+        // Recipient came online. If a stale offer for this call is
+        // still buffered (caller raced reconnect → live fan-out wins),
+        // clear it so the callee doesn't double-receive once the
+        // existing live frame and the drain both fire.
+        if (msg.type === 'call_end') {
+          deps.callBuffer.clear(msg.to, msg.call_id);
         }
 
         // Fan out to every live device of the recipient. First answer
