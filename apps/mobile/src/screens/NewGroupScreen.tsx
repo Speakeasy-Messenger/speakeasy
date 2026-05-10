@@ -103,7 +103,7 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
         setError('Sign in again — device token missing.');
         return;
       }
-      const { group_id } = await api.createGroup(deviceToken);
+      const { group_id } = await api.createGroup(deviceToken, trimmedName);
       for (const member of members) {
         try {
           await api.addGroupMember(deviceToken, group_id, member);

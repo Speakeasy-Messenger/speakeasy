@@ -12,6 +12,7 @@ import {
   View,
 } from 'react-native';
 import { type Attachment, encodePayload, newMessageId } from '@speakeasy/shared';
+import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
@@ -96,6 +97,46 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
   useEffect(() => {
     openGroup(groupId);
   }, [groupId, openGroup]);
+
+  // Hydrate the group's metadata (name + members) if missing — invitees
+  // who got added via /v1/groups/:id/members previously had no way to
+  // learn the room's name or member list (rc.47 and earlier shipped
+  // [group not loaded] errors here). The fetch is idempotent + cached
+  // by metadataFetchedAt, so the cost is one round-trip on first open.
+  useEffect(() => {
+    if (group && group.members.length > 0) return;
+    void (async () => {
+      try {
+        let dt = useIdentity.getState().deviceToken;
+        if (!dt) {
+          const r = await vouchflow.verify({ context: 'login' });
+          useIdentity.getState().setDeviceToken(r.deviceToken);
+          dt = r.deviceToken;
+        }
+        const [groupRes, rosterRes] = await Promise.all([
+          api.fetchGroup(dt, groupId),
+          api.listGroupMembers(dt, groupId),
+        ]);
+        const memberIds = rosterRes.members;
+        const others = memberIds.filter((m) => m !== myUserId).slice(0, 3);
+        const fallbackName =
+          others.length === 0 ? 'Room' : `Room with @${others.join(', @')}`;
+        useGroups.getState().upsert({
+          id: groupId,
+          name: groupRes.name ?? fallbackName,
+          members: memberIds,
+          createdAt: Date.now(),
+          createdBy: groupRes.created_by,
+          metadataFetchedAt: Date.now(),
+        });
+      } catch (err) {
+        diag('group', 'fetch on open failed', {
+          groupId,
+          err: String(err),
+        });
+      }
+    })();
+  }, [groupId, group, myUserId]);
 
   // Mark read on open AND every time a new inbound message lands while
   // the screen is mounted — see ChatScreen for the rationale.

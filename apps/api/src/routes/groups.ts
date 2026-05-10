@@ -22,15 +22,28 @@ export async function registerGroupRoutes(
    * creation (a 1-member "group" is just an empty room). 100-ceiling is
    * enforced on add.
    */
-  app.post(
+  app.post<{ Body: { name?: string } | undefined }>(
     '/v1/groups',
     { preHandler: requireAuth },
     async (request, reply) => {
       const userId = request.auth?.userId;
       if (!userId) return reply.code(403).send({ error: 'not_enrolled' });
       const groupId = generateId();
+      // Legacy clients omit the body entirely; rc.48 clients pass
+      // `{ name }`. No JSON-schema validation here so empty-body
+      // requests still parse — the route just shrugs and treats name
+      // as undefined. We do bound the length manually below.
+      const rawName =
+        typeof request.body === 'object' && request.body !== null
+          ? (request.body as { name?: unknown }).name
+          : undefined;
+      let name: string | undefined;
+      if (typeof rawName === 'string') {
+        const trimmed = rawName.trim();
+        if (trimmed.length > 0 && trimmed.length <= 64) name = trimmed;
+      }
       try {
-        await opts.repo.create({ groupId, createdBy: userId });
+        await opts.repo.create({ groupId, createdBy: userId, name });
       } catch (err) {
         request.log.error({ err, groupId }, 'group create failed');
         return reply.code(500).send({ error: 'internal' });
@@ -156,6 +169,7 @@ export async function registerGroupRoutes(
       return reply.send({
         id: summary.id,
         created_by: summary.createdBy,
+        name: summary.name,
       });
     },
   );

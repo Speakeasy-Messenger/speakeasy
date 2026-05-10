@@ -4,12 +4,20 @@ import { groups, groupMembers } from './schema.js';
 import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo, type GroupSummary } from './groups.js';
 
 export class DrizzleGroupRepo implements GroupRepo {
-  async create(args: { groupId: string; createdBy: string }): Promise<void> {
+  async create(args: {
+    groupId: string;
+    createdBy: string;
+    name?: string;
+  }): Promise<void> {
     const db = getDb();
     await db.transaction(async (tx) => {
       const inserted = await tx
         .insert(groups)
-        .values({ id: args.groupId, createdBy: args.createdBy })
+        .values({
+          id: args.groupId,
+          createdBy: args.createdBy,
+          name: args.name ?? null,
+        })
         .onConflictDoNothing()
         .returning({ id: groups.id });
       if (inserted.length === 0) {
@@ -175,11 +183,14 @@ export class DrizzleGroupRepo implements GroupRepo {
       .select({
         id: groups.id,
         createdBy: groups.createdBy,
+        name: groups.name,
       })
       .from(groups)
       .where(eq(groups.id, groupId))
       .limit(1);
     const row = rows[0];
-    return row ? { id: row.id, createdBy: row.createdBy } : undefined;
+    return row
+      ? { id: row.id, createdBy: row.createdBy, name: row.name }
+      : undefined;
   }
 }

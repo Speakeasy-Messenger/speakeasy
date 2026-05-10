@@ -112,7 +112,7 @@ export class ApiClient {
   async fetchGroup(
     deviceToken: string,
     groupId: string,
-  ): Promise<{ id: string; created_by: string }> {
+  ): Promise<{ id: string; created_by: string; name: string | null }> {
     const res = await this.doFetch(
       `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}`,
       { headers: { authorization: `Bearer ${deviceToken}` } },
@@ -130,8 +130,10 @@ export class ApiClient {
     return (await res.json()) as {
       id: string;
       created_by: string;
+      name: string | null;
     };
   }
+
 
   // setGroupAvatar removed in Phase 2 — groups don't have photos OR
   // custom marks. The mobile client renders the room mark from the
@@ -272,17 +274,33 @@ export class ApiClient {
    * Create a new group. Caller becomes the first member; add others via
    * `addGroupMember`. Returns the assigned `group_id`.
    */
-  async createGroup(deviceToken: string): Promise<{ group_id: string }> {
-    // No body. We DON'T send `content-type: application/json` because
-    // Fastify with that header tries to parse the (empty) body as JSON
-    // and fails with 400 Bad Request. The route doesn't read a body
-    // anyway — caller is identified via the auth header.
-    const res = await this.doFetch(`${this.baseUrl}/v1/groups`, {
-      method: 'POST',
-      headers: {
-        authorization: `Bearer ${deviceToken}`,
-      },
-    });
+  async createGroup(
+    deviceToken: string,
+    name?: string,
+  ): Promise<{ group_id: string }> {
+    // rc.48: pass `name` through so invitees see the room's display
+    // name when they receive metadata via fetchGroup. Pre-rc.48 the
+    // name was a client-only field and never propagated.
+    //
+    // Empty/omitted name omits the body entirely so the legacy "no
+    // content-type" form still parses cleanly server-side.
+    const trimmed = name?.trim();
+    const init: RequestInit = trimmed
+      ? {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${deviceToken}`,
+            'content-type': 'application/json',
+          },
+          body: JSON.stringify({ name: trimmed }),
+        }
+      : {
+          method: 'POST',
+          headers: {
+            authorization: `Bearer ${deviceToken}`,
+          },
+        };
+    const res = await this.doFetch(`${this.baseUrl}/v1/groups`, init);
     if (res.status === 201) return (await res.json()) as { group_id: string };
     let code: string | undefined;
     try {

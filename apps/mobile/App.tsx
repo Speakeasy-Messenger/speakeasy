@@ -493,6 +493,48 @@ export default function App() {
         useConversations.getState().markDelivered(msgId),
       markMessageRead: (msgId, readAt) =>
         useConversations.getState().markMessageRead(msgId, readAt),
+      ensureGroupHydrated: async (groupId) => {
+        // Skip if already populated with members. We re-fetch every
+        // hour at most via metadataFetchedAt — for now any non-empty
+        // member set means we don't need to round-trip again.
+        const existing = useGroups.getState().byId[groupId];
+        if (existing && existing.members.length > 0) return;
+        const dt = await getToken().catch(() => undefined);
+        if (!dt) return;
+        try {
+          const [groupRes, rosterRes] = await Promise.all([
+            api.fetchGroup(dt, groupId),
+            api.listGroupMembers(dt, groupId),
+          ]);
+          const memberIds = rosterRes.members;
+          const fallbackName = (() => {
+            // No name set server-side and no local override — build a
+            // "Room with @x, @y" line from members, capped to keep it
+            // short. The user can rename via Group Settings.
+            const others = memberIds.filter((m) => m !== userId).slice(0, 3);
+            if (others.length === 0) return 'Room';
+            return `Room with @${others.join(', @')}`;
+          })();
+          useGroups.getState().upsert({
+            id: groupId,
+            name: groupRes.name ?? fallbackName,
+            members: memberIds,
+            createdAt: Date.now(),
+            createdBy: groupRes.created_by,
+            metadataFetchedAt: Date.now(),
+          });
+          diag('group', 'ensureGroupHydrated populated', {
+            groupId,
+            name: groupRes.name ?? '(fallback)',
+            memberCount: memberIds.length,
+          });
+        } catch (err) {
+          diag('group', 'ensureGroupHydrated fetch failed', {
+            groupId,
+            err: String(err),
+          });
+        }
+      },
       conversationIdFor: (kind, senderId, to) => {
         switch (kind) {
           case 'direct':

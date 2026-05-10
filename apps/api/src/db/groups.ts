@@ -4,12 +4,19 @@ export const SMALL_GROUP_MAX_MEMBERS = 100;
 export interface GroupSummary {
   id: string;
   createdBy: string;
+  /** Display name set by the creator. Null until rc.48 callers (or
+   *  an explicit setName) populate it; mobile falls back to a default. */
+  name: string | null;
   // No avatar field — Phase 2 dropped group photos in favor of the
   // deterministic geometric room mark client-side. AVATAR-SYSTEM.md §7.
 }
 
 export interface GroupRepo {
-  create(args: { groupId: string; createdBy: string }): Promise<void>;
+  create(args: {
+    groupId: string;
+    createdBy: string;
+    name?: string;
+  }): Promise<void>;
   /** Returns the new member count, or `'group_full'`, or `'not_member'` (if `addedBy` isn't a member). */
   addMember(args: {
     groupId: string;

@@ -66,6 +66,14 @@ export const groups = pgTable('groups', {
   createdBy: text('created_by')
     .notNull()
     .references(() => users.id),
+  // Display name set by the creator at /v1/groups POST time. Nullable
+  // because existing pre-migration-0014 rows have no name, and the
+  // mobile client falls back to a "Room with @x, @y" default for
+  // unnamed groups. Per spec the name is plaintext server-side — we
+  // need it to propagate to invitees on add (creator-only knowledge
+  // would defeat the goal of new members seeing the room's identity
+  // when a group message lands).
+  name: text('name'),
   // Per AVATAR-SYSTEM.md §7, groups don't have photos OR custom marks
   // — the room-mark glyph is deterministic from `id`. Customization
   // here would create exactly the social-signaling pressure ("our

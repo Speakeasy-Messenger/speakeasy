@@ -58,6 +58,16 @@ export interface MessageRouterDeps {
    * but-unread).
    */
   markMessageRead: (msgId: string, readAt: number) => void;
+  /**
+   * Idempotent: ensure the local `useGroups` store has metadata for
+   * `groupId` (name + members). Fires when a group message arrives
+   * for a groupId we've never seen — e.g., a freshly-added member
+   * who's never opened the room. Pre-rc.48 the metadata never
+   * propagated, so the chat AppBar showed the raw `grp-…` id and
+   * `sendOutbound` failed with `[group not loaded]` because
+   * `useGroups.byId[gid]` was undefined.
+   */
+  ensureGroupHydrated: (groupId: string) => Promise<void>;
   /** Resolve a conversation id from a message frame. */
   conversationIdFor: (
     msgType: 'direct' | 'group' | 'community',
@@ -434,6 +444,17 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   convId: frame.conversation_id,
                   msgId: frame.message_id,
                 });
+                // Make sure the room's metadata (name, members) is
+                // hydrated locally so the chat AppBar + send path
+                // work — see ensureGroupHydrated docs.
+                void deps
+                  .ensureGroupHydrated(frame.conversation_id)
+                  .catch((err) =>
+                    diag('router', 'ensureGroupHydrated threw', {
+                      groupId: frame.conversation_id,
+                      err: String(err),
+                    }),
+                  );
                 if (groupAttachments && groupSenderId !== deps.myUserId) {
                   deps.onInboundAttachments?.(groupAttachments);
                 }

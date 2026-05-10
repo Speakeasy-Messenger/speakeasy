@@ -26,8 +26,8 @@ const SUPPORT_EMAIL = 'hello@speakeasy.app';
 // versionCode. Manual sync until a build-time bake step lands.
 // Re-exported so other modules (e.g. ChatScreen for feedback
 // app_version field) reference a single source of truth.
-export const APP_VERSION = '0.5.0-rc.47';
-export const APP_BUILD = '47';
+export const APP_VERSION = '0.5.0-rc.48';
+export const APP_BUILD = '48';
 const VERSION = APP_VERSION;
 const BUILD = APP_BUILD;
 

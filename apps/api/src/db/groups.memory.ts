@@ -3,18 +3,24 @@ import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo, type GroupSummary } from './gr
 interface Group {
   createdBy: string;
   members: Set<string>;
+  name: string | null;
 }
 
 export class InMemoryGroupRepo implements GroupRepo {
   readonly groups = new Map<string, Group>();
 
-  async create(args: { groupId: string; createdBy: string }): Promise<void> {
+  async create(args: {
+    groupId: string;
+    createdBy: string;
+    name?: string;
+  }): Promise<void> {
     if (this.groups.has(args.groupId)) {
       throw new Error(`group ${args.groupId} already exists`);
     }
     this.groups.set(args.groupId, {
       createdBy: args.createdBy,
       members: new Set([args.createdBy]),
+      name: args.name ?? null,
     });
   }
 
@@ -59,6 +65,6 @@ export class InMemoryGroupRepo implements GroupRepo {
   async findById(groupId: string): Promise<GroupSummary | undefined> {
     const g = this.groups.get(groupId);
     if (!g) return undefined;
-    return { id: groupId, createdBy: g.createdBy };
+    return { id: groupId, createdBy: g.createdBy, name: g.name };
   }
 }

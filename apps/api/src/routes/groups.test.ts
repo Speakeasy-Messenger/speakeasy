@@ -55,6 +55,66 @@ describe('POST /v1/groups', () => {
     expect(res.statusCode).toBe(403);
     await app.close();
   });
+
+  it('persists the name and surfaces it on GET', async () => {
+    const { app } = await makeApp();
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/groups',
+      headers: callerHeader('alice'),
+      payload: { name: 'Suckdix' },
+    });
+    expect(create.statusCode).toBe(201);
+    const groupId = create.json().group_id;
+    const get = await app.inject({
+      method: 'GET',
+      url: `/v1/groups/${groupId}`,
+      headers: callerHeader('alice'),
+    });
+    expect(get.statusCode).toBe(200);
+    expect(get.json()).toMatchObject({ name: 'Suckdix' });
+    await app.close();
+  });
+
+  it('omits name → null in GET response (legacy clients)', async () => {
+    const { app } = await makeApp();
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/groups',
+      headers: callerHeader('alice'),
+      payload: {},
+    });
+    const groupId = create.json().group_id;
+    const get = await app.inject({
+      method: 'GET',
+      url: `/v1/groups/${groupId}`,
+      headers: callerHeader('alice'),
+    });
+    expect(get.json().name).toBeNull();
+    await app.close();
+  });
+
+  it('rejects oversized names by silently dropping (≤64 chars only)', async () => {
+    const { app } = await makeApp();
+    const create = await app.inject({
+      method: 'POST',
+      url: '/v1/groups',
+      headers: callerHeader('alice'),
+      payload: { name: 'x'.repeat(200) },
+    });
+    expect(create.statusCode).toBe(201);
+    const groupId = create.json().group_id;
+    const get = await app.inject({
+      method: 'GET',
+      url: `/v1/groups/${groupId}`,
+      headers: callerHeader('alice'),
+    });
+    // Server silently drops the oversize name — group still creates,
+    // but `name` falls back to null and the mobile client renders the
+    // default "Room with @x, @y" label.
+    expect(get.json().name).toBeNull();
+    await app.close();
+  });
 });
 
 describe('POST /v1/groups/:id/members', () => {
@@ -168,6 +228,10 @@ describe('GET /v1/groups/:id', () => {
     expect(res.json()).toEqual({
       id: 'grp-test',
       created_by: 'alice',
+      // rc.48 added groups.name (nullable until creators pass one
+      // through POST /v1/groups). Existing test creates without a
+      // name — null is the correct default.
+      name: null,
     });
     await app.close();
   });
