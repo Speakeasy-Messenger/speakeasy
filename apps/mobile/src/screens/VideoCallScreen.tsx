@@ -44,32 +44,37 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const [remoteUrl, setRemoteUrl] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState('');
 
-  // CALLS.md §06 — drop a system message into the chat feed when the
-  // call ends. Same shape as the audio CallScreen logic:
-  //   - completed         → `video call · M:SS.`
-  //   - missed incoming   → `@<peer> video-called. you missed it.`
-  //   - cancelled outgoing → `you video-called. no answer.`
+  // See CallScreen's matching block for the full rationale: rc.36's
+  // `active.stage === 'ended'` check never fires because the orchestrator
+  // synchronously batches ended → undefined into a single React render.
+  // rc.43 uses a prev-active ref to detect the defined→undefined edge.
   const addMessage = useConversations((s) => s.add);
   const everConnectedRef = useRef(false);
   const wasIncomingRef = useRef(false);
   const wasCallerRef = useRef(false);
   const wroteEndMsgRef = useRef(false);
+  const prevActiveRef = useRef<typeof active>(undefined);
   useEffect(() => {
-    if (!active) return;
-    if (active.stage === 'connected') everConnectedRef.current = true;
-    if (active.stage === 'incoming_ringing') wasIncomingRef.current = true;
-    if (active.isCaller) wasCallerRef.current = true;
-    if (active.stage === 'ended' && !wroteEndMsgRef.current && myUserId) {
+    const prev = prevActiveRef.current;
+    prevActiveRef.current = active;
+
+    if (active) {
+      if (active.stage === 'connected') everConnectedRef.current = true;
+      if (active.stage === 'incoming_ringing') wasIncomingRef.current = true;
+      if (active.isCaller) wasCallerRef.current = true;
+    }
+
+    if (prev && !active && !wroteEndMsgRef.current && myUserId) {
       wroteEndMsgRef.current = true;
-      const cid = conversationIdForDirect(myUserId, active.peerUserId);
+      const cid = conversationIdForDirect(myUserId, prev.peerUserId);
       let text: string | undefined;
-      if (everConnectedRef.current && active.connectedAt) {
-        const sec = Math.floor((Date.now() - active.connectedAt) / 1000);
+      if (everConnectedRef.current && prev.connectedAt) {
+        const sec = Math.floor((Date.now() - prev.connectedAt) / 1000);
         const mm = Math.floor(sec / 60);
         const ss = String(sec % 60).padStart(2, '0');
         text = `video call · ${mm}:${ss}.`;
       } else if (wasIncomingRef.current) {
-        text = `@${active.peerUserId} video-called. you missed it.`;
+        text = `@${prev.peerUserId} video-called. you missed it.`;
       } else if (wasCallerRef.current) {
         text = `you video-called. no answer.`;
       }
