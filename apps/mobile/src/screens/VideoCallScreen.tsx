@@ -155,7 +155,15 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             video stream so the user can read it without it taking
             real-estate from the picture. */}
         <View style={styles.topBar}>
-          <Handle value={active.peerUserId} variant="display" />
+          {/* Force a light handle color: the top bar is always over
+              the video stream + a dark scrim, so themed.ink (dark in
+              light mode) renders the handle invisible. Matches the
+              hardcoded white of the stage label below. */}
+          <Handle
+            value={active.peerUserId}
+            variant="display"
+            color={callPalette.fg}
+          />
           <Text style={styles.topStage}>{stageLabel[active.stage]}</Text>
         </View>
 
