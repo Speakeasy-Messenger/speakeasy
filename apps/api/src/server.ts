@@ -47,6 +47,11 @@ import { rateLimit } from './ratelimit/middleware.js';
 import { InMemoryAckRouter, type AckRouter } from './ws/ack-router.js';
 import { RedisAckRouter } from './ws/ack-router.redis.js';
 import { RedisUserNotifier } from './ws/user-notifier.redis.js';
+import {
+  createCallOfferBuffer,
+  type CallOfferBuffer,
+} from './ws/call-offer-buffer.js';
+import { createRedisCallOfferBuffer } from './ws/call-offer-buffer.redis.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
 import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
@@ -72,6 +77,9 @@ export interface BuildServerOptions {
   rateLimiter?: RateLimiter;
   ackRouter?: AckRouter;
   push?: PushProvider;
+  /** Override the call-offer buffer (test injection). Defaults to
+   *  Redis-backed when REDIS_URL is set, else in-memory. */
+  callBuffer?: CallOfferBuffer;
   /** TURN/STUN credentials provider for `/v1/turn/credentials`. Defaults
    *  to env-driven (Cloudflare if env set; STUN-only fallback). */
   turnProvider?: TurnProvider;
@@ -229,6 +237,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
     const push = opts.push ?? defaultPushProvider(devices, app.log);
+    const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
 
     attachWebsocket(app, {
       validator,
@@ -242,6 +251,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       push,
       devices,
       users: repo,
+      callBuffer,
     });
     if (redis) {
       app.addHook('onClose', async () => {
@@ -289,6 +299,17 @@ function defaultAckRouter(): AckRouter {
   const pub = new Redis(url, { lazyConnect: false });
   const sub = new Redis(url, { lazyConnect: false });
   return new RedisAckRouter(pub, sub);
+}
+
+function defaultCallOfferBuffer(): CallOfferBuffer {
+  const url = process.env.REDIS_URL;
+  if (!url) return createCallOfferBuffer();
+  // Single connection — the buffer only does single-command GET/SET/
+  // EVAL/GETDEL, no pub/sub, so the publisher-style connection is
+  // sufficient. Shared with no other consumer to keep the failure mode
+  // (Redis stall blocks puts) scoped to call signaling instead of
+  // cascading into ack routing or notifications.
+  return createRedisCallOfferBuffer(new Redis(url, { lazyConnect: false }));
 }
 
 function defaultUserNotifier(connections: Connections, instanceId: string): UserNotifier {

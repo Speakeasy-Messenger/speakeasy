@@ -43,16 +43,22 @@ export interface CallOfferBuffer {
    * Record an offer or follow-up ICE frame for a currently-offline
    * recipient. ICE frames are appended only if the matching offer is
    * already buffered (otherwise we'd be holding ICE candidates with
-   * no SDP to anchor them to).
+   * no SDP to anchor them to). Fire-and-forget on the Redis variant;
+   * a dropped put just means that one frame isn't buffered — the
+   * caller's ringing-window timeout produces the same outcome.
    */
   put(toUserId: string, frame: BufferedCallFrame): void;
   /** Clear any pending offer for this recipient + callId pair. */
   clear(toUserId: string, callId: string): void;
-  /** Pop and return all pending frames for this recipient (offer first, ICEs in arrival order). */
-  drain(toUserId: string): BufferedCallFrame[];
-  /** Test seam — current entry count. */
+  /**
+   * Pop and return all pending frames for this recipient (offer
+   * first, ICEs in arrival order). Async to accommodate the Redis
+   * variant; the in-memory variant resolves immediately.
+   */
+  drain(toUserId: string): Promise<BufferedCallFrame[]>;
+  /** Test seam — current entry count (in-memory only; Redis returns 0). */
   size(): number;
-  /** Test seam — clear all timers. */
+  /** Test seam — clear all timers / local state. */
   shutdown(): void;
 }
 
@@ -108,9 +114,9 @@ export function createCallOfferBuffer(opts?: {
     },
     drain(toUserId) {
       const e = entries.get(toUserId);
-      if (!e) return [];
+      if (!e) return Promise.resolve([]);
       evict(toUserId);
-      return [e.offer, ...e.ices];
+      return Promise.resolve([e.offer, ...e.ices]);
     },
     size() {
       return entries.size;

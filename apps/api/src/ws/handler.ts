@@ -222,7 +222,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         // reconnects). Without this, the offer + early ICE frames
         // are dropped and the call never reaches the call screen.
         // 30-second TTL on the buffer side caps how stale this can be.
-        const pendingCall = deps.callBuffer.drain(session.userId);
+        const pendingCall = await deps.callBuffer.drain(session.userId);
         if (pendingCall.length > 0) {
           for (const f of pendingCall) {
             send(socket, {
