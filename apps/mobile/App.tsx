@@ -34,6 +34,7 @@ import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // or CallScreen mount).
 import { diag } from './src/diag/log.js';
 import { requestStartupPermissions } from './src/permissions/startup.js';
+import { tryRegisterPushToken } from './src/push/register.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
 import { SplashScreen } from './src/components/SplashScreen.js';
@@ -364,39 +365,13 @@ export default function App() {
     // Also rides along the current notificationPrivacy preference so a
     // user who toggled privacy mode while offline gets it synced up on
     // the next launch even if the inline toggle-time request failed.
-    getToken().then((dt) => {
-      return pushNotifications.getToken().then((pushResult) => {
-        if (!pushResult) {
-          // No FCM/APNs token available — Firebase native module
-          // didn't link, the user denied notification permission, or
-          // (Android) Play Services aren't installed. Silently
-          // degrades: messages still arrive via WS reconnect on app
-          // resume; just no system banner while backgrounded.
-          //
-          // The native service stashes the specific failure reason on
-          // itself so we can capture which branch fired into diag.
-          const reason =
-            (pushNotifications as { lastFailureReason?: string })
-              .lastFailureReason ?? 'unknown';
-          diag('push', 'no token', { reason });
-          return;
-        }
-        const privacy = useSettings.getState().notificationPrivacy;
-        diag('push', 'registering token', {
-          platform: pushResult.platform,
-          tokenPreview: pushResult.pushToken.slice(0, 8) + '…',
-          privacy,
+    void getToken()
+      .then((dt) => tryRegisterPushToken(dt))
+      .catch((err) => {
+        diag('app', 'push token registration failed (non-fatal)', {
+          err: String(err),
         });
-        void api
-          .registerPushToken(dt, pushResult.pushToken, pushResult.platform, privacy)
-          .then(() => diag('push', 'token registered'))
-          .catch((err) =>
-            diag('push', 'register failed', { err: String(err) }),
-          );
       });
-    }).catch((err) => {
-      diag('app', 'push token registration failed (non-fatal)', { err: String(err) });
-    });
 
     // Replenisher dedupes concurrent prekey-low signals onto a single
     // in-flight round.
@@ -609,6 +584,16 @@ export default function App() {
             diag('app', 'reconnect threw', { err: String(err) });
           }
         }
+        // Re-attempt push-token registration on every foreground.
+        // Catches the case where a user denied notifications during
+        // onboarding then later granted via system Settings — without
+        // this, the cold-launch registration is the only chance and
+        // we'd never recover. Idempotent against the server.
+        void getToken()
+          .then((dt) => tryRegisterPushToken(dt))
+          .catch(() => {
+            /* best-effort */
+          });
       } else if (next === 'background' || next === 'inactive') {
         // Close the WS proactively so the server routes incoming
         // messages through push instead of the (still-alive)

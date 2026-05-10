@@ -38,7 +38,24 @@ export class FcmApnsPushProvider implements PushProvider {
   async notifyDelivery(notice: PushDeliveryNotice): Promise<void> {
     const userDevices = await this.devices.listForUser(notice.userId);
     const withPush = userDevices.filter((d) => d.pushToken);
-    if (withPush.length === 0) return;
+    if (withPush.length === 0) {
+      // Recurring report shape: "@<peer> isn't getting push notifications".
+      // Almost always this — the recipient never registered an FCM token
+      // (denied permission, Firebase unlinked on dev build, or simply
+      // never cold-launched the rc.31+ build that fixed registration).
+      // Log it so the next "no notifications" report is one server-log
+      // grep away from a diagnosis instead of a multi-turn dig.
+      // eslint-disable-next-line no-console
+      console.warn(
+        {
+          userId: notice.userId,
+          totalDevices: userDevices.length,
+          kind: notice.kind ?? 'message',
+        },
+        'push notify: no devices with push_token (silently dropped)',
+      );
+      return;
+    }
 
     // Per-device privacy: a user can have a 'rich' work phone and a
     // 'private' bedside tablet. Group device tokens by the resolved
