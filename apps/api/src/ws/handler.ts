@@ -25,6 +25,7 @@ import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
+import type { UserNotifier } from './user-notifier.js';
 
 const AUTH_TIMEOUT_MS = 10_000;
 const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // spec §5: 7-day relay buffer
@@ -48,6 +49,18 @@ interface Deps {
    * the why.
    */
   callBuffer: CallOfferBuffer;
+  /**
+   * Cross-instance fan-out for live frames. Used by the call signaling
+   * path (rc.57) so a `call_answer` / `call_ice` / `call_end` reaches
+   * the peer even if their WS authed onto a different fly machine
+   * than the sender's. The Redis-backed variant publishes via pub/sub;
+   * each instance subscribes and forwards to its local sockets.
+   *
+   * The offer side already worked cross-instance via callBuffer (rc.53);
+   * the reply side was still local-fan-out only, which lost ~50% of
+   * answers in a 2-machine deploy.
+   */
+  userNotifier: UserNotifier;
 }
 
 interface AuthedSession {
@@ -543,12 +556,21 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
       case 'call_answer':
       case 'call_ice':
       case 'call_end': {
-        // Voice call signaling. Live-route only — no relay buffer.
-        // Rationale: a call_offer that arrives 7 days later isn't a
-        // call, it's an artifact. The sender's orchestrator handles
+        // Voice call signaling. Live-route only — no 7-day relay
+        // buffer (a `call_offer` that arrives 7 days later is an
+        // artifact, not a call). The sender's orchestrator owns the
         // ringing-window timeout (~45s) locally; if the recipient is
-        // offline, push wakes the device and a fresh offer can be
-        // attempted on reconnect.
+        // offline, push wakes the device and the short-lived offer
+        // buffer (callBuffer, rc.53) holds the frame for ~30s so it
+        // drains on the recipient's next WS auth.
+        //
+        // Routing model (rc.57): every frame goes through the
+        // UserNotifier — local fan-out PLUS Redis pub/sub fan-out
+        // for any instance with the recipient's WS. Without that
+        // cross-instance hop, a callee whose WS authed onto a
+        // different fly machine than the caller's never received
+        // `call_answer` and the call stayed in "ringing" forever
+        // (~50% of calls in the 2-machine deploy).
         //
         // The `ciphertext` (offer/answer/ice) is encrypted with the
         // existing Signal 1:1 session — server can't read SDP, ICE
@@ -571,86 +593,102 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           return;
         }
 
-        const peerDevices = deps.connections.getDevices(msg.to);
-        if (peerDevices.length === 0) {
-          if (msg.type === 'call_offer') {
-            // Wake the device — push provider already does notify-only,
-            // no content. The caller's orchestrator times out the
-            // ringing window if the callee never connects.
-            const conversation = conversationIdForDirect(session.userId, msg.to);
-            void deps.push
-              .notifyDelivery({
-                userId: msg.to,
-                conversationId: conversation,
-                msgType: 'direct',
-                senderId: session.userId,
-                // Distinguishes the banner copy ("@caller is calling…"
-                // vs "@sender: New message") and stamps the FCM data
-                // block so the mobile app's message handler can route
-                // to CallKeepBridge for the full-screen ringer.
-                kind: 'call',
-              })
-              .catch((err) =>
-                deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
-              );
-            // Buffer the offer for the ringing window so when the
-            // pushed-awake device reconnects, the orchestrator gets
-            // the offer it would otherwise have missed. TTL handled
-            // by the buffer; replaced if a fresh offer arrives.
-            deps.callBuffer.put(msg.to, {
-              type: 'call_offer',
-              fromUserId: session.userId,
-              callId: msg.call_id,
-              ciphertext: msg.ciphertext as string,
-            });
-          } else if (msg.type === 'call_ice') {
-            // Trickle ICE candidates that arrived after a buffered
-            // offer. The buffer ignores ICE frames that don't match
-            // a currently-buffered call (no offer = no anchor SDP).
-            deps.callBuffer.put(msg.to, {
-              type: 'call_ice',
-              fromUserId: session.userId,
-              callId: msg.call_id,
-              ciphertext: msg.ciphertext as string,
-            });
-          } else if (msg.type === 'call_end') {
-            // Caller gave up before the callee reconnected. Drop the
-            // buffered offer so it doesn't surface as a stale ring.
+        const senderUserId = session.userId;
+        const frameToSend: WsServerMsg =
+          msg.type === 'call_end'
+            ? {
+                type: 'call_end',
+                from: senderUserId,
+                call_id: msg.call_id,
+                reason: msg.reason,
+              }
+            : {
+                type: msg.type,
+                from: senderUserId,
+                call_id: msg.call_id,
+                ciphertext: msg.ciphertext as string,
+              };
+
+        // Check whether the recipient is online anywhere (this instance
+        // or another). presence.lookupInstance returns the instance id
+        // the recipient last authed onto, or undefined if they have no
+        // live session in the cluster. We also check local devices as
+        // an extra-cheap fast path (avoids a Redis hop when the peer
+        // is right here).
+        const localDevices = deps.connections.getDevices(msg.to);
+        const onlineLocally = localDevices.length > 0;
+        const peerInstance = onlineLocally
+          ? deps.instanceId
+          : await deps.presence.lookupInstance(msg.to);
+        const onlineSomewhere = onlineLocally || !!peerInstance;
+
+        if (onlineSomewhere) {
+          // Route via UserNotifier — local fan-out + Redis pub/sub.
+          // Even if peer is on this instance, going through the
+          // notifier keeps the path uniform (the notifier's local
+          // fan-out matches what manual `for (peer of peerDevices)`
+          // did before; multi-device works the same way).
+          deps.userNotifier.notify(msg.to, frameToSend);
+
+          // If a stale offer for this call is buffered (caller raced
+          // a reconnect → live route now wins), clear so the callee
+          // doesn't double-receive once the live frame and the
+          // buffer drain both fire.
+          if (msg.type === 'call_end') {
             deps.callBuffer.clear(msg.to, msg.call_id);
           }
-          // call_answer to an offline peer is a best-effort no-op
-          // (peer's local timeout produces the same outcome).
           return;
         }
-        // Recipient came online. If a stale offer for this call is
-        // still buffered (caller raced reconnect → live fan-out wins),
-        // clear it so the callee doesn't double-receive once the
-        // existing live frame and the drain both fire.
-        if (msg.type === 'call_end') {
+
+        // Truly offline (no instance has this user).
+        if (msg.type === 'call_offer') {
+          // Wake the device — notify-only push, no content. The
+          // caller's orchestrator times out the ringing window if
+          // the callee never connects.
+          const conversation = conversationIdForDirect(session.userId, msg.to);
+          void deps.push
+            .notifyDelivery({
+              userId: msg.to,
+              conversationId: conversation,
+              msgType: 'direct',
+              senderId: session.userId,
+              // Distinguishes the banner copy ("@caller is calling…"
+              // vs "@sender: New message") and stamps the FCM data
+              // block so the mobile app's message handler can route
+              // to CallKeepBridge for the full-screen ringer.
+              kind: 'call',
+            })
+            .catch((err) =>
+              deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
+            );
+          // Buffer the offer for the ringing window so when the
+          // pushed-awake device reconnects (on any instance), the
+          // orchestrator gets the offer it would otherwise have
+          // missed. TTL handled by the buffer; replaced if a fresh
+          // offer arrives.
+          deps.callBuffer.put(msg.to, {
+            type: 'call_offer',
+            fromUserId: senderUserId,
+            callId: msg.call_id,
+            ciphertext: msg.ciphertext as string,
+          });
+        } else if (msg.type === 'call_ice') {
+          // Trickle ICE candidates that arrived after a buffered
+          // offer. The buffer ignores ICE frames that don't match a
+          // currently-buffered call (no offer = no anchor SDP).
+          deps.callBuffer.put(msg.to, {
+            type: 'call_ice',
+            fromUserId: senderUserId,
+            callId: msg.call_id,
+            ciphertext: msg.ciphertext as string,
+          });
+        } else if (msg.type === 'call_end') {
+          // Caller gave up before the callee reconnected. Drop the
+          // buffered offer so it doesn't surface as a stale ring.
           deps.callBuffer.clear(msg.to, msg.call_id);
         }
-
-        // Fan out to every live device of the recipient. First answer
-        // wins; orchestrator on losing devices sees no media flow and
-        // transitions to ended on the next call_end frame.
-        const senderUserId = session.userId;
-        for (const peer of peerDevices) {
-          if (msg.type === 'call_end') {
-            send(peer, {
-              type: 'call_end',
-              from: senderUserId,
-              call_id: msg.call_id,
-              reason: msg.reason,
-            });
-          } else {
-            send(peer, {
-              type: msg.type,
-              from: senderUserId,
-              call_id: msg.call_id,
-              ciphertext: msg.ciphertext,
-            });
-          }
-        }
+        // call_answer to an offline peer is a best-effort no-op
+        // (peer's local timeout produces the same outcome).
         return;
       }
       default: {

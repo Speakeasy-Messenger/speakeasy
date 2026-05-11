@@ -13,6 +13,7 @@ import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
 import { createCallOfferBuffer } from './call-offer-buffer.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
+import type { UserNotifier } from './user-notifier.js';
 
 export interface AttachWsOptions {
   validator: Validator;
@@ -31,6 +32,13 @@ export interface AttachWsOptions {
    * per attachWebsocket call with the default 30s ringing TTL.
    */
   callBuffer?: CallOfferBuffer;
+  /**
+   * UserNotifier for cross-instance frame routing — required for
+   * call signaling to work in a multi-instance deploy (rc.57). The
+   * server-level wiring resolves this once and shares it with the
+   * routes layer that already uses it (e.g. prekey_low notifications).
+   */
+  userNotifier: UserNotifier;
   /** Path on which to accept upgrades. Default: /ws */
   path?: string;
 }
@@ -72,6 +80,7 @@ export function attachWebsocket(
         devices: opts.devices,
         users: opts.users,
         callBuffer,
+        userNotifier: opts.userNotifier,
         log: app.log,
       });
     });

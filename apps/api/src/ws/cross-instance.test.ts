@@ -12,6 +12,8 @@ import { InMemoryGroupRepo } from '../db/groups.memory.js';
 import { InMemoryCommunityRepo } from '../db/communities.memory.js';
 import { MockPushProvider } from '../push/push.mock.js';
 import { RedisAckRouter } from './ack-router.redis.js';
+import { RedisUserNotifier } from './user-notifier.redis.js';
+import { createCallOfferBuffer } from './call-offer-buffer.js';
 
 /**
  * Phase 5f WebSocket production-class test: spin up TWO `buildServer`
@@ -138,18 +140,31 @@ async function buildCluster(): Promise<Cluster> {
   // Per-instance state.
   const connsA = new InMemoryConnections();
   const connsB = new InMemoryConnections();
-  const presenceA = new InMemoryPresence();
-  const presenceB = new InMemoryPresence();
+  // Shared presence (was per-instance pre-rc.57). Real prod uses Redis,
+  // which both machines query — InMemoryPresence shared between apps is
+  // the closest analog. Cross-instance call routing relies on this:
+  // instance A asks "is recipient on another instance?" by calling
+  // presence.lookupInstance, which only returns a result if presence
+  // is global.
+  const presence = new InMemoryPresence();
   const pushA = new MockPushProvider();
   const pushB = new MockPushProvider();
+  // Shared call-offer buffer (Redis-backed in prod). Used by call
+  // signaling tests across instances.
+  const callBuffer = createCallOfferBuffer();
 
-  // Shared (fake) Redis pub/sub bus. Both ackRouters publish + subscribe
-  // through the same channel.
-  const bus = new FakeRedisChannel();
-  const pairA = fakeRedisPair(bus);
-  const pairB = fakeRedisPair(bus);
-  const ackA = new RedisAckRouter(pairA.pub, pairA.sub);
-  const ackB = new RedisAckRouter(pairB.pub, pairB.sub);
+  // Shared (fake) Redis pub/sub buses. Separate channels for ack
+  // routing vs user notifications.
+  const ackBus = new FakeRedisChannel();
+  const ackPairA = fakeRedisPair(ackBus);
+  const ackPairB = fakeRedisPair(ackBus);
+  const ackA = new RedisAckRouter(ackPairA.pub, ackPairA.sub);
+  const ackB = new RedisAckRouter(ackPairB.pub, ackPairB.sub);
+  const notifyBus = new FakeRedisChannel();
+  const notifyPairA = fakeRedisPair(notifyBus);
+  const notifyPairB = fakeRedisPair(notifyBus);
+  const userNotifierA = new RedisUserNotifier(connsA, notifyPairA.pub, notifyPairA.sub, 'A');
+  const userNotifierB = new RedisUserNotifier(connsB, notifyPairB.pub, notifyPairB.sub, 'B');
 
   const appA = await buildServer({
     validator,
@@ -159,9 +174,11 @@ async function buildCluster(): Promise<Cluster> {
     groupRepo: groups,
     communityRepo: communities,
     connections: connsA,
-    presence: presenceA,
+    presence,
     push: pushA,
     ackRouter: ackA,
+    userNotifier: userNotifierA,
+    callBuffer,
     instanceId: 'A',
     logger: false,
   });
@@ -173,9 +190,11 @@ async function buildCluster(): Promise<Cluster> {
     groupRepo: groups,
     communityRepo: communities,
     connections: connsB,
-    presence: presenceB,
+    presence,
     push: pushB,
     ackRouter: ackB,
+    userNotifier: userNotifierB,
+    callBuffer,
     instanceId: 'B',
     logger: false,
   });
@@ -350,5 +369,147 @@ describe('cross-instance message + ack routing (Phase 5f)', () => {
     }
     // No row left in the buffer.
     expect(cluster.shared.messages.buffer.size).toBe(0);
+  });
+});
+
+/**
+ * rc.57 cross-instance call signaling.
+ *
+ * Pre-rc.57 the WS handler used `connections.getDevices(peer)` for
+ * call_answer / call_ice / call_end fan-out — a strictly LOCAL
+ * lookup. With two fly machines and no sticky WS sessions, ~50% of
+ * calls cross instances between offer and answer, and every reply
+ * after that was silently dropped by the server (peer's WS sat on
+ * the other machine). Reproducer: callee's diag at 01:11:35 sent
+ * call_answer but caller never received it; their PC stuck in
+ * have-local-offer; UI stayed in "ringing" until WebRTC's own
+ * ~20s timeout closed the PC.
+ *
+ * Fix: route every call frame through `UserNotifier.notify` — local
+ * fan-out + Redis pub/sub, identical to how `prekey_low` already
+ * worked. These tests pin the contract.
+ */
+describe('cross-instance call signaling (rc.57)', () => {
+  let cluster: Cluster;
+  const sockets = new Set<WebSocket>();
+
+  beforeEach(async () => {
+    cluster = await buildCluster();
+  });
+
+  afterEach(async () => {
+    for (const ws of sockets) {
+      if (ws.readyState === ws.OPEN || ws.readyState === ws.CONNECTING) {
+        ws.terminate();
+      }
+    }
+    sockets.clear();
+    await cluster.close();
+  });
+
+  function track(ws: WebSocket): WebSocket {
+    sockets.add(ws);
+    return ws;
+  }
+
+  it('forwards call_answer from callee on B to caller on A', async () => {
+    const alice = await authedSocket(cluster.urlA, 'alice');
+    track(alice.ws);
+    const bob = await authedSocket(cluster.urlB, 'bob');
+    track(bob.ws);
+
+    // Alice (caller on A) sends offer. Bob (callee on B) should
+    // receive it cross-instance.
+    alice.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob',
+        call_id: 'call-01HXICALLOFFERAAAAAAAAAAAAAA',
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    const offer = (await bob.q.next()) as {
+      type: string;
+      from: string;
+      call_id: string;
+      ciphertext: string;
+    };
+    expect(offer.type).toBe('call_offer');
+    expect(offer.from).toBe('alice');
+    expect(offer.call_id).toBe('call-01HXICALLOFFERAAAAAAAAAAAAAA');
+
+    // Bob (callee on B) sends answer. Pre-rc.57 this was dropped
+    // because A's local connections has no record of alice (she's…
+    // wait, she's on A; B is sending the answer FROM B, addressed to
+    // alice who is on A. B's handler.ts did getDevices('alice'),
+    // found [] locally on B, and silently dropped.)
+    bob.ws.send(
+      JSON.stringify({
+        type: 'call_answer',
+        to: 'alice',
+        call_id: 'call-01HXICALLOFFERAAAAAAAAAAAAAA',
+        ciphertext: 'QU5T',
+      }),
+    );
+    const answer = (await alice.q.next()) as {
+      type: string;
+      from: string;
+      call_id: string;
+      ciphertext: string;
+    };
+    expect(answer.type).toBe('call_answer');
+    expect(answer.from).toBe('bob');
+    expect(answer.ciphertext).toBe('QU5T');
+  });
+
+  it('forwards trickle call_ice both directions across instances', async () => {
+    const alice = await authedSocket(cluster.urlA, 'alice');
+    track(alice.ws);
+    const bob = await authedSocket(cluster.urlB, 'bob');
+    track(bob.ws);
+
+    alice.ws.send(
+      JSON.stringify({
+        type: 'call_ice',
+        to: 'bob',
+        call_id: 'call-01HXICALLICEAAAAAAAAAAAAAAAA',
+        ciphertext: 'SUNFMQ==',
+      }),
+    );
+    const iceToBob = (await bob.q.next()) as { type: string; ciphertext: string };
+    expect(iceToBob.type).toBe('call_ice');
+    expect(iceToBob.ciphertext).toBe('SUNFMQ==');
+
+    bob.ws.send(
+      JSON.stringify({
+        type: 'call_ice',
+        to: 'alice',
+        call_id: 'call-01HXICALLICEAAAAAAAAAAAAAAAA',
+        ciphertext: 'SUNFMg==',
+      }),
+    );
+    const iceToAlice = (await alice.q.next()) as { type: string; ciphertext: string };
+    expect(iceToAlice.type).toBe('call_ice');
+    expect(iceToAlice.ciphertext).toBe('SUNFMg==');
+  });
+
+  it('forwards call_end across instances', async () => {
+    const alice = await authedSocket(cluster.urlA, 'alice');
+    track(alice.ws);
+    const bob = await authedSocket(cluster.urlB, 'bob');
+    track(bob.ws);
+
+    bob.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'alice',
+        call_id: 'call-01HXICALLENDAAAAAAAAAAAAAAAA',
+        reason: 'cancel',
+      }),
+    );
+    const end = (await alice.q.next()) as { type: string; reason: string; from: string };
+    expect(end.type).toBe('call_end');
+    expect(end.reason).toBe('cancel');
+    expect(end.from).toBe('bob');
   });
 });
