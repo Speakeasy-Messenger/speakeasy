@@ -582,8 +582,28 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
   socket.on('close', () => {
     clearTimeout(authTimer);
     if (session) {
-      void deps.connections.remove(session.userId, session.deviceToken, socket);
-      void deps.presence.recordOffline(session.userId);
+      const closingSession = session;
+      void (async () => {
+        await deps.connections.remove(
+          closingSession.userId,
+          closingSession.deviceToken,
+          socket,
+        );
+        // Only record offline if THIS was the user's last live WS in
+        // the cluster. Without this check, a rapid background→active
+        // reconnect (mobile AppState flip → close old WS, open new
+        // WS) had a window where the old WS's close handler ran
+        // *after* the new WS authed — recordOffline DELETEd presence
+        // even though the user was still live on the new socket.
+        // Downstream effect: cross-instance call routing thought the
+        // user was offline and dropped subsequent call_answer /
+        // call_ice frames silently. Reproduced in
+        // cross-instance-real-redis.test.ts.
+        const remainingLocal = deps.connections.getDevices(closingSession.userId);
+        if (remainingLocal.length === 0) {
+          void deps.presence.recordOffline(closingSession.userId);
+        }
+      })();
     }
   });
 

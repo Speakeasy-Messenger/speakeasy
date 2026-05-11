@@ -36,6 +36,7 @@
     "@types/pg": "^8.11.10",
     "@types/ws": "^8.5.13",
     "drizzle-kit": "^0.31.10",
+    "ioredis-mock": "^8.13.1",
     "tsx": "^4.19.2",
     "typescript": "^5.6.3",
     "vitest": "^2.1.4"
