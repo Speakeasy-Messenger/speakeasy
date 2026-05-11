@@ -26,6 +26,7 @@ import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
+import { routeCallFrame } from './call-router.js';
 
 const AUTH_TIMEOUT_MS = 10_000;
 const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // spec §5: 7-day relay buffer
@@ -556,152 +557,16 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
       case 'call_answer':
       case 'call_ice':
       case 'call_end': {
-        // Voice call signaling. Live-route only — no 7-day relay
-        // buffer (a `call_offer` that arrives 7 days later is an
-        // artifact, not a call). The sender's orchestrator owns the
-        // ringing-window timeout (~45s) locally; if the recipient is
-        // offline, push wakes the device and the short-lived offer
-        // buffer (callBuffer, rc.53) holds the frame for ~30s so it
-        // drains on the recipient's next WS auth.
-        //
-        // Routing model (rc.57): every frame goes through the
-        // UserNotifier — local fan-out PLUS Redis pub/sub fan-out
-        // for any instance with the recipient's WS. Without that
-        // cross-instance hop, a callee whose WS authed onto a
-        // different fly machine than the caller's never received
-        // `call_answer` and the call stayed in "ringing" forever
-        // (~50% of calls in the 2-machine deploy).
-        //
-        // The `ciphertext` (offer/answer/ice) is encrypted with the
-        // existing Signal 1:1 session — server can't read SDP, ICE
-        // candidates, or DTLS fingerprints. `call_end` carries no
-        // ciphertext, just a plaintext reason.
-        if (!msg.to || typeof msg.to !== 'string') {
-          sendError(socket, 'invalid_target', 'call frame requires `to`');
-          return;
+        // Voice/video call signaling. Logic lives in call-router.ts —
+        // see that module's header for the routing model (always-push
+        // for offers, UserNotifier for live cross-instance fan-out,
+        // ringing-window buffer for offline peers). Kept here as a
+        // thin dispatcher so handler.ts stays the WS shape and
+        // validation surface, not the call lifecycle.
+        const result = await routeCallFrame(deps, session.userId, msg);
+        if (!result.ok) {
+          sendError(socket, result.code, result.message);
         }
-        if (msg.to === session.userId) {
-          sendError(socket, 'invalid_target', 'cannot call self');
-          return;
-        }
-        if (!msg.call_id || typeof msg.call_id !== 'string') {
-          sendError(socket, 'bad_call_id', 'call frame requires `call_id`');
-          return;
-        }
-        if (msg.type !== 'call_end' && typeof msg.ciphertext !== 'string') {
-          sendError(socket, 'invalid_ciphertext', 'call signaling requires ciphertext');
-          return;
-        }
-
-        const senderUserId = session.userId;
-        const frameToSend: WsServerMsg =
-          msg.type === 'call_end'
-            ? {
-                type: 'call_end',
-                from: senderUserId,
-                call_id: msg.call_id,
-                reason: msg.reason,
-              }
-            : {
-                type: msg.type,
-                from: senderUserId,
-                call_id: msg.call_id,
-                ciphertext: msg.ciphertext as string,
-              };
-
-        // rc.58: ALWAYS fire push for call_offer, regardless of
-        // whether the recipient is "online" per presence/connections.
-        // Rationale: the AppState→background→close-WS pattern has a
-        // race window of several seconds where the server still sees
-        // the recipient as online but the app has already backgrounded
-        // and won't surface in-app UI for a live call_offer. Without
-        // a push wake-up, the caller sees nothing and the call goes
-        // nowhere. WhatsApp/Signal use this model — calls always
-        // push; the foreground FCM handler suppresses the system
-        // banner when the app is already showing the ringer, so the
-        // common case (truly foreground) doesn't see a duplicate.
-        if (msg.type === 'call_offer') {
-          const conversation = conversationIdForDirect(senderUserId, msg.to);
-          void deps.push
-            .notifyDelivery({
-              userId: msg.to,
-              conversationId: conversation,
-              msgType: 'direct',
-              senderId: senderUserId,
-              // Distinguishes the banner copy ("@caller is calling…"
-              // vs "@sender: New message") and stamps the FCM data
-              // block so the mobile app's message handler can route
-              // to the full-screen ringer.
-              kind: 'call',
-            })
-            .catch((err) =>
-              deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
-            );
-        }
-
-        // Check whether the recipient is online anywhere (this instance
-        // or another). presence.lookupInstance returns the instance id
-        // the recipient last authed onto, or undefined if they have no
-        // live session in the cluster. We also check local devices as
-        // an extra-cheap fast path (avoids a Redis hop when the peer
-        // is right here).
-        const localDevices = deps.connections.getDevices(msg.to);
-        const onlineLocally = localDevices.length > 0;
-        const peerInstance = onlineLocally
-          ? deps.instanceId
-          : await deps.presence.lookupInstance(msg.to);
-        const onlineSomewhere = onlineLocally || !!peerInstance;
-
-        if (onlineSomewhere) {
-          // Route via UserNotifier — local fan-out + Redis pub/sub.
-          // Even if peer is on this instance, going through the
-          // notifier keeps the path uniform (the notifier's local
-          // fan-out matches what manual `for (peer of peerDevices)`
-          // did before; multi-device works the same way).
-          deps.userNotifier.notify(msg.to, frameToSend);
-
-          // If a stale offer for this call is buffered (caller raced
-          // a reconnect → live route now wins), clear so the callee
-          // doesn't double-receive once the live frame and the
-          // buffer drain both fire.
-          if (msg.type === 'call_end') {
-            deps.callBuffer.clear(msg.to, msg.call_id);
-          }
-          return;
-        }
-
-        // Truly offline (no instance has this user). For offers, the
-        // push above is the wake-up; the buffer holds the SDP so the
-        // pushed-awake device receives the offer on next WS auth.
-        if (msg.type === 'call_offer') {
-          // Buffer the offer for the ringing window so when the
-          // pushed-awake device reconnects (on any instance), the
-          // orchestrator gets the offer it would otherwise have
-          // missed. TTL handled by the buffer; replaced if a fresh
-          // offer arrives.
-          deps.callBuffer.put(msg.to, {
-            type: 'call_offer',
-            fromUserId: senderUserId,
-            callId: msg.call_id,
-            ciphertext: msg.ciphertext as string,
-          });
-        } else if (msg.type === 'call_ice') {
-          // Trickle ICE candidates that arrived after a buffered
-          // offer. The buffer ignores ICE frames that don't match a
-          // currently-buffered call (no offer = no anchor SDP).
-          deps.callBuffer.put(msg.to, {
-            type: 'call_ice',
-            fromUserId: senderUserId,
-            callId: msg.call_id,
-            ciphertext: msg.ciphertext as string,
-          });
-        } else if (msg.type === 'call_end') {
-          // Caller gave up before the callee reconnected. Drop the
-          // buffered offer so it doesn't surface as a stale ring.
-          deps.callBuffer.clear(msg.to, msg.call_id);
-        }
-        // call_answer to an offline peer is a best-effort no-op
-        // (peer's local timeout produces the same outcome).
         return;
       }
       default: {
