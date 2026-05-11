@@ -2,18 +2,32 @@ import type { ApiClient } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 
 /**
- * Per-process cache of "we have already called initiateSession for this
- * peer." The native libsignal store actually persists session state
- * (Phase 5c, SQLCipher-backed), but `initiateSession` consumes a
- * one-time prekey server-side every time it's called — so even though
- * the native store *would* tolerate a redundant init, we'd burn a fresh
- * OTPK from the peer's bundle on every send. This cache prevents that.
+ * Per-process cache of "we have a usable Signal session with this peer
+ * — no need to call initiateSession again." Two ways an entry lands:
+ *
+ *   1. We initiated a session ourselves (via [ensureSessionWithPeer]).
+ *   2. We decrypted an incoming message from the peer, which means
+ *      their libsignal session has been established in our native
+ *      store (PreKey message processing creates a session; subsequent
+ *      Signal messages refresh it). The decrypt call site then calls
+ *      [noteSessionEstablishedWith] to populate the cache.
+ *
+ * Why the receive-side branch matters (rc.58 bug fix): without it, a
+ * cold-started callee who decrypts a call_offer ends up calling
+ * [ensureSessionWithPeer] to encrypt the call_answer. With an empty
+ * cache, ensureSessionWithPeer re-initiates from the caller's PreKey
+ * bundle even though a session already exists in libsignal — burns a
+ * fresh OTPK and produces a PreKey-style ciphertext. The caller's
+ * libsignal store then rejects it ("invalid PreKey message:
+ * decryption failed") because their session is already advanced past
+ * the PreKey handshake. Marking the peer after decrypt closes that
+ * gap for any receive-then-send pattern within the same process.
  *
  * Cleared by `clearSessionCache` (re-enrollment, sign-out, identity
- * rotation). Not persisted across cold starts: on reboot we ask the
- * native store via a probe-and-skip path inside [ensureSessionWithPeer]
- * — the native bridge is idempotent enough that a stale "no session"
- * belief just costs one extra OTPK on the next send.
+ * rotation). Not persisted across cold starts: on the next reboot,
+ * the first inbound decrypt repopulates. The cold-start-send-first
+ * case (no prior decrypt this process) still re-initiates — covered
+ * by a future `hasSession` native bridge.
  */
 const initiatedPeers = new Set<string>();
 
@@ -27,6 +41,18 @@ export function clearSessionCache(): void {
  * re-initiates against their freshly-rotated identity. */
 export function clearSessionCacheFor(peerUserId: string): void {
   initiatedPeers.delete(peerUserId);
+}
+
+/**
+ * Mark `peerUserId` as having an established Signal session in this
+ * process. Call this after any successful `signalProtocol.decrypt`
+ * for the peer — it suppresses the next [ensureSessionWithPeer] from
+ * destructively re-initiating against the peer's PreKey bundle.
+ *
+ * Idempotent. Safe to call from every decrypt site.
+ */
+export function noteSessionEstablishedWith(peerUserId: string): void {
+  initiatedPeers.add(peerUserId);
 }
 
 /**

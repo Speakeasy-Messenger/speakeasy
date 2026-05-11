@@ -13,6 +13,7 @@ import type { SpeakeasyWsClient } from './client.js';
 import type { GroupOrchestrator } from '../crypto/group-orchestration.js';
 import type { ChatMessage } from '../store/conversations.js';
 import { b64ToBytes as bytesFromB64, utf8FromBytes } from '../utils/bytes.js';
+import { noteSessionEstablishedWith } from '../crypto/session.js';
 import { diag } from '../diag/log.js';
 
 /**
@@ -290,6 +291,12 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                     senderId,
                     ciphertext,
                   );
+                  // rc.58: decrypt succeeded → libsignal has an
+                  // established session for this peer. Mark it so the
+                  // next outbound encrypt skips the destructive
+                  // ensureSessionWithPeer re-initiation. See
+                  // session.ts for the why.
+                  noteSessionEstablishedWith(senderId);
                   const raw = utf8FromBytes(plaintext);
                   const payload = decodePayload(raw);
                   bubble = payload.text ?? '';

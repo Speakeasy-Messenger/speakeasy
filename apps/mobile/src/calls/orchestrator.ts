@@ -10,6 +10,7 @@ import {
 import type { ApiClient } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { ensureSessionWithPeer as EnsureSessionFn } from '../crypto/session.js';
+import { noteSessionEstablishedWith } from '../crypto/session.js';
 import { b64ToBytes, bytesToB64, utf8FromBytes, utf8ToBytes } from '../utils/bytes.js';
 import {
   ensureCameraPermission,
@@ -535,6 +536,14 @@ export class CallOrchestrator {
   private async decrypt(fromUserId: string, ciphertextB64: string): Promise<unknown> {
     const ciphertext = b64ToBytes(ciphertextB64);
     const plaintext = await this.deps.signalProtocol.decrypt(fromUserId, ciphertext);
+    // rc.58: decrypt succeeded → libsignal has an established session
+    // for this peer. Mark in the process-lifetime cache so the next
+    // sendEncrypted to them (call_answer, call_ice, etc.) skips the
+    // destructive ensureSessionWithPeer re-initiation. Without this,
+    // a cold-started callee would burn a fresh OTPK on every reply
+    // and produce a PreKey-style ciphertext the caller can't decrypt
+    // ("invalid PreKey message" — actual user-reported bug).
+    noteSessionEstablishedWith(fromUserId);
     return JSON.parse(utf8FromBytes(plaintext));
   }
 
