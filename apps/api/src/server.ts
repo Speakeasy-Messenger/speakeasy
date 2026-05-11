@@ -16,6 +16,9 @@ import { DrizzleGroupRepo } from './db/groups.drizzle.js';
 import { DrizzleCommunityRepo } from './db/communities.drizzle.js';
 import { DrizzleMessagesRepo } from './db/messages.drizzle.js';
 import { DrizzleDevicesRepo } from './db/devices.drizzle.js';
+import { DrizzleEventLogRepo } from './db/event-log.drizzle.js';
+import { InMemoryEventLogRepo } from './db/event-log.memory.js';
+import type { EventLogRepo } from './db/event-log.js';
 import { registerEnrollRoutes } from './routes/enroll.js';
 import { registerAvailabilityRoute } from './routes/availability.js';
 import { registerUserRoutes } from './routes/users.js';
@@ -58,6 +61,7 @@ import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
 import { registerDeviceRoutes } from './routes/devices.js';
 import { registerFeedbackRoute } from './routes/feedback.js';
+import { registerAdminRoutes } from './routes/admin.js';
 import {
   registerTurnRoutes,
   turnProviderFromEnv,
@@ -80,6 +84,9 @@ export interface BuildServerOptions {
   /** Override the call-offer buffer (test injection). Defaults to
    *  Redis-backed when REDIS_URL is set, else in-memory. */
   callBuffer?: CallOfferBuffer;
+  /** Override the persistent event log (test injection). Defaults to
+   *  Drizzle when DATABASE_URL is set, else in-memory. */
+  eventLog?: EventLogRepo;
   /** TURN/STUN credentials provider for `/v1/turn/credentials`. Defaults
    *  to env-driven (Cloudflare if env set; STUN-only fallback). */
   turnProvider?: TurnProvider;
@@ -212,8 +219,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Devices repo is needed for both the push-token route and the WS handler.
   // Resolve it once so both paths share the same instance.
   const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
+  const eventLog: EventLogRepo = opts.eventLog ?? (hasDb ? new DrizzleEventLogRepo() : new InMemoryEventLogRepo());
   await registerDeviceRoutes(app, { devices });
   await registerFeedbackRoute(app);
+  await registerAdminRoutes(app, { eventLog });
   const turnProvider = opts.turnProvider ?? turnProviderFromEnv();
   await registerTurnRoutes(app, { provider: turnProvider });
 
@@ -236,7 +245,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // instanceId already computed above for the user notifier.
     const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
-    const push = opts.push ?? defaultPushProvider(devices, app.log);
+    const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
     const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
 
     attachWebsocket(app, {
@@ -326,11 +335,12 @@ function defaultUserNotifier(connections: Connections, instanceId: string): User
 
 function defaultPushProvider(
   devices: DevicesRepo,
+  eventLog: EventLogRepo,
   log: import('fastify').FastifyBaseLogger,
 ): PushProvider {
   if (process.env.FCM_PROJECT_ID) {
     log.info('FCM_PROJECT_ID set — using FcmApnsPushProvider');
-    return new FcmApnsPushProvider(devices);
+    return new FcmApnsPushProvider(devices, eventLog);
   }
   log.info('FCM_PROJECT_ID not set — using NoopPushProvider (no push notifications)');
   return new NoopPushProvider((msg, ctx) => log.debug(ctx ?? {}, msg));

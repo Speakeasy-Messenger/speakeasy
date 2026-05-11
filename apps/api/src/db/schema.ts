@@ -1,5 +1,6 @@
 import { sql } from 'drizzle-orm';
 import {
+  bigserial,
   boolean,
   check,
   customType,
@@ -245,3 +246,26 @@ export const feedback = pgTable('feedback', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
 });
+
+/**
+ * Persistent server-side event log for diagnostics whose answers fly's
+ * 5-minute stdout buffer can't reach. See migrations/0015.
+ *
+ * One row per `eventLog.record()` call. Wired from the push path first;
+ * other paths can layer in by importing the repo. Not a general log
+ * sink — only events that are explicitly persisted land here.
+ */
+export const serverEventLog = pgTable(
+  'server_event_log',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    ts: timestamp('ts', { withTimezone: true }).notNull().defaultNow(),
+    eventType: text('event_type').notNull(),
+    userId: text('user_id'),
+    payload: jsonb('payload').notNull().default({}),
+  },
+  (t) => ({
+    userTsIdx: index('server_event_log_user_ts').on(t.userId, t.ts),
+    typeTsIdx: index('server_event_log_type_ts').on(t.eventType, t.ts),
+  }),
+);

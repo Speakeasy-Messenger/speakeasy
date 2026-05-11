@@ -6,6 +6,7 @@
 import admin from 'firebase-admin';
 import type { PushDeliveryNotice, PushProvider } from './push.js';
 import type { DevicesRepo } from '../db/devices.js';
+import type { EventLogRepo } from '../db/event-log.js';
 
 /**
  * Production push provider — FCM (Android) + APNs (iOS).
@@ -19,6 +20,7 @@ export class FcmApnsPushProvider implements PushProvider {
 
   constructor(
     private readonly devices: DevicesRepo,
+    private readonly eventLog: EventLogRepo,
     opts?: { credential?: admin.ServiceAccount },
   ) {
     this.app = admin.initializeApp(
@@ -54,6 +56,19 @@ export class FcmApnsPushProvider implements PushProvider {
         },
         'push notify: no devices with push_token (silently dropped)',
       );
+      void this.eventLog
+        .record({
+          eventType: 'push.no_devices',
+          userId: notice.userId,
+          payload: {
+            totalDevices: userDevices.length,
+            kind: notice.kind ?? 'message',
+            conversationId: notice.conversationId,
+          },
+        })
+        .catch(() => {
+          /* eventLog is best-effort */
+        });
       return;
     }
 
@@ -124,6 +139,23 @@ export class FcmApnsPushProvider implements PushProvider {
       },
       'push notify: attempted',
     );
+    void this.eventLog
+      .record({
+        eventType: 'push.attempted',
+        userId: notice.userId,
+        payload: {
+          kind,
+          deviceCount: withPush.length,
+          successes: totalSuccesses,
+          failures: totalFailures,
+          tokenPreview: withPush[0]?.pushToken?.slice(0, 8),
+          conversationId: notice.conversationId,
+          senderId: notice.senderId,
+        },
+      })
+      .catch(() => {
+        /* eventLog is best-effort */
+      });
     if (totalFailures > 0) {
       const allFailed = responses.flatMap((r) => r.responses.filter((x) => !x.success));
       // eslint-disable-next-line no-console
@@ -131,6 +163,19 @@ export class FcmApnsPushProvider implements PushProvider {
         { failures: allFailed.map((f) => f.error?.message) },
         'FCM push: some deliveries failed',
       );
+      void this.eventLog
+        .record({
+          eventType: 'push.fcm_failure',
+          userId: notice.userId,
+          payload: {
+            failures: allFailed.map((f) => f.error?.message ?? 'unknown'),
+            successes: totalSuccesses,
+            kind,
+          },
+        })
+        .catch(() => {
+          /* best-effort */
+        });
     }
   }
 }
