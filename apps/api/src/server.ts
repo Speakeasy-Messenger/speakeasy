@@ -262,6 +262,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       users: repo,
       callBuffer,
       userNotifier,
+      eventLog,
     });
     if (redis) {
       app.addHook('onClose', async () => {

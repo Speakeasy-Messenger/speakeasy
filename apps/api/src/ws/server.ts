@@ -14,6 +14,7 @@ import type { UserRepo } from '../db/users.js';
 import { createCallOfferBuffer } from './call-offer-buffer.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
+import type { EventLogRepo } from '../db/event-log.js';
 
 export interface AttachWsOptions {
   validator: Validator;
@@ -39,6 +40,8 @@ export interface AttachWsOptions {
    * routes layer that already uses it (e.g. prekey_low notifications).
    */
   userNotifier: UserNotifier;
+  /** Optional persistent event log — recipient of call-route diagnostics. */
+  eventLog?: EventLogRepo;
   /** Path on which to accept upgrades. Default: /ws */
   path?: string;
 }
@@ -81,6 +84,7 @@ export function attachWebsocket(
         users: opts.users,
         callBuffer,
         userNotifier: opts.userNotifier,
+        eventLog: opts.eventLog,
         log: app.log,
       });
     });

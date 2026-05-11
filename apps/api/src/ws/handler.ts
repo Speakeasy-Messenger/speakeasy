@@ -62,6 +62,8 @@ interface Deps {
    * answers in a 2-machine deploy.
    */
   userNotifier: UserNotifier;
+  /** Optional persistent event log — recipient of call-route diagnostics. */
+  eventLog?: import('../db/event-log.js').EventLogRepo;
 }
 
 interface AuthedSession {

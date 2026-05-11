@@ -9,6 +9,7 @@ import type { Presence } from '../presence/presence.js';
 import type { PushProvider } from '../push/push.js';
 import type { UserNotifier } from './user-notifier.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
+import type { EventLogRepo } from '../db/event-log.js';
 
 /**
  * Voice/video call signaling router.
@@ -54,6 +55,14 @@ export interface CallRouterDeps {
   callBuffer: CallOfferBuffer;
   push: PushProvider;
   log: FastifyBaseLogger;
+  /**
+   * Optional event log for persistent diagnostics. When provided, the
+   * router records each non-ICE call frame's routing decision so
+   * "tester didn't receive my call_answer 20 minutes ago" can be
+   * answered by SQL instead of "please reproduce while I tail logs."
+   * ICE frames are excluded (one call easily generates 30+).
+   */
+  eventLog?: EventLogRepo;
 }
 
 export type CallFrameClient = Extract<
@@ -161,6 +170,12 @@ export async function routeCallFrame(
     if (msg.type === 'call_end') {
       deps.callBuffer.clear(msg.to, msg.call_id);
     }
+    if (msg.type !== 'call_ice') {
+      recordCallRoute(deps, msg.type, msg.to, msg.call_id, senderUserId, {
+        decision: onlineLocally ? 'online_local' : 'online_cross_instance',
+        peerInstance,
+      });
+    }
     return ok();
   }
 
@@ -191,7 +206,46 @@ export async function routeCallFrame(
   }
   // call_answer to offline peer is a no-op — the peer's local
   // ringing-window timeout produces the same outcome.
+  if (msg.type !== 'call_ice') {
+    recordCallRoute(deps, msg.type, msg.to, msg.call_id, senderUserId, {
+      decision: msg.type === 'call_offer' ? 'offline_buffered' : msg.type === 'call_end' ? 'offline_clear_buffer' : 'offline_drop',
+    });
+  }
   return ok();
+}
+
+function recordCallRoute(
+  deps: CallRouterDeps,
+  frameType: 'call_offer' | 'call_answer' | 'call_end',
+  toUserId: string,
+  callId: string,
+  senderUserId: string,
+  detail: {
+    decision:
+      | 'online_local'
+      | 'online_cross_instance'
+      | 'offline_buffered'
+      | 'offline_clear_buffer'
+      | 'offline_drop';
+    peerInstance?: string;
+  },
+): void {
+  if (!deps.eventLog) return;
+  void deps.eventLog
+    .record({
+      eventType: `call.${frameType}.routed`,
+      userId: toUserId,
+      payload: {
+        callId,
+        senderId: senderUserId,
+        decision: detail.decision,
+        peerInstance: detail.peerInstance,
+        ourInstance: deps.instanceId,
+      },
+    })
+    .catch(() => {
+      /* best-effort */
+    });
 }
 
 function ok(): { ok: true } {
