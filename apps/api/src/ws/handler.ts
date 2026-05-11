@@ -420,26 +420,40 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               deliveredToDevices: [],
               sealed,
             });
-            // Phase 4: fan-out to ALL live devices for this recipient.
-            const peerDevices = deps.connections.getDevices(recipientId);
-            if (peerDevices.length > 0) {
-              for (const peer of peerDevices) {
-                send(peer, {
-                  type: 'message',
-                  // Sealed-sender direct messages omit `from` — the
-                  // recipient unwraps the inner envelope to recover
-                  // sender identity. See `WsServerMsg.message`.
-                  ...(sealed ? {} : { from: senderUserId }),
-                  ciphertext: msg.ciphertext,
-                  message_id: rowId,
-                  msg_type: msg.msg_type,
-                  conversation_id: conversation,
-                });
-              }
+            // Live fan-out via UserNotifier — local delivery + Redis
+            // pub/sub so the recipient receives the message regardless
+            // of which fly instance their WS is authed on. Pre-rc.58
+            // this was local-only fan-out, so two users on different
+            // machines saw messages delayed until one of them's WS
+            // happened to cycle and drain the relay buffer.
+            //
+            // The relay buffer write (above) still happens so messages
+            // survive when the recipient is offline; the mobile client
+            // dedupes by `message_id` so the live frame + a later
+            // drain replay of the same row is harmless.
+            const frame = {
+              type: 'message' as const,
+              // Sealed-sender direct messages omit `from` — the
+              // recipient unwraps the inner envelope to recover
+              // sender identity. See `WsServerMsg.message`.
+              ...(sealed ? {} : { from: senderUserId }),
+              ciphertext: msg.ciphertext,
+              message_id: rowId,
+              msg_type: msg.msg_type,
+              conversation_id: conversation,
+            };
+            const localDevices = deps.connections.getDevices(recipientId);
+            const onlineLocally = localDevices.length > 0;
+            const peerInstance = onlineLocally
+              ? deps.instanceId
+              : await deps.presence.lookupInstance(recipientId);
+            const onlineSomewhere = onlineLocally || !!peerInstance;
+            if (onlineSomewhere) {
+              deps.userNotifier.notify(recipientId, frame);
             } else {
-              // Phase 4: notify-only push so the device wakes and reconnects
-              // (then drains via the buffered-delivery path on auth handshake).
-              // No content in the payload per spec §11.
+              // Truly offline. Notify-only push wakes the device and
+              // it drains the relay buffer on next WS auth. No content
+              // in the payload per spec §11.
               void deps.push
                 .notifyDelivery({
                   userId: recipientId,
@@ -526,20 +540,25 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           // attribution.
           sealed: false,
         });
-        const peerDevices = deps.connections.getDevices(msg.to);
-        if (peerDevices.length > 0) {
-          for (const peer of peerDevices) {
-            send(peer, {
-              type: 'skdm',
-              from: senderUserId,
-              group_id: msg.group_id,
-              ciphertext: msg.ciphertext,
-              message_id: rowId,
-            });
-          }
+        // Live fan-out via UserNotifier — see direct-message branch
+        // above for the why. Same cross-instance shape, same dedupe
+        // semantics from the relay-buffer drain.
+        const skdmFrame = {
+          type: 'skdm' as const,
+          from: senderUserId,
+          group_id: msg.group_id,
+          ciphertext: msg.ciphertext,
+          message_id: rowId,
+        };
+        const skdmLocalDevices = deps.connections.getDevices(msg.to);
+        const skdmOnlineLocally = skdmLocalDevices.length > 0;
+        const skdmPeerInstance = skdmOnlineLocally
+          ? deps.instanceId
+          : await deps.presence.lookupInstance(msg.to);
+        const skdmOnlineSomewhere = skdmOnlineLocally || !!skdmPeerInstance;
+        if (skdmOnlineSomewhere) {
+          deps.userNotifier.notify(msg.to, skdmFrame);
         } else {
-          // Same notify-only push behavior as ordinary messages — wakes
-          // the recipient device which then drains the buffer.
           void deps.push
             .notifyDelivery({
               userId: msg.to,

@@ -15,11 +15,17 @@ import type { BufferedCallFrame, CallOfferBuffer } from './call-offer-buffer.js'
  *   speakeasy:call-buf:{userId}  →  JSON {callId, offer, ices: [...]}
  *   PEXPIRE 30000  (matches the ringing window)
  *
- * Atomicity: ICE-append and call-end-clear are read-modify-write,
- * which would race with a concurrent offer for a different callId.
- * We use Lua via EVAL for both so the check-then-write is atomic
- * inside Redis. SET (offer) and GETDEL (drain) are already atomic
- * single-op commands.
+ * Atomicity: SET (offer) and GETDEL (drain) are atomic single-op
+ * commands. ICE-append and call-end-clear are read-modify-write —
+ * we do the check + write in JS without a transaction, which races
+ * with a concurrent offer for a different callId in the millisecond
+ * window between GET and SET/DEL. The race is rare (two callers
+ * calling the same Bob simultaneously) and the consequence is
+ * bounded (one ICE lost, or a buffer cleared that a newer offer
+ * just re-populated — same as the existing fire-and-forget put
+ * failure mode). Lua EVAL would close the window, but using only
+ * single-op Redis commands keeps the path portable across both
+ * full Redis (Upstash 7.x) and ioredis-mock-backed Tier B tests.
  *
  * Failure mode: Redis-down or transient network error on put/clear
  * = best-effort drop. The caller's ringing-window timeout produces
@@ -33,46 +39,52 @@ import type { BufferedCallFrame, CallOfferBuffer } from './call-offer-buffer.js'
 const TTL_MS = 30_000;
 const keyFor = (userId: string): string => `speakeasy:call-buf:${userId}`;
 
-/**
- * Append an ICE frame iff the buffered offer's callId matches.
- * KEYS[1] = buffer key
- * ARGV[1] = expected callId
- * ARGV[2] = ICE frame JSON (object with fromUserId + ciphertext)
- * ARGV[3] = TTL in ms (re-applied on append)
- * Returns 1 on append, 0 on no-op.
- */
-const APPEND_ICE_SCRIPT = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then return 0 end
-local ok, v = pcall(cjson.decode, raw)
-if not ok or v.callId ~= ARGV[1] then return 0 end
-table.insert(v.ices, cjson.decode(ARGV[2]))
-redis.call('SET', KEYS[1], cjson.encode(v), 'PX', tonumber(ARGV[3]))
-return 1
-`;
-
-/**
- * Delete the buffer iff the stored callId matches.
- * KEYS[1] = buffer key
- * ARGV[1] = expected callId
- * Returns 1 on delete, 0 on no-op.
- */
-const CLEAR_SCRIPT = `
-local raw = redis.call('GET', KEYS[1])
-if not raw then return 0 end
-local ok, v = pcall(cjson.decode, raw)
-if not ok then return 0 end
-if v.callId == ARGV[1] then
-  redis.call('DEL', KEYS[1])
-  return 1
-end
-return 0
-`;
-
 interface StoredEntry {
   callId: string;
   offer: { fromUserId: string; ciphertext: string };
   ices: Array<{ fromUserId: string; ciphertext: string }>;
+}
+
+/**
+ * Non-atomic conditional read-modify-write. Reads the buffer key,
+ * passes the parsed entry to `mutate`, and writes back the result.
+ * `mutate` returns:
+ *   - a new entry → SET it (with PX ttl)
+ *   - `null`      → DEL the key
+ *   - `undefined` → no-op
+ *
+ * Concurrent writers between the GET and the SET/DEL can race —
+ * see file header. Returns true on a successful mutation, false on
+ * any abort path (no key, parse failure, Redis error, mutate
+ * declined).
+ */
+async function modifyBuffer(
+  redis: Redis,
+  key: string,
+  ttlMs: number,
+  mutate: (entry: StoredEntry) => StoredEntry | null | undefined,
+): Promise<boolean> {
+  try {
+    const raw = await redis.get(key);
+    if (!raw) return false;
+    let entry: StoredEntry;
+    try {
+      entry = JSON.parse(raw) as StoredEntry;
+    } catch {
+      return false;
+    }
+    const next = mutate(entry);
+    if (next === undefined) return false;
+    if (next === null) {
+      await redis.del(key);
+    } else {
+      await redis.set(key, JSON.stringify(next), 'PX', ttlMs);
+    }
+    return true;
+  } catch {
+    // Best-effort — drop silently per file header.
+    return false;
+  }
 }
 
 export function createRedisCallOfferBuffer(
@@ -97,29 +109,22 @@ export function createRedisCallOfferBuffer(
         });
         return;
       }
-      // call_ice
+      // call_ice — append only if the stored offer's callId matches.
       const iceFrame = {
         fromUserId: frame.fromUserId,
         ciphertext: frame.ciphertext,
       };
-      void redis
-        .eval(
-          APPEND_ICE_SCRIPT,
-          1,
-          key,
-          frame.callId,
-          JSON.stringify(iceFrame),
-          String(ttlMs),
-        )
-        .catch(() => {
-          /* silent */
-        });
+      void modifyBuffer(redis, key, ttlMs, (entry) => {
+        if (entry.callId !== frame.callId) return undefined; // no-op
+        return { ...entry, ices: [...entry.ices, iceFrame] };
+      });
     },
 
     clear(toUserId, callId) {
       const key = keyFor(toUserId);
-      void redis.eval(CLEAR_SCRIPT, 1, key, callId).catch(() => {
-        /* silent */
+      void modifyBuffer(redis, key, ttlMs, (entry) => {
+        if (entry.callId !== callId) return undefined; // no-op
+        return null; // DEL
       });
     },
 
