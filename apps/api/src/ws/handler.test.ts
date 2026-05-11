@@ -1170,6 +1170,34 @@ describe('ws voice call signaling — Phase 6', () => {
     expect(messagesRepo.buffer.size).toBe(0);
   });
 
+  it('fires a push for call_offer even when the callee is connected (rc.58)', async () => {
+    // rc.58 closes the race window where the recipient's WS is still
+    // technically "online" per presence but the app has backgrounded
+    // and won't render in-app UI for a live offer. Always pushing for
+    // call_offer guarantees a system-level wake-up regardless. The
+    // foreground FCM handler suppresses the system banner when the
+    // app is already showing the ringer, so the common case doesn't
+    // see a duplicate.
+    const a = await authedSocket('alice-blue-fox');
+    await authedSocket('bob-red-bear');
+    const before = pushProvider.calls.length;
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: 'call-01HZZZONLINEPUSHFFFFFFFFFF',
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls.length).toBe(before + 1);
+    expect(pushProvider.calls.at(-1)).toMatchObject({
+      userId: 'bob-red-bear',
+      kind: 'call',
+      senderId: 'alice-blue-fox',
+    });
+  });
+
   it('forwards call_answer and call_ice to the caller', async () => {
     const a = await authedSocket('alice-blue-fox');
     const b = await authedSocket('bob-red-bear');

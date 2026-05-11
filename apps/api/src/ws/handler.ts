@@ -609,6 +609,36 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 ciphertext: msg.ciphertext as string,
               };
 
+        // rc.58: ALWAYS fire push for call_offer, regardless of
+        // whether the recipient is "online" per presence/connections.
+        // Rationale: the AppState→background→close-WS pattern has a
+        // race window of several seconds where the server still sees
+        // the recipient as online but the app has already backgrounded
+        // and won't surface in-app UI for a live call_offer. Without
+        // a push wake-up, the caller sees nothing and the call goes
+        // nowhere. WhatsApp/Signal use this model — calls always
+        // push; the foreground FCM handler suppresses the system
+        // banner when the app is already showing the ringer, so the
+        // common case (truly foreground) doesn't see a duplicate.
+        if (msg.type === 'call_offer') {
+          const conversation = conversationIdForDirect(senderUserId, msg.to);
+          void deps.push
+            .notifyDelivery({
+              userId: msg.to,
+              conversationId: conversation,
+              msgType: 'direct',
+              senderId: senderUserId,
+              // Distinguishes the banner copy ("@caller is calling…"
+              // vs "@sender: New message") and stamps the FCM data
+              // block so the mobile app's message handler can route
+              // to the full-screen ringer.
+              kind: 'call',
+            })
+            .catch((err) =>
+              deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
+            );
+        }
+
         // Check whether the recipient is online anywhere (this instance
         // or another). presence.lookupInstance returns the instance id
         // the recipient last authed onto, or undefined if they have no
@@ -640,27 +670,10 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           return;
         }
 
-        // Truly offline (no instance has this user).
+        // Truly offline (no instance has this user). For offers, the
+        // push above is the wake-up; the buffer holds the SDP so the
+        // pushed-awake device receives the offer on next WS auth.
         if (msg.type === 'call_offer') {
-          // Wake the device — notify-only push, no content. The
-          // caller's orchestrator times out the ringing window if
-          // the callee never connects.
-          const conversation = conversationIdForDirect(session.userId, msg.to);
-          void deps.push
-            .notifyDelivery({
-              userId: msg.to,
-              conversationId: conversation,
-              msgType: 'direct',
-              senderId: session.userId,
-              // Distinguishes the banner copy ("@caller is calling…"
-              // vs "@sender: New message") and stamps the FCM data
-              // block so the mobile app's message handler can route
-              // to CallKeepBridge for the full-screen ringer.
-              kind: 'call',
-            })
-            .catch((err) =>
-              deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'),
-            );
           // Buffer the offer for the ringing window so when the
           // pushed-awake device reconnects (on any instance), the
           // orchestrator gets the offer it would otherwise have
