@@ -1,0 +1,191 @@
+name: Push Notification Test (Self-Hosted)
+
+# Dedicated workflow for push notification testing on self-hosted runner
+# Uses hetzner-android runner with 64GB RAM and hardware acceleration
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/src/push/**'
+      - 'apps/mobile/maestro/11-push-background-handler.yaml'
+      - '.github/workflows/push-test-self-hosted.yml'
+  workflow_dispatch:
+
+jobs:
+  push-notification-test:
+    runs-on: [self-hosted, android, emulator]
+    timeout-minutes: 30
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify KVM access
+        run: |
+          ls -la /dev/kvm
+          groups | grep kvm || echo "Warning: not in kvm group"
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Rewrite mobile config
+        env:
+          API_BASE_URL: http://127.0.0.1:8080
+          WS_URL: ws://127.0.0.1:8080/ws
+        run: node apps/mobile/scripts/write-test-config.mjs
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
+            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set"
+            exit 1
+          fi
+          rm -rf ../../node_modules/.cache/metro
+          rm -rf /tmp/metro-*
+          ./gradlew :app:assembleRelease --no-daemon \
+            -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
+
+      - name: Boot api server
+        env:
+          PORT: '8080'
+          HOST: '0.0.0.0'
+          LOG_LEVEL: 'info'
+          VOUCHFLOW_READ_KEY: ${{ secrets.VOUCHFLOW_READ_KEY }}
+          VOUCHFLOW_BASE_URL: 'https://sandbox.api.vouchflow.dev/v1'
+          ENROLL_RATE_LIMIT: '100'
+        run: |
+          if [ -z "$VOUCHFLOW_READ_KEY" ]; then
+            echo "::error::VOUCHFLOW_READ_KEY secret is not set"
+            exit 1
+          fi
+          cd apps/api
+          nohup node dist/server.js > /tmp/api-server.log 2>&1 &
+          for i in {1..30}; do
+            if curl -fsS http://127.0.0.1:8080/healthz > /dev/null; then
+              echo "api server is up"
+              exit 0
+            fi
+            sleep 1
+          done
+          cat /tmp/api-server.log
+          exit 1
+
+      - name: Start Android emulator
+        run: |
+          # Kill any existing emulators
+          pkill -9 qemu-system-x86_64 || true
+          adb kill-server || true
+          sleep 2
+          
+          # Ensure AVD exists
+          if ! $ANDROID_HOME/emulator/emulator -list-avds | grep -q Pixel_7_API_33; then
+            echo "Creating AVD..."
+            echo "no" | $ANDROID_HOME/cmdline-tools/latest/bin/avdmanager create avd \
+              -n Pixel_7_API_33 \
+              -k "system-images;android-33;google_apis;x86_64" \
+              -d "pixel_7"
+          fi
+          
+          # Start emulator with hardware acceleration
+          $ANDROID_HOME/emulator/emulator -avd Pixel_7_API_33 \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -accel on \
+            -gpu host \
+            -memory 4096 \
+            -no-snapshot-save &
+          
+          # Wait for device
+          adb wait-for-device
+          echo "Waiting for boot complete..."
+          timeout 120 adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done' || {
+            echo "Boot timeout"
+            exit 1
+          }
+          
+          echo "✓ Emulator ready"
+          adb devices
+
+      - name: Set up device
+        run: |
+          adb shell locksettings set-pin 0000
+          adb shell svc power stayon true
+          adb shell settings put system screen_off_timeout 1800000
+          adb shell input keyevent KEYCODE_WAKEUP
+          adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher || true
+          adb shell pm disable-user --user 0 com.android.launcher3 || true
+
+      - name: Start logcat capture
+        run: |
+          adb logcat -c
+          nohup adb logcat -v time \
+            Vouchflow:V VouchflowModule:V ReactNativeJS:V ReactNative:V \
+            AndroidRuntime:V SpeakeasyDb:V SignalProtocolModule:V \
+            SpeakeasyApp:V RNFirebaseMessaging:V FirebaseMessaging:V \
+            '*:E' > /tmp/logcat.txt 2>&1 &
+          echo "✓ Logcat capture started"
+
+      - name: Install APK and grant permissions
+        run: |
+          adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          adb shell pm grant xyz.speakeasyapp.app android.permission.RECORD_AUDIO
+          adb shell pm grant xyz.speakeasyapp.app android.permission.POST_NOTIFICATIONS
+          echo "✓ APK installed and permissions granted"
+
+      - name: Run Push Notification Test (Test 11)
+        run: |
+          adb shell wm dismiss-keyguard
+          adb shell am force-stop xyz.speakeasyapp.app
+          
+          timeout 300 maestro test apps/mobile/maestro/11-push-background-handler.yaml \
+            --debug-output /tmp/maestro-11 || {
+            echo "::error::Test 11 failed"
+            exit 1
+          }
+          
+          echo "✅ Test 11 passed!"
+
+      - name: Check for background handler execution
+        if: always()
+        run: |
+          echo "=== Checking if background handler executed ==="
+          echo ""
+          
+          echo "Handler registration:"
+          grep "background message handler registered" /tmp/logcat.txt || echo "  Not found"
+          echo ""
+          
+          echo "Background message handling:"
+          grep "push-bg.*background message received" /tmp/logcat.txt || echo "  Not found"
+          echo ""
+          
+          echo "Headless JS activity:"
+          grep -i "HeadlessJsTaskService\|ReactNative.*Starting" /tmp/logcat.txt | tail -10 || echo "  Not found"
+          echo ""
+
+      - name: Cleanup
+        if: always()
+        run: |
+          # Kill emulator
+          pkill -9 qemu-system-x86_64 || true
+          adb kill-server || true
+          # Stop api server
+          pkill -f "node dist/server.js" || true
+
+      - name: Upload artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: push-test-debug-${{ github.sha }}
+          path: |
+            /tmp/maestro-11/
+            /tmp/logcat.txt
+            /tmp/api-server.log
+          retention-days: 7
