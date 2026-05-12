@@ -104,6 +104,25 @@ export class CallOrchestrator {
   private localIceUnsub?: () => void;
   private connStateUnsub?: () => void;
 
+  /**
+   * Sequential queue for inbound call frames.
+   *
+   * When the WS reconnects and the server drains a buffered call_offer
+   * + trailing ICE candidates, the message-router dispatches each
+   * frame via `onCallFrame?.(frame)` without awaiting. This means
+   * `handleIncomingIce` can run before `handleIncomingOffer` finishes
+   * creating the peer + setting `this.active` — and the early-ICE
+   * guard (`if (!this.active || ...)`) silently drops those candidates.
+   *
+   * The fix: enqueue every call frame and process them one at a time.
+   * `handleFrame` pushes to the queue; the drain loop runs each
+   * handler sequentially (awaiting the previous one before starting
+   * the next). This guarantees the offer is fully processed before
+   * any trailing ICE frames attempt to add candidates to the peer.
+   */
+  private callFrameQueue: WsServerMsg[] = [];
+  private callFrameDraining = false;
+
   constructor(private readonly deps: CallOrchestratorDeps) {}
 
   getActive(): ActiveCall | undefined {
@@ -277,30 +296,52 @@ export class CallOrchestrator {
   /**
    * Inbound frame router. Wired into `makeMessageRouter`. Only acts on
    * `call_*` frames; everything else is ignored.
+   *
+   * Frames are **enqueued** and processed sequentially to prevent the
+   * ICE-during-offer-setup race documented on `callFrameQueue`.
+   * Non-call frames pass through immediately.
    */
   async handleFrame(frame: WsServerMsg): Promise<void> {
-    if (
+    const isCallFrame =
       frame.type === 'call_offer' ||
       frame.type === 'call_answer' ||
       frame.type === 'call_ice' ||
-      frame.type === 'call_end'
-    ) {
-      diag('call', `handleFrame: ${frame.type}`, {
-        from: frame.from,
-        call_id: frame.call_id,
-      });
-    }
-    switch (frame.type) {
-      case 'call_offer':
-        return this.handleIncomingOffer(frame.from, frame.call_id, frame.ciphertext);
-      case 'call_answer':
-        return this.handleIncomingAnswer(frame.from, frame.call_id, frame.ciphertext);
-      case 'call_ice':
-        return this.handleIncomingIce(frame.from, frame.call_id, frame.ciphertext);
-      case 'call_end':
-        return this.handleIncomingEnd(frame.from, frame.call_id, frame.reason);
-      default:
-        return;
+      frame.type === 'call_end';
+
+    if (!isCallFrame) return;
+
+    diag('call', `handleFrame: ${frame.type}`, {
+      from: frame.from,
+      call_id: frame.call_id,
+    });
+    this.callFrameQueue.push(frame);
+    await this.drainCallFrameQueue();
+  }
+
+  /** Process queued call frames one at a time, awaiting each handler. */
+  private async drainCallFrameQueue(): Promise<void> {
+    if (this.callFrameDraining) return;
+    this.callFrameDraining = true;
+    try {
+      while (this.callFrameQueue.length > 0) {
+        const frame = this.callFrameQueue.shift()!;
+        switch (frame.type) {
+          case 'call_offer':
+            await this.handleIncomingOffer(frame.from, frame.call_id, frame.ciphertext);
+            break;
+          case 'call_answer':
+            await this.handleIncomingAnswer(frame.from, frame.call_id, frame.ciphertext);
+            break;
+          case 'call_ice':
+            await this.handleIncomingIce(frame.from, frame.call_id, frame.ciphertext);
+            break;
+          case 'call_end':
+            this.handleIncomingEnd(frame.from, frame.call_id, frame.reason);
+            break;
+        }
+      }
+    } finally {
+      this.callFrameDraining = false;
     }
   }
 
