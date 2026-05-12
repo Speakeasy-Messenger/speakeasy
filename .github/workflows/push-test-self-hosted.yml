@@ -94,19 +94,21 @@ jobs:
           
           # Start emulator with hardware acceleration
           # Use swiftshader_indirect (software rendering) since no GPU on headless server
+          # Reduced memory to 3072MB to speed up boot
           $ANDROID_HOME/emulator/emulator -avd Pixel_7_API_33 \
             -no-window \
             -no-audio \
             -no-boot-anim \
             -accel on \
             -gpu swiftshader_indirect \
-            -memory 4096 \
+            -memory 3072 \
             -no-snapshot-save &
           
           # Wait for device
           adb wait-for-device
           echo "Waiting for boot complete..."
-          timeout 300 adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done' || {
+          # Increased timeout to 600s (10 min) - emulator boots slowly on first run
+          timeout 600 adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done' || {
             echo "Boot timeout - checking emulator status"
             adb devices
             adb shell getprop sys.boot_completed || true
