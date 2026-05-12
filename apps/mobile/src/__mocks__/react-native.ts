@@ -8,3 +8,4 @@ export const NativeModules = {};
 export const useEffect = () => {};
 export const useRef = <T>(initial?: T) => ({ current: initial ?? null });
 export const useState = <T>(initial: T) => [initial, () => {}];
+export const Alert = { alert: () => {} };

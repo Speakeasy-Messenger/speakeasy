@@ -6,29 +6,48 @@ import { diag } from '../diag/log.js';
 /**
  * Tap-to-open for files received in chat.
  *
- * Android scoped storage + RN's lack of FileProvider plumbing makes
- * launching an external viewer with a `content://` URI impractical
- * without adding a native dep. The pragmatic alpha behaviour: copy
- * the bytes into the device's public Downloads folder so the user can
- * find the file in their Files app, and surface the destination via
- * an Alert. The OS Files app handles the "open with…" picker from
- * there.
+ * Android scoped storage (API 29+) blocks direct writes to the public
+ * Downloads directory — RNFS.writeFile to DownloadDirectoryPath throws
+ * ENOENT. The fix: write to the app's external files directory (always
+ * writable, scoped-storage-safe) and then copy into the public
+ * Downloads via MediaStore / DownloadManager. For the alpha, we write
+ * to the app's external directory and tell the user to find the file
+ * there; a future native module can add a proper content:// share.
  *
  * On iOS, the public Downloads dir doesn't exist; we write to the
  * app's Documents dir and tell the user to open the Files app.
  */
 export async function saveAndAnnounceFile(attachment: Attachment): Promise<void> {
   const name = sanitizeFilename(attachment.name ?? `speakeasy-file-${Date.now()}`);
+
+  // Pick a directory that's always writable.
+  // - Android: ExternalDirectoryPath  → /storage/emulated/0/Android/data/<pkg>/files
+  //   This is app-specific external storage: always writable, survives
+  //   app restart, and is visible in the OS Files app under the app's
+  //   entry.  Scoped storage (API 29+) does NOT block writes here.
+  //   The public DownloadDirectoryPath is NOT writable on API 29+,
+  //   which was the source of the ENOENT bug.
+  // - iOS: DocumentDirectoryPath → always writable.
   const baseDir =
     Platform.OS === 'android'
-      ? RNFS.DownloadDirectoryPath
+      ? RNFS.ExternalDirectoryPath
       : RNFS.DocumentDirectoryPath;
+
+  // Ensure the directory exists (first save on a fresh install may not
+  // have created it yet).
+  const dirExists = await RNFS.exists(baseDir).catch(() => false);
+  if (!dirExists) {
+    await RNFS.mkdir(baseDir);
+  }
+
   const dest = `${baseDir}/${name}`;
 
   try {
     await RNFS.writeFile(dest, attachment.data, 'base64');
-    // Make Android's media store / Files app see the new file
-    // immediately. Best-effort; failures are silent.
+
+    // Android: attempt to scan the file into the MediaStore so it
+    // appears in the Files app immediately. Best-effort; not all
+    // RNFS versions expose scanFile.
     if (Platform.OS === 'android' && typeof RNFS.scanFile === 'function') {
       try {
         await RNFS.scanFile(dest);
@@ -36,8 +55,13 @@ export async function saveAndAnnounceFile(attachment: Attachment): Promise<void>
         /* not all RN versions expose this — ignore */
       }
     }
+
     diag('attach', 'file saved', { name, dest });
-    const where = Platform.OS === 'android' ? 'Downloads' : 'On My iPhone › Speakeasy';
+
+    const where =
+      Platform.OS === 'android'
+        ? 'Android › data › Speakeasy › files'
+        : 'On My iPhone › Speakeasy';
     Alert.alert(
       'Saved',
       `${name} was saved to ${where}. Open it from your Files app.`,
