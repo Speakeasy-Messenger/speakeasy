@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
+import { MentionText } from './MentionText.js';
 import { radius, space, useColors } from '../theme/index.js';
 import { accent, font } from '../theme/tokens.js';
 
@@ -39,6 +40,8 @@ export interface DisappearingMessageBubbleProps {
   variant?: 'sent' | 'received';
   /** Optional attachments rendered ABOVE the caption text. */
   attachments?: Attachment[];
+  /** Handles @mentioned in this message — enables highlighted rendering. */
+  mentions?: string[];
   /** Tap a photo/gif → host opens fullscreen viewer. */
   onTapPhoto?: (attachment: Attachment) => void;
   /** Tap a file → host writes to Downloads / opens externally. */
@@ -94,6 +97,7 @@ export function DisappearingMessageBubble({
   stage,
   variant = 'sent',
   attachments,
+  mentions,
   onTapPhoto,
   onTapFile,
   onStageAnimated,
@@ -199,14 +203,25 @@ export function DisappearingMessageBubble({
         />
       ) : null}
       {text ? (
-        <Text
-          style={[
-            styles.text,
-            isSent ? styles.sentText : { color: themed.ink },
-          ]}
-        >
-          {text}
-        </Text>
+        mentions?.length ? (
+          <MentionText
+            text={text}
+            mentions={mentions}
+            style={[
+              styles.text,
+              isSent ? styles.sentText : { color: themed.ink },
+            ]}
+          />
+        ) : (
+          <Text
+            style={[
+              styles.text,
+              isSent ? styles.sentText : { color: themed.ink },
+            ]}
+          >
+            {text}
+          </Text>
+        )
       ) : null}
       {/* Read-receipt glyph — only on sent 1:1 bubbles. ✓ = sent +
           buffered server-side; ✓✓ = recipient acked across all

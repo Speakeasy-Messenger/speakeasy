@@ -37,6 +37,8 @@ export interface ChatMessage {
   /** Optional attachments (images, gifs, files). When present, the
    * bubble renders them above any caption text. */
   attachments?: Attachment[];
+  /** Handles @mentioned in this message (bare, no @ prefix). */
+  mentions?: string[];
   /** Conversation membership type — affects routing on outbound. */
   kind: ConversationKind;
   /** Wall-clock send time (ms). */

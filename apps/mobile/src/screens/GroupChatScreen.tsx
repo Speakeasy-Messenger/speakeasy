@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   FlatList,
   KeyboardAvoidingView,
@@ -11,7 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { type Attachment, encodePayload, newMessageId } from '@speakeasy/shared';
+import { type Attachment, encodePayload, newMessageId, parseMentions } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
@@ -24,6 +24,8 @@ import { SystemMessageRow } from '../components/SystemMessageRow.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Avatar } from '../components/Avatar.js';
+import { MentionPicker } from '../components/MentionPicker.js';
+import { MentionText } from '../components/MentionText.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
@@ -152,6 +154,33 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
   }, [groupId]);
 
   const [input, setInput] = useState('');
+  const [mentionQuery, setMentionQuery] = useState<string | null>(null);
+  const inputRef = useRef<TextInput>(null);
+
+  /** Detect `@` + partial handle in the current input. */
+  const handleInputChange = useCallback((text: string) => {
+    setInput(text);
+    // Find the last `@` that isn't preceded by a non-space char (i.e. start-of-line or after space)
+    const match = /(?:^|\s)@([a-z0-9_]*)$/i.exec(text);
+    if (match) {
+      setMentionQuery(match[1]!.toLowerCase());
+    } else {
+      setMentionQuery(null);
+    }
+  }, []);
+
+  /** Insert selected mention handle into the input field. */
+  const handleMentionSelect = useCallback((handle: string) => {
+    // Replace the trailing `@query` with `@handle `
+    setInput((prev) => {
+      const idx = prev.lastIndexOf('@');
+      if (idx === -1) return prev + `@${handle} `;
+      const prefix = prev.slice(0, idx);
+      return prefix + `@${handle} `;
+    });
+    setMentionQuery(null);
+    inputRef.current?.focus();
+  }, []);
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
@@ -195,14 +224,16 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
     const trimmed = input.trim();
     if (!trimmed) return;
     setInput('');
-    void sendOutbound({ text: trimmed });
+    setMentionQuery(null);
+    const mentions = parseMentions(trimmed);
+    void sendOutbound({ text: trimmed, mentions: mentions.length ? mentions : undefined });
   }
 
   // Group send accepts text and/or attachments. Same v1 envelope as
   // direct chats (`encodePayload`) so the message-router decode path
   // is identical on the receiving side. Attachments go through the
   // sender-key fan-out, just like text.
-  async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
+  async function sendOutbound(opts: { text?: string; attachments?: Attachment[]; mentions?: string[] }) {
     const text = opts.text?.trim() || undefined;
     const attachments = opts.attachments?.length ? opts.attachments : undefined;
     if (!text && !attachments) return;
@@ -246,7 +277,7 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
           useDistributionIds.getState().getOrCreate(id),
       });
       await ws.waitForAuthed();
-      const plaintext = encodePayload({ v: 1, text, attachments });
+      const plaintext = encodePayload({ v: 1, text, attachments, mentions: opts.mentions });
       await orchestrator.sendGroupMessage({
         groupId,
         members: group.members,
@@ -380,6 +411,7 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
                 <DisappearingMessageBubble
                   text={item.text}
                   attachments={item.attachments}
+                  mentions={item.mentions}
                   stage={item.stage as DisappearingStage}
                   variant={isSelf ? 'sent' : 'received'}
                   onTapPhoto={(a) => setViewerAttachment(a)}
@@ -398,6 +430,14 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
           }
           onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
         />
+        {mentionQuery !== null && group && (
+          <MentionPicker
+            query={mentionQuery}
+            members={group.members}
+            selfUserId={myUserId ?? ''}
+            onSelect={handleMentionSelect}
+          />
+        )}
         <View
           style={[
             styles.composer,
@@ -425,7 +465,8 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
               testID="chat-input"
               style={[styles.input, { color: themed.ink }]}
               value={input}
-              onChangeText={setInput}
+              onChangeText={handleInputChange}
+              ref={inputRef}
               placeholder="say something…"
               placeholderTextColor={themed.slate}
               onSubmitEditing={hasInput ? handleSend : undefined}

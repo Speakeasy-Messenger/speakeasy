@@ -275,15 +275,18 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               // libsignal encrypt). Decode directly instead of running
               // decrypt against a self-paired session that may not exist.
               let attachments: Attachment[] | undefined;
+              let mentions: string[] | undefined;
               if (senderId === deps.myUserId) {
                 const raw = utf8FromBytes(ciphertext);
                 const payload = decodePayload(raw);
                 bubble = payload.text ?? '';
                 attachments = payload.attachments;
+                mentions = payload.mentions;
                 diag('router', 'message: self-DM utf8 decoded', {
                   ...frameDesc,
                   textPreview: bubble.slice(0, 24),
                   attachCount: attachments?.length ?? 0,
+                  mentionCount: mentions?.length ?? 0,
                 });
               } else {
                 try {
@@ -301,6 +304,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   const payload = decodePayload(raw);
                   bubble = payload.text ?? '';
                   attachments = payload.attachments;
+                  mentions = payload.mentions;
                   decryptedOk = true;
                   diag('router', 'message: signal decrypted', {
                     ...frameDesc,
@@ -342,6 +346,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   from: senderId,
                   text: bubble,
                   attachments,
+                  mentions,
                   kind: 'direct',
                   sentAt: Date.now(),
                   stage: 'sent',
@@ -411,6 +416,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               }
               let bubble: string;
               let groupAttachments: Attachment[] | undefined;
+              let groupMentions: string[] | undefined;
               let decryptedOk = false;
               try {
                 const plaintext = await deps.groupMessaging.decryptFromGroupMember(
@@ -421,6 +427,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 const payload = decodePayload(raw);
                 bubble = payload.text ?? '';
                 groupAttachments = payload.attachments;
+                groupMentions = payload.mentions;
                 decryptedOk = true;
                 diag('router', 'group: decrypted', {
                   msgId: frame.message_id,
@@ -443,6 +450,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   from: groupSenderId,
                   text: bubble,
                   attachments: groupAttachments,
+                  mentions: groupMentions,
                   kind: 'group',
                   sentAt: Date.now(),
                   stage: 'sent',

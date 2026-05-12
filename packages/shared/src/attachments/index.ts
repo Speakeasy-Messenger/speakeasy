@@ -37,6 +37,12 @@ export interface MessagePayload {
   text?: string;
   /** Up to N attachments per message (UI groups them). */
   attachments?: Attachment[];
+  /**
+   * User handles that were @mentioned in this message.
+   * Each entry is a bare handle (no `@` prefix). The renderer
+   * highlights them; the server may use them for selective push.
+   */
+  mentions?: string[];
 }
 
 /** Pack a payload into the utf-8 plaintext that gets handed to the
@@ -68,6 +74,9 @@ export function decodePayload(plain: string): MessagePayload {
                 && typeof a.data === 'string',
             )
           : undefined,
+        mentions: Array.isArray(parsed.mentions)
+          ? parsed.mentions.filter((m): m is string => typeof m === 'string')
+          : undefined,
       };
     }
     // Unknown / future version → fall back to raw text.
@@ -75,4 +84,19 @@ export function decodePayload(plain: string): MessagePayload {
   } catch {
     return { v: 1, text: plain };
   }
+}
+
+/**
+ * Extract @mentions from text.
+ * Matches `@` followed by valid handle characters `[a-z][a-z0-9_]{1,19}`.
+ * Returns deduplicated set of bare handles (no `@` prefix).
+ */
+export function parseMentions(text: string): string[] {
+  const re = /(^|\s)@([a-z][a-z0-9_]{1,19})(?=[^a-z0-9_]|$)/gi;
+  const seen = new Set<string>();
+  let match: RegExpExecArray | null;
+  while ((match = re.exec(text)) !== null) {
+    seen.add(match[2]!);
+  }
+  return Array.from(seen);
 }

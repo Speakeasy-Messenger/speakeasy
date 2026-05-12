@@ -583,6 +583,7 @@ export function ChatScreen({
               <DisappearingMessageBubble
                 text={item.text}
                 attachments={item.attachments}
+                mentions={item.mentions}
                 stage={item.stage as DisappearingStage}
                 variant={item.from === 'me' ? 'sent' : 'received'}
                 delivered={item.delivered}
