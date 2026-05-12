@@ -389,10 +389,16 @@ export function registerBackgroundMessageHandler(): void {
   const syncMod = requireMessagingSync();
   if (syncMod) {
     const messaging = syncMod as {
-      setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
+      setBackgroundMessageHandler?: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
-    messaging.setBackgroundMessageHandler(async (remoteMessage) => {
+    // CRITICAL BUG FIX: Check if setBackgroundMessageHandler exists before calling
+    // The function may be undefined if Firebase messaging module isn't fully initialized
+    if (typeof messaging.setBackgroundMessageHandler !== 'function') {
+      diag('push', 'setBackgroundMessageHandler not available (sync) - falling back to async');
+      // Fall through to async retry below
+    } else {
+      messaging.setBackgroundMessageHandler(async (remoteMessage) => {
       const data = (remoteMessage.data ?? {}) as FcmData;
       diag('push-bg', 'background message received', {
         conversationId: data.conversation_id,
@@ -407,11 +413,11 @@ export function registerBackgroundMessageHandler(): void {
         diag('push-bg', 'tap-target persisted', { target });
       } else {
         diag('push-bg', 'could not resolve target from FCM data', { data });
-      }
-    });
+      });
 
-    diag('push', 'background message handler registered (sync)');
-    return;
+      diag('push', 'background message handler registered (sync)');
+      return;
+    }
   }
 
   // Fallback: async retry. This covers the rare case where the
@@ -421,8 +427,14 @@ export function registerBackgroundMessageHandler(): void {
   void requireMessagingAsync().then((mod) => {
     if (!mod) return;
     const messaging = mod as {
-      setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
+      setBackgroundMessageHandler?: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
+
+    // Check if setBackgroundMessageHandler exists
+    if (typeof messaging.setBackgroundMessageHandler !== 'function') {
+      diag('push', 'setBackgroundMessageHandler not available even after async retry - module may not support background messages');
+      return;
+    }
 
     messaging.setBackgroundMessageHandler(async (remoteMessage) => {
       const data = (remoteMessage.data ?? {}) as FcmData;
