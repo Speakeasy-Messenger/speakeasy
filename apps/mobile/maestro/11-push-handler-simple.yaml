@@ -1,0 +1,36 @@
+# Maestro flow: Push handler registration test (SIMPLIFIED)
+# Just verifies that background message handler is registered at app start
+# Does NOT require enrollment - just launches app and checks logs
+
+appId: xyz.speakeasyapp.app
+---
+# Clear state
+- clearState
+- clearKeychain
+
+# Launch app
+- launchApp
+
+# Wait for app to load
+- waitForAnimationToEnd:
+    timeout: 5000
+
+# Dismiss ANR dialog if present
+- tapOn:
+    text: "Wait"
+    optional: true
+
+# Wait a bit more for the app to fully initialize
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# App should be on the enrollment screen now
+# We don't need to enroll - just check if handler registered
+
+# Check logcat for handler registration
+# This should happen immediately on app start (module load time)
+- runScript:
+    file: scripts/check-handler-registered-simple.sh
+
+# That's it! We just need to verify the handler was registered
+# Actual push delivery testing requires a full enrollment flow
