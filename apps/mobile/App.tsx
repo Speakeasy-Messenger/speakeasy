@@ -493,7 +493,7 @@ export default function App() {
         api,
         peerFactory: reactNativeWebRtcPeerFactory,
         getDeviceToken: getToken,
-        send: (frame) => ws.send(frame),
+        send: (frame) => ws.enqueueSend(frame),
         ensureSessionWithPeer,
         onStateChange: (call) => useCalls.getState().setActive(call),
         onCallFinished: (entry) => {

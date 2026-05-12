@@ -48,6 +48,53 @@ import { useCalls } from '../store/calls.js';
 import { CallKeepBridge } from '../calls/callkeep-bridge.js';
 
 // ---------------------------------------------------------------------------
+// Safe native-module require with retry
+// ---------------------------------------------------------------------------
+
+/**
+ * @react-native-firebase/messaging may return `undefined` if the native
+ * module bridge hasn't initialized when the JS bundle first evaluates.
+ * On Android this is common during cold start — the TurboModule registry
+ * is populated asynchronously and `require()` can race ahead of it.
+ *
+ * This helper tries the require, and if it returns undefined (or throws),
+ * retries on the next event-loop tick (up to `maxRetries` times).
+ * Returns the messaging module, or `undefined` if all retries fail.
+ */
+function requireMessaging(maxRetries = 10): Promise<object | undefined> {
+  return new Promise((resolve) => {
+    let attempts = 0;
+
+    function tryRequire(): void {
+      attempts++;
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+        const mod = require('@react-native-firebase/messaging');
+        if (mod && typeof mod === 'object') {
+          resolve(mod);
+          return;
+        }
+      } catch {
+        // Module not ready yet
+      }
+
+      if (attempts >= maxRetries) {
+        diag('push', 'messaging module never became available', {
+          attempts,
+        });
+        resolve(undefined);
+        return;
+      }
+
+      // Defer to next tick — by then the native bridge is usually ready
+      setTimeout(tryRequire, 50);
+    }
+
+    tryRequire();
+  });
+}
+
+// ---------------------------------------------------------------------------
 // FCM data-payload shape (matches server: push.fcm-apns.ts)
 // ---------------------------------------------------------------------------
 
@@ -222,16 +269,15 @@ let backgroundHandlerRegistered = false;
 export function registerBackgroundMessageHandler(): void {
   if (backgroundHandlerRegistered) return;
   if (Platform.OS === 'ios') {
-    // iOS: setBackgroundMessageHandler is not supported on iOS —
-    // the OS handles notification taps natively and delivers the
-    // data via getInitialNotification / onNotificationOpenedApp.
     backgroundHandlerRegistered = true;
     return;
   }
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const messaging = require('@react-native-firebase/messaging') as {
+  backgroundHandlerRegistered = true; // Set early to prevent duplicate calls
+
+  void requireMessaging().then((mod) => {
+    if (!mod) return;
+    const messaging = mod as {
       setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
@@ -250,13 +296,8 @@ export function registerBackgroundMessageHandler(): void {
       }
     });
 
-    backgroundHandlerRegistered = true;
-    diag('push', 'background message handler registered');
-  } catch (err) {
-    diag('push', 'setBackgroundMessageHandler registration failed', {
-      err: String(err),
-    });
-  }
+    diag('push', 'background message handler registered (async)');
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -281,9 +322,9 @@ let foregroundHandlerUnsub: (() => void) | undefined;
 export function registerForegroundMessageHandler(): void {
   if (foregroundHandlerUnsub) return;
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const messaging = require('@react-native-firebase/messaging') as {
+  void requireMessaging().then((mod) => {
+    if (!mod || foregroundHandlerUnsub) return;
+    const messaging = mod as {
       onMessage: (handler: (msg: RemoteMessageShape) => void) => () => void;
     };
 
@@ -296,10 +337,8 @@ export function registerForegroundMessageHandler(): void {
       });
     });
 
-    diag('push', 'foreground message handler registered');
-  } catch (err) {
-    diag('push', 'onMessage registration failed', { err: String(err) });
-  }
+    diag('push', 'foreground message handler registered (async)');
+  });
 }
 
 export function unregisterForegroundMessageHandler(): void {
@@ -328,10 +367,11 @@ let notificationOpenedRegistered = false;
 
 export function registerNotificationOpenedListener(): void {
   if (notificationOpenedRegistered) return;
+  notificationOpenedRegistered = true; // Set early to prevent duplicate calls
 
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const messaging = require('@react-native-firebase/messaging') as {
+  void requireMessaging().then((mod) => {
+    if (!mod) return;
+    const messaging = mod as {
       onNotificationOpenedApp: (handler: (msg: RemoteMessageShape) => void) => () => void;
     };
 
@@ -349,13 +389,8 @@ export function registerNotificationOpenedListener(): void {
       }
     });
 
-    notificationOpenedRegistered = true;
-    diag('push', 'notification-opened listener registered at module level');
-  } catch (err) {
-    diag('push', 'onNotificationOpenedApp registration failed', {
-      err: String(err),
-    });
-  }
+    diag('push', 'notification-opened listener registered (async)');
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -395,24 +430,28 @@ export function usePushNavigation(
 
     async function handleInitialNotification() {
       try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-        const messaging = require('@react-native-firebase/messaging') as {
+        const messaging = await requireMessaging() as undefined | {
           getInitialNotification: () => Promise<RemoteMessageShape | null>;
         };
 
-        // 1. Cold start — check getInitialNotification
-        const initial = await messaging.getInitialNotification();
-        if (initial?.data && !routedRef.current) {
-          const data = initial.data as FcmData;
-          const target = resolveTarget(data);
-          if (target) {
-            diag('push-nav', 'cold start from push tap', {
-              conversationId: data.conversation_id,
-              kind: data.notify_kind,
-            });
-            routedRef.current = true;
-            await routeTarget(navRef, target, callOrchestrator);
-            return;
+        if (!messaging) {
+          diag('push-nav', 'messaging module unavailable — skipping initial notification check');
+          // Still try deferred tap-target below
+        } else {
+          // 1. Cold start — check getInitialNotification
+          const initial = await messaging.getInitialNotification();
+          if (initial?.data && !routedRef.current) {
+            const data = initial.data as FcmData;
+            const target = resolveTarget(data);
+            if (target) {
+              diag('push-nav', 'cold start from push tap', {
+                conversationId: data.conversation_id,
+                kind: data.notify_kind,
+              });
+              routedRef.current = true;
+              await routeTarget(navRef, target, callOrchestrator);
+              return;
+            }
           }
         }
 

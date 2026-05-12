@@ -114,6 +114,44 @@ export class SpeakeasyWsClient {
     this.setState('closed');
   }
 
+  /**
+   * Queue a message for sending. If the WS is `authed`, sends immediately.
+   * Otherwise, queues and flushes on next `authed` transition. This is
+   * the safe variant of `send()` — it never throws due to connection state.
+   *
+   * Use this for call signaling (call_offer/answer/ice/end) and any other
+   * frames that must survive a brief reconnect window. `send()` remains
+   * available for callers that prefer explicit error handling.
+   */
+  private readonly pendingSends: WsClientMsg[] = [];
+  enqueueSend(msg: WsClientMsg): void {
+    if (this.state === 'authed' && this.socket) {
+      try {
+        this.socket.send(JSON.stringify(msg));
+        return;
+      } catch {
+        // Mid-send close — fall through to queue
+      }
+    }
+    this.pendingSends.push(msg);
+    this.flushSends();
+  }
+
+  private flushSends(): void {
+    if (this.state !== 'authed' || !this.socket) return;
+    while (this.pendingSends.length > 0) {
+      const msg = this.pendingSends[0];
+      try {
+        this.socket.send(JSON.stringify(msg));
+        this.pendingSends.shift();
+      } catch {
+        // Mid-flush close — keep the message queued; the next
+        // 'authed' transition tries again.
+        return;
+      }
+    }
+  }
+
   send(msg: WsClientMsg): void {
     if (this.state !== 'authed' || !this.socket) {
       throw new Error(`cannot send in state=${this.state}`);
@@ -253,6 +291,7 @@ export class SpeakeasyWsClient {
       this.reconnectAttempts = 0;
       this.startPingLoop();
       this.flushAcks();
+      this.flushSends();
     }
     this.opts.onMessage?.(msg);
     for (const sub of this.subscribers) {
