@@ -413,7 +413,8 @@ export function registerBackgroundMessageHandler(): void {
         diag('push-bg', 'tap-target persisted', { target });
       } else {
         diag('push-bg', 'could not resolve target from FCM data', { data });
-      });
+      }
+    });
 
       diag('push', 'background message handler registered (sync)');
       return;
