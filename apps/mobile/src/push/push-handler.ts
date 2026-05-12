@@ -389,76 +389,89 @@ export function registerBackgroundMessageHandler(): void {
   const syncMod = requireMessagingSync();
   if (syncMod) {
     // @react-native-firebase/messaging v24+ uses modular API
-    // setBackgroundMessageHandler is a FREE FUNCTION, not a method on messaging instance
+    // setBackgroundMessageHandler is a FREE FUNCTION exported from the module
     const fcm = syncMod as {
       setBackgroundMessageHandler?: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
-    // CRITICAL BUG FIX: Check if setBackgroundMessageHandler exists before calling
-    // The function may be undefined if Firebase messaging module isn't fully initialized
-    if (typeof fcm.setBackgroundMessageHandler !== 'function') {
-      diag('push', 'setBackgroundMessageHandler not available (sync) - falling back to async');
-      // Fall through to async retry below
-    } else {
+    // CRITICAL BUG FIX: Wrap in try/catch and check if function exists
+    // v24 changed the API and this may fail or be undefined
+    try {
+      if (typeof fcm.setBackgroundMessageHandler !== 'function') {
+        diag('push', 'setBackgroundMessageHandler not available (sync) - skipping');
+        return; // Don't fall through to async - just skip for now
+      }
+      
       fcm.setBackgroundMessageHandler(async (remoteMessage) => {
-      const data = (remoteMessage.data ?? {}) as FcmData;
-      diag('push-bg', 'background message received', {
-        conversationId: data.conversation_id,
-        kind: data.notify_kind,
-        msgType: data.msg_type,
-        timestamp: Date.now(),
+        const data = (remoteMessage.data ?? {}) as FcmData;
+        diag('push-bg', 'background message received', {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+          timestamp: Date.now(),
+        });
+
+        const target = resolveTarget(data);
+        if (target) {
+          await persistTapTarget(target);
+          diag('push-bg', 'tap-target persisted', { target });
+        } else {
+          diag('push-bg', 'could not resolve target from FCM data', { data });
+        }
       });
 
-      const target = resolveTarget(data);
-      if (target) {
-        await persistTapTarget(target);
-        diag('push-bg', 'tap-target persisted', { target });
-      } else {
-        diag('push-bg', 'could not resolve target from FCM data', { data });
-      }
-    });
-
       diag('push', 'background message handler registered (sync)');
+      return;
+    } catch (err) {
+      diag('push', 'setBackgroundMessageHandler sync failed', {
+        err: String(err),
+        message: (err as Error).message,
+      });
+      // Don't retry async - the function doesn't work, period
       return;
     }
   }
 
-  // Fallback: async retry. This covers the rare case where the
-  // TurboModule registry hasn't populated when the JS bundle
-  // evaluates. The handler will be registered within 50–500ms.
+  // Fallback: async retry only if sync require failed (module not ready)
   diag('push', 'sync require failed — falling back to async retry for background handler');
   void requireMessagingAsync().then((mod) => {
     if (!mod) return;
-    // v24+ modular API - setBackgroundMessageHandler is a free function
+    
     const fcm = mod as {
       setBackgroundMessageHandler?: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
-    // Check if setBackgroundMessageHandler exists
-    if (typeof fcm.setBackgroundMessageHandler !== 'function') {
-      diag('push', 'setBackgroundMessageHandler not available even after async retry - module may not support background messages');
-      return;
-    }
+    try {
+      if (typeof fcm.setBackgroundMessageHandler !== 'function') {
+        diag('push', 'setBackgroundMessageHandler not available (async) - background push may not work');
+        return;
+      }
 
-    fcm.setBackgroundMessageHandler(async (remoteMessage) => {
-      const data = (remoteMessage.data ?? {}) as FcmData;
-      diag('push-bg', 'background message received (async handler)', {
-        conversationId: data.conversation_id,
-        kind: data.notify_kind,
-        msgType: data.msg_type,
-        timestamp: Date.now(),
+      fcm.setBackgroundMessageHandler(async (remoteMessage) => {
+        const data = (remoteMessage.data ?? {}) as FcmData;
+        diag('push-bg', 'background message received (async handler)', {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+          timestamp: Date.now(),
+        });
+
+        const target = resolveTarget(data);
+        if (target) {
+          await persistTapTarget(target);
+          diag('push-bg', 'tap-target persisted (async handler)', { target });
+        } else {
+          diag('push-bg', 'could not resolve target from FCM data (async)', { data });
+        }
       });
 
-      const target = resolveTarget(data);
-      if (target) {
-        await persistTapTarget(target);
-        diag('push-bg', 'tap-target persisted (async handler)', { target });
-      } else {
-        diag('push-bg', 'could not resolve target from FCM data (async)', { data });
-      }
-    });
-
-    diag('push', 'background message handler registered (async fallback)');
+      diag('push', 'background message handler registered (async fallback)');
+    } catch (err) {
+      diag('push', 'setBackgroundMessageHandler async failed', {
+        err: String(err),
+        message: (err as Error).message,
+      });
+    }
   });
 }
 
