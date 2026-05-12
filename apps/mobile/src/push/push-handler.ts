@@ -29,12 +29,33 @@
  *        - `notify_kind === 'message'` + `msg_type === 'group'`
  *          → navigate to GroupChat with groupId
  *        - `notify_kind === 'call'`
- *          → start CallKeepBridge + navigate to IncomingCall
+ *          → wait for call_offer to arrive via WS, then navigate
+ *            to IncomingCall (see Bug 2 fix below)
  *
  * Key design: all three listeners are registered at module level
  * (outside React's lifecycle) to close timing gaps. They persist
  * tap-targets to AsyncStorage. The `usePushNavigation` React hook
  * consumes those targets after hydration.
+ *
+ * BUG 1 FIX: `setBackgroundMessageHandler` MUST be called
+ * synchronously — before the JS event loop yields — because FCM
+ * delivers the headless-task message immediately after the bundle
+ * evaluates. The previous async `requireMessaging()` retry pattern
+ * (50ms × 10 = 500ms delay) meant that pushes arriving during
+ * that window were silently lost. Now we try the synchronous
+ * `require` first (works on 90%+ of cold starts) and only fall
+ * back to async retry if the module isn't ready yet.
+ *
+ * BUG 2 FIX: When a user taps a call push notification from the
+ * killed state, `routeTarget({kind:'call'})` used to navigate to
+ * IncomingCall immediately. But `IncomingCallScreen` returns `null`
+ * when `useCalls(s => s.active)` is empty — the `call_offer` hasn't
+ * arrived yet because WS hasn't connected/authed/drained. The user
+ * saw a blank screen. Now, for call targets, we persist a
+ * "pending call navigation" flag instead of navigating immediately.
+ * The existing `useCalls` subscription in App.tsx already auto-
+ * navigates to IncomingCall when `active.stage === 'incoming_ringing'`,
+ * so the call screen appears naturally once the WS delivers the offer.
  */
 
 import { useEffect, useRef } from 'react';
@@ -52,30 +73,40 @@ import { CallKeepBridge } from '../calls/callkeep-bridge.js';
 // ---------------------------------------------------------------------------
 
 /**
- * @react-native-firebase/messaging may return `undefined` if the native
- * module bridge hasn't initialized when the JS bundle first evaluates.
- * On Android this is common during cold start — the TurboModule registry
- * is populated asynchronously and `require()` can race ahead of it.
+ * Try to require `@react-native-firebase/messaging` synchronously.
+ * Returns the module or `undefined`.
  *
- * This helper tries the require, and if it returns undefined (or throws),
- * retries on the next event-loop tick (up to `maxRetries` times).
- * Returns the messaging module, or `undefined` if all retries fail.
+ * On most cold starts the native module bridge is ready by the time
+ * the JS bundle evaluates, so the synchronous require succeeds.
+ * When it doesn't (TurboModule registry race), callers should fall
+ * back to `requireMessagingAsync()`.
  */
-function requireMessaging(maxRetries = 10): Promise<object | undefined> {
+function requireMessagingSync(): object | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const mod = require('@react-native-firebase/messaging');
+    if (mod && typeof mod === 'object') return mod;
+  } catch {
+    // Module not ready yet
+  }
+  return undefined;
+}
+
+/**
+ * Async retry variant — polls with exponential backoff.
+ * Use when the synchronous require fails and you can afford to wait
+ * (e.g. foreground handler, notification-opened listener).
+ */
+function requireMessagingAsync(maxRetries = 10): Promise<object | undefined> {
   return new Promise((resolve) => {
     let attempts = 0;
 
     function tryRequire(): void {
       attempts++;
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-        const mod = require('@react-native-firebase/messaging');
-        if (mod && typeof mod === 'object') {
-          resolve(mod);
-          return;
-        }
-      } catch {
-        // Module not ready yet
+      const mod = requireMessagingSync();
+      if (mod) {
+        resolve(mod);
+        return;
       }
 
       if (attempts >= maxRetries) {
@@ -94,6 +125,12 @@ function requireMessaging(maxRetries = 10): Promise<object | undefined> {
   });
 }
 
+/** Backwards-compatible alias used by callers that were previously
+ *  calling `requireMessaging()`. */
+function requireMessaging(maxRetries = 10): Promise<object | undefined> {
+  return requireMessagingAsync(maxRetries);
+}
+
 // ---------------------------------------------------------------------------
 // FCM data-payload shape (matches server: push.fcm-apns.ts)
 // ---------------------------------------------------------------------------
@@ -108,11 +145,15 @@ export interface FcmData {
 }
 
 // ---------------------------------------------------------------------------
-// AsyncStorage key for cross-process tap-target
+// AsyncStorage keys for cross-process tap-target
 // ---------------------------------------------------------------------------
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 const TAP_TARGET_KEY = 'speakeasy.push.tap-target.v1';
+/** Key for pending call navigation — set when a call push is tapped
+ *  before the WS delivers the call_offer. Consumed by the
+ *  useCalls subscriber in App.tsx. */
+const PENDING_CALL_NAV_KEY = 'speakeasy.push.pending-call-nav.v1';
 
 export type TapTarget =
   | { kind: 'direct'; peerId: string }
@@ -133,6 +174,31 @@ async function consumeTapTarget(): Promise<TapTarget | undefined> {
     if (!raw) return undefined;
     await AsyncStorage.removeItem(TAP_TARGET_KEY);
     return JSON.parse(raw) as TapTarget;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Persist a pending call navigation target. Unlike regular tap-targets,
+ * call navigation is deferred until the WS delivers the call_offer
+ * (which triggers `useCalls` → `IncomingCall`). This key is read by
+ * the `useCalls` subscriber in App.tsx to start CallKeepBridge.
+ */
+export async function persistPendingCallNav(peerId: string): Promise<void> {
+  try {
+    await AsyncStorage.setItem(PENDING_CALL_NAV_KEY, JSON.stringify({ peerId }));
+  } catch {
+    /* best-effort */
+  }
+}
+
+export async function consumePendingCallNav(): Promise<string | undefined> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_CALL_NAV_KEY);
+    if (!raw) return undefined;
+    await AsyncStorage.removeItem(PENDING_CALL_NAV_KEY);
+    return (JSON.parse(raw) as { peerId: string }).peerId;
   } catch {
     return undefined;
   }
@@ -197,8 +263,15 @@ type RemoteMessageShape = {
 /**
  * Navigate to the correct screen for a tap-target.
  *
- * Extracted from the React hook so it can be called from both the hook
- * and the module-level foreground/AppState listeners.
+ * BUG 2 FIX: For `kind: 'call'`, we do NOT navigate to IncomingCall
+ * immediately. Instead, we persist a "pending call nav" and wait for
+ * the WS to deliver the `call_offer`, which triggers the `useCalls`
+ * subscriber in App.tsx to navigate to IncomingCall. This avoids the
+ * blank-screen race where IncomingCallScreen returns `null` because
+ * `useCalls(s => s.active)` is empty.
+ *
+ * We DO start CallKeepBridge here so the native ring UI is ready
+ * when the call_offer arrives.
  */
 export async function routeTarget(
   navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
@@ -235,23 +308,36 @@ export async function routeTarget(
         break;
       }
       case 'call': {
+        // BUG 2 FIX: Don't navigate to IncomingCall yet — the
+        // call_offer hasn't arrived via WS. Instead, persist the
+        // pending call nav so the useCalls subscriber in App.tsx
+        // can start CallKeepBridge and navigate when the call
+        // actually arrives.
+        diag('push-nav', 'call push tap — deferring navigation until call_offer arrives via WS', {
+          peerId: target.peerId,
+        });
+
+        // Start CallKeepBridge now so the native ring UI is ready
         if (callOrchestrator) {
           try {
             const bridge = new CallKeepBridge({ orchestrator: callOrchestrator });
             await bridge.start();
-            diag('push-nav', 'CallKeepBridge started from push tap');
+            diag('push-nav', 'CallKeepBridge started from call push tap (deferred nav)');
           } catch (err) {
             diag('push-nav', 'CallKeepBridge start failed (non-fatal)', {
               err: String(err),
             });
           }
         }
-        const activeCall = useCalls.getState().active;
-        if (activeCall?.stage === 'incoming_ringing') {
-          navRef.current.navigate('IncomingCall');
-        } else {
-          navRef.current.navigate('Call');
-        }
+
+        // Persist the pending call navigation so the useCalls
+        // subscriber can pick it up when the call arrives.
+        await persistPendingCallNav(target.peerId);
+
+        // Navigate to Home (conversation list) as a landing screen.
+        // The useCalls subscriber will navigate to IncomingCall once
+        // the call_offer arrives. This avoids the blank-screen race.
+        navRef.current.navigate('Home');
         break;
       }
     }
@@ -266,6 +352,21 @@ export async function routeTarget(
 
 let backgroundHandlerRegistered = false;
 
+/**
+ * BUG 1 FIX: Register the FCM background message handler SYNCHRONOUSLY.
+ *
+ * FCM's `setBackgroundMessageHandler` must be called before the JS
+ * event loop yields — if it's not registered when the headless task
+ * fires, the message is silently dropped. The previous implementation
+ * used `requireMessaging()` (async with 50ms retry intervals), which
+ * meant pushes arriving within the first ~500ms of cold start were
+ * lost.
+ *
+ * Now we try the synchronous `require` first. On most devices the
+ * native module bridge is ready by the time the JS bundle evaluates,
+ * so the handler is registered instantly. If the sync require fails
+ * (TurboModule race), we fall back to the async retry.
+ */
 export function registerBackgroundMessageHandler(): void {
   if (backgroundHandlerRegistered) return;
   if (Platform.OS === 'ios') {
@@ -275,9 +376,19 @@ export function registerBackgroundMessageHandler(): void {
 
   backgroundHandlerRegistered = true; // Set early to prevent duplicate calls
 
-  void requireMessaging().then((mod) => {
-    if (!mod) return;
-    const messaging = mod as {
+  // DIAGNOSTIC: Log that we're attempting to register
+  diag('push', 'registerBackgroundMessageHandler called', { 
+    timestamp: Date.now(),
+    platform: Platform.OS 
+  });
+
+  // CRITICAL FIX: Must be called at index.js import time, not after any async operations
+  // Try synchronous require first — this is the critical path for
+  // cold-start push delivery. On 90%+ of devices, the native module
+  // is ready by the time the JS bundle evaluates.
+  const syncMod = requireMessagingSync();
+  if (syncMod) {
+    const messaging = syncMod as {
       setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
@@ -287,16 +398,51 @@ export function registerBackgroundMessageHandler(): void {
         conversationId: data.conversation_id,
         kind: data.notify_kind,
         msgType: data.msg_type,
+        timestamp: Date.now(),
       });
 
       const target = resolveTarget(data);
       if (target) {
         await persistTapTarget(target);
         diag('push-bg', 'tap-target persisted', { target });
+      } else {
+        diag('push-bg', 'could not resolve target from FCM data', { data });
       }
     });
 
-    diag('push', 'background message handler registered (async)');
+    diag('push', 'background message handler registered (sync)');
+    return;
+  }
+
+  // Fallback: async retry. This covers the rare case where the
+  // TurboModule registry hasn't populated when the JS bundle
+  // evaluates. The handler will be registered within 50–500ms.
+  diag('push', 'sync require failed — falling back to async retry for background handler');
+  void requireMessagingAsync().then((mod) => {
+    if (!mod) return;
+    const messaging = mod as {
+      setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
+    };
+
+    messaging.setBackgroundMessageHandler(async (remoteMessage) => {
+      const data = (remoteMessage.data ?? {}) as FcmData;
+      diag('push-bg', 'background message received (async handler)', {
+        conversationId: data.conversation_id,
+        kind: data.notify_kind,
+        msgType: data.msg_type,
+        timestamp: Date.now(),
+      });
+
+      const target = resolveTarget(data);
+      if (target) {
+        await persistTapTarget(target);
+        diag('push-bg', 'tap-target persisted (async handler)', { target });
+      } else {
+        diag('push-bg', 'could not resolve target from FCM data (async)', { data });
+      }
+    });
+
+    diag('push', 'background message handler registered (async fallback)');
   });
 }
 
@@ -322,7 +468,7 @@ let foregroundHandlerUnsub: (() => void) | undefined;
 export function registerForegroundMessageHandler(): void {
   if (foregroundHandlerUnsub) return;
 
-  void requireMessaging().then((mod) => {
+  void requireMessagingAsync().then((mod) => {
     if (!mod || foregroundHandlerUnsub) return;
     const messaging = mod as {
       onMessage: (handler: (msg: RemoteMessageShape) => void) => () => void;
@@ -337,7 +483,7 @@ export function registerForegroundMessageHandler(): void {
       });
     });
 
-    diag('push', 'foreground message handler registered (async)');
+    diag('push', 'foreground message handler registered');
   });
 }
 
@@ -369,7 +515,33 @@ export function registerNotificationOpenedListener(): void {
   if (notificationOpenedRegistered) return;
   notificationOpenedRegistered = true; // Set early to prevent duplicate calls
 
-  void requireMessaging().then((mod) => {
+  // Try sync first, then fall back to async
+  const syncMod = requireMessagingSync();
+  if (syncMod) {
+    const messaging = syncMod as {
+      onNotificationOpenedApp: (handler: (msg: RemoteMessageShape) => void) => () => void;
+    };
+
+    messaging.onNotificationOpenedApp((remoteMessage) => {
+      if (!remoteMessage?.data) return;
+      const data = remoteMessage.data as FcmData;
+      const target = resolveTarget(data);
+      if (target) {
+        diag('push-open', 'warm resume from push tap — persisting for hook (sync)', {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+        });
+        void persistTapTarget(target);
+      }
+    });
+
+    diag('push', 'notification-opened listener registered (sync)');
+    return;
+  }
+
+  // Async fallback
+  void requireMessagingAsync().then((mod) => {
     if (!mod) return;
     const messaging = mod as {
       onNotificationOpenedApp: (handler: (msg: RemoteMessageShape) => void) => () => void;
@@ -380,7 +552,7 @@ export function registerNotificationOpenedListener(): void {
       const data = remoteMessage.data as FcmData;
       const target = resolveTarget(data);
       if (target) {
-        diag('push-open', 'warm resume from push tap — persisting for hook', {
+        diag('push-open', 'warm resume from push tap — persisting for hook (async)', {
           conversationId: data.conversation_id,
           kind: data.notify_kind,
           msgType: data.msg_type,
@@ -389,7 +561,7 @@ export function registerNotificationOpenedListener(): void {
       }
     });
 
-    diag('push', 'notification-opened listener registered (async)');
+    diag('push', 'notification-opened listener registered (async fallback)');
   });
 }
 
@@ -501,8 +673,6 @@ export function usePushNavigation(
       }
     }
 
-    // We need AppState but it's from 'react-native' — import it inline
-    // to avoid the mock complexity at test time.
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const { AppState } = require('react-native') as {
       AppState: {

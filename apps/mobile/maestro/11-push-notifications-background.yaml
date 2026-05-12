@@ -1,0 +1,71 @@
+# Maestro flow: Push notification background delivery (Tier B)
+# Tests that push notifications work when app is backgrounded/killed
+
+appId: xyz.speakeasyapp.app
+---
+# Clear state and enroll fresh  
+- clearState
+- clearKeychain
+- launchApp
+
+# Dismiss cold-boot ANR dialog if present
+- tapOn:
+    text: "Wait"
+    optional: true
+
+# Enroll tester09 (the user with push issues)
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester09
+
+# Copy user's own ID for later verification
+- copyTextFrom:
+    id: "conversations-userid"
+
+# Grant notification permission explicitly
+# On Android 13+, this is required for push delivery
+- runScript:
+    file: scripts/grant-notification-permission.sh
+
+# Wait for permission to be granted
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Background the app
+- pressKey: Home
+
+# Wait 2 seconds for app to fully background
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Simulate FCM push notification via adb
+# This mimics what FCM would do when server sends a push
+- runScript:
+    file: scripts/send-test-push.sh
+    env:
+      USER_ID: "${maestro.copiedText}"
+      MESSAGE: "Test background notification"
+
+# Wait for notification to arrive
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Check if notification appeared
+# Note: We can't directly assert on system notifications via Maestro,
+# but we can check logcat for evidence the push was received
+- runScript:
+    file: scripts/verify-push-received.sh
+
+# Foreground the app by tapping notification
+- launchApp
+
+# Verify app opened correctly
+- extendedWaitUntil:
+    visible:
+      id: "conversations-userid"
+    timeout: 10000
+
+# Verify no crash or error state
+- assertVisible:
+    id: "conversations-list"

@@ -1,0 +1,63 @@
+# Maestro flow: Push background handler registration test
+# Verifies that setBackgroundMessageHandler is called and working
+
+appId: xyz.speakeasyapp.app
+---
+# Clear state and enroll fresh
+- clearState
+- clearKeychain
+- launchApp
+
+# Dismiss cold-boot ANR dialog
+- tapOn:
+    text: "Wait"
+    optional: true
+
+# Enroll tester09
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester09
+
+# Grant notification permission
+- runScript:
+    file: scripts/grant-notification-permission.sh
+
+# Check logcat for handler registration
+# This should happen immediately on app start
+- runScript:
+    file: scripts/check-handler-registered.sh
+
+# Background the app  
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 2000
+
+# Kill the app completely to test cold-start behavior
+- runScript:
+    file: scripts/kill-app.sh
+
+# Wait a moment
+- waitForAnimationToEnd:
+    timeout: 1000
+
+# Send test push while app is killed
+- runScript:
+    file: scripts/send-fcm-test.sh
+
+# Wait for headless JS to process
+- waitForAnimationToEnd:
+    timeout: 3000
+
+# Check if background handler ran
+- runScript:
+    file: scripts/verify-headless-execution.sh
+
+# Relaunch app
+- launchApp
+
+# Verify app state after background push
+- extendedWaitUntil:
+    visible:
+      id: "conversations-list"
+    timeout: 10000
