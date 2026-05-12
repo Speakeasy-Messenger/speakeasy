@@ -1,0 +1,146 @@
+name: Push Test (Direct - No Maestro)
+
+# Bypass Maestro entirely - just use adb commands directly
+# This avoids encryption/unlock issues with Maestro
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/src/push/**'
+      - '.github/workflows/push-test-direct.yml'
+  workflow_dispatch:
+
+jobs:
+  push-test:
+    runs-on: [self-hosted, android, emulator]
+    timeout-minutes: 30
+    
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Rewrite mobile config
+        env:
+          API_BASE_URL: http://127.0.0.1:8080
+          WS_URL: ws://127.0.0.1:8080/ws
+        run: node apps/mobile/scripts/write-test-config.mjs
+
+      - name: Build release APK
+        working-directory: apps/mobile/android
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        run: |
+          rm -rf ../../node_modules/.cache/metro 2>/dev/null || true
+          ./gradlew :app:assembleRelease --no-daemon \
+            -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
+
+      - name: Start emulator
+        run: |
+          # Kill any existing
+          pkill -f qemu-system-x86_64 || true
+          adb kill-server || true
+          sleep 2
+          
+          # Start emulator
+          $ANDROID_HOME/emulator/emulator -avd Pixel_7_API_33 \
+            -no-window \
+            -no-audio \
+            -no-boot-anim \
+            -accel on \
+            -gpu swiftshader_indirect \
+            -memory 3072 \
+            -no-snapshot-save \
+            -wipe-data &
+          
+          # Wait for device
+          adb wait-for-device
+          echo "Waiting for boot..."
+          timeout 600 adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done'
+          echo "✓ Emulator ready"
+
+      - name: Start logcat
+        run: |
+          adb logcat -c
+          nohup adb logcat -v time '*:V' > /tmp/logcat-all.txt 2>&1 &
+          echo "✓ Full logcat capture started"
+
+      - name: Install APK
+        run: |
+          adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk
+          adb shell pm grant xyz.speakeasyapp.app android.permission.POST_NOTIFICATIONS || true
+          echo "✓ APK installed"
+
+      - name: Launch app
+        run: |
+          # Launch the app
+          adb shell am start -n xyz.speakeasyapp.app/.MainActivity
+          
+          # Wait for app to start
+          sleep 10
+          
+          echo "✓ App launched"
+
+      - name: Check for background handler registration
+        run: |
+          echo "=== Checking logs for background handler registration ==="
+          echo ""
+          
+          # Wait for logs to flush
+          sleep 3
+          
+          # Search for our diagnostic log
+          if grep -q "background message handler registered" /tmp/logcat-all.txt; then
+            echo "✅ FOUND: Background handler registered!"
+            grep "background message handler registered" /tmp/logcat-all.txt
+            echo ""
+            
+            # Check if it was sync or async
+            if grep -q "background message handler registered (sync)" /tmp/logcat-all.txt; then
+              echo "✅ Registration was SYNCHRONOUS (ideal)"
+            else
+              echo "⚠️  Registration was ASYNCHRONOUS (may miss early pushes)"
+            fi
+          else
+            echo "❌ Background handler registration NOT found in logs"
+            echo ""
+            echo "Checking for ANY push/firebase logs..."
+            grep -i "push\|firebase\|fcm" /tmp/logcat-all.txt || echo "  None found"
+            echo ""
+            echo "Checking for ReactNative logs..."
+            grep "ReactNativeJS" /tmp/logcat-all.txt | head -20 || echo "  None found"
+            echo ""
+            echo "This means:"
+            echo "1. App launched but registerBackgroundMessageHandler() was not called, OR"
+            echo "2. Firebase messaging module failed to load, OR"
+            echo "3. App crashed during initialization"
+            exit 1
+          fi
+
+      - name: Check app is running
+        if: always()
+        run: |
+          echo "=== App process status ==="
+          adb shell ps | grep speakeasy || echo "App not running"
+          echo ""
+          echo "=== Recent app logs ==="
+          grep "xyz.speakeasyapp" /tmp/logcat-all.txt | tail -30 || echo "No app logs"
+
+      - name: Cleanup
+        if: always()
+        run: |
+          pkill -f qemu-system-x86_64 || true
+          adb kill-server || true
+
+      - name: Upload logcat
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: push-test-direct-${{ github.sha }}
+          path: /tmp/logcat-all.txt
+          retention-days: 7
