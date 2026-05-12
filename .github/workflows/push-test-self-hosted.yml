@@ -120,12 +120,28 @@ jobs:
 
       - name: Set up device
         run: |
-          adb shell locksettings set-pin 0000
+          # Wake up device first
+          adb shell input keyevent KEYCODE_WAKEUP
+          adb shell input keyevent KEYCODE_MENU
+          
+          # Dismiss keyguard/lockscreen BEFORE setting pin
+          adb shell wm dismiss-keyguard
+          sleep 2
+          
+          # Now set pin (may fail if already set, that's ok)
+          adb shell locksettings set-pin 0000 || echo "Pin already set or failed"
+          
+          # Keep screen on
           adb shell svc power stayon true
           adb shell settings put system screen_off_timeout 1800000
-          adb shell input keyevent KEYCODE_WAKEUP
+          
+          # Disable launchers that might interfere
           adb shell pm disable-user --user 0 com.google.android.apps.nexuslauncher || true
           adb shell pm disable-user --user 0 com.android.launcher3 || true
+          
+          # Verify device is unlocked
+          ENCRYPTED=$(adb shell getprop ro.crypto.state)
+          echo "Encryption state: $ENCRYPTED"
 
       - name: Start logcat capture
         run: |
