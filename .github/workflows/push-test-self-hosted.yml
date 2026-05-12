@@ -93,20 +93,23 @@ jobs:
           fi
           
           # Start emulator with hardware acceleration
+          # Use swiftshader_indirect (software rendering) since no GPU on headless server
           $ANDROID_HOME/emulator/emulator -avd Pixel_7_API_33 \
             -no-window \
             -no-audio \
             -no-boot-anim \
             -accel on \
-            -gpu host \
+            -gpu swiftshader_indirect \
             -memory 4096 \
             -no-snapshot-save &
           
           # Wait for device
           adb wait-for-device
           echo "Waiting for boot complete..."
-          timeout 120 adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done' || {
-            echo "Boot timeout"
+          timeout 300 adb shell 'while [[ -z $(getprop sys.boot_completed) ]]; do sleep 1; done' || {
+            echo "Boot timeout - checking emulator status"
+            adb devices
+            adb shell getprop sys.boot_completed || true
             exit 1
           }
           
