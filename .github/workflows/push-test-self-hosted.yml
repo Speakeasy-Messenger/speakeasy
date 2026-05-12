@@ -46,8 +46,8 @@ jobs:
             echo "::error::VOUCHFLOW_WRITE_KEY secret is not set"
             exit 1
           fi
-          rm -rf ../../node_modules/.cache/metro
-          rm -rf /tmp/metro-*
+          rm -rf ../../node_modules/.cache/metro || true
+          sudo rm -rf /tmp/metro-* || true
           ./gradlew :app:assembleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
 
