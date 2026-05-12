@@ -71,10 +71,10 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
 // any push arrives to prevent auto-display of system notifications
 // while the app is foregrounded — the "2x push" bug).
 
-// TEMPORARY: Comment out to test if this is causing the crash
-// registerBackgroundMessageHandler();
-// registerForegroundMessageHandler();
-// registerNotificationOpenedListener();
+// FIX: Use v24 modular API with messaging instance parameter
+registerBackgroundMessageHandler();
+registerForegroundMessageHandler();
+registerNotificationOpenedListener();
 
 /**
  * Minimum visible duration for the SplashScreen. Hydration completes
