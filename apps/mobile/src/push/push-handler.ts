@@ -388,17 +388,19 @@ export function registerBackgroundMessageHandler(): void {
   // is ready by the time the JS bundle evaluates.
   const syncMod = requireMessagingSync();
   if (syncMod) {
-    const messaging = syncMod as {
+    // @react-native-firebase/messaging v24+ uses modular API
+    // setBackgroundMessageHandler is a FREE FUNCTION, not a method on messaging instance
+    const fcm = syncMod as {
       setBackgroundMessageHandler?: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
     // CRITICAL BUG FIX: Check if setBackgroundMessageHandler exists before calling
     // The function may be undefined if Firebase messaging module isn't fully initialized
-    if (typeof messaging.setBackgroundMessageHandler !== 'function') {
+    if (typeof fcm.setBackgroundMessageHandler !== 'function') {
       diag('push', 'setBackgroundMessageHandler not available (sync) - falling back to async');
       // Fall through to async retry below
     } else {
-      messaging.setBackgroundMessageHandler(async (remoteMessage) => {
+      fcm.setBackgroundMessageHandler(async (remoteMessage) => {
       const data = (remoteMessage.data ?? {}) as FcmData;
       diag('push-bg', 'background message received', {
         conversationId: data.conversation_id,
@@ -427,17 +429,18 @@ export function registerBackgroundMessageHandler(): void {
   diag('push', 'sync require failed — falling back to async retry for background handler');
   void requireMessagingAsync().then((mod) => {
     if (!mod) return;
-    const messaging = mod as {
+    // v24+ modular API - setBackgroundMessageHandler is a free function
+    const fcm = mod as {
       setBackgroundMessageHandler?: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
     // Check if setBackgroundMessageHandler exists
-    if (typeof messaging.setBackgroundMessageHandler !== 'function') {
+    if (typeof fcm.setBackgroundMessageHandler !== 'function') {
       diag('push', 'setBackgroundMessageHandler not available even after async retry - module may not support background messages');
       return;
     }
 
-    messaging.setBackgroundMessageHandler(async (remoteMessage) => {
+    fcm.setBackgroundMessageHandler(async (remoteMessage) => {
       const data = (remoteMessage.data ?? {}) as FcmData;
       diag('push-bg', 'background message received (async handler)', {
         conversationId: data.conversation_id,
