@@ -70,9 +70,11 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
 // for headless JS on Android, and onMessage must be registered before
 // any push arrives to prevent auto-display of system notifications
 // while the app is foregrounded — the "2x push" bug).
-registerBackgroundMessageHandler();
-registerForegroundMessageHandler();
-registerNotificationOpenedListener();
+
+// TEMPORARY: Comment out to test if this is causing the crash
+// registerBackgroundMessageHandler();
+// registerForegroundMessageHandler();
+// registerNotificationOpenedListener();
 
 /**
  * Minimum visible duration for the SplashScreen. Hydration completes
