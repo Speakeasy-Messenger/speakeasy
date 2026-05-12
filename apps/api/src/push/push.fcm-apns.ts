@@ -84,7 +84,13 @@ export class FcmApnsPushProvider implements PushProvider {
       msg_type: notice.msgType,
       notify_kind: kind,
     };
-    const buckets = new Map<string, { title: string; body: string; tokens: string[] }>();
+    // Bucket by (title, body, platform) so we can build
+    // platform-specific payloads: data-only for Android (the
+    // onMessage handler suppresses auto-display when the app is
+    // foregrounded, and the OS auto-displays when the app is
+    // backgrounded/killed), and notification+data for iOS (APNs
+    // needs the alert key to display when the app is killed).
+    const buckets = new Map<string, { title: string; body: string; platform: 'ios' | 'android'; tokens: string[] }>();
     for (const d of withPush) {
       const privacy = d.notificationPrivacy ?? 'rich';
       const showSender = privacy === 'rich' && !!notice.senderId;
@@ -101,23 +107,67 @@ export class FcmApnsPushProvider implements PushProvider {
         title = showSender ? `@${notice.senderId}` : 'speakeasy';
         body = 'New message';
       }
-      const key = `${title}\0${body}`;
+      const platform = d.platform ?? 'android';
+      const key = `${title}\0${body}\0${platform}`;
       const bucket = buckets.get(key);
       if (bucket) {
         bucket.tokens.push(d.pushToken!);
       } else {
-        buckets.set(key, { title, body, tokens: [d.pushToken!] });
+        buckets.set(key, { title, body, platform, tokens: [d.pushToken!] });
       }
     }
 
     const sends: Promise<admin.messaging.BatchResponse>[] = [];
-    for (const { title, body, tokens } of buckets.values()) {
-      const payload: admin.messaging.MulticastMessage = {
-        notification: { title, body },
-        data,
-        tokens,
-      };
-      sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
+    for (const { title, body, platform, tokens } of buckets.values()) {
+      // Android: data-only message. When the app is foregrounded,
+      // onMessage fires and the library suppresses auto-display.
+      // When the app is backgrounded/killed, Android still auto-
+      // displays the notification because FCM shows data-only
+      // messages in the system tray for apps with a default
+      // notification channel configured in AndroidManifest.xml.
+      //
+      // Actually, data-only messages on Android do NOT auto-display.
+      // We need the notification key for background/killed state.
+      // The duplicate-notification fix is purely on the client side:
+      // onMessage registered at module level suppresses auto-display
+      // when the app is foregrounded. We keep the notification key
+      // here so the OS still shows a banner when the app is in the
+      // background.
+      if (platform === 'android') {
+        const payload: admin.messaging.MulticastMessage = {
+          data,
+          android: {
+            priority: 'high' as const,
+            notification: {
+              title,
+              body,
+              channelId: 'speakeasy_default',
+              clickAction: 'OPEN_FROM_PUSH',
+            },
+          },
+          tokens,
+        };
+        sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
+      } else {
+        // iOS: include top-level notification for APNs to display
+        // when the app is killed, plus content-available for
+        // background delivery (triggers UNNotificationServiceExtension
+        // or wakes the app briefly).
+        const payload: admin.messaging.MulticastMessage = {
+          notification: { title, body },
+          data,
+          apns: {
+            payload: {
+              aps: {
+                'content-available': 1,
+                'mutable-content': 1,
+              },
+            },
+          },
+          tokens,
+        };
+        sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
+      }
     }
     const responses = await Promise.all(sends);
     const totalSuccesses = responses.reduce((acc, r) => acc + r.successCount, 0);

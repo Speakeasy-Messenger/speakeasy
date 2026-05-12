@@ -1,0 +1,76 @@
+appId: xyz.speakeasyapp.app
+name: Burn whole conversation (Tier B)
+---
+
+# BURN.md §5 — open the conversation settings, tap "Burn this
+# conversation", confirm. Local dissolve + row-collapse should
+# leave no trace of the message text on screen. Self-DM is the
+# easiest single-device fixture: I'm both ends of the conversation.
+
+- clearState
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester09
+
+# Open a self-DM and seed a message so the conversation has
+# something to dissolve.
+- copyTextFrom:
+    id: "conversations-userid"
+- tapOn:
+    id: "conversations-fab"
+- tapOn:
+    id: "find-sheet-input"
+- inputText: "${maestro.copiedText}"
+- tapOn:
+    id: "find-sheet-result"
+
+- tapOn:
+    id: "chat-input"
+- inputText: "burn-me"
+- tapOn:
+    id: "chat-send"
+- assertVisible:
+    text: "burn-me"
+
+# Title-block tap opens conversation settings (the AppBar handle
+# block is the entry, not a kebab).
+- tapOn:
+    id: "chat-title-block"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-settings-screen"
+    timeout: 10000
+
+# Burn lives in the Conversation section per BURN.md §3.2 (NOT the
+# Danger section — that's where Block goes).
+- tapOn:
+    id: "conv-settings-burn"
+- extendedWaitUntil:
+    visible:
+      id: "burn-confirm-sheet"
+    timeout: 5000
+
+# The dissolve takes ~1.5s end-to-end (600ms feed-fade + 240ms
+# screen-pop + 250ms list delay + 600ms row collapse).
+- tapOn:
+    id: "burn-confirm"
+
+# After the dissolve completes, the conversation list is back on
+# screen and the burned conversation's row is gone — assert by
+# looking for the seeded message text. assertNotVisible polls; the
+# 8s window covers the dissolve + a slow emulator.
+- extendedWaitUntil:
+    notVisible:
+      text: "burn-me"
+    timeout: 8000
+
+# Sanity: the conversation list AppBar handle is back in view (we
+# didn't accidentally end up on a blank screen).
+- assertVisible:
+    id: "conversations-userid"

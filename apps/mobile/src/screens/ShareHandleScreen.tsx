@@ -66,15 +66,21 @@ export function ShareHandleScreen({ onBack }: Props): React.ReactElement {
     setTimeout(() => setCopiedAt(null), 2000);
   }
 
-  // Spec §5.4 Share via…: deep link URL is what the system share
-  // sheet should propagate. iOS share sheet previews a URL; Android
-  // shares as text. Both work.
+  // Spec §5.4 Share via…: include a real download path. The
+  // `speakeasy://add?handle=…` deep link only works for users who
+  // already have the app, so until we have App Store / Play Store
+  // listings the recipient gets the GitHub releases/latest link
+  // (always points at the newest tagged APK) — same pattern the
+  // old InviteFriends flow used. The deep link is dropped: it
+  // resolves to nothing for new users and the share-sheet preview
+  // turns the text into a dead-looking URL.
   async function handleShare() {
-    const url = encodeAdd(myUserId!);
+    const downloadUrl =
+      'https://github.com/Speakeasy-Messenger/speakeasy/releases/latest';
     try {
       await Share.share({
-        message: `@${myUserId} on Speakeasy: ${url}`,
-        url,
+        message: `join me on speakeasy: my handle is @${myUserId}.\ndownload: ${downloadUrl}`,
+        url: downloadUrl,
       });
     } catch {
       // User dismissed the share sheet — nothing to do.

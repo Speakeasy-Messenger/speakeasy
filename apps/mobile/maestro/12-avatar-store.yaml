@@ -1,0 +1,97 @@
+appId: xyz.speakeasyapp.app
+name: Avatar store — acquire flow + section visibility (Tier B)
+---
+
+# AVATARSTORE.md §6 — verify the picker's three-section layout, the
+# locked-tile → AcquireSheet → fake-purchase → ownership flip flow,
+# and that an acquired avatar moves from the Rare section into Yours.
+#
+# Phase A: every locked-tile tap opens the same AcquireSheet. We tap
+# Lynx (the only fully-illustrated rare in rc.6) so the sheet's
+# portrait actually shows the per-rare art rather than a placeholder.
+
+- clearState
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester12
+
+# Settings → Account → Change my face.
+- tapOn:
+    id: "conversations-settings-btn"
+- extendedWaitUntil:
+    visible:
+      id: "settings-screen"
+    timeout: 10000
+- tapOn:
+    id: "settings-account"
+- extendedWaitUntil:
+    visible:
+      id: "account-screen"
+    timeout: 5000
+- tapOn:
+    text: "Change my face"
+- extendedWaitUntil:
+    visible:
+      id: "avatar-picker-screen"
+    timeout: 5000
+
+# All three sections are visible. The "Yours" section appears
+# inline (free 12 always present, header rendered by SectionHeader).
+- assertVisible:
+    text: "Yours"
+- assertVisible:
+    id: "picker-section-rare"
+- assertVisible:
+    id: "picker-section-legendary"
+
+# Lynx is rendered as a locked rare tile.
+- assertVisible:
+    id: "avatar-locked-lynx"
+
+# Tap it → AcquireSheet opens with the rare-tier label + the lynx
+# blurb + an Acquire CTA showing the price.
+- tapOn:
+    id: "avatar-locked-lynx"
+- extendedWaitUntil:
+    visible:
+      id: "acquire-sheet"
+    timeout: 5000
+- assertVisible:
+    text: "RARE"
+- assertVisible:
+    text: "Lynx"
+- assertVisible:
+    id: "acquire-confirm"
+
+# Confirm — the fake-purchase flow flips ownership and the parent
+# auto-selects + dismisses back to settings/account. Lynx is now in
+# the user's owned set; the picker (next time we open it) will show
+# Lynx in the Yours section without the locked tile.
+- tapOn:
+    id: "acquire-confirm"
+
+# After successful acquire, the picker pops back automatically (the
+# `handlePick` call in the parent kicks `onBack`). Re-enter the
+# picker to assert the section move.
+- extendedWaitUntil:
+    visible:
+      id: "account-screen"
+    timeout: 8000
+- tapOn:
+    text: "Change my face"
+- extendedWaitUntil:
+    visible:
+      id: "avatar-picker-screen"
+    timeout: 5000
+
+# Lynx now lives in Yours — selectable by the standard pick id.
+- assertVisible:
+    id: "avatar-pick-lynx"
+- assertNotVisible:
+    id: "avatar-locked-lynx"

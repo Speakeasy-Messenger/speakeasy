@@ -64,7 +64,20 @@ export const useProfiles = create<ProfilesState>((set, get) => ({
       const raw = await AsyncStorage.getItem(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, PeerProfile>;
+        // rc.6 rename: free common bird `raven` → `pigeon`; the
+        // `raven` id is now the rare paid avatar. Any pre-rc.6 cached
+        // selection that referenced 'raven' was the old free bird —
+        // remap so users don't suddenly appear as the (unowned) rare.
+        let migrated = false;
+        for (const userId of Object.keys(parsed)) {
+          const entry = parsed[userId];
+          if (entry?.selectedAvatarId === 'raven') {
+            parsed[userId] = { ...entry, selectedAvatarId: 'pigeon' };
+            migrated = true;
+          }
+        }
         set({ byUserId: parsed });
+        if (migrated) void persist(parsed);
       }
     } catch {
       /* corrupt / missing → empty */

@@ -1,0 +1,97 @@
+appId: xyz.speakeasyapp.app
+name: Block + unblock round-trip (Tier B)
+---
+
+# BLOCK.md §3 + §8 — open conv settings → Block → assert frozen
+# state → tap Unblock from the FrozenInputBar → confirm → assert
+# the conversation thaws back. Self-DM is the single-device fixture
+# (the local block list doesn't reject self-targeting; the UI
+# machinery is what we're verifying).
+
+- clearState
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester10
+
+- copyTextFrom:
+    id: "conversations-userid"
+- tapOn:
+    id: "conversations-fab"
+- tapOn:
+    id: "find-sheet-input"
+- inputText: "${maestro.copiedText}"
+- tapOn:
+    id: "find-sheet-result"
+
+# Drop a message so the conversation isn't a pure draft (Block
+# from a draft is allowed but the spec's §11.4 isDraft variant of
+# the burn sheet is exercised separately — for block, we just want
+# a real conversation).
+- tapOn:
+    id: "chat-input"
+- inputText: "ping"
+- tapOn:
+    id: "chat-send"
+- assertVisible:
+    text: "ping"
+
+# Open conv settings → Danger → Block.
+- tapOn:
+    id: "chat-title-block"
+- extendedWaitUntil:
+    visible:
+      id: "conversation-settings-screen"
+    timeout: 10000
+
+- tapOn:
+    id: "conv-settings-block"
+- extendedWaitUntil:
+    visible:
+      id: "block-confirm-sheet"
+    timeout: 5000
+- tapOn:
+    id: "block-confirm"
+
+# After block: the settings screen pops back; ChatScreen's
+# AppBar swaps to the Peephole portrait + `BLOCKED` meta sub +
+# hides the call button + replaces the composer with the
+# FrozenInputBar.
+- extendedWaitUntil:
+    visible:
+      text: "BLOCKED"
+    timeout: 5000
+- assertVisible:
+    id: "frozen-input-bar"
+- assertNotVisible:
+    id: "chat-input"
+
+# The "you blocked @x." system message appears in the feed.
+- assertVisible:
+    text: "you blocked"
+
+# Unblock from the FrozenInputBar.
+- tapOn:
+    id: "frozen-input-unblock"
+- extendedWaitUntil:
+    visible:
+      id: "unblock-confirm-sheet"
+    timeout: 5000
+- tapOn:
+    id: "unblock-confirm"
+
+# After unblock: the chat thaws. BLOCKED meta sub goes away, the
+# E2E line returns, the composer comes back.
+- extendedWaitUntil:
+    notVisible:
+      text: "BLOCKED"
+    timeout: 5000
+- assertVisible:
+    text: "E2E"
+- assertVisible:
+    id: "chat-input"

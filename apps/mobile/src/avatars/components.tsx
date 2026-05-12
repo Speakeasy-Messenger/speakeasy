@@ -28,6 +28,23 @@ import Svg, {
   Rect,
 } from 'react-native-svg';
 import type { AnimalDef, AnimalRender, AnimalRenderProps } from './types.js';
+import { Lynx } from './rares/lynx.js';
+import { Koi } from './rares/koi.js';
+import { Raven } from './rares/raven.js';
+import { Frog } from './rares/frog.js';
+import { Snake } from './rares/snake.js';
+import { Peacock } from './rares/peacock.js';
+import { Hawk } from './rares/hawk.js';
+import { Squirrel } from './rares/squirrel.js';
+import { Crab } from './rares/crab.js';
+import { Beetle } from './rares/beetle.js';
+import { Anglerfish } from './rares/anglerfish.js';
+import { Seahorse } from './rares/seahorse.js';
+import { Dragon } from './legendaries/dragon.js';
+import { Phoenix } from './legendaries/phoenix.js';
+import { Turtle } from './legendaries/turtle.js';
+import { Manticore } from './legendaries/manticore.js';
+import { makePlaceholder } from './placeholder.js';
 
 // react-native-svg's animated wrappers. Passed Animated.Values via the
 // `scaleY` prop; native driver isn't supported on SVG transforms but the
@@ -152,7 +169,10 @@ const Owl: AnimalRender = ({ eyeScale, mouthScale }) => (
   </>
 );
 
-const Raven: AnimalRender = ({ eyeScale, mouthScale }) => (
+// Was `Raven` pre-rc.6 — the friendly bird silhouette is now the
+// `pigeon` free common; the rare illustrated raven (with head_tilt
+// signature effect) takes the `raven` id and lives in `rares/raven.tsx`.
+const Pigeon: AnimalRender = ({ eyeScale, mouthScale }) => (
   // Profile silhouette — single eye, beak as the mouth element. The
   // beak axis is X (horizontal "click") rather than Y, since the bird
   // is in profile and a vertical scale would distort the silhouette.
@@ -466,10 +486,10 @@ export const ANIMALS: Record<string, AnimalDef> = {
     },
     Render: Owl,
   },
-  raven: {
+  pigeon: {
     meta: {
-      id: 'raven',
-      name: 'Raven',
+      id: 'pigeon',
+      name: 'Pigeon',
       anchors: {
         breathePivot: { x: 50, y: 76 },
         eyeLeftPivot: { x: 38, y: 44 },
@@ -479,7 +499,7 @@ export const ANIMALS: Record<string, AnimalDef> = {
       },
       audioResponse: { scaleMin: 1.0, scaleMax: 1.22, translateMaxPx: 0 },
     },
-    Render: Raven,
+    Render: Pigeon,
   },
   hare: {
     meta: {
@@ -616,7 +636,93 @@ export const ANIMALS: Record<string, AnimalDef> = {
     },
     Render: Bat,
   },
+
+  // ── Paid (rare + legendary) ─────────────────────────────────
+  // The paid catalog lives in `./catalog.ts`. Each id is registered
+  // here so AvatarRenderer can dispatch on it; ownership is gated
+  // separately at the picker level. Renders not yet illustrated
+  // use a brass-square placeholder.
+
+  lynx: {
+    meta: {
+      id: 'lynx' as never,
+      name: 'Lynx',
+      anchors: {
+        breathePivot: { x: 50, y: 76 },
+        eyeLeftPivot: { x: 42, y: 50 },
+        eyeRightPivot: { x: 58, y: 50 },
+        mouthPivot: { x: 50, y: 68 },
+        mouthAxis: 'y',
+      },
+      audioResponse: { scaleMin: 1.0, scaleMax: 1.16, translateMaxPx: 0 },
+    },
+    Render: Lynx,
+  },
+  // Phase B rares — fully illustrated. Anchor metadata comes from
+  // each per-rare SVG's eye/mouth pivot points (see speakeasy-rares.html).
+  koi: paidDef('Koi', { breathe: { x: 50, y: 60 }, eyeL: { x: 20, y: 51 }, eyeR: { x: 20, y: 51 }, mouth: { x: 12.5, y: 53.9 }, mouthAxis: 'x', scaleMax: 1.06 }, Koi),
+  raven: paidDef('Raven', { breathe: { x: 50, y: 90 }, eyeL: { x: 56, y: 36 }, eyeR: { x: 56, y: 36 }, mouth: { x: 79, y: 43 }, mouthAxis: 'x', scaleMax: 1.18 }, Raven),
+  frog: paidDef('Frog', { breathe: { x: 50, y: 72 }, eyeL: { x: 38, y: 32 }, eyeR: { x: 62, y: 32 }, mouth: { x: 50, y: 60 }, mouthAxis: 'y', scaleMax: 1.14 }, Frog),
+  snake: paidDef('Snake', { breathe: { x: 50, y: 90 }, eyeL: { x: 43, y: 38 }, eyeR: { x: 57, y: 38 }, mouth: { x: 50, y: 44.5 }, mouthAxis: 'x', scaleMax: 1.08 }, Snake),
+  peacock: paidDef('Peacock', { breathe: { x: 50, y: 86 }, eyeL: { x: 46, y: 48 }, eyeR: { x: 54, y: 48 }, mouth: { x: 51, y: 55 }, mouthAxis: 'y', scaleMax: 1.14 }, Peacock),
+  hawk: paidDef('Hawk', { breathe: { x: 50, y: 92 }, eyeL: { x: 50, y: 36 }, eyeR: { x: 50, y: 36 }, mouth: { x: 75, y: 43 }, mouthAxis: 'x', scaleMax: 1.18 }, Hawk),
+  squirrel: paidDef('Squirrel', { breathe: { x: 44, y: 86 }, eyeL: { x: 34, y: 42 }, eyeR: { x: 42, y: 42 }, mouth: { x: 38, y: 54 }, mouthAxis: 'y', scaleMax: 1.16 }, Squirrel),
+  crab: paidDef('Crab', { breathe: { x: 50, y: 74 }, eyeL: { x: 43.7, y: 42 }, eyeR: { x: 56.3, y: 42 }, mouth: { x: 50, y: 58.7 }, mouthAxis: 'x', scaleMax: 1.08 }, Crab),
+  beetle: paidDef('Beetle', { breathe: { x: 50, y: 80 }, eyeL: { x: 46, y: 33 }, eyeR: { x: 54, y: 33 }, mouth: { x: 50, y: 38.5 }, mouthAxis: 'x', scaleMax: 1.06 }, Beetle),
+  anglerfish: paidDef('Anglerfish', { breathe: { x: 52, y: 80 }, eyeL: { x: 44, y: 42 }, eyeR: { x: 56, y: 42 }, mouth: { x: 46, y: 62 }, mouthAxis: 'y', scaleMax: 1.22 }, Anglerfish),
+  seahorse: paidDef('Seahorse', { breathe: { x: 44, y: 90 }, eyeL: { x: 44, y: 20 }, eyeR: { x: 44, y: 20 }, mouth: { x: 21.5, y: 20.5 }, mouthAxis: 'x', scaleMax: 1.06 }, Seahorse),
+
+  // Legendaries — Phase B fully illustrated.
+  dragon: paidDef('Dragon', { breathe: { x: 50, y: 99 }, eyeL: { x: 42, y: 28 }, eyeR: { x: 58, y: 28 }, mouth: { x: 50, y: 49 }, mouthAxis: 'y', scaleMax: 1.16 }, Dragon),
+  phoenix: paidDef('Phoenix', { breathe: { x: 50, y: 98 }, eyeL: { x: 46, y: 36 }, eyeR: { x: 54, y: 36 }, mouth: { x: 50, y: 46 }, mouthAxis: 'y', scaleMax: 1.18 }, Phoenix),
+  turtle: paidDef('Turtle', { breathe: { x: 50, y: 86 }, eyeL: { x: 11, y: 46 }, eyeR: { x: 11, y: 46 }, mouth: { x: 8, y: 50.5 }, mouthAxis: 'x', scaleMax: 1.06 }, Turtle),
+  manticore: paidDef('Manticore', { breathe: { x: 50, y: 80 }, eyeL: { x: 44, y: 40 }, eyeR: { x: 56, y: 40 }, mouth: { x: 50, y: 54 }, mouthAxis: 'y', scaleMax: 1.18 }, Manticore),
 };
+
+interface PaidAnchors {
+  breathe: { x: number; y: number };
+  eyeL: { x: number; y: number };
+  eyeR: { x: number; y: number };
+  mouth: { x: number; y: number };
+  mouthAxis: 'x' | 'y';
+  scaleMax: number;
+}
+
+function paidDef(name: string, a: PaidAnchors, Render: AnimalRender): AnimalDef {
+  return {
+    meta: {
+      id: name.toLowerCase() as never,
+      name,
+      anchors: {
+        breathePivot: a.breathe,
+        eyeLeftPivot: a.eyeL,
+        eyeRightPivot: a.eyeR,
+        mouthPivot: a.mouth,
+        mouthAxis: a.mouthAxis,
+      },
+      audioResponse: { scaleMin: 1.0, scaleMax: a.scaleMax, translateMaxPx: 0 },
+    },
+    Render,
+  };
+}
+
+function paidPlaceholder(name: string, letter: string): AnimalDef {
+  return {
+    meta: {
+      id: name.toLowerCase() as never,
+      name,
+      anchors: {
+        breathePivot: { x: 50, y: 80 },
+        eyeLeftPivot: { x: 50, y: 50 },
+        eyeRightPivot: { x: 50, y: 50 },
+        mouthPivot: { x: 50, y: 70 },
+        mouthAxis: 'y',
+      },
+      audioResponse: { scaleMin: 1.0, scaleMax: 1.0, translateMaxPx: 0 },
+    },
+    Render: makePlaceholder(letter),
+  };
+}
 
 export const ANIMAL_IDS = Object.keys(ANIMALS) as Array<keyof typeof ANIMALS>;
 
@@ -630,17 +736,33 @@ export function AnimalSvg({
   size,
   eyeScale,
   mouthScale,
+  amplitude,
 }: {
   animalId: string;
   size: number;
   eyeScale: AnimalRenderProps['eyeScale'];
   mouthScale: AnimalRenderProps['mouthScale'];
+  /**
+   * Optional. The renderer always passes a real Animated.Value;
+   * static call sites (e.g. PortraitTile previews that ship a static
+   * pose) can omit, in which case a no-op zero-value backs the prop.
+   */
+  amplitude?: AnimalRenderProps['amplitude'];
 }): React.ReactElement | null {
   const def = ANIMALS[animalId];
+  // Stable zero-amplitude backing Animated.Value — reused across
+  // PortraitTile renders so static previews don't allocate a fresh
+  // value every paint.
+  const zeroAmpRef = React.useRef<Animated.Value | null>(null);
+  if (zeroAmpRef.current === null) zeroAmpRef.current = new Animated.Value(0);
   if (!def) return null;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
-      {def.Render({ eyeScale, mouthScale })}
+      {def.Render({
+        eyeScale,
+        mouthScale,
+        amplitude: amplitude ?? zeroAmpRef.current,
+      })}
     </Svg>
   );
 }

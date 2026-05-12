@@ -23,6 +23,15 @@ export default defineConfig({
         __dirname,
         'src/__mocks__/async-storage.ts',
       ),
+      'react-native': path.resolve(__dirname, 'src/__mocks__/react-native.ts'),
+      '@react-navigation/native': path.resolve(
+        __dirname,
+        'src/__mocks__/react-navigation.ts',
+      ),
+      '../calls/callkeep-bridge.js': path.resolve(
+        __dirname,
+        'src/__mocks__/callkeep-bridge.ts',
+      ),
     },
   },
   test: {

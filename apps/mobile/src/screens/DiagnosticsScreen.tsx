@@ -1,4 +1,5 @@
 import React, { useEffect, useState } from 'react';
+import { Alert } from 'react-native';
 import {
   FlatList,
   Pressable,
@@ -22,6 +23,12 @@ import {
 } from '../diag/install-error-handler.js';
 import { space, useColors } from '../theme/index.js';
 import { font, type as typeScale } from '../theme/tokens.js';
+import { useOwnership } from '../store/ownership.js';
+import { useIdentity } from '../store/identity.js';
+import { useProfiles } from '../store/profiles.js';
+import { descriptorFor } from '../avatars/catalog.js';
+import { defaultAnimalForUser } from '../avatars/default.js';
+import { api } from '../services.js';
 
 interface Props {
   onBack: () => void;
@@ -94,6 +101,60 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
     void clearLastJsCrash();
   }
 
+  function handleWipeEntitlements() {
+    // Phase A only — fake purchases persist to AsyncStorage; once we
+    // wire RevenueCat the source-of-truth is the platform store and
+    // this affordance becomes a wrapper around `Purchases.logOut()`.
+    //
+    // Confirmation prompt + post-wipe alert because earlier silent
+    // wipes left users wondering whether the tap registered. The
+    // post-wipe alert also explains the side effect (avatar may
+    // change if their selection was a paid one).
+    Alert.alert(
+      'Reset purchases?',
+      'Clears your local fake-purchase state. Your selected avatar will be reset if it was a paid one (Phase A has no real entitlements yet).',
+      [
+        { text: 'Cancel', style: 'cancel' },
+        {
+          text: 'Reset',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              await useOwnership.getState().reset();
+              // If the user is currently wearing a paid avatar, fall
+              // back to a free one so they don't show as locked-out
+              // of their own face.
+              const userId = useIdentity.getState().userId;
+              const deviceToken = useIdentity.getState().deviceToken;
+              if (userId) {
+                const own = useProfiles.getState().byUserId[userId];
+                const current = own?.selectedAvatarId;
+                const desc = current ? descriptorFor(current) : undefined;
+                if (desc && desc.tier !== 'free') {
+                  const free = defaultAnimalForUser(userId);
+                  useProfiles.getState().set(userId, {
+                    selectedAvatarId: free,
+                    fetchedAt: Date.now(),
+                  });
+                  if (deviceToken) {
+                    void api.setAvatar(deviceToken, free).catch(() => {
+                      /* server hiccup is OK — local state is the source
+                       * of truth until next setAvatar */
+                    });
+                  }
+                }
+              }
+              Alert.alert(
+                'Reset.',
+                'Locked tiles will appear in Change my face → Rare / Legendary.',
+              );
+            })();
+          },
+        },
+      ],
+    );
+  }
+
   return (
     <SafeAreaView
       testID="diagnostics-screen"
@@ -131,6 +192,31 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
           />
         ) : null}
       </View>
+
+      {/* Dedicated row for the Reset-purchases affordance. Was crammed
+          into the top action bar in earlier alphas; the label was
+          truncating on narrow screens and users reported it looked
+          unresponsive. As its own row with full width + brass border
+          it's unambiguous. */}
+      <Pressable
+        onPress={handleWipeEntitlements}
+        style={({ pressed }) => [
+          styles.bigAction,
+          {
+            borderColor: themed.divider,
+            backgroundColor: pressed ? themed.soft : 'transparent',
+          },
+        ]}
+        testID="diag-wipe-entitlements"
+      >
+        <Text style={[styles.bigActionTitle, { color: themed.ink }]}>
+          Reset purchases
+        </Text>
+        <Text style={[styles.bigActionSub, { color: themed.slate }]}>
+          Clear local fake-purchase state. Phase A only — RevenueCat
+          replaces this in Phase C.
+        </Text>
+      </Pressable>
 
       <FlatList
         data={entries}
@@ -403,6 +489,24 @@ const styles = StyleSheet.create({
     marginTop: 4,
   },
   listContent: { paddingBottom: space.xl },
+  bigAction: {
+    marginHorizontal: space.md,
+    marginTop: 12,
+    paddingVertical: 14,
+    paddingHorizontal: 14,
+    borderWidth: 1,
+  },
+  bigActionTitle: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    letterSpacing: -0.005 * 15,
+  },
+  bigActionSub: {
+    fontFamily: font.regular,
+    fontSize: 11,
+    lineHeight: 16,
+    marginTop: 4,
+  },
   row: {
     flexDirection: 'row',
     gap: 10,

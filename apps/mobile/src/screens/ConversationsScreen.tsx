@@ -144,7 +144,7 @@ export function ConversationsScreen({
   // for the dock — once nothing's there, that lift is dead space).
   const dismissedCards = useOnboardingCards((s) => s.dismissed);
   const allCardsDismissed =
-    GET_STARTED_CARD_IDS.every((id) => dismissedCards[id]);
+    GET_STARTED_CARD_IDS.every((id: string) => dismissedCards[id]);
   const showGetStarted =
     rows.length > 0 && rows.length < 5 && !allCardsDismissed;
 

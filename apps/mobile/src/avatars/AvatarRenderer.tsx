@@ -117,7 +117,15 @@ export function AvatarRenderer({
     outputRange: [1.0, 1.015],
   });
 
-  const mouthScale = useMouthScale(amplitude, def?.meta.audioResponse.scaleMax ?? 1);
+  // Always derive the source Animated.Value here so we can expose it
+  // to the per-animal Render as `amplitude`. Paid-tier animals
+  // (lynx, raven, etc.) use it to drive their signature effect;
+  // free animals ignore it.
+  const source = useAmplitudeSource(amplitude);
+  const mouthScale = source.interpolate({
+    inputRange: [0, 1],
+    outputRange: [1.0, def?.meta.audioResponse.scaleMax ?? 1],
+  });
 
   if (!def) {
     return <View style={{ width: size, height: size }} />;
@@ -130,25 +138,22 @@ export function AvatarRenderer({
         size={size}
         eyeScale={blink}
         mouthScale={mouthScale}
+        amplitude={source}
       />
     </Animated.View>
   );
 }
 
 /**
- * Convert an external amplitude signal (number or Animated.Value, in
- * [0, 1]) into the `mouthScale` value the per-animal SVG expects.
- *
- * Mapping: `1 + amplitude * (scaleMax - 1)`. So amplitude=0 → 1.0
- * (rest pose), amplitude=1 → scaleMax (loudest).
+ * Resolve the (number | Animated.Value | undefined) input into a
+ * single stable Animated.Value the renderer can reuse for both the
+ * mouth-scale interpolation and the per-animal signature-effect
+ * driver. Re-using the same ref across renders prevents spurious
+ * unmounts of the SVG tree on every parent re-render.
  */
-function useMouthScale(
+function useAmplitudeSource(
   amplitude: Animated.Value | number | undefined,
-  scaleMax: number,
-): Animated.AnimatedInterpolation<number> | Animated.Value {
-  // Stable Animated.Value backing constant amplitudes (or undefined).
-  // Re-using the same ref across renders prevents spurious unmounts on
-  // every re-render of the parent.
+): Animated.Value {
   const fallback = useRef(new Animated.Value(0)).current;
 
   useEffect(() => {
@@ -159,11 +164,5 @@ function useMouthScale(
     }
   }, [amplitude, fallback]);
 
-  const source: Animated.Value =
-    amplitude instanceof Animated.Value ? amplitude : fallback;
-
-  return source.interpolate({
-    inputRange: [0, 1],
-    outputRange: [1.0, scaleMax],
-  });
+  return amplitude instanceof Animated.Value ? amplitude : fallback;
 }

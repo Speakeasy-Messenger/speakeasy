@@ -1,0 +1,95 @@
+diff --git a/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java b/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
+index 025480ac..70a13051 100644
+--- a/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
++++ b/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
+@@ -434,11 +434,6 @@ public void unregisterEvents() {
+         this.hasListeners = false;
+     }
+ 
+-    @ReactMethod
+-    public void displayIncomingCall(String uuid, String number, String callerName) {
+-        this.displayIncomingCall(uuid, number, callerName, false, null);
+-    }
+-
+     @ReactMethod
+     public void displayIncomingCall(String uuid, String number, String callerName, boolean hasVideo) {
+         this.displayIncomingCall(uuid, number, callerName, hasVideo, null);
+@@ -483,11 +478,6 @@ public void answerIncomingCall(String uuid) {
+         conn.onAnswer();
+     }
+ 
+-    @ReactMethod
+-    public void startCall(String uuid, String number, String callerName) {
+-        this.startCall(uuid, number, callerName, false, null);
+-    }
+-
+     @ReactMethod
+     public void startCall(String uuid, String number, String callerName, boolean hasVideo) {
+         this.startCall(uuid, number, callerName, hasVideo, null);
+diff --git a/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java b/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
+index 025480ac..0e36fb86 100644
+--- a/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
++++ b/android/src/main/java/io/wazo/callkeep/RNCallKeepModule.java
+@@ -35,7 +35,7 @@
+ import android.net.Uri;
+ import android.os.Build;
+ import android.os.Bundle;
+-import android.os.Looper;
++import android.os.HandlerThread;
+ import android.view.WindowManager;
+ import androidx.annotation.NonNull;
+ import androidx.annotation.Nullable;
+@@ -120,6 +120,7 @@ public class RNCallKeepModule extends ReactContextBaseJavaModule implements Life
+ 
+     private static final String TAG = "RNCallKeep";
+     private static TelecomManager telecomManager;
++    private HandlerThread handlerThread;
+     private LegacyCallStateListener legacyCallStateListener;
+     private CallStateListener callStateListener;
+     private static TelephonyManager telephonyManager;
+@@ -304,7 +305,11 @@ public void stopListenToNativeCallsState() {
+             telephonyManager.unregisterTelephonyCallback(callStateListener);
+         } else if (Build.VERSION.SDK_INT < Build.VERSION_CODES.S && legacyCallStateListener != null){
+             telephonyManager.listen(legacyCallStateListener, PhoneStateListener.LISTEN_NONE);
+-            Looper.myLooper().quit();
++            
++            if (handlerThread != null) {
++                handlerThread.quitSafely();
++                handlerThread = null;
++            }
+         }
+     }
+ 
+@@ -315,15 +320,16 @@ public void listenToNativeCallsState() {
+ 
+         if (permissionCheck == PackageManager.PERMISSION_GRANTED) {
+             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+-                  callStateListener = new CallStateListener();
+-                  telephonyManager.registerTelephonyCallback(context.getMainExecutor(),callStateListener);
++                callStateListener = new CallStateListener();
++                telephonyManager.registerTelephonyCallback(context.getMainExecutor(),callStateListener);
+             } else {
+-                  if (Looper.myLooper() == null) {
+-                    Looper.prepare();
+-                  }
+-                  legacyCallStateListener  = new LegacyCallStateListener();
+-                  telephonyManager.listen(legacyCallStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+-                  Looper.loop();
++                if (handlerThread == null) {
++                    handlerThread = new HandlerThread("TelephonyManager");
++                    handlerThread.start();
++                }
++
++                legacyCallStateListener  = new LegacyCallStateListener();
++                telephonyManager.listen(legacyCallStateListener, PhoneStateListener.LISTEN_CALL_STATE);
+             }
+         }
+     }
+index b9b821b4..1e8cb804 100644
+@@ -1,6 +1,6 @@
+ {
+   "name": "react-native-callkeep",
++  "version": "4.3.17",
+   "description": "iOS 10 CallKit and Android ConnectionService Framework For React Native",
+   "main": "index.js",
+   "scripts": {},

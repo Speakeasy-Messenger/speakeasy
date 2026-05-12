@@ -11,7 +11,7 @@
 # Then `flyctl postgres attach speakeasy-db --app speakeasy-api` and
 # `flyctl secrets set REDIS_URL=$(flyctl redis status speakeasy-redis -j | jq -r .private_url)`.
 
-app = "speakeasy-api"
+app = "speakeasy-api-1"
 primary_region = "iad"
 kill_signal = "SIGINT"
 kill_timeout = "30s"

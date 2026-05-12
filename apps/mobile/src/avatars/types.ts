@@ -19,11 +19,18 @@ import type React from 'react';
 import type { Animated as RNAnimated } from 'react-native';
 
 /** Stable identifier persisted in the user's profile + sent on
- *  conversation handshake to peers. Don't rename without a migration. */
+ *  conversation handshake to peers. Don't rename without a migration.
+ *
+ *  Note: this union covers the 12 free animals — the source-of-truth
+ *  for what's renderable. Paid avatars (rare + legendary) are
+ *  registered into the same `ANIMALS: Record<string, AnimalDef>` map
+ *  but live outside this union; consumers that select arbitrary
+ *  animals (the picker, the renderer dispatch) take `string` and
+ *  fall back gracefully when the id is unknown. */
 export type AnimalId =
   | 'fox'
   | 'owl'
-  | 'raven'
+  | 'pigeon'
   | 'hare'
   | 'stag'
   | 'whale'
@@ -83,6 +90,16 @@ export interface AnimalMeta {
 export type AnimalRenderProps = {
   eyeScale: RNAnimated.AnimatedInterpolation<number>;
   mouthScale: RNAnimated.AnimatedInterpolation<number>;
+  /**
+   * Raw amplitude in [0, 1] — same source the renderer derives
+   * `mouthScale` from, but exposed here so paid-tier animals can
+   * drive their per-animal signature effect (lynx tuft twitch,
+   * raven head tilt, etc.) off the live mic level.
+   *
+   * Free animals ignore this prop. The renderer always provides an
+   * Animated.Value (zero when no audio source is wired).
+   */
+  amplitude: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
 };
 
 export type AnimalRender = (props: AnimalRenderProps) => React.ReactElement;

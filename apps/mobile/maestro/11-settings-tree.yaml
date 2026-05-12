@@ -1,0 +1,86 @@
+appId: xyz.speakeasyapp.app
+name: Settings landing → 5 categories smoke (Tier B)
+---
+
+# SETTINGS.md §3 — verify each subscreen mounts. The 5 category
+# rows each have a stable testID; each subscreen exposes a
+# corresponding root testID. We tap, assert, back-out, and move on.
+#
+# This is a smoke flow — it doesn't verify any toggle behavior or
+# copy. It catches (a) accidentally unmounted routes, (b) crashes
+# at first mount, and (c) testID drift.
+
+- clearState
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+
+- runFlow:
+    file: _enroll-with-handle.yaml
+    env:
+      HANDLE: tester11
+
+# Open Settings landing from the conversations AppBar gear.
+- tapOn:
+    id: "conversations-settings-btn"
+- extendedWaitUntil:
+    visible:
+      id: "settings-screen"
+    timeout: 10000
+
+# Privacy
+- tapOn:
+    id: "settings-privacy"
+- extendedWaitUntil:
+    visible:
+      id: "privacy-screen"
+    timeout: 5000
+# Sub-row: Blocked is the one drilldown out of Privacy. It used to
+# crash on mount in rc.4 — guard the regression here.
+- tapOn:
+    id: "privacy-blocked"
+- extendedWaitUntil:
+    visible:
+      id: "block-list-screen"
+    timeout: 5000
+- back
+- back
+
+# Notifications
+- tapOn:
+    id: "settings-notifications"
+- extendedWaitUntil:
+    visible:
+      id: "notifications-screen"
+    timeout: 5000
+- back
+
+# Appearance
+- tapOn:
+    id: "settings-appearance"
+- extendedWaitUntil:
+    visible:
+      id: "appearance-screen"
+    timeout: 5000
+- back
+
+# Account
+- tapOn:
+    id: "settings-account"
+- extendedWaitUntil:
+    visible:
+      id: "account-screen"
+    timeout: 5000
+- back
+
+# About
+- tapOn:
+    id: "settings-about"
+- extendedWaitUntil:
+    visible:
+      id: "about-screen"
+    timeout: 5000
+# Footer copy renders.
+- assertVisible:
+    text: "Say it. Leave nothing."

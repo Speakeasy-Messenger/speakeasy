@@ -1,10 +1,16 @@
-import { ANIMAL_IDS } from './components.js';
+import { FREE_AVATARS } from './catalog.js';
 
 /**
  * Stable default animal for a user with no explicit `selectedAvatarId`.
  * FNV-1a → uniform-distribution-into-12 — same input always picks the
  * same animal, so a peer who hasn't customized their avatar shows up
  * consistently across our screens AND across other users' devices.
+ *
+ * **Important:** sources from the *free* 12 animals only. Paid avatars
+ * are now in ANIMALS too (the renderer dispatches on the full set);
+ * defaulting a user to a paid animal they haven't acquired would be a
+ * privacy + presentation bug — peers would render them with an avatar
+ * the owner doesn't actually own.
  *
  * Used:
  *   - On first enrollment, before the user has reached onboarding's
@@ -19,6 +25,6 @@ export function defaultAnimalForUser(userId: string): string {
     h ^= userId.charCodeAt(i);
     h = Math.imul(h, 16777619);
   }
-  const index = (h >>> 0) % ANIMAL_IDS.length;
-  return ANIMAL_IDS[index]!;
+  const index = (h >>> 0) % FREE_AVATARS.length;
+  return FREE_AVATARS[index]!.id;
 }

@@ -10,6 +10,7 @@ import {
 } from '@speakeasy/crypto';
 import { SpeakeasyWsClient } from './ws/client.js';
 import { useConnection } from './store/connection.js';
+import { diag } from './diag/log.js';
 import {
   NativePushNotificationService,
   type PushNotificationService,
@@ -63,6 +64,13 @@ export function getWsClient(getToken: () => Promise<string>): SpeakeasyWsClient 
       url: config.wsUrl,
       getToken,
       onState: (state) => useConnection.getState().setState(state),
+      onClose: ({ code, reason, stateAtClose, intentional }) => {
+        // diagnose rapid-cycle reproductions (rc.8 user report). Each
+        // close logs (code, reason, state) so a Diagnostics dump shows
+        // whether the close was `replaced` (4000) — implying parallel
+        // socket from the same device — or something else.
+        diag('ws', 'closed', { code, reason, stateAtClose, intentional });
+      },
     });
   }
   return _ws;

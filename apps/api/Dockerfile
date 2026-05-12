@@ -3,12 +3,18 @@ WORKDIR /repo
 
 COPY package.json package-lock.json* turbo.json tsconfig.base.json ./
 COPY packages/shared/package.json packages/shared/
+COPY packages/vouchflow/package.json packages/vouchflow/
+COPY packages/crypto/package.json packages/crypto/
 COPY apps/api/package.json apps/api/
 RUN npm ci --ignore-scripts
 
 COPY packages/shared packages/shared
+COPY packages/vouchflow packages/vouchflow
+COPY packages/crypto packages/crypto
 COPY apps/api apps/api
 RUN npm run build -w @speakeasy/shared
+RUN npm run build -w @speakeasy/vouchflow
+RUN npm run build -w @speakeasy/crypto
 RUN npm run build -w @speakeasy/api
 
 FROM node:20-alpine AS runner
@@ -18,6 +24,10 @@ ENV NODE_ENV=production
 COPY --from=builder /repo/node_modules ./node_modules
 COPY --from=builder /repo/packages/shared/dist ./packages/shared/dist
 COPY --from=builder /repo/packages/shared/package.json ./packages/shared/package.json
+COPY --from=builder /repo/packages/vouchflow/dist ./packages/vouchflow/dist
+COPY --from=builder /repo/packages/vouchflow/package.json ./packages/vouchflow/package.json
+COPY --from=builder /repo/packages/crypto/dist ./packages/crypto/dist
+COPY --from=builder /repo/packages/crypto/package.json ./packages/crypto/package.json
 COPY --from=builder /repo/apps/api/dist ./apps/api/dist
 COPY --from=builder /repo/apps/api/package.json ./apps/api/package.json
 

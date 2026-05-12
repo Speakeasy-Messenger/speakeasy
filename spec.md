@@ -6,7 +6,7 @@
 
 ---
 
-## Implementation status (April 2026)
+## Implementation status (May 2026)
 
 | Phase | Server | Mobile | Notes |
 | --- | --- | --- | --- |
@@ -30,6 +30,8 @@
 
 **Verified end-to-end (2026-04-26):** demo bootstrapper (`apps/api/dist/demo-server.js`) loaded `apps/api/.env.local` with sandbox keys, hit `https://sandbox.api.vouchflow.dev/v1/device/{token}/reputation` for a bogus deviceToken, mapped Vouchflow's 404 → `{"error":"device_not_found"}` 401 to the client. ~3.5s latency confirmed real network roundtrip, not local stub.
 
+**May 2026 — alpha sideload track (rc.0 → rc.18):** brand overhaul Phase 2 shipped (animal avatars replaced photos, Onboarding's "Choose your face" 4-step flow, Burn / Block / Group conversation actions, Settings restructure). **Avatar store** Phase A landed: 28-avatar catalog (12 free + 12 rare $9.99 + 4 legendary $99.99), 3-section picker (Yours / Rare / Legendary), AcquireSheet on brand canvas, fake-purchase flow with persisted ownership, all 16 paid avatars fully illustrated with signature animations via `react-native-reanimated`. **Three schema-vs-migration drifts** caught + fixed in the `messages` and `users` tables (migrations 0010 / 0011 / 0012); WS handler now logs underlying errors to keep the next instance of this class from going silent. **Privacy / Terms / Open-source pages** live at `speakeasyapp.xyz`. **Reset-purchases dev affordance** in Diagnostics (Phase A only — RevenueCat replaces in Phase C). **Branded splash screen** (CipherS + wordmark) replaces blank pre-hydration view. See `AVATARSTORE.md` for the full payments architecture.
+
 ---
 
 ## 1. Product Overview
@@ -51,11 +53,15 @@ Speakeasy is a private, encrypted messenger with the following core principles:
 - Community chats (channel key model, server-relay)
 - Disappearing messages (7-day default, per-conversation override, persistence opt-in)
 - Random ID generation and display
+- Animal avatar identity — 12 free + 12 rare ($9.99) + 4 legendary ($99.99)
+  paid via App Store / Play Billing. See `AVATARSTORE.md`.
+- 1:1 voice calls, E2E encrypted via DTLS-SRTP authenticated through the
+  Signal session.
 
 ### Post-MVP (explicitly out of scope for now)
 
 - Video calls with automatic face masks, background filters, and voice filters
-- Payments (USDT/TRON or USDC/Solana — under consideration)
+- Group calls
 - Web client
 
 ### Phase 6 — Voice calling (in progress)
@@ -213,12 +219,16 @@ Communities are a distinct type from the data model level — separate tables, s
 
 | Concern | Choice | Rationale |
 |---|---|---|
-| Framework | React Native | Cross-platform, JS/TS ecosystem |
+| Framework | React Native 0.76 (Hermes, new arch) | Cross-platform, JS/TS ecosystem |
 | State | Zustand | Lightweight, no boilerplate |
-| Navigation | React Navigation v7 | Standard RN navigation |
+| Navigation | React Navigation v7 (native-stack) | Standard RN navigation |
 | Local DB | react-native-quick-sqlite + SQLCipher | Encrypted SQLite |
-| Crypto | Native module (CryptoKit / Conscrypt) | WebCrypto unavailable in JSC |
+| Crypto | Native module (CryptoKit / Conscrypt + libsignal) | WebCrypto unavailable in Hermes |
 | Push | FCM + APNs (notify only, no content) | Privacy-preserving notifications |
+| WebRTC | react-native-webrtc + react-native-callkeep | Voice calls + native CallKit/ConnectionService |
+| SVG | react-native-svg 15.x | Animal avatars + RoomMark glyphs |
+| Animations | Animated (classic) + react-native-reanimated 3.x | Reanimated for SVG transform animations (signature avatar effects) |
+| Payments | RevenueCat (Phase C) — fake purchases in Phase A sideload | Wraps StoreKit / Play Billing |
 
 ### Backend
 
@@ -247,79 +257,112 @@ Communities are a distinct type from the data model level — separate tables, s
 
 ## 8. Database Schema (High-Level)
 
+> Source-of-truth: `apps/api/src/db/schema.ts`. SQL migrations in
+> `infra/migrations/0001..0012`. Audited end-to-end against the live
+> Fly Postgres (May 2026) — schema.ts and prod are in lockstep.
+
 ```sql
 -- Users
 users (
-  id          TEXT PRIMARY KEY,   -- adjective-adjective-noun
-  public_key  BYTEA NOT NULL,      -- identity public key
-  created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
+  id                  TEXT PRIMARY KEY,    -- adjective-adjective-noun
+  public_key          BYTEA NOT NULL,      -- identity public key
+  device_token        TEXT NOT NULL,       -- Vouchflow deviceToken (0010)
+  selected_avatar_id  TEXT,                -- animal id from avatar catalog
+  created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
+-- INDEX users_device_token_idx ON device_token
 
 -- PreKey bundles (Signal Protocol)
 prekey_bundles (
-  user_id           TEXT REFERENCES users(id),
+  user_id           TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
   registration_id   INTEGER NOT NULL,
   signed_prekey_id  INTEGER NOT NULL,
   signed_prekey     BYTEA NOT NULL,
   signed_prekey_sig BYTEA NOT NULL,
-  prekeys           JSONB NOT NULL,   -- array of {id, key}
+  prekeys           JSONB NOT NULL,        -- array of {id, key}
   updated_at        TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 
 -- Groups
 groups (
-  id          TEXT PRIMARY KEY,    -- grp-[ulid]
-  created_by  TEXT REFERENCES users(id),
+  id          TEXT PRIMARY KEY,            -- grp-[ulid]
+  created_by  TEXT NOT NULL REFERENCES users(id),
   created_at  TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 
 group_members (
-  group_id    TEXT REFERENCES groups(id),
-  user_id     TEXT REFERENCES users(id),
+  group_id    TEXT NOT NULL REFERENCES groups(id) ON DELETE CASCADE,
+  user_id     TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   joined_at   TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (group_id, user_id)
 )
+-- INDEX group_members_user_idx ON user_id
 
 -- Communities
 communities (
-  id              TEXT PRIMARY KEY,  -- com-[ulid]
-  created_by      TEXT REFERENCES users(id),
-  ttl_days        INTEGER NOT NULL DEFAULT 7,
+  id              TEXT PRIMARY KEY,        -- com-[ulid]
+  created_by      TEXT NOT NULL REFERENCES users(id),
+  ttl_days        INTEGER NOT NULL DEFAULT 7 CHECK (ttl_days > 0),
   created_at      TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
 
 -- Channel-key envelopes — channel key K wrapped once per recipient (spec §4b).
 -- Server stores envelopes only; never plaintext K.
 community_key_envelopes (
-  community_id        TEXT REFERENCES communities(id) ON DELETE CASCADE,
-  recipient_user_id   TEXT REFERENCES users(id) ON DELETE CASCADE,
+  community_id        TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  recipient_user_id   TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
   wrapped_key         BYTEA NOT NULL,
-  wrapped_by_user_id  TEXT REFERENCES users(id),
+  wrapped_by_user_id  TEXT NOT NULL REFERENCES users(id),
   key_epoch           INTEGER NOT NULL DEFAULT 1,
   created_at          TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (community_id, recipient_user_id, key_epoch)
 )
+-- INDEX community_key_envelopes_recipient_idx ON recipient_user_id
 
 community_members (
-  community_id  TEXT REFERENCES communities(id),
-  user_id       TEXT REFERENCES users(id),
-  role          TEXT NOT NULL DEFAULT 'member',  -- member | moderator
+  community_id  TEXT NOT NULL REFERENCES communities(id) ON DELETE CASCADE,
+  user_id       TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  role          TEXT NOT NULL DEFAULT 'member'
+    CHECK (role IN ('member', 'moderator')),
   joined_at     TIMESTAMPTZ NOT NULL DEFAULT NOW(),
   PRIMARY KEY (community_id, user_id)
 )
+-- INDEX community_members_user_idx ON user_id
 
--- Message relay buffer (all types)
--- Deleted on delivery. 7-day TTL for undelivered.
-messages (
-  id            TEXT PRIMARY KEY,    -- ulid
-  conversation  TEXT NOT NULL,       -- user_id pair hash | group_id | community_id
-  sender_id     TEXT NOT NULL,
-  ciphertext    BYTEA NOT NULL,
-  msg_type      TEXT NOT NULL,       -- direct | group | community
-  delivered     BOOLEAN NOT NULL DEFAULT FALSE,
-  created_at    TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-  expires_at    TIMESTAMPTZ NOT NULL  -- set to created_at + 7 days
+-- Phase 4 multi-device: one user can have N device_tokens.
+devices (
+  device_token          TEXT PRIMARY KEY,
+  user_id               TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+  push_token            TEXT,                  -- FCM (Android) / APNs (iOS)
+  platform              TEXT
+    CHECK (platform IS NULL OR platform IN ('ios', 'android')),
+  notification_privacy  TEXT,                  -- 'rich' | 'private' (NULL → 'rich')
+  enrolled_at           TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  last_seen             TIMESTAMPTZ NOT NULL DEFAULT NOW()
 )
+-- INDEX devices_user_idx ON user_id
+
+-- Message relay buffer (all types).
+-- Deleted on confirmed delivery. 7-day TTL for undelivered.
+messages (
+  id                    TEXT PRIMARY KEY,      -- ulid
+  conversation          TEXT NOT NULL,         -- dm-{sha256(sortedPair)} | grp-... | com-...
+  sender_id             TEXT NOT NULL REFERENCES users(id),
+  recipient_id          TEXT NOT NULL,         -- 0011
+  ciphertext            BYTEA NOT NULL,
+  msg_type              TEXT NOT NULL
+    CHECK (msg_type IN ('direct', 'group', 'community')),
+  skdm_group_id         TEXT,                  -- 0004: SKDM frame target group
+  target_devices        JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 0005 + 0012
+  delivered_to_devices  JSONB NOT NULL DEFAULT '[]'::jsonb,    -- 0005 + 0012
+  sealed                BOOLEAN NOT NULL DEFAULT FALSE,        -- 0007 sealed sender
+  delivered             BOOLEAN NOT NULL DEFAULT FALSE,
+  created_at            TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  expires_at            TIMESTAMPTZ NOT NULL  -- created_at + 7 days
+)
+-- INDEX messages_conversation_idx ON (conversation, created_at)
+-- INDEX messages_expires_idx ON expires_at WHERE delivered = FALSE  -- partial
+-- INDEX messages_recipient_idx ON recipient_id
 ```
 
 Redis keys:
@@ -550,12 +593,12 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 
 ## 13. Open Questions (Decisions Deferred)
 
-- **Sealed sender:** Should 1:1 messages hide sender identity from the server? (Signal does this.) Recommended for v2.
-- **Channel key rotation policy:** Rotate on every member leave? Every N days? Moderator-triggered only? TBD.
-- **Payments:** USDT/TRON or USDC/Solana under consideration. Not in MVP. Fee sponsorship (no gas for users) is the target UX.
+- ✅ **Sealed sender:** **Resolved.** 1:1 messages hide sender identity from the server (`messages.sealed = TRUE`) — sender recovered from inner envelope by the recipient. Migration 0007. Wire format in Phase A of the sealed-sender rollout.
+- **Channel key rotation policy:** Rotate on every member leave? Every N days? Moderator-triggered only? Still TBD.
+- ✅ **Payments:** **Resolved.** Avatar store uses **App Store / Play Billing** non-consumables, not crypto. RevenueCat is the wrapper; Phase A ships fake (sideload) purchases, Phase C ships real billing once we're on the stores. Crypto-payments idea dropped per `AVATARSTORE.md`.
 - **Community message TTL:** decided in Phase 5g. Moderator-configurable 1..365 days, default 7.
 - **Per-conversation disappearing timer options:** Suggested: 1 hour, 24 hours, 7 days, 30 days, off.
-- **Username discovery:** How do users find each other? Share ID out-of-band for MVP. QR code in v2.
+- ✅ **Username discovery:** **Resolved.** QR code + `speakeasy://add?handle=…` deep link shipped (rc.0+). Tap "Share my handle" → present QR; scanning a peer's QR routes to NewChat with the handle prefilled.
 - **AWS migration triggers:** Fly.io Postgres tier unpredictability, or enterprise compliance (SOC2/HIPAA) requirement.
 
 ---

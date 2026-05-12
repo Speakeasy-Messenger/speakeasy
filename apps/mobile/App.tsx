@@ -43,6 +43,11 @@ import { tryRegisterPushToken } from './src/push/register.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
 import { SplashScreen } from './src/components/SplashScreen.js';
+import {
+  registerBackgroundMessageHandler,
+  registerForegroundMessageHandler,
+  usePushNavigation,
+} from './src/push/push-handler.js';
 
 // Global unhandled-rejection handler — prevents promise rejections
 // from crashing the RN host on Android.
@@ -57,6 +62,15 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
   diag('app', 'global error', { message: e.message, isFatal: String(isFatal) });
   if (typeof _origHandler === 'function') _origHandler(e, isFatal);
 });
+
+// Phase 6 fix: register FCM background + foreground message handlers at
+// module level (MUST run before any React lifecycle —
+// @react-native-firebase/messaging requires setBackgroundMessageHandler
+// for headless JS on Android, and onMessage must be registered before
+// any push arrives to prevent auto-display of system notifications
+// while the app is foregrounded — the "2x push" bug).
+registerBackgroundMessageHandler();
+registerForegroundMessageHandler();
 
 /**
  * Minimum visible duration for the SplashScreen. Hydration completes
@@ -242,6 +256,13 @@ export default function App() {
       diag('app', 'startup permissions catch-up threw', { err: String(err) }),
     );
   }, [hydrated, userId]);
+
+  // Phase 6 fix: route push-notification taps to the correct screen.
+  // Reads the FCM data payload (conversation_id + notify_kind) and
+  // navigates to Chat/GroupChat/IncomingCall instead of always
+  // landing on the conversation list. Covers cold start, warm
+  // resume, and deferred (background-handler persisted) taps.
+  usePushNavigation(navRef, callOrchestrator);
 
   // Load (or generate) the local SpeakeasySignalStore identity key.
   // OnboardingFlow's RoomStep calls this once at signup; subsequent
@@ -599,7 +620,7 @@ export default function App() {
               useSettings.getState().inAppNotificationsEnabled,
             activeConversationId:
               useUiState.getState().activeConversationId,
-            isMuted: (cid) =>
+            isMuted: (cid: string) =>
               !!useConversations.getState().byId[cid]?.muted,
             activeCall: useCalls.getState().active,
           },

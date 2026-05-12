@@ -53,6 +53,7 @@ import { diag } from '../diag/log.js';
 import { colors, fonts, space } from '../theme/index.js';
 import { font, type } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
+import { useConnection } from '../store/connection.js';
 
 interface Props {
   /** The other user's adjective-adjective-noun id, for direct chats only. */
@@ -189,6 +190,7 @@ export function ChatScreen({
   // self-DMs (peerId === myUserId), feedback chat (no peer to
   // notify), and group/community kinds (the wire frame is 1:1 only).
   const readSentRef = useRef<Set<string>>(new Set());
+  const wsState = useConnection((s) => s.state);
   useEffect(() => {
     if (peerId === myUserId) return;
     if (isFeedbackHandle(peerId)) return;
@@ -199,11 +201,18 @@ export function ChatScreen({
       useIdentity.getState().setDeviceToken(r.deviceToken);
       return r.deviceToken;
     });
-    if (ws.getState() !== 'authed') return;
+    // Previously this early-returned when ws wasn't authed yet. That
+    // was the bug: if the WS isn't authed on first render (common on
+    // cold-start from a push tap), readSentRef stays empty, and the
+    // effect doesn't re-run because `messages` hasn't changed by the
+    // time WS connects. Now we gate individual sends on wsState and
+    // include it in the dependency array so the effect re-fires when
+    // the socket becomes authed.
     for (const m of messages) {
       if (m.from !== peerId) continue;
       if (m.kind !== 'direct') continue;
       if (readSentRef.current.has(m.id)) continue;
+      if (wsState !== 'authed') continue;
       readSentRef.current.add(m.id);
       try {
         ws.send({ type: 'read', to: peerId, message_id: m.id });
@@ -214,7 +223,7 @@ export function ChatScreen({
         diag('chat', 'read send threw (will retry)', { err: String(err) });
       }
     }
-  }, [peerId, myUserId, messages]);
+  }, [peerId, myUserId, messages, wsState]);
 
   // Track the active conversation so the in-app message banner can
   // suppress itself when the user is already staring at this chat.

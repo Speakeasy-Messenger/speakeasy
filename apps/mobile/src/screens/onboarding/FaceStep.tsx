@@ -111,7 +111,7 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
 
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.grid}>
-          {FREE_AVATARS.map((entry) => {
+          {FREE_AVATARS.map((entry: { id: string }) => {
             const id = entry.id;
             const isSelected = id === selected;
             return (

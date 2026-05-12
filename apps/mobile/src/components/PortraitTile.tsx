@@ -2,6 +2,7 @@ import React from 'react';
 import { Animated, StyleSheet, View } from 'react-native';
 import { useColors } from '../theme/index.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
+import { AvatarErrorBoundary } from '../avatars/AvatarErrorBoundary.js';
 import { RoomMark } from '../avatars/RoomMark.js';
 
 /**
@@ -61,12 +62,14 @@ export function PortraitTile(props: Props): React.ReactElement {
       ]}
     >
       {props.kind === 'animal' ? (
-        <AvatarRenderer
-          animalId={props.id}
-          size={inner}
-          skipBlink={props.skipBlink}
-          amplitude={props.amplitude}
-        />
+        <AvatarErrorBoundary size={inner} label={props.id}>
+          <AvatarRenderer
+            animalId={props.id}
+            size={inner}
+            skipBlink={props.skipBlink}
+            amplitude={props.amplitude}
+          />
+        </AvatarErrorBoundary>
       ) : (
         <RoomMark roomId={props.id} size={inner} />
       )}

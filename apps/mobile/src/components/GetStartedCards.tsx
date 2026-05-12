@@ -52,6 +52,12 @@ const CARDS: readonly CardSpec[] = [
   },
 ] as const;
 
+/**
+ * Card ids exported so the parent screen can detect the
+ * "every card dismissed" state and collapse its FAB lift.
+ */
+export const GET_STARTED_CARD_IDS: readonly string[] = CARDS.map((c) => c.id);
+
 export function GetStartedCards(props: Props): React.JSX.Element | null {
   const dismissed = useOnboardingCards((s) => s.dismissed);
   const dismiss = useOnboardingCards((s) => s.dismiss);

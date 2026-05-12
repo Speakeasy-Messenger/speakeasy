@@ -23,6 +23,15 @@ export interface SpeakeasyWsClientOptions {
   /** State change observer. */
   onState?: (state: WsState) => void;
   /**
+   * Per-event diagnostics observer. Receives a structured close event
+   * (close code, reason, state-at-close, was-clean) every time a
+   * socket terminates — separate from `onState` because the state
+   * transition can collapse multiple close events into the same UI
+   * read while still firing distinct `onClose` calls. Used by
+   * Diagnostics to root-cause rapid reconnect cycles.
+   */
+  onClose?: (info: WsCloseInfo) => void;
+  /**
    * Server frame observer. Single-callback path kept for backwards
    * compatibility with existing wiring; prefer `subscribe()` for new
    * subscribers — the client fans out to every subscribed listener.
@@ -33,6 +42,17 @@ export interface SpeakeasyWsClientOptions {
 }
 
 type Subscriber = (msg: WsServerMsg) => void;
+
+export interface WsCloseInfo {
+  /** WebSocket close code (1000 = normal, 4000+ = app-defined). */
+  code: number;
+  /** Server-supplied reason string (may be empty). */
+  reason: string;
+  /** Client-side state when the close fired. */
+  stateAtClose: WsState;
+  /** Whether the close was initiated by `client.close()`. */
+  intentional: boolean;
+}
 
 /** Connection lifecycle: connect → auth → ping loop, with reconnect. */
 export class SpeakeasyWsClient {
@@ -191,7 +211,17 @@ export class SpeakeasyWsClient {
       if (this.socket !== ws) return;
       this.handleMessage(ev as MessageEvent);
     });
-    ws.addEventListener('close', () => {
+    ws.addEventListener('close', (ev) => {
+      // Always notify the close observer, even on stale-socket events.
+      // This lets Diagnostics catch the kicked-by-newer path that the
+      // closure check below intentionally swallows.
+      const closeEv = ev as CloseEvent;
+      this.opts.onClose?.({
+        code: closeEv.code ?? 0,
+        reason: closeEv.reason ?? '',
+        stateAtClose: this.state,
+        intentional: this.intentionalClose,
+      });
       if (this.socket !== ws) return;
       this.handleClose();
     });

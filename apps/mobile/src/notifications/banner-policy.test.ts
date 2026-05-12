@@ -93,7 +93,7 @@ describe('decideBanner', () => {
   it('suppresses when the target conversation is muted', () => {
     const cid = conversationIdForDirect(ME, PEER);
     const d = decideBanner(
-      baseInputs({ isMuted: (id) => id === cid }),
+      baseInputs({ isMuted: (id: string) => id === cid }),
       'm',
     );
     expect(d.kind).toBe('muted');
@@ -102,7 +102,7 @@ describe('decideBanner', () => {
   it('does NOT suppress when a different conversation is muted', () => {
     const otherCid = conversationIdForDirect(ME, 'kim');
     const d = decideBanner(
-      baseInputs({ isMuted: (id) => id === otherCid }),
+      baseInputs({ isMuted: (id: string) => id === otherCid }),
       'm',
     );
     expect(d.kind).toBe('show');
@@ -135,7 +135,7 @@ describe('decideBanner', () => {
     const cid = conversationIdForDirect(ME, PEER);
     const d = decideBanner(
       baseInputs({
-        isMuted: (id) => id === cid,
+        isMuted: (id: string) => id === cid,
         activeCall: ringingCall,
       }),
       'm',

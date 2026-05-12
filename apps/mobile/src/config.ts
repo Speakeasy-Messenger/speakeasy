@@ -14,9 +14,9 @@
  */
 export const config = {
   /** Speakeasy API base URL. */
-  apiBaseUrl: 'http://65.21.224.209:8080',
+  apiBaseUrl: 'https://api.speakeasyapp.xyz',
   /** WebSocket URL. */
-  wsUrl: 'ws://65.21.224.209:8080/ws',
+  wsUrl: 'wss://api.speakeasyapp.xyz/ws',
   /**
    * If true, services use MockSignalProtocolClient instead of the real
    * native bridge. Useful for QA harnesses, Storybook, or simulators that
