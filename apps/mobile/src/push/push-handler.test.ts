@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest';
-import { resolveTarget, registerForegroundMessageHandler, type FcmData } from './push-handler.js';
+import { resolveTarget, registerForegroundMessageHandler, registerNotificationOpenedListener, type FcmData } from './push-handler.js';
 import { useConversations } from '../store/conversations.js';
 import { __resetAsyncStorageMock } from '../__mocks__/async-storage.js';
 
@@ -158,5 +158,19 @@ describe('registerForegroundMessageHandler', () => {
     // before React even mounts. If this throws, the module-level
     // registration in App.tsx would crash at import time.
     expect(() => registerForegroundMessageHandler()).not.toThrow();
+  });
+});
+
+describe('registerNotificationOpenedListener', () => {
+  it('is idempotent — calling twice does not throw', () => {
+    registerNotificationOpenedListener();
+    expect(() => registerNotificationOpenedListener()).not.toThrow();
+  });
+
+  it('does not require React context — can be called at module level', () => {
+    // The warm-resume bug: onNotificationOpenedApp fires before
+    // React useEffect re-runs, so the listener MUST be registerable
+    // at module level outside any hook.
+    expect(() => registerNotificationOpenedListener()).not.toThrow();
   });
 });

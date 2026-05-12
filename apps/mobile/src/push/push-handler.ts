@@ -31,9 +31,10 @@
  *        - `notify_kind === 'call'`
  *          → start CallKeepBridge + navigate to IncomingCall
  *
- * All navigation goes through the `usePushNavigation` hook below,
- * which reads a persisted tap-target on mount and re-routes on
- * every new `onNotificationOpenedApp` event.
+ * Key design: all three listeners are registered at module level
+ * (outside React's lifecycle) to close timing gaps. They persist
+ * tap-targets to AsyncStorage. The `usePushNavigation` React hook
+ * consumes those targets after hydration.
  */
 
 import { useEffect, useRef } from 'react';
@@ -109,16 +110,11 @@ export function resolveTarget(data: FcmData): TapTarget | undefined {
   const msgType = data.msg_type ?? 'direct';
 
   if (kind === 'call') {
-    // Call pushes include the conversation_id which is a direct-message
-    // channel. Resolve the peer from it if possible.
     if (convId && msgType === 'direct') {
       const conv = useConversations.getState().byId[convId];
       if (conv?.peerUserId) {
         return { kind: 'call', peerId: conv.peerUserId };
       }
-      // Store not hydrated yet — persist conversation_id for deferred
-      // routing. We'll need the peer to start the call orchestrator.
-      // Fall through to a best-effort navigation.
       return { kind: 'call', peerId: convId };
     }
     return undefined;
@@ -137,9 +133,84 @@ export function resolveTarget(data: FcmData): TapTarget | undefined {
     return { kind: 'direct', peerId: conv.peerUserId };
   }
 
-  // Cold-start race: store not hydrated. Persist convId and let
-  // the navigation hook retry after hydration.
+  // Cold-start race: store not hydrated. Use convId as peerId;
+  // the navigation hook will re-resolve after hydration.
   return { kind: 'direct', peerId: convId };
+}
+
+// ---------------------------------------------------------------------------
+// Navigation helper (module-level, callable from any listener or hook)
+// ---------------------------------------------------------------------------
+
+type RemoteMessageShape = {
+  data?: Record<string, string | undefined> | null;
+  messageId?: string;
+};
+
+/**
+ * Navigate to the correct screen for a tap-target.
+ *
+ * Extracted from the React hook so it can be called from both the hook
+ * and the module-level foreground/AppState listeners.
+ */
+export async function routeTarget(
+  navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
+  target: TapTarget,
+  callOrchestrator?: CallOrchestrator,
+): Promise<void> {
+  if (!navRef.current) {
+    await new Promise((r) => setTimeout(r, 100));
+    if (!navRef.current) return;
+  }
+
+  diag('push-nav', 'routing tap-target', { target });
+
+  try {
+    switch (target.kind) {
+      case 'direct': {
+        let peerId = target.peerId;
+        const conv = useConversations.getState().byId[peerId];
+        if (conv?.peerUserId) {
+          peerId = conv.peerUserId;
+        } else if (peerId.startsWith('dm-')) {
+          for (const [id, c] of Object.entries(useConversations.getState().byId)) {
+            if (id === peerId && c.peerUserId) {
+              peerId = c.peerUserId;
+              break;
+            }
+          }
+        }
+        navRef.current.navigate('Chat', { peerId });
+        break;
+      }
+      case 'group': {
+        navRef.current.navigate('GroupChat', { groupId: target.groupId });
+        break;
+      }
+      case 'call': {
+        if (callOrchestrator) {
+          try {
+            const bridge = new CallKeepBridge({ orchestrator: callOrchestrator });
+            await bridge.start();
+            diag('push-nav', 'CallKeepBridge started from push tap');
+          } catch (err) {
+            diag('push-nav', 'CallKeepBridge start failed (non-fatal)', {
+              err: String(err),
+            });
+          }
+        }
+        const activeCall = useCalls.getState().active;
+        if (activeCall?.stage === 'incoming_ringing') {
+          navRef.current.navigate('IncomingCall');
+        } else {
+          navRef.current.navigate('Call');
+        }
+        break;
+      }
+    }
+  } catch (err) {
+    diag('push-nav', 'navigation failed', { err: String(err), target });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -154,8 +225,6 @@ export function registerBackgroundMessageHandler(): void {
     // iOS: setBackgroundMessageHandler is not supported on iOS —
     // the OS handles notification taps natively and delivers the
     // data via getInitialNotification / onNotificationOpenedApp.
-    // On Android, this is the only way to run code when the app
-    // is in the background/killed state.
     backgroundHandlerRegistered = true;
     return;
   }
@@ -194,18 +263,6 @@ export function registerBackgroundMessageHandler(): void {
 // Foreground message handler
 // ---------------------------------------------------------------------------
 
-/**
- * Register the foreground `onMessage` handler. Without this, FCM shows
- * a system notification banner on top of our in-app InAppBanner when the
- * app is foreground — the "duplicate push notifications" bug.
- *
- * By intercepting the foreground message, we suppress the OS banner.
- * The existing `notifyInbound` → `decideBanner` pipeline already handles
- * in-app notification for live-delivered messages. For messages that
- * arrive only via push (app was background when WS closed, now
- * foregrounded but WS hasn't reconnected yet), we just absorb the
- * duplicate — the WS drain will populate the conversation list shortly.
- */
 let foregroundHandlerUnsub: (() => void) | undefined;
 
 /**
@@ -214,17 +271,15 @@ let foregroundHandlerUnsub: (() => void) | undefined;
  *
  * The "2x push notification" bug happened because onMessage was
  * previously registered inside a useEffect gated on `hydrated && userId`.
- * Any FCM push that arrived during the startup window (after the native
- * module initialised but before React hydration) caused Android to
+ * Any FCM push that arrived during the startup window caused Android to
  * auto-display the system notification because no onMessage listener
  * was attached yet. Meanwhile the WS also delivered the message,
  * triggering the in-app InAppBanner → user saw two notifications.
  *
- * Registering at module level closes that timing gap. The handler is
- * idempotent — calling it again is a no-op.
+ * Registering at module level closes that timing gap. Idempotent.
  */
 export function registerForegroundMessageHandler(): void {
-  if (foregroundHandlerUnsub) return; // already registered
+  if (foregroundHandlerUnsub) return;
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
@@ -239,15 +294,6 @@ export function registerForegroundMessageHandler(): void {
         kind: data.notify_kind,
         msgType: data.msg_type,
       });
-
-      // We intentionally do NOT show an additional in-app banner here.
-      // If the WS is connected, the live frame already triggered
-      // `notifyInbound`. If the WS is reconnecting, the banner from
-      // the WS frame will fire within a few seconds.
-      //
-      // The sole purpose of this handler is to tell FCM "the app
-      // handled this notification" so Android/iOS don't also show
-      // the system tray banner → no duplicate.
     });
 
     diag('push', 'foreground message handler registered');
@@ -262,13 +308,59 @@ export function unregisterForegroundMessageHandler(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Navigation hook — the React-side consumer
+// Notification-opened listener — registered at module level
 // ---------------------------------------------------------------------------
 
-type RemoteMessageShape = {
-  data?: Record<string, string | undefined> | null;
-  messageId?: string;
-};
+/**
+ * Register `onNotificationOpenedApp` at module level.
+ *
+ * When the user taps a system notification while the app is
+ * in the background, the OS foregrounds the activity and
+ * `onNotificationOpenedApp` fires immediately — before any React
+ * useEffect re-runs. If the subscription only exists inside a
+ * useEffect gated on `hydrated && userId`, the event is lost and
+ * the user lands on the conversation list instead of the chat.
+ *
+ * This listener persists the tap-target to AsyncStorage; the
+ * `usePushNavigation` hook consumes it after hydration.
+ */
+let notificationOpenedRegistered = false;
+
+export function registerNotificationOpenedListener(): void {
+  if (notificationOpenedRegistered) return;
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const messaging = require('@react-native-firebase/messaging') as {
+      onNotificationOpenedApp: (handler: (msg: RemoteMessageShape) => void) => () => void;
+    };
+
+    messaging.onNotificationOpenedApp((remoteMessage) => {
+      if (!remoteMessage?.data) return;
+      const data = remoteMessage.data as FcmData;
+      const target = resolveTarget(data);
+      if (target) {
+        diag('push-open', 'warm resume from push tap — persisting for hook', {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+        });
+        void persistTapTarget(target);
+      }
+    });
+
+    notificationOpenedRegistered = true;
+    diag('push', 'notification-opened listener registered at module level');
+  } catch (err) {
+    diag('push', 'onNotificationOpenedApp registration failed', {
+      err: String(err),
+    });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Navigation hook — the React-side consumer
+// ---------------------------------------------------------------------------
 
 /**
  * Hook that routes push-notification taps to the correct screen.
@@ -276,11 +368,17 @@ type RemoteMessageShape = {
  * Call once from the root component (App.tsx), passing the same
  * `navRef` used by the NavigationContainer.
  *
+ * All three FCM listeners (background, foreground, notification-opened)
+ * are registered at module level and persist tap-targets to AsyncStorage.
+ * This hook consumes those targets after hydration completes.
+ *
  * Handles:
  *   - Cold start: reads `getInitialNotification()` on mount
- *   - Warm resume: subscribes to `onNotificationOpenedApp`
- *   - Deferred: checks AsyncStorage for a target persisted by the
- *     background handler (covers the Android killed-app case)
+ *   - Warm resume: checks AsyncStorage (populated by module-level
+ *     onNotificationOpenedApp listener)
+ *   - Deferred: checks AsyncStorage (populated by background handler
+ *     or foreground re-check)
+ *   - Re-checks on every app foreground transition (via AppState)
  */
 export function usePushNavigation(
   navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
@@ -295,82 +393,11 @@ export function usePushNavigation(
 
     let cancelled = false;
 
-    async function routeTarget(target: TapTarget) {
-      if (!navRef.current) {
-        // Navigation container not mounted yet — defer by a tick
-        await new Promise((r) => setTimeout(r, 100));
-        if (cancelled || !navRef.current) return;
-      }
-
-      diag('push-nav', 'routing tap-target', { target });
-
-      try {
-        switch (target.kind) {
-          case 'direct': {
-            // target.peerId might be a conversation_id if the store wasn't
-            // hydrated when we resolved. Re-resolve now.
-            let peerId = target.peerId;
-            const conv = useConversations.getState().byId[peerId];
-            if (conv?.peerUserId) {
-              peerId = conv.peerUserId;
-            } else if (peerId.startsWith('dm-')) {
-              // Try to find the conversation by walking the store
-              for (const [id, c] of Object.entries(useConversations.getState().byId)) {
-                if (id === peerId && c.peerUserId) {
-                  peerId = c.peerUserId;
-                  break;
-                }
-              }
-            }
-            navRef.current.navigate('Chat', { peerId });
-            break;
-          }
-          case 'group': {
-            navRef.current.navigate('GroupChat', { groupId: target.groupId });
-            break;
-          }
-          case 'call': {
-            // For call pushes, we navigate to the incoming call screen.
-            // The call orchestrator will pick up the buffered offer on
-            // WS reconnect. If the orchestrator is available, we also
-            // warm up the CallKeep bridge so the native ring UI shows.
-            if (callOrchestrator) {
-              try {
-                // Bridge is lazy — calling start() ensures the native
-                // ring UI is available if the OS has granted the
-                // "Calling accounts" permission.
-                const bridge = new CallKeepBridge({ orchestrator: callOrchestrator });
-                await bridge.start();
-                diag('push-nav', 'CallKeepBridge started from push tap');
-              } catch (err) {
-                diag('push-nav', 'CallKeepBridge start failed (non-fatal)', {
-                  err: String(err),
-                });
-              }
-            }
-            // If there's an active incoming call in the store, navigate
-            // to IncomingCall. Otherwise, fall through to Call screen
-            // (which handles the "no active call" state gracefully).
-            const activeCall = useCalls.getState().active;
-            if (activeCall?.stage === 'incoming_ringing') {
-              navRef.current.navigate('IncomingCall');
-            } else {
-              navRef.current.navigate('Call');
-            }
-            break;
-          }
-        }
-      } catch (err) {
-        diag('push-nav', 'navigation failed', { err: String(err), target });
-      }
-    }
-
     async function handleInitialNotification() {
       try {
         // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
         const messaging = require('@react-native-firebase/messaging') as {
           getInitialNotification: () => Promise<RemoteMessageShape | null>;
-          onNotificationOpenedApp: (handler: (msg: RemoteMessageShape) => void) => () => void;
         };
 
         // 1. Cold start — check getInitialNotification
@@ -384,51 +411,79 @@ export function usePushNavigation(
               kind: data.notify_kind,
             });
             routedRef.current = true;
-            await routeTarget(target);
+            await routeTarget(navRef, target, callOrchestrator);
             return;
           }
         }
 
-        // 2. Deferred — check AsyncStorage for background-handler target
+        // 2. Deferred — consume any tap-target persisted by the
+        //    background handler OR the module-level onNotificationOpenedApp
+        //    listener.
         if (!routedRef.current) {
           const deferred = await consumeTapTarget();
           if (deferred) {
-            diag('push-nav', 'deferred tap-target from background handler', {
+            diag('push-nav', 'deferred tap-target consumed after hydration', {
               target: deferred,
             });
             routedRef.current = true;
-            await routeTarget(deferred);
+            await routeTarget(navRef, deferred, callOrchestrator);
             return;
           }
         }
-
-        // 3. Warm resume — subscribe to onNotificationOpenedApp
-        const unsub = messaging.onNotificationOpenedApp((remoteMessage) => {
-          if (!remoteMessage?.data) return;
-          const data = remoteMessage.data as FcmData;
-          const target = resolveTarget(data);
-          if (target) {
-            diag('push-nav', 'warm resume from push tap', {
-              conversationId: data.conversation_id,
-              kind: data.notify_kind,
-            });
-            void routeTarget(target);
-          }
-        });
-
-        return () => unsub();
       } catch (err) {
         diag('push-nav', 'FCM handler setup failed', { err: String(err) });
-        return undefined;
       }
     }
 
-    const cleanup = handleInitialNotification();
+    handleInitialNotification();
+    return () => { cancelled = true; };
+  }, [hydrated, userId, callOrchestrator, navRef]);
+
+  // Second effect: re-check AsyncStorage when app comes to foreground.
+  // The module-level onNotificationOpenedApp listener persists tap-targets
+  // to AsyncStorage, but the main effect above only runs once per
+  // hydration cycle. This effect catches new targets from push taps that
+  // happen after the app is already hydrated and running.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+
+    let cancelled = false;
+    let appStateSub: { remove: () => void } | undefined;
+
+    async function checkForPendingTarget() {
+      if (routedRef.current) return;
+      const deferred = await consumeTapTarget();
+      if (deferred && !cancelled) {
+        diag('push-nav', 'foreground check found pending tap-target', {
+          target: deferred,
+        });
+        routedRef.current = true;
+        await routeTarget(navRef, deferred, callOrchestrator);
+      }
+    }
+
+    // We need AppState but it's from 'react-native' — import it inline
+    // to avoid the mock complexity at test time.
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const { AppState } = require('react-native') as {
+      AppState: {
+        addEventListener: (type: 'change', handler: (state: string) => void) => { remove: () => void };
+      };
+    };
+
+    appStateSub = AppState.addEventListener('change', (state) => {
+      if (state === 'active') {
+        // Give the module-level onNotificationOpenedApp listener a moment
+        // to finish persisting the tap-target before we consume it.
+        setTimeout(() => { void checkForPendingTarget(); }, 500);
+      }
+    });
+
     return () => {
       cancelled = true;
-      void cleanup.then((fn) => fn?.());
+      appStateSub?.remove();
     };
-  }, [hydrated, userId, callOrchestrator]);
+  }, [hydrated, userId, callOrchestrator, navRef]);
 }
 
 // ---------------------------------------------------------------------------

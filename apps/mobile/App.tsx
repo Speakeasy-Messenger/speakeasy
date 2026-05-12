@@ -46,6 +46,7 @@ import { SplashScreen } from './src/components/SplashScreen.js';
 import {
   registerBackgroundMessageHandler,
   registerForegroundMessageHandler,
+  registerNotificationOpenedListener,
   usePushNavigation,
 } from './src/push/push-handler.js';
 
@@ -71,6 +72,7 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
 // while the app is foregrounded — the "2x push" bug).
 registerBackgroundMessageHandler();
 registerForegroundMessageHandler();
+registerNotificationOpenedListener();
 
 /**
  * Minimum visible duration for the SplashScreen. Hydration completes
