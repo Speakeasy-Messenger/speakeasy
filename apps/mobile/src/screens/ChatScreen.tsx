@@ -1,9 +1,10 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
   Easing,
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -140,6 +141,19 @@ export function ChatScreen({
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const listRef = useRef<FlatList>(null);
 
+  // Scroll to bottom when the keyboard appears so the last message
+  // stays visible above the input bar. Without this, opening the
+  // keyboard pushes the view up but the scroll position doesn't
+  // adjust — the last message is hidden behind the keyboard.
+  useEffect(() => {
+    const showSub = Keyboard.addListener('keyboardDidShow', () => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => {
+      showSub.remove();
+    };
+  }, []);
+
   // BURN.md §5 — feed dissolve. ConvSettings sets
   // `burningConversationId`; we drive the local fade here. The
   // animation runs once on entry, then we pop back to the list
@@ -273,6 +287,9 @@ export function ChatScreen({
     if (!trimmed) return;
     setInput('');
     void sendOutbound({ text: trimmed });
+    // Immediately scroll to bottom so the user sees their message
+    // without waiting for the content size change.
+    listRef.current?.scrollToEnd({ animated: true });
   }
 
   // Paperclip → bottom sheet with Photo / Camera / Document choices.

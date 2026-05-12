@@ -209,6 +209,14 @@ export default function App() {
           }
           useIdentity.getState().setDeviceToken(r.deviceToken);
           useIdentity.getState().setUserId(me.id);
+          // Register push token immediately — don't wait for the
+          // useEffect below. This closes the window where the server
+          // has the device record but no FCM token → push.no_devices.
+          void tryRegisterPushToken(r.deviceToken).catch((err) => {
+            diag('app', 'push token registration after recovery failed (non-fatal)', {
+              err: String(err),
+            });
+          });
         } else {
           diag('app', 'identity recovery: no user bound — onboarding', {
             tokenPrefix,
@@ -313,6 +321,11 @@ export default function App() {
           const r = await vouchflow.verify({ context: 'login' });
           useIdentity.getState().setDeviceToken(r.deviceToken);
           diag('app', 'launch verify OK', { userId, prevAgeMs: ageMs });
+          // Re-register push token after re-verification in case it
+          // rotated or wasn't registered on the first launch.
+          void tryRegisterPushToken(r.deviceToken).catch(() => {
+            /* best-effort */
+          });
         } catch (err) {
           diag('app', 'launch verify FAILED — clearing identity', {
             err: String(err),
@@ -380,6 +393,9 @@ export default function App() {
       if (cached) return cached;
       const r = await vouchflow.verify({ context: 'login' });
       useIdentity.getState().setDeviceToken(r.deviceToken);
+      void tryRegisterPushToken(r.deviceToken).catch(() => {
+        /* best-effort */
+      });
       return r.deviceToken;
     };
     const ws = getWsClient(getToken);
