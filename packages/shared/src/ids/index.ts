@@ -48,7 +48,7 @@ export const ID_REGEX = /^[a-z]+-[a-z]+-[a-z]+$/;
  *
  * Stored raw; displayed with an `@` prefix everywhere.
  */
-export const HANDLE_REGEX = /^[a-z0-9][a-z0-9._-]{1,18}[a-z0-9]$/;
+export const HANDLE_REGEX = /^[a-z][a-z0-9_]{1,18}[a-z0-9]$/;
 
 /** Two-or-more consecutive separators reject post-regex. Spec §2.3.2:
  * "no double symbols" (`..`, `--`, `__`, `.-`, `-_`, etc.). */
