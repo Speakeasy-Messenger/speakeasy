@@ -21,6 +21,7 @@ export interface DeviceRecord {
   pushToken?: string;
   platform?: 'ios' | 'android';
   notificationPrivacy?: NotificationPrivacy;
+  lastPushError?: string;
   enrolledAt: Date;
   lastSeen: Date;
 }
@@ -47,4 +48,7 @@ export interface DevicesRepo {
     platform: 'ios' | 'android';
     notificationPrivacy?: NotificationPrivacy;
   }): Promise<void>;
+
+  /** Record why the last push-token registration failed (e.g. "android_post_notifications_denied", "native_module_missing"). Cleared on next successful setPushToken. */
+  reportPushError(args: { deviceToken: string; error: string }): Promise<void>;
 }

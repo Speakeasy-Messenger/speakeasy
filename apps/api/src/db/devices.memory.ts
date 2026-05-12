@@ -44,4 +44,11 @@ export class InMemoryDevicesRepo implements DevicesRepo {
     // If device doesn't exist yet, silently ignore — the device must
     // have been seen via upsertOnSeen first (auth handshake).
   }
+
+  async reportPushError(args: { deviceToken: string; error: string }): Promise<void> {
+    const device = this.devices.get(args.deviceToken);
+    if (device) {
+      device.lastPushError = args.error;
+    }
+  }
 }

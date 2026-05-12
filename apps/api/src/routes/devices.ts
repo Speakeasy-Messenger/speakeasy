@@ -50,4 +50,35 @@ export async function registerDeviceRoutes(
       return reply.code(200).send({ ok: true });
     },
   );
+
+  /** Client reports a push registration failure so the server can
+   * diagnose "not receiving push" without requiring the user to
+   * manually check their diag log. Cleared on next successful
+   * registration. */
+  app.post<{ Body: { error: string } }>(
+    '/v1/devices/push-error',
+    {
+      preHandler: [requireAuth],
+      schema: {
+        body: {
+          type: 'object',
+          required: ['error'],
+          properties: {
+            error: { type: 'string', minLength: 1, maxLength: 500 },
+          },
+        },
+      },
+    },
+    async (request, reply) => {
+      const deviceToken = request.auth?.deviceToken;
+      if (!deviceToken) {
+        return reply.code(403).send({ error: 'not_enrolled' });
+      }
+      await opts.devices.reportPushError({
+        deviceToken,
+        error: request.body.error,
+      });
+      return reply.code(200).send({ ok: true });
+    },
+  );
 }

@@ -10,12 +10,8 @@ import { diag } from '../diag/log.js';
  *   - Every AppState `active` transition (handles the case where the
  *     user denied notifications during onboarding, then later granted
  *     via system Settings — we'd otherwise never re-fetch the token)
- *
- * The recurring "tester1 / noname has no push token registered"
- * pattern was bites of this gap: those users were on the cold-launch
- * code path that bailed at `pushResult === undefined` and never
- * retried, even after permission flipped to granted. rc.49 closes the
- * loop by re-running on every foreground.
+ *   - Immediately after Vouchflow identity recovery (closes the
+ *     window where the server has the device record but no FCM token)
  *
  * Returns:
  *   - 'registered' if the token round-tripped to the server.
@@ -34,6 +30,11 @@ export async function tryRegisterPushToken(
       (pushNotifications as { lastFailureReason?: string }).lastFailureReason ??
       'unknown';
     diag('push', 'no token', { reason });
+    // Report the failure to the server so we can diagnose "not receiving
+    // push" reports without needing the user to check their diag log.
+    void api.reportPushError(deviceToken, reason).catch(() => {
+      /* best-effort */
+    });
     return 'no_token';
   }
   const privacy = useSettings.getState().notificationPrivacy;
@@ -53,6 +54,11 @@ export async function tryRegisterPushToken(
     return 'registered';
   } catch (err) {
     diag('push', 'register failed', { err: String(err) });
+    // Report the registration failure to the server.
+    const reason = `register_failed: ${(err as Error).message ?? String(err)}`;
+    void api.reportPushError(deviceToken, reason).catch(() => {
+      /* best-effort */
+    });
     return 'register_failed';
   }
 }

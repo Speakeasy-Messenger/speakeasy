@@ -34,6 +34,7 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       platform: (r.platform as 'ios' | 'android') ?? undefined,
       notificationPrivacy:
         (r.notificationPrivacy as NotificationPrivacy | null) ?? undefined,
+      lastPushError: r.lastPushError ?? undefined,
       enrolledAt: r.enrolledAt,
       lastSeen: r.lastSeen,
     }));
@@ -58,6 +59,8 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     const set: Record<string, unknown> = {
       pushToken: args.pushToken,
       platform: args.platform,
+      // Clear any previous error on successful registration.
+      lastPushError: null,
     };
     // Only overwrite the privacy column when the caller actually
     // supplied one — see DevicesRepo.setPushToken contract.
@@ -67,6 +70,14 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     await db
       .update(devices)
       .set(set)
+      .where(eq(devices.deviceToken, args.deviceToken));
+  }
+
+  async reportPushError(args: { deviceToken: string; error: string }): Promise<void> {
+    const db = getDb();
+    await db
+      .update(devices)
+      .set({ lastPushError: args.error })
       .where(eq(devices.deviceToken, args.deviceToken));
   }
 }

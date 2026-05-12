@@ -183,6 +183,8 @@ export const devices = pgTable(
     // interpreted as 'rich' at read-time so pre-Phase-5d-knob rows
     // don't all silently get the privacy mode they didn't ask for.
     notificationPrivacy: text('notification_privacy'),
+    /** Last reason getToken() or push-token registration failed. NULL when token is registered. */
+    lastPushError: text('last_push_error'),
     enrolledAt: timestamp('enrolled_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeen: timestamp('last_seen', { withTimezone: true }).notNull().defaultNow(),
   },
