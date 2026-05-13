@@ -29,33 +29,11 @@
  *        - `notify_kind === 'message'` + `msg_type === 'group'`
  *          → navigate to GroupChat with groupId
  *        - `notify_kind === 'call'`
- *          → wait for call_offer to arrive via WS, then navigate
- *            to IncomingCall (see Bug 2 fix below)
+ *          → start CallKeepBridge + navigate to IncomingCall
  *
- * Key design: all three listeners are registered at module level
- * (outside React's lifecycle) to close timing gaps. They persist
- * tap-targets to AsyncStorage. The `usePushNavigation` React hook
- * consumes those targets after hydration.
- *
- * BUG 1 FIX: `setBackgroundMessageHandler` MUST be called
- * synchronously — before the JS event loop yields — because FCM
- * delivers the headless-task message immediately after the bundle
- * evaluates. The previous async `requireMessaging()` retry pattern
- * (50ms × 10 = 500ms delay) meant that pushes arriving during
- * that window were silently lost. Now we try the synchronous
- * `require` first (works on 90%+ of cold starts) and only fall
- * back to async retry if the module isn't ready yet.
- *
- * BUG 2 FIX: When a user taps a call push notification from the
- * killed state, `routeTarget({kind:'call'})` used to navigate to
- * IncomingCall immediately. But `IncomingCallScreen` returns `null`
- * when `useCalls(s => s.active)` is empty — the `call_offer` hasn't
- * arrived yet because WS hasn't connected/authed/drained. The user
- * saw a blank screen. Now, for call targets, we persist a
- * "pending call navigation" flag instead of navigating immediately.
- * The existing `useCalls` subscription in App.tsx already auto-
- * navigates to IncomingCall when `active.stage === 'incoming_ringing'`,
- * so the call screen appears naturally once the WS delivers the offer.
+ * All navigation goes through the `usePushNavigation` hook below,
+ * which reads a persisted tap-target on mount and re-routes on
+ * every new `onNotificationOpenedApp` event.
  */
 
 import { useEffect, useRef } from 'react';
@@ -67,69 +45,6 @@ import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
 import { useCalls } from '../store/calls.js';
 import { CallKeepBridge } from '../calls/callkeep-bridge.js';
-
-// ---------------------------------------------------------------------------
-// Safe native-module require with retry
-// ---------------------------------------------------------------------------
-
-/**
- * Try to require `@react-native-firebase/messaging` synchronously.
- * Returns the module or `undefined`.
- *
- * On most cold starts the native module bridge is ready by the time
- * the JS bundle evaluates, so the synchronous require succeeds.
- * When it doesn't (TurboModule registry race), callers should fall
- * back to `requireMessagingAsync()`.
- */
-function requireMessagingSync(): object | undefined {
-  try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const mod = require('@react-native-firebase/messaging');
-    if (mod && typeof mod === 'object') return mod;
-  } catch {
-    // Module not ready yet
-  }
-  return undefined;
-}
-
-/**
- * Async retry variant — polls with exponential backoff.
- * Use when the synchronous require fails and you can afford to wait
- * (e.g. foreground handler, notification-opened listener).
- */
-function requireMessagingAsync(maxRetries = 10): Promise<object | undefined> {
-  return new Promise((resolve) => {
-    let attempts = 0;
-
-    function tryRequire(): void {
-      attempts++;
-      const mod = requireMessagingSync();
-      if (mod) {
-        resolve(mod);
-        return;
-      }
-
-      if (attempts >= maxRetries) {
-        diag('push', 'messaging module never became available', {
-          attempts,
-        });
-        resolve(undefined);
-        return;
-      }
-
-      // Defer to next tick — by then the native bridge is usually ready
-      setTimeout(tryRequire, 50);
-    }
-
-    tryRequire();
-  });
-}
-
-/** Backwards-compatible alias used by callers that were previously
- *  calling `requireMessaging()`. */
-function requireMessaging(maxRetries = 10): Promise<object | undefined> {
-  return requireMessagingAsync(maxRetries);
-}
 
 // ---------------------------------------------------------------------------
 // FCM data-payload shape (matches server: push.fcm-apns.ts)
@@ -145,15 +60,11 @@ export interface FcmData {
 }
 
 // ---------------------------------------------------------------------------
-// AsyncStorage keys for cross-process tap-target
+// AsyncStorage key for cross-process tap-target
 // ---------------------------------------------------------------------------
 
 import AsyncStorage from '@react-native-async-storage/async-storage';
 const TAP_TARGET_KEY = 'speakeasy.push.tap-target.v1';
-/** Key for pending call navigation — set when a call push is tapped
- *  before the WS delivers the call_offer. Consumed by the
- *  useCalls subscriber in App.tsx. */
-const PENDING_CALL_NAV_KEY = 'speakeasy.push.pending-call-nav.v1';
 
 export type TapTarget =
   | { kind: 'direct'; peerId: string }
@@ -179,31 +90,6 @@ async function consumeTapTarget(): Promise<TapTarget | undefined> {
   }
 }
 
-/**
- * Persist a pending call navigation target. Unlike regular tap-targets,
- * call navigation is deferred until the WS delivers the call_offer
- * (which triggers `useCalls` → `IncomingCall`). This key is read by
- * the `useCalls` subscriber in App.tsx to start CallKeepBridge.
- */
-export async function persistPendingCallNav(peerId: string): Promise<void> {
-  try {
-    await AsyncStorage.setItem(PENDING_CALL_NAV_KEY, JSON.stringify({ peerId }));
-  } catch {
-    /* best-effort */
-  }
-}
-
-export async function consumePendingCallNav(): Promise<string | undefined> {
-  try {
-    const raw = await AsyncStorage.getItem(PENDING_CALL_NAV_KEY);
-    if (!raw) return undefined;
-    await AsyncStorage.removeItem(PENDING_CALL_NAV_KEY);
-    return (JSON.parse(raw) as { peerId: string }).peerId;
-  } catch {
-    return undefined;
-  }
-}
-
 // ---------------------------------------------------------------------------
 // Resolve a conversation_id to a navigation target
 // ---------------------------------------------------------------------------
@@ -223,11 +109,16 @@ export function resolveTarget(data: FcmData): TapTarget | undefined {
   const msgType = data.msg_type ?? 'direct';
 
   if (kind === 'call') {
+    // Call pushes include the conversation_id which is a direct-message
+    // channel. Resolve the peer from it if possible.
     if (convId && msgType === 'direct') {
       const conv = useConversations.getState().byId[convId];
       if (conv?.peerUserId) {
         return { kind: 'call', peerId: conv.peerUserId };
       }
+      // Store not hydrated yet — persist conversation_id for deferred
+      // routing. We'll need the peer to start the call orchestrator.
+      // Fall through to a best-effort navigation.
       return { kind: 'call', peerId: convId };
     }
     return undefined;
@@ -246,104 +137,9 @@ export function resolveTarget(data: FcmData): TapTarget | undefined {
     return { kind: 'direct', peerId: conv.peerUserId };
   }
 
-  // Cold-start race: store not hydrated. Use convId as peerId;
-  // the navigation hook will re-resolve after hydration.
+  // Cold-start race: store not hydrated. Persist convId and let
+  // the navigation hook retry after hydration.
   return { kind: 'direct', peerId: convId };
-}
-
-// ---------------------------------------------------------------------------
-// Navigation helper (module-level, callable from any listener or hook)
-// ---------------------------------------------------------------------------
-
-type RemoteMessageShape = {
-  data?: Record<string, string | undefined> | null;
-  messageId?: string;
-};
-
-/**
- * Navigate to the correct screen for a tap-target.
- *
- * BUG 2 FIX: For `kind: 'call'`, we do NOT navigate to IncomingCall
- * immediately. Instead, we persist a "pending call nav" and wait for
- * the WS to deliver the `call_offer`, which triggers the `useCalls`
- * subscriber in App.tsx to navigate to IncomingCall. This avoids the
- * blank-screen race where IncomingCallScreen returns `null` because
- * `useCalls(s => s.active)` is empty.
- *
- * We DO start CallKeepBridge here so the native ring UI is ready
- * when the call_offer arrives.
- */
-export async function routeTarget(
-  navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
-  target: TapTarget,
-  callOrchestrator?: CallOrchestrator,
-): Promise<void> {
-  if (!navRef.current) {
-    await new Promise((r) => setTimeout(r, 100));
-    if (!navRef.current) return;
-  }
-
-  diag('push-nav', 'routing tap-target', { target });
-
-  try {
-    switch (target.kind) {
-      case 'direct': {
-        let peerId = target.peerId;
-        const conv = useConversations.getState().byId[peerId];
-        if (conv?.peerUserId) {
-          peerId = conv.peerUserId;
-        } else if (peerId.startsWith('dm-')) {
-          for (const [id, c] of Object.entries(useConversations.getState().byId)) {
-            if (id === peerId && c.peerUserId) {
-              peerId = c.peerUserId;
-              break;
-            }
-          }
-        }
-        navRef.current.navigate('Chat', { peerId });
-        break;
-      }
-      case 'group': {
-        navRef.current.navigate('GroupChat', { groupId: target.groupId });
-        break;
-      }
-      case 'call': {
-        // BUG 2 FIX: Don't navigate to IncomingCall yet — the
-        // call_offer hasn't arrived via WS. Instead, persist the
-        // pending call nav so the useCalls subscriber in App.tsx
-        // can start CallKeepBridge and navigate when the call
-        // actually arrives.
-        diag('push-nav', 'call push tap — deferring navigation until call_offer arrives via WS', {
-          peerId: target.peerId,
-        });
-
-        // Start CallKeepBridge now so the native ring UI is ready
-        if (callOrchestrator) {
-          try {
-            const bridge = new CallKeepBridge({ orchestrator: callOrchestrator });
-            await bridge.start();
-            diag('push-nav', 'CallKeepBridge started from call push tap (deferred nav)');
-          } catch (err) {
-            diag('push-nav', 'CallKeepBridge start failed (non-fatal)', {
-              err: String(err),
-            });
-          }
-        }
-
-        // Persist the pending call navigation so the useCalls
-        // subscriber can pick it up when the call arrives.
-        await persistPendingCallNav(target.peerId);
-
-        // Navigate to Home (conversation list) as a landing screen.
-        // The useCalls subscriber will navigate to IncomingCall once
-        // the call_offer arrives. This avoids the blank-screen race.
-        navRef.current.navigate('Home');
-        break;
-      }
-    }
-  } catch (err) {
-    diag('push-nav', 'navigation failed', { err: String(err), target });
-  }
 }
 
 // ---------------------------------------------------------------------------
@@ -352,136 +148,64 @@ export async function routeTarget(
 
 let backgroundHandlerRegistered = false;
 
-/**
- * BUG 1 FIX: Register the FCM background message handler SYNCHRONOUSLY.
- *
- * FCM's `setBackgroundMessageHandler` must be called before the JS
- * event loop yields — if it's not registered when the headless task
- * fires, the message is silently dropped. The previous implementation
- * used `requireMessaging()` (async with 50ms retry intervals), which
- * meant pushes arriving within the first ~500ms of cold start were
- * lost.
- *
- * Now we try the synchronous `require` first. On most devices the
- * native module bridge is ready by the time the JS bundle evaluates,
- * so the handler is registered instantly. If the sync require fails
- * (TurboModule race), we fall back to the async retry.
- */
 export function registerBackgroundMessageHandler(): void {
   if (backgroundHandlerRegistered) return;
   if (Platform.OS === 'ios') {
+    // iOS: setBackgroundMessageHandler is not supported on iOS —
+    // the OS handles notification taps natively and delivers the
+    // data via getInitialNotification / onNotificationOpenedApp.
+    // On Android, this is the only way to run code when the app
+    // is in the background/killed state.
     backgroundHandlerRegistered = true;
     return;
   }
 
-  backgroundHandlerRegistered = true; // Set early to prevent duplicate calls
-
-  // DIAGNOSTIC: Log that we're attempting to register
-  diag('push', 'registerBackgroundMessageHandler called', { 
-    timestamp: Date.now(),
-    platform: Platform.OS 
-  });
-
-  // CRITICAL FIX: Must be called at index.js import time, not after any async operations
-  // Try synchronous require first — this is the critical path for
-  // cold-start push delivery. On 90%+ of devices, the native module
-  // is ready by the time the JS bundle evaluates.
-  const syncMod = requireMessagingSync();
-  if (syncMod) {
-    // CRITICAL: Use ONLY namespaced API, NOT modular API
-    // The modular API requires Firebase app to be initialized first,
-    // but at module-load time it's not ready yet. The namespaced API
-    // (messaging().setBackgroundMessageHandler) works reliably.
-    const fcm = syncMod as any;
-
-    try {
-      // Use namespaced API: require().default() returns messaging()
-      if (typeof fcm.default === 'function') {
-        const messaging = fcm.default();
-        if (typeof messaging.setBackgroundMessageHandler === 'function') {
-          messaging.setBackgroundMessageHandler(async (remoteMessage: RemoteMessageShape) => {
-            const data = (remoteMessage.data ?? {}) as FcmData;
-            diag('push-bg', 'background message received (namespaced)', {
-              conversationId: data.conversation_id,
-              kind: data.notify_kind,
-              msgType: data.msg_type,
-              timestamp: Date.now(),
-            });
-
-            const target = resolveTarget(data);
-            if (target) {
-              await persistTapTarget(target);
-              diag('push-bg', 'tap-target persisted', { target });
-            } else {
-              diag('push-bg', 'could not resolve target from FCM data', { data });
-            }
-          });
-
-          diag('push', 'background message handler registered (sync - namespaced API)');
-          return;
-        }
-      }
-
-      diag('push', 'neither modular nor namespaced API available (sync)');
-      return;
-    } catch (err) {
-      diag('push', 'setBackgroundMessageHandler sync failed', {
-        err: String(err),
-        message: (err as Error).message,
-      });
-      return;
-    }
-  }
-
-  // Fallback: async retry only if sync require failed (module not ready)
-  diag('push', 'sync require failed — falling back to async retry for background handler');
-  void requireMessagingAsync().then((mod) => {
-    if (!mod) return;
-    
-    const fcm = mod as {
-      getMessaging?: () => unknown;
-      setBackgroundMessageHandler?: (messaging: unknown, handler: (msg: RemoteMessageShape) => Promise<void>) => void;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const messaging = require('@react-native-firebase/messaging') as {
+      setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
     };
 
-    try {
-      if (typeof fcm.getMessaging !== 'function' || typeof fcm.setBackgroundMessageHandler !== 'function') {
-        diag('push', 'modular API not available (async) - background push may not work');
-        return;
+    messaging.setBackgroundMessageHandler(async (remoteMessage) => {
+      const data = (remoteMessage.data ?? {}) as FcmData;
+      diag('push-bg', 'background message received', {
+        conversationId: data.conversation_id,
+        kind: data.notify_kind,
+        msgType: data.msg_type,
+      });
+
+      const target = resolveTarget(data);
+      if (target) {
+        await persistTapTarget(target);
+        diag('push-bg', 'tap-target persisted', { target });
       }
+    });
 
-      const messaging = fcm.getMessaging();
-      fcm.setBackgroundMessageHandler(messaging, async (remoteMessage) => {
-        const data = (remoteMessage.data ?? {}) as FcmData;
-        diag('push-bg', 'background message received (async handler)', {
-          conversationId: data.conversation_id,
-          kind: data.notify_kind,
-          msgType: data.msg_type,
-          timestamp: Date.now(),
-        });
-
-        const target = resolveTarget(data);
-        if (target) {
-          await persistTapTarget(target);
-          diag('push-bg', 'tap-target persisted (async handler)', { target });
-        } else {
-          diag('push-bg', 'could not resolve target from FCM data (async)', { data });
-        }
-      });
-
-      diag('push', 'background message handler registered (async fallback)');
-    } catch (err) {
-      diag('push', 'setBackgroundMessageHandler async failed', {
-        err: String(err),
-        message: (err as Error).message,
-      });
-    }
-  });
+    backgroundHandlerRegistered = true;
+    diag('push', 'background message handler registered');
+  } catch (err) {
+    diag('push', 'setBackgroundMessageHandler registration failed', {
+      err: String(err),
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
 // Foreground message handler
 // ---------------------------------------------------------------------------
 
+/**
+ * Register the foreground `onMessage` handler. Without this, FCM shows
+ * a system notification banner on top of our in-app InAppBanner when the
+ * app is foreground — the "duplicate push notifications" bug.
+ *
+ * By intercepting the foreground message, we suppress the OS banner.
+ * The existing `notifyInbound` → `decideBanner` pipeline already handles
+ * in-app notification for live-delivered messages. For messages that
+ * arrive only via push (app was background when WS closed, now
+ * foregrounded but WS hasn't reconnected yet), we just absorb the
+ * duplicate — the WS drain will populate the conversation list shortly.
+ */
 let foregroundHandlerUnsub: (() => void) | undefined;
 
 /**
@@ -490,40 +214,46 @@ let foregroundHandlerUnsub: (() => void) | undefined;
  *
  * The "2x push notification" bug happened because onMessage was
  * previously registered inside a useEffect gated on `hydrated && userId`.
- * Any FCM push that arrived during the startup window caused Android to
+ * Any FCM push that arrived during the startup window (after the native
+ * module initialised but before React hydration) caused Android to
  * auto-display the system notification because no onMessage listener
  * was attached yet. Meanwhile the WS also delivered the message,
  * triggering the in-app InAppBanner → user saw two notifications.
  *
- * Registering at module level closes that timing gap. Idempotent.
+ * Registering at module level closes that timing gap. The handler is
+ * idempotent — calling it again is a no-op.
  */
 export function registerForegroundMessageHandler(): void {
-  if (foregroundHandlerUnsub) return;
+  if (foregroundHandlerUnsub) return; // already registered
 
-  void requireMessagingAsync().then((mod) => {
-    if (!mod || foregroundHandlerUnsub) return;
-    const fcm = mod as any;
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const messaging = require('@react-native-firebase/messaging') as {
+      onMessage: (handler: (msg: RemoteMessageShape) => void) => () => void;
+    };
 
-    // v24 modular API: onMessage(messaging, handler)
-    if (typeof fcm.getMessaging === 'function' && typeof fcm.onMessage === 'function') {
-      try {
-        const messaging = fcm.getMessaging();
-        foregroundHandlerUnsub = fcm.onMessage(messaging, (remoteMessage: RemoteMessageShape) => {
-          const data = (remoteMessage.data ?? {}) as FcmData;
-          diag('push-fg', 'foreground push received (suppressed OS banner)', {
-            conversationId: data.conversation_id,
-            kind: data.notify_kind,
-            msgType: data.msg_type,
-          });
-        });
-        diag('push', 'foreground message handler registered');
-      } catch (err) {
-        diag('push', 'foreground handler registration failed', { err: String(err) });
-      }
-    } else {
-      diag('push', 'onMessage modular API not available');
-    }
-  });
+    foregroundHandlerUnsub = messaging.onMessage((remoteMessage) => {
+      const data = (remoteMessage.data ?? {}) as FcmData;
+      diag('push-fg', 'foreground push received (suppressed OS banner)', {
+        conversationId: data.conversation_id,
+        kind: data.notify_kind,
+        msgType: data.msg_type,
+      });
+
+      // We intentionally do NOT show an additional in-app banner here.
+      // If the WS is connected, the live frame already triggered
+      // `notifyInbound`. If the WS is reconnecting, the banner from
+      // the WS frame will fire within a few seconds.
+      //
+      // The sole purpose of this handler is to tell FCM "the app
+      // handled this notification" so Android/iOS don't also show
+      // the system tray banner → no duplicate.
+    });
+
+    diag('push', 'foreground message handler registered');
+  } catch (err) {
+    diag('push', 'onMessage registration failed', { err: String(err) });
+  }
 }
 
 export function unregisterForegroundMessageHandler(): void {
@@ -532,93 +262,13 @@ export function unregisterForegroundMessageHandler(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Notification-opened listener — registered at module level
-// ---------------------------------------------------------------------------
-
-/**
- * Register `onNotificationOpenedApp` at module level.
- *
- * When the user taps a system notification while the app is
- * in the background, the OS foregrounds the activity and
- * `onNotificationOpenedApp` fires immediately — before any React
- * useEffect re-runs. If the subscription only exists inside a
- * useEffect gated on `hydrated && userId`, the event is lost and
- * the user lands on the conversation list instead of the chat.
- *
- * This listener persists the tap-target to AsyncStorage; the
- * `usePushNavigation` hook consumes it after hydration.
- */
-let notificationOpenedRegistered = false;
-
-export function registerNotificationOpenedListener(): void {
-  if (notificationOpenedRegistered) return;
-  notificationOpenedRegistered = true; // Set early to prevent duplicate calls
-
-  // Try sync first, then fall back to async
-  const syncMod = requireMessagingSync();
-  if (syncMod) {
-    const fcm = syncMod as any;
-
-    // v24 modular API: onNotificationOpenedApp(messaging, handler)
-    if (typeof fcm.getMessaging === 'function' && typeof fcm.onNotificationOpenedApp === 'function') {
-      try {
-        const messaging = fcm.getMessaging();
-        fcm.onNotificationOpenedApp(messaging, (remoteMessage: RemoteMessageShape) => {
-          if (!remoteMessage?.data) return;
-          const data = remoteMessage.data as FcmData;
-          const target = resolveTarget(data);
-          if (target) {
-            diag('push-open', 'warm resume from push tap — persisting for hook (sync)', {
-              conversationId: data.conversation_id,
-              kind: data.notify_kind,
-              msgType: data.msg_type,
-            });
-            void persistTapTarget(target);
-          }
-        });
-        diag('push', 'notification-opened listener registered (sync)');
-        return;
-      } catch (err) {
-        diag('push', 'notification-opened listener registration failed (sync)', { err: String(err) });
-      }
-    }
-  }
-
-  // Async fallback
-  void requireMessagingAsync().then((mod) => {
-    if (!mod) return;
-    const fcm = mod as any;
-
-    if (typeof fcm.getMessaging !== 'function' || typeof fcm.onNotificationOpenedApp !== 'function') {
-      diag('push', 'onNotificationOpenedApp modular API not available (async)');
-      return;
-    }
-
-    try {
-      const messaging = fcm.getMessaging();
-      fcm.onNotificationOpenedApp(messaging, (remoteMessage: RemoteMessageShape) => {
-        if (!remoteMessage?.data) return;
-        const data = remoteMessage.data as FcmData;
-        const target = resolveTarget(data);
-        if (target) {
-          diag('push-open', 'warm resume from push tap — persisting for hook (async)', {
-            conversationId: data.conversation_id,
-            kind: data.notify_kind,
-            msgType: data.msg_type,
-          });
-          void persistTapTarget(target);
-        }
-      });
-      diag('push', 'notification-opened listener registered (async fallback)');
-    } catch (err) {
-      diag('push', 'notification-opened listener registration failed (async)', { err: String(err) });
-    }
-  });
-}
-
-// ---------------------------------------------------------------------------
 // Navigation hook — the React-side consumer
 // ---------------------------------------------------------------------------
+
+type RemoteMessageShape = {
+  data?: Record<string, string | undefined> | null;
+  messageId?: string;
+};
 
 /**
  * Hook that routes push-notification taps to the correct screen.
@@ -626,17 +276,11 @@ export function registerNotificationOpenedListener(): void {
  * Call once from the root component (App.tsx), passing the same
  * `navRef` used by the NavigationContainer.
  *
- * All three FCM listeners (background, foreground, notification-opened)
- * are registered at module level and persist tap-targets to AsyncStorage.
- * This hook consumes those targets after hydration completes.
- *
  * Handles:
  *   - Cold start: reads `getInitialNotification()` on mount
- *   - Warm resume: checks AsyncStorage (populated by module-level
- *     onNotificationOpenedApp listener)
- *   - Deferred: checks AsyncStorage (populated by background handler
- *     or foreground re-check)
- *   - Re-checks on every app foreground transition (via AppState)
+ *   - Warm resume: subscribes to `onNotificationOpenedApp`
+ *   - Deferred: checks AsyncStorage for a target persisted by the
+ *     background handler (covers the Android killed-app case)
  */
 export function usePushNavigation(
   navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
@@ -651,105 +295,140 @@ export function usePushNavigation(
 
     let cancelled = false;
 
-    async function handleInitialNotification() {
-      try {
-        const mod = await requireMessaging();
+    async function routeTarget(target: TapTarget) {
+      if (!navRef.current) {
+        // Navigation container not mounted yet — defer by a tick
+        await new Promise((r) => setTimeout(r, 100));
+        if (cancelled || !navRef.current) return;
+      }
 
-        if (!mod) {
-          diag('push-nav', 'messaging module unavailable — skipping initial notification check');
-          // Still try deferred tap-target below
-        } else {
-          // v24 modular API: getInitialNotification is a FREE FUNCTION
-          const fcm = mod as any;
-          if (typeof fcm.getMessaging !== 'function' || typeof fcm.getInitialNotification !== 'function') {
-            diag('push-nav', 'FCM modular API not available');
-            // Still try deferred tap-target below
-          } else {
-            const messaging = fcm.getMessaging();
-            // 1. Cold start — check getInitialNotification (FREE FUNCTION in v24)
-            const initial = await fcm.getInitialNotification(messaging);
-            if (initial?.data && !routedRef.current) {
-              const data = initial.data as FcmData;
-              const target = resolveTarget(data);
-              if (target) {
-                diag('push-nav', 'cold start from push tap', {
-                  conversationId: data.conversation_id,
-                  kind: data.notify_kind,
-                });
-                routedRef.current = true;
-                await routeTarget(navRef, target, callOrchestrator);
-                return;
+      diag('push-nav', 'routing tap-target', { target });
+
+      try {
+        switch (target.kind) {
+          case 'direct': {
+            // target.peerId might be a conversation_id if the store wasn't
+            // hydrated when we resolved. Re-resolve now.
+            let peerId = target.peerId;
+            const conv = useConversations.getState().byId[peerId];
+            if (conv?.peerUserId) {
+              peerId = conv.peerUserId;
+            } else if (peerId.startsWith('dm-')) {
+              // Try to find the conversation by walking the store
+              for (const [id, c] of Object.entries(useConversations.getState().byId)) {
+                if (id === peerId && c.peerUserId) {
+                  peerId = c.peerUserId;
+                  break;
+                }
               }
             }
+            navRef.current.navigate('Chat', { peerId });
+            break;
           }
-        }
-
-        // 2. Deferred — consume any tap-target persisted by the
-        //    background handler OR the module-level onNotificationOpenedApp
-        //    listener.
-        if (!routedRef.current) {
-          const deferred = await consumeTapTarget();
-          if (deferred) {
-            diag('push-nav', 'deferred tap-target consumed after hydration', {
-              target: deferred,
-            });
-            routedRef.current = true;
-            await routeTarget(navRef, deferred, callOrchestrator);
-            return;
+          case 'group': {
+            navRef.current.navigate('GroupChat', { groupId: target.groupId });
+            break;
+          }
+          case 'call': {
+            // For call pushes, we navigate to the incoming call screen.
+            // The call orchestrator will pick up the buffered offer on
+            // WS reconnect. If the orchestrator is available, we also
+            // warm up the CallKeep bridge so the native ring UI shows.
+            if (callOrchestrator) {
+              try {
+                // Bridge is lazy — calling start() ensures the native
+                // ring UI is available if the OS has granted the
+                // "Calling accounts" permission.
+                const bridge = new CallKeepBridge({ orchestrator: callOrchestrator });
+                await bridge.start();
+                diag('push-nav', 'CallKeepBridge started from push tap');
+              } catch (err) {
+                diag('push-nav', 'CallKeepBridge start failed (non-fatal)', {
+                  err: String(err),
+                });
+              }
+            }
+            // If there's an active incoming call in the store, navigate
+            // to IncomingCall. Otherwise, fall through to Call screen
+            // (which handles the "no active call" state gracefully).
+            const activeCall = useCalls.getState().active;
+            if (activeCall?.stage === 'incoming_ringing') {
+              navRef.current.navigate('IncomingCall');
+            } else {
+              navRef.current.navigate('Call');
+            }
+            break;
           }
         }
       } catch (err) {
-        diag('push-nav', 'FCM handler setup failed', { err: String(err) });
+        diag('push-nav', 'navigation failed', { err: String(err), target });
       }
     }
 
-    handleInitialNotification();
-    return () => { cancelled = true; };
-  }, [hydrated, userId, callOrchestrator, navRef]);
+    async function handleInitialNotification() {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+        const messaging = require('@react-native-firebase/messaging') as {
+          getInitialNotification: () => Promise<RemoteMessageShape | null>;
+          onNotificationOpenedApp: (handler: (msg: RemoteMessageShape) => void) => () => void;
+        };
 
-  // Second effect: re-check AsyncStorage when app comes to foreground.
-  // The module-level onNotificationOpenedApp listener persists tap-targets
-  // to AsyncStorage, but the main effect above only runs once per
-  // hydration cycle. This effect catches new targets from push taps that
-  // happen after the app is already hydrated and running.
-  useEffect(() => {
-    if (!hydrated || !userId) return;
+        // 1. Cold start — check getInitialNotification
+        const initial = await messaging.getInitialNotification();
+        if (initial?.data && !routedRef.current) {
+          const data = initial.data as FcmData;
+          const target = resolveTarget(data);
+          if (target) {
+            diag('push-nav', 'cold start from push tap', {
+              conversationId: data.conversation_id,
+              kind: data.notify_kind,
+            });
+            routedRef.current = true;
+            await routeTarget(target);
+            return;
+          }
+        }
 
-    let cancelled = false;
-    let appStateSub: { remove: () => void } | undefined;
+        // 2. Deferred — check AsyncStorage for background-handler target
+        if (!routedRef.current) {
+          const deferred = await consumeTapTarget();
+          if (deferred) {
+            diag('push-nav', 'deferred tap-target from background handler', {
+              target: deferred,
+            });
+            routedRef.current = true;
+            await routeTarget(deferred);
+            return;
+          }
+        }
 
-    async function checkForPendingTarget() {
-      if (routedRef.current) return;
-      const deferred = await consumeTapTarget();
-      if (deferred && !cancelled) {
-        diag('push-nav', 'foreground check found pending tap-target', {
-          target: deferred,
+        // 3. Warm resume — subscribe to onNotificationOpenedApp
+        const unsub = messaging.onNotificationOpenedApp((remoteMessage) => {
+          if (!remoteMessage?.data) return;
+          const data = remoteMessage.data as FcmData;
+          const target = resolveTarget(data);
+          if (target) {
+            diag('push-nav', 'warm resume from push tap', {
+              conversationId: data.conversation_id,
+              kind: data.notify_kind,
+            });
+            void routeTarget(target);
+          }
         });
-        routedRef.current = true;
-        await routeTarget(navRef, deferred, callOrchestrator);
+
+        return () => unsub();
+      } catch (err) {
+        diag('push-nav', 'FCM handler setup failed', { err: String(err) });
+        return undefined;
       }
     }
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const { AppState } = require('react-native') as {
-      AppState: {
-        addEventListener: (type: 'change', handler: (state: string) => void) => { remove: () => void };
-      };
-    };
-
-    appStateSub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') {
-        // Give the module-level onNotificationOpenedApp listener a moment
-        // to finish persisting the tap-target before we consume it.
-        setTimeout(() => { void checkForPendingTarget(); }, 500);
-      }
-    });
-
+    const cleanup = handleInitialNotification();
     return () => {
       cancelled = true;
-      appStateSub?.remove();
+      void cleanup.then((fn) => fn?.());
     };
-  }, [hydrated, userId, callOrchestrator, navRef]);
+  }, [hydrated, userId, callOrchestrator]);
 }
 
 // ---------------------------------------------------------------------------
