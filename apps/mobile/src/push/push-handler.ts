@@ -388,22 +388,16 @@ export function registerBackgroundMessageHandler(): void {
   // is ready by the time the JS bundle evaluates.
   const syncMod = requireMessagingSync();
   if (syncMod) {
-    // @react-native-firebase/messaging v24+ uses modular API
-    // Functions require messaging instance as first parameter
-    const fcm = syncMod as {
-      getMessaging?: () => unknown;
-      setBackgroundMessageHandler?: (messaging: unknown, handler: (msg: RemoteMessageShape) => Promise<void>) => void;
-    };
+    // Try BOTH APIs: modular (v24+) and namespaced (v6-v18 compat)
+    const fcm = syncMod as any;
 
-    // CRITICAL BUG FIX: v24 modular API requires messaging instance
+    // CRITICAL BUG FIX: v24 exports both modular AND namespaced APIs
+    // Try modular first, fall back to namespaced
     try {
-      if (typeof fcm.getMessaging !== 'function' || typeof fcm.setBackgroundMessageHandler !== 'function') {
-        diag('push', 'modular API not available (sync) - skipping');
-        return;
-      }
-      
-      const messaging = fcm.getMessaging();
-      fcm.setBackgroundMessageHandler(messaging, async (remoteMessage) => {
+      // Option 1: Modular API (v24+ preferred)
+      if (typeof fcm.getMessaging === 'function' && typeof fcm.setBackgroundMessageHandler === 'function') {
+        const messaging = fcm.getMessaging();
+        fcm.setBackgroundMessageHandler(messaging, async (remoteMessage: RemoteMessageShape) => {
         const data = (remoteMessage.data ?? {}) as FcmData;
         diag('push-bg', 'background message received', {
           conversationId: data.conversation_id,
@@ -421,14 +415,44 @@ export function registerBackgroundMessageHandler(): void {
         }
       });
 
-      diag('push', 'background message handler registered (sync)');
+        diag('push', 'background message handler registered (sync - modular API)');
+        return;
+      }
+
+      // Option 2: Namespaced API (v6-v18 compat, still works in v24)
+      if (typeof fcm.default === 'function') {
+        const messaging = fcm.default();
+        if (typeof messaging.setBackgroundMessageHandler === 'function') {
+          messaging.setBackgroundMessageHandler(async (remoteMessage: RemoteMessageShape) => {
+            const data = (remoteMessage.data ?? {}) as FcmData;
+            diag('push-bg', 'background message received (namespaced)', {
+              conversationId: data.conversation_id,
+              kind: data.notify_kind,
+              msgType: data.msg_type,
+              timestamp: Date.now(),
+            });
+
+            const target = resolveTarget(data);
+            if (target) {
+              await persistTapTarget(target);
+              diag('push-bg', 'tap-target persisted', { target });
+            } else {
+              diag('push-bg', 'could not resolve target from FCM data', { data });
+            }
+          });
+
+          diag('push', 'background message handler registered (sync - namespaced API)');
+          return;
+        }
+      }
+
+      diag('push', 'neither modular nor namespaced API available (sync)');
       return;
     } catch (err) {
       diag('push', 'setBackgroundMessageHandler sync failed', {
         err: String(err),
         message: (err as Error).message,
       });
-      // Don't retry async - the function doesn't work, period
       return;
     }
   }
