@@ -653,27 +653,33 @@ export function usePushNavigation(
 
     async function handleInitialNotification() {
       try {
-        const messaging = await requireMessaging() as undefined | {
-          getInitialNotification: () => Promise<RemoteMessageShape | null>;
-        };
+        const mod = await requireMessaging();
 
-        if (!messaging) {
+        if (!mod) {
           diag('push-nav', 'messaging module unavailable — skipping initial notification check');
           // Still try deferred tap-target below
         } else {
-          // 1. Cold start — check getInitialNotification
-          const initial = await messaging.getInitialNotification();
-          if (initial?.data && !routedRef.current) {
-            const data = initial.data as FcmData;
-            const target = resolveTarget(data);
-            if (target) {
-              diag('push-nav', 'cold start from push tap', {
-                conversationId: data.conversation_id,
-                kind: data.notify_kind,
-              });
-              routedRef.current = true;
-              await routeTarget(navRef, target, callOrchestrator);
-              return;
+          // v24 modular API: getInitialNotification is a FREE FUNCTION
+          const fcm = mod as any;
+          if (typeof fcm.getMessaging !== 'function' || typeof fcm.getInitialNotification !== 'function') {
+            diag('push-nav', 'FCM modular API not available');
+            // Still try deferred tap-target below
+          } else {
+            const messaging = fcm.getMessaging();
+            // 1. Cold start — check getInitialNotification (FREE FUNCTION in v24)
+            const initial = await fcm.getInitialNotification(messaging);
+            if (initial?.data && !routedRef.current) {
+              const data = initial.data as FcmData;
+              const target = resolveTarget(data);
+              if (target) {
+                diag('push-nav', 'cold start from push tap', {
+                  conversationId: data.conversation_id,
+                  kind: data.notify_kind,
+                });
+                routedRef.current = true;
+                await routeTarget(navRef, target, callOrchestrator);
+                return;
+              }
             }
           }
         }
