@@ -47,6 +47,50 @@ import { useCalls } from '../store/calls.js';
 import { CallKeepBridge } from '../calls/callkeep-bridge.js';
 
 // ---------------------------------------------------------------------------
+// Module require helpers
+// ---------------------------------------------------------------------------
+
+function requireMessagingSync(): object | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const mod = require('@react-native-firebase/messaging');
+    if (mod && typeof mod === 'object') return mod;
+  } catch {
+    // Module not ready yet
+  }
+  return undefined;
+}
+
+function requireMessagingAsync(maxRetries = 10): Promise<object | undefined> {
+  return new Promise((resolve) => {
+    let attempts = 0;
+
+    function tryRequire(): void {
+      attempts++;
+      const mod = requireMessagingSync();
+      if (mod) {
+        resolve(mod);
+        return;
+      }
+
+      if (attempts >= maxRetries) {
+        diag('push', 'messaging module never became available', { attempts });
+        resolve(undefined);
+        return;
+      }
+
+      setTimeout(tryRequire, Math.min(100 * Math.pow(2, attempts), 2000));
+    }
+
+    tryRequire();
+  });
+}
+
+function requireMessaging(maxRetries = 10): Promise<object | undefined> {
+  return requireMessagingAsync(maxRetries);
+}
+
+// ---------------------------------------------------------------------------
 // FCM data-payload shape (matches server: push.fcm-apns.ts)
 // ---------------------------------------------------------------------------
 
