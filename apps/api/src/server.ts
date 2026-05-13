@@ -222,7 +222,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const eventLog: EventLogRepo = opts.eventLog ?? (hasDb ? new DrizzleEventLogRepo() : new InMemoryEventLogRepo());
   await registerDeviceRoutes(app, { devices });
   await registerFeedbackRoute(app);
-  await registerAdminRoutes(app, { eventLog });
+  await registerAdminRoutes(app, { eventLog, devices, users: repo });
   const turnProvider = opts.turnProvider ?? turnProviderFromEnv();
   await registerTurnRoutes(app, { provider: turnProvider });
 
