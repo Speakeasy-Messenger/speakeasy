@@ -270,6 +270,44 @@ export function unregisterForegroundMessageHandler(): void {
 }
 
 // ---------------------------------------------------------------------------
+// Notification-opened listener
+// ---------------------------------------------------------------------------
+
+let notificationOpenedRegistered = false;
+
+export function registerNotificationOpenedListener(): void {
+  if (notificationOpenedRegistered) return;
+  notificationOpenedRegistered = true;
+  
+  const syncMod = requireMessagingSync();
+  if (syncMod) {
+    const fcm = syncMod as any;
+    
+    if (typeof fcm.getMessaging === 'function' && typeof fcm.onNotificationOpenedApp === 'function') {
+      try {
+        const messaging = fcm.getMessaging();
+        fcm.onNotificationOpenedApp(messaging, (remoteMessage: RemoteMessageShape) => {
+          if (!remoteMessage?.data) return;
+          const data = remoteMessage.data as FcmData;
+          const target = resolveTarget(data);
+          if (target) {
+            diag('push-open', 'warm resume from push tap', {
+              conversationId: data.conversation_id,
+              kind: data.notify_kind,
+              msgType: data.msg_type,
+            });
+            void persistTapTarget(target);
+          }
+        });
+        diag('push', 'notification-opened listener registered');
+      } catch (err) {
+        diag('push', 'notification-opened listener failed', { err: String(err) });
+      }
+    }
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Navigation hook — the React-side consumer
 // ---------------------------------------------------------------------------
 
