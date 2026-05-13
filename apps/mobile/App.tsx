@@ -199,26 +199,51 @@ export default function App() {
         diag('app', 'identity recovery: vouchflow returned', { tokenPrefix });
         const me = await api.fetchMe(r.deviceToken);
         if (me) {
-          diag('app', 'identity recovery: restored', {
-            userId: me.id,
-            tokenPrefix,
-          });
-          if (me.selected_avatar_id) {
-            useProfiles.getState().set(me.id, {
-              selectedAvatarId: me.selected_avatar_id,
-              fetchedAt: Date.now(),
+          // Option B: Validate that local Signal keys exist
+          // If user cleared app data, keys are gone but server still has old device
+          try {
+            const db = await vouchflow.openDb();
+            const hasIdentityKey = await db.getIdentityKeyPair();
+            if (!hasIdentityKey) {
+              diag('app', 'identity recovery failed - Signal keys missing, forcing re-enrollment', {
+                userId: me.id,
+                tokenPrefix,
+              });
+              // Delete device on server to force re-enrollment
+              await api.deleteMyDevice(r.deviceToken).catch((err) => {
+                diag('app', 'failed to delete device during recovery validation (non-fatal)', {
+                  err: String(err),
+                });
+              });
+              // Continue to onboarding
+              diag('app', 'proceeding to onboarding after key validation failure');
+            } else {
+              diag('app', 'identity recovery: restored', {
+                userId: me.id,
+                tokenPrefix,
+              });
+              if (me.selected_avatar_id) {
+                useProfiles.getState().set(me.id, {
+                  selectedAvatarId: me.selected_avatar_id,
+                  fetchedAt: Date.now(),
+                });
+              }
+              useIdentity.getState().setDeviceToken(r.deviceToken);
+              useIdentity.getState().setUserId(me.id);
+              // Register push token immediately — don't wait for the
+              // useEffect below. This closes the window where the server
+              // has the device record but no FCM token → push.no_devices.
+              void tryRegisterPushToken(r.deviceToken).catch((err) => {
+                diag('app', 'push token registration after recovery failed (non-fatal)', {
+                  err: String(err),
+                });
+              });
+            }
+          } catch (dbErr) {
+            diag('app', 'identity recovery: Signal DB check failed, proceeding to onboarding', {
+              err: String(dbErr),
             });
           }
-          useIdentity.getState().setDeviceToken(r.deviceToken);
-          useIdentity.getState().setUserId(me.id);
-          // Register push token immediately — don't wait for the
-          // useEffect below. This closes the window where the server
-          // has the device record but no FCM token → push.no_devices.
-          void tryRegisterPushToken(r.deviceToken).catch((err) => {
-            diag('app', 'push token registration after recovery failed (non-fatal)', {
-              err: String(err),
-            });
-          });
         } else {
           diag('app', 'identity recovery: no user bound — onboarding', {
             tokenPrefix,

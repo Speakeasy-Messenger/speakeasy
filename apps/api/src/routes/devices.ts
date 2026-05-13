@@ -81,4 +81,22 @@ export async function registerDeviceRoutes(
       return reply.code(200).send({ ok: true });
     },
   );
+
+  /** Delete the current device, used when identity recovery fails */
+  app.delete(
+    '/v1/devices/:deviceToken',
+    {
+      preHandler: [requireAuth],
+    },
+    async (request, reply) => {
+      const params = request.params as { deviceToken: string };
+      const authToken = request.auth?.deviceToken;
+      // Must match the device being deleted
+      if (authToken !== params.deviceToken) {
+        return reply.code(403).send({ error: 'cannot_delete_other_device' });
+      }
+      await opts.devices.remove(params.deviceToken);
+      return reply.code(200).send({ ok: true });
+    },
+  );
 }

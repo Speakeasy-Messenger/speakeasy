@@ -253,6 +253,21 @@ export class ApiClient {
   }
 
   /**
+   * Delete the current device, forcing re-enrollment.
+   * Used when identity recovery fails due to missing local keys.
+   */
+  async deleteMyDevice(deviceToken: string): Promise<void> {
+    try {
+      await this.doFetch(`${this.baseUrl}/v1/devices/${deviceToken}`, {
+        method: 'DELETE',
+        headers: { authorization: `Bearer ${deviceToken}` },
+      });
+    } catch {
+      // Best-effort - if it fails, onboarding will show an error anyway
+    }
+  }
+
+  /**
    * Check whether a candidate handle is available for enrollment.
    * Returns the same shape as the server: `{available, reason?}` where
    * `reason` is one of `'invalid' | 'reserved' | 'taken'`.
