@@ -502,30 +502,27 @@ export function registerForegroundMessageHandler(): void {
 
   void requireMessagingAsync().then((mod) => {
     if (!mod || foregroundHandlerUnsub) return;
-    // Use namespaced API (reliable at any time)
     const fcm = mod as any;
 
-    if (typeof fcm.default !== 'function') {
-      diag('push', 'onMessage namespaced API not available');
-      return;
+    // v24 modular API: onMessage(messaging, handler)
+    if (typeof fcm.getMessaging === 'function' && typeof fcm.onMessage === 'function') {
+      try {
+        const messaging = fcm.getMessaging();
+        foregroundHandlerUnsub = fcm.onMessage(messaging, (remoteMessage: RemoteMessageShape) => {
+          const data = (remoteMessage.data ?? {}) as FcmData;
+          diag('push-fg', 'foreground push received (suppressed OS banner)', {
+            conversationId: data.conversation_id,
+            kind: data.notify_kind,
+            msgType: data.msg_type,
+          });
+        });
+        diag('push', 'foreground message handler registered');
+      } catch (err) {
+        diag('push', 'foreground handler registration failed', { err: String(err) });
+      }
+    } else {
+      diag('push', 'onMessage modular API not available');
     }
-
-    const messaging = fcm.default();
-    if (typeof messaging.onMessage !== 'function') {
-      diag('push', 'messaging.onMessage not available');
-      return;
-    }
-
-    foregroundHandlerUnsub = messaging.onMessage((remoteMessage: RemoteMessageShape) => {
-      const data = (remoteMessage.data ?? {}) as FcmData;
-      diag('push-fg', 'foreground push received (suppressed OS banner)', {
-        conversationId: data.conversation_id,
-        kind: data.notify_kind,
-        msgType: data.msg_type,
-      });
-    });
-
-    diag('push', 'foreground message handler registered');
   });
 }
 
@@ -560,13 +557,13 @@ export function registerNotificationOpenedListener(): void {
   // Try sync first, then fall back to async
   const syncMod = requireMessagingSync();
   if (syncMod) {
-    // Use namespaced API (reliable)
     const fcm = syncMod as any;
 
-    if (typeof fcm.default === 'function') {
-      const messaging = fcm.default();
-      if (typeof messaging.onNotificationOpenedApp === 'function') {
-        messaging.onNotificationOpenedApp((remoteMessage: RemoteMessageShape) => {
+    // v24 modular API: onNotificationOpenedApp(messaging, handler)
+    if (typeof fcm.getMessaging === 'function' && typeof fcm.onNotificationOpenedApp === 'function') {
+      try {
+        const messaging = fcm.getMessaging();
+        fcm.onNotificationOpenedApp(messaging, (remoteMessage: RemoteMessageShape) => {
           if (!remoteMessage?.data) return;
           const data = remoteMessage.data as FcmData;
           const target = resolveTarget(data);
@@ -579,9 +576,10 @@ export function registerNotificationOpenedListener(): void {
             void persistTapTarget(target);
           }
         });
-
         diag('push', 'notification-opened listener registered (sync)');
         return;
+      } catch (err) {
+        diag('push', 'notification-opened listener registration failed (sync)', { err: String(err) });
       }
     }
   }
@@ -591,32 +589,30 @@ export function registerNotificationOpenedListener(): void {
     if (!mod) return;
     const fcm = mod as any;
 
-    if (typeof fcm.default !== 'function') {
-      diag('push', 'onNotificationOpenedApp namespaced API not available');
+    if (typeof fcm.getMessaging !== 'function' || typeof fcm.onNotificationOpenedApp !== 'function') {
+      diag('push', 'onNotificationOpenedApp modular API not available (async)');
       return;
     }
 
-    const messaging = fcm.default();
-    if (typeof messaging.onNotificationOpenedApp !== 'function') {
-      diag('push', 'messaging.onNotificationOpenedApp not available');
-      return;
+    try {
+      const messaging = fcm.getMessaging();
+      fcm.onNotificationOpenedApp(messaging, (remoteMessage: RemoteMessageShape) => {
+        if (!remoteMessage?.data) return;
+        const data = remoteMessage.data as FcmData;
+        const target = resolveTarget(data);
+        if (target) {
+          diag('push-open', 'warm resume from push tap — persisting for hook (async)', {
+            conversationId: data.conversation_id,
+            kind: data.notify_kind,
+            msgType: data.msg_type,
+          });
+          void persistTapTarget(target);
+        }
+      });
+      diag('push', 'notification-opened listener registered (async fallback)');
+    } catch (err) {
+      diag('push', 'notification-opened listener registration failed (async)', { err: String(err) });
     }
-
-    messaging.onNotificationOpenedApp((remoteMessage: RemoteMessageShape) => {
-      if (!remoteMessage?.data) return;
-      const data = remoteMessage.data as FcmData;
-      const target = resolveTarget(data);
-      if (target) {
-        diag('push-open', 'warm resume from push tap — persisting for hook (async)', {
-          conversationId: data.conversation_id,
-          kind: data.notify_kind,
-          msgType: data.msg_type,
-        });
-        void persistTapTarget(target);
-      }
-    });
-
-    diag('push', 'notification-opened listener registered (async fallback)');
   });
 }
 
