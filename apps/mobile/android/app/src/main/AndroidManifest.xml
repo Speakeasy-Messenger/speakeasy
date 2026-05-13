@@ -116,5 +116,9 @@
             <action android:name="android.telecom.ConnectionService" />
         </intent-filter>
       </service>
+      <!-- Disable FCM notification delegation (v24+ feature that breaks JS handlers) -->
+      <meta-data
+        android:name="com.google.firebase.messaging.notification_delegation_enabled"
+        android:value="false" />
     </application>
 </manifest>

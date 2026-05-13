@@ -162,11 +162,16 @@ export function registerBackgroundMessageHandler(): void {
 
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
-    const messaging = require('@react-native-firebase/messaging') as {
-      setBackgroundMessageHandler: (handler: (msg: RemoteMessageShape) => Promise<void>) => void;
-    };
+    const messagingModule = require('@react-native-firebase/messaging');
+    const messaging = messagingModule.default; // v24: default export is the factory function
+    
+    if (typeof messaging !== 'function') {
+      diag('push', 'messaging() factory not available');
+      return;
+    }
 
-    messaging.setBackgroundMessageHandler(async (remoteMessage) => {
+    // v24: Call messaging() to get the instance, then set handler
+    messaging().setBackgroundMessageHandler(async (remoteMessage: RemoteMessageShape) => {
       const data = (remoteMessage.data ?? {}) as FcmData;
       diag('push-bg', 'background message received', {
         conversationId: data.conversation_id,
