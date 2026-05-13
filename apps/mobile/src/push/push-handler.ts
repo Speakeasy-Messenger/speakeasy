@@ -388,38 +388,14 @@ export function registerBackgroundMessageHandler(): void {
   // is ready by the time the JS bundle evaluates.
   const syncMod = requireMessagingSync();
   if (syncMod) {
-    // Try BOTH APIs: modular (v24+) and namespaced (v6-v18 compat)
+    // CRITICAL: Use ONLY namespaced API, NOT modular API
+    // The modular API requires Firebase app to be initialized first,
+    // but at module-load time it's not ready yet. The namespaced API
+    // (messaging().setBackgroundMessageHandler) works reliably.
     const fcm = syncMod as any;
 
-    // CRITICAL BUG FIX: v24 exports both modular AND namespaced APIs
-    // Try modular first, fall back to namespaced
     try {
-      // Option 1: Modular API (v24+ preferred)
-      if (typeof fcm.getMessaging === 'function' && typeof fcm.setBackgroundMessageHandler === 'function') {
-        const messaging = fcm.getMessaging();
-        fcm.setBackgroundMessageHandler(messaging, async (remoteMessage: RemoteMessageShape) => {
-        const data = (remoteMessage.data ?? {}) as FcmData;
-        diag('push-bg', 'background message received', {
-          conversationId: data.conversation_id,
-          kind: data.notify_kind,
-          msgType: data.msg_type,
-          timestamp: Date.now(),
-        });
-
-        const target = resolveTarget(data);
-        if (target) {
-          await persistTapTarget(target);
-          diag('push-bg', 'tap-target persisted', { target });
-        } else {
-          diag('push-bg', 'could not resolve target from FCM data', { data });
-        }
-      });
-
-        diag('push', 'background message handler registered (sync - modular API)');
-        return;
-      }
-
-      // Option 2: Namespaced API (v6-v18 compat, still works in v24)
+      // Use namespaced API: require().default() returns messaging()
       if (typeof fcm.default === 'function') {
         const messaging = fcm.default();
         if (typeof messaging.setBackgroundMessageHandler === 'function') {
@@ -526,19 +502,21 @@ export function registerForegroundMessageHandler(): void {
 
   void requireMessagingAsync().then((mod) => {
     if (!mod || foregroundHandlerUnsub) return;
-    // v24 modular API - onMessage needs messaging instance
-    const fcm = mod as {
-      getMessaging?: () => unknown;
-      onMessage?: (messaging: unknown, handler: (msg: RemoteMessageShape) => void) => () => void;
-    };
+    // Use namespaced API (reliable at any time)
+    const fcm = mod as any;
 
-    if (typeof fcm.getMessaging !== 'function' || typeof fcm.onMessage !== 'function') {
-      diag('push', 'onMessage modular API not available');
+    if (typeof fcm.default !== 'function') {
+      diag('push', 'onMessage namespaced API not available');
       return;
     }
 
-    const messaging = fcm.getMessaging();
-    foregroundHandlerUnsub = fcm.onMessage(messaging, (remoteMessage) => {
+    const messaging = fcm.default();
+    if (typeof messaging.onMessage !== 'function') {
+      diag('push', 'messaging.onMessage not available');
+      return;
+    }
+
+    foregroundHandlerUnsub = messaging.onMessage((remoteMessage: RemoteMessageShape) => {
       const data = (remoteMessage.data ?? {}) as FcmData;
       diag('push-fg', 'foreground push received (suppressed OS banner)', {
         conversationId: data.conversation_id,
@@ -582,48 +560,49 @@ export function registerNotificationOpenedListener(): void {
   // Try sync first, then fall back to async
   const syncMod = requireMessagingSync();
   if (syncMod) {
-    // v24 modular API - onNotificationOpenedApp needs messaging instance
-    const fcm = syncMod as {
-      getMessaging?: () => unknown;
-      onNotificationOpenedApp?: (messaging: unknown, handler: (msg: RemoteMessageShape) => void) => () => void;
-    };
+    // Use namespaced API (reliable)
+    const fcm = syncMod as any;
 
-    if (typeof fcm.getMessaging === 'function' && typeof fcm.onNotificationOpenedApp === 'function') {
-      const messaging = fcm.getMessaging();
-      fcm.onNotificationOpenedApp(messaging, (remoteMessage) => {
-        if (!remoteMessage?.data) return;
-        const data = remoteMessage.data as FcmData;
-        const target = resolveTarget(data);
-        if (target) {
-          diag('push-open', 'warm resume from push tap — persisting for hook (sync)', {
-            conversationId: data.conversation_id,
-            kind: data.notify_kind,
-            msgType: data.msg_type,
-          });
-          void persistTapTarget(target);
-        }
-      });
+    if (typeof fcm.default === 'function') {
+      const messaging = fcm.default();
+      if (typeof messaging.onNotificationOpenedApp === 'function') {
+        messaging.onNotificationOpenedApp((remoteMessage: RemoteMessageShape) => {
+          if (!remoteMessage?.data) return;
+          const data = remoteMessage.data as FcmData;
+          const target = resolveTarget(data);
+          if (target) {
+            diag('push-open', 'warm resume from push tap — persisting for hook (sync)', {
+              conversationId: data.conversation_id,
+              kind: data.notify_kind,
+              msgType: data.msg_type,
+            });
+            void persistTapTarget(target);
+          }
+        });
 
-      diag('push', 'notification-opened listener registered (sync)');
-      return;
+        diag('push', 'notification-opened listener registered (sync)');
+        return;
+      }
     }
   }
 
   // Async fallback
   void requireMessagingAsync().then((mod) => {
     if (!mod) return;
-    const fcm = mod as {
-      getMessaging?: () => unknown;
-      onNotificationOpenedApp?: (messaging: unknown, handler: (msg: RemoteMessageShape) => void) => () => void;
-    };
+    const fcm = mod as any;
 
-    if (typeof fcm.getMessaging !== 'function' || typeof fcm.onNotificationOpenedApp !== 'function') {
-      diag('push', 'onNotificationOpenedApp modular API not available');
+    if (typeof fcm.default !== 'function') {
+      diag('push', 'onNotificationOpenedApp namespaced API not available');
       return;
     }
 
-    const messaging = fcm.getMessaging();
-    fcm.onNotificationOpenedApp(messaging, (remoteMessage) => {
+    const messaging = fcm.default();
+    if (typeof messaging.onNotificationOpenedApp !== 'function') {
+      diag('push', 'messaging.onNotificationOpenedApp not available');
+      return;
+    }
+
+    messaging.onNotificationOpenedApp((remoteMessage: RemoteMessageShape) => {
       if (!remoteMessage?.data) return;
       const data = remoteMessage.data as FcmData;
       const target = resolveTarget(data);
