@@ -54,6 +54,33 @@ export async function registerAdminRoutes(
     },
   );
 
+  // GET /v1/admin/users/:userId/devices
+  // Lists all devices for a user
+  app.get(
+    '/v1/admin/users/:userId/devices',
+    async (req: FastifyRequest, reply: FastifyReply) => {
+      const expected = process.env.ADMIN_TOKEN;
+      if (!expected) {
+        return reply.code(503).send({ error: 'admin_token_unset' });
+      }
+      const auth = req.headers.authorization;
+      if (!auth || !auth.startsWith('Bearer ')) {
+        return reply.code(401).send({ error: 'missing_bearer' });
+      }
+      const token = auth.slice('Bearer '.length).trim();
+      if (token !== expected) {
+        return reply.code(403).send({ error: 'bad_token' });
+      }
+      const params = req.params as { userId: string };
+      if (!deps.devices) {
+        return reply.code(501).send({ error: 'devices_repo_not_available' });
+      }
+      
+      const devices = await deps.devices.listForUser(params.userId);
+      return reply.send({ devices });
+    },
+  );
+
   // DELETE /v1/admin/users/:userId/devices/:deviceToken
   // Deletes a device record, forcing re-enrollment
   app.delete(
