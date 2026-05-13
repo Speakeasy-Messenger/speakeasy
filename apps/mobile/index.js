@@ -6,6 +6,14 @@
 // producing a hard JS exception in the AnimalSvg subtree. Importing
 // here forces init.
 import 'react-native-reanimated';
+
+// CRITICAL: Import Firebase messaging to register headless task
+// The module registers AppRegistry.registerHeadlessTask() when imported,
+// which is required for background FCM messages to wake the app.
+// Without this import, the headless task is never registered and
+// background messages are queued by Android until foreground.
+import '@react-native-firebase/messaging';
+
 import { AppRegistry } from 'react-native';
 import App from './App';
 import { name as appName } from './app.json';
