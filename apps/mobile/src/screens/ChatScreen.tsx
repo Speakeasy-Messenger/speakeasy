@@ -22,7 +22,7 @@ import {
   newMessageId,
   type Attachment,
 } from '@speakeasy/shared';
-import { APP_VERSION as FEEDBACK_APP_VERSION } from './AboutScreen.js';
+import { appVersion } from '../version.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
@@ -360,7 +360,7 @@ export function ChatScreen({
       // the chat making the channel intent clear.
       if (isFeedbackHandle(peerId)) {
         if (text) {
-          await api.submitFeedback(deviceToken, text, FEEDBACK_APP_VERSION);
+          await api.submitFeedback(deviceToken, text, appVersion());
           // Mark immediately as delivered — there's no remote ack
           // round-trip; the POST 200 IS the ack.
           markDelivered(id);

@@ -6,6 +6,69 @@ apply plugin: "com.facebook.react"
 // (apps/mobile/android/app/) at evaluation time.
 apply plugin: "com.google.gms.google-services"
 
+// =====================================================================
+// Version derivation — single source of truth is the git tag.
+//
+// Resolution order:
+//   1. $GITHUB_REF (CI, on tag push) — set to refs/tags/alpha-0.5.0-rc.81
+//   2. `git describe --tags --dirty --always` — local dev with tags
+//   3. literal "0.0.0-dev" fallback (CI without tag / shallow checkout)
+//
+// Expected tag format: `alpha-<semver-with-rc>` e.g. `alpha-0.5.0-rc.81`.
+// - versionName strips the `alpha-` prefix → "0.5.0-rc.81"
+// - versionCode is the rc number → 81. For builds off-tag (rc-dirty)
+//   gradle uses 0; release CI only builds on tag push so a dirty
+//   versionCode never reaches the Play Store / users.
+//
+// This replaces the previous "manually bump versionName + versionCode +
+// JS APP_VERSION + JS APP_BUILD before each release" choreography. The
+// JS side now reads BuildConfig via VersionModule (see app/src/main/
+// java/.../version/VersionModule.kt).
+// =====================================================================
+def deriveVersionString = { ->
+    def env = System.getenv("GITHUB_REF") ?: ""
+    if (env.startsWith("refs/tags/")) {
+        return env.substring("refs/tags/".length())
+    }
+    try {
+        def proc = ["git", "describe", "--tags", "--dirty", "--always"]
+                .execute(null, project.rootDir)
+        proc.waitFor()
+        if (proc.exitValue() == 0) {
+            def desc = proc.text.trim()
+            if (desc) return desc
+        }
+    } catch (Exception ignored) {
+        // git not available or not a repo — fall through
+    }
+    return "alpha-0.0.0-dev"
+}
+
+def rawVersionTag = deriveVersionString()
+
+def computedVersionName = {
+    // Strip the `alpha-` prefix; if the tag is dirty (e.g.
+    // "alpha-0.5.0-rc.81-3-gabcd123-dirty") keep the extra detail so
+    // the About screen tells the truth about dev builds.
+    def name = rawVersionTag.startsWith("alpha-")
+            ? rawVersionTag.substring("alpha-".length())
+            : rawVersionTag
+    return name
+}()
+
+def computedVersionCode = {
+    // Extract the rc number for the integer versionCode. On a tag like
+    // "alpha-0.5.0-rc.81" → 81. On any off-tag build → 0 (only release
+    // CI builds on tags, so users never see 0).
+    def m = rawVersionTag =~ /-rc\.(\d+)$/
+    if (m.find()) {
+        return m.group(1).toInteger()
+    }
+    return 0
+}()
+
+println "[version] tag=${rawVersionTag} name=${computedVersionName} code=${computedVersionCode}"
+
 // Workspace packages (@speakeasy/shared, /crypto, /vouchflow) compile to
 // `dist/` and are consumed by Metro through the workspace symlink. They
 // live outside the Android project tree, so gradle's incremental build
@@ -204,15 +267,12 @@ android {
         //     uses auto routing now
         //   - outgoing-call ringback (system default tone) plays
         //     while waiting for the peer to answer
-        // alpha-0.5.0-rc.81 — version-drift fix:
-        //   - bump versionName/versionCode (stuck at rc.58 since the
-        //     last manual sync; APKs for rc.59–rc.80 all reported
-        //     "rc.58" inside the app, which made user bug reports
-        //     misleading)
-        //   - paired CI guard in release.yml asserts versionName ==
-        //     git tag, so this can no longer silently drift
-        versionCode 81
-        versionName "0.5.0-rc.81"
+        // rc.82+ — versionCode/versionName auto-derived from the git
+        // tag at build time. See top-of-file `deriveVersionString` for
+        // the resolution order. No more manual bumps; CI guard in
+        // release.yml verifies the artifact carries the expected tag.
+        versionCode computedVersionCode
+        versionName computedVersionName
         // Phase 5b: BuildConfig fields for Vouchflow SDK init. Pulled from
         // android/gradle.properties (the api key is gitignored — see
         // android/gradle.properties.example for the placeholder).

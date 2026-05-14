@@ -22,20 +22,13 @@ const TERMS_URL = 'https://speakeasyapp.xyz/terms';
 const OPEN_SOURCE_URL = 'https://speakeasyapp.xyz/open-source';
 const SUPPORT_EMAIL = 'hello@speakeasy.app';
 
-// Matches apps/mobile/android/app/build.gradle versionName +
-// versionCode. Manual sync until a build-time bake step lands.
-// Re-exported so other modules (e.g. ChatScreen for feedback
-// app_version field) reference a single source of truth.
-//
-// CI guard: .github/workflows/release.yml asserts that this string
-// matches both the gradle versionName and the git tag being built
-// before the APK is uploaded — so a mismatch fails the release
-// before users see the wrong version in the About screen / feedback
-// reports.
-export const APP_VERSION = '0.5.0-rc.81';
-export const APP_BUILD = '81';
-const VERSION = APP_VERSION;
-const BUILD = APP_BUILD;
+// rc.82+: version reads from the native module (BuildConfig baked at
+// build time from the git tag). Imported via function calls so each
+// access pulls the current native value (matters in vitest where the
+// mock module can be re-initialized across test files).
+import { appVersion, appBuild } from '../version.js';
+const VERSION = appVersion();
+const BUILD = appBuild();
 
 /**
  * SETTINGS.md §9 — three sections + footer.

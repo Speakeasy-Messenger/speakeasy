@@ -67,50 +67,6 @@ jobs:
           npm run typecheck
           npm run test
 
-      - name: Assert versionName matches git tag
-        # Stops the rc.58-stuck-for-22-releases problem from recurring.
-        # The gradle versionName, the JS APP_VERSION constant, and the
-        # git tag being built must all agree, or the APK lies about
-        # what it is and user bug reports become useless.
-        #
-        # Tag format: alpha-0.5.0-rc.NN → expected versionName "0.5.0-rc.NN"
-        # and expected versionCode NN.
-        run: |
-          tag="${GITHUB_REF##*/}"
-          expected_name="${tag#alpha-}"
-          expected_code="${tag##*-rc.}"
-
-          gradle_name=$(grep -oP 'versionName "\K[^"]+' apps/mobile/android/app/build.gradle | head -1)
-          gradle_code=$(grep -oP 'versionCode \K[0-9]+'  apps/mobile/android/app/build.gradle | head -1)
-          js_version=$(grep -oP "APP_VERSION = '\K[^']+" apps/mobile/src/screens/AboutScreen.tsx)
-          js_build=$(grep -oP "APP_BUILD = '\K[^']+"     apps/mobile/src/screens/AboutScreen.tsx)
-
-          echo "Expected versionName: $expected_name"
-          echo "Expected versionCode: $expected_code"
-          echo "Gradle versionName:   $gradle_name"
-          echo "Gradle versionCode:   $gradle_code"
-          echo "JS APP_VERSION:       $js_version"
-          echo "JS APP_BUILD:         $js_build"
-
-          fail=0
-          if [ "$gradle_name" != "$expected_name" ]; then
-            echo "::error::gradle versionName ($gradle_name) does not match tag ($expected_name)"
-            fail=1
-          fi
-          if [ "$gradle_code" != "$expected_code" ]; then
-            echo "::error::gradle versionCode ($gradle_code) does not match tag-derived code ($expected_code)"
-            fail=1
-          fi
-          if [ "$js_version" != "$expected_name" ]; then
-            echo "::error::AboutScreen.tsx APP_VERSION ($js_version) does not match tag ($expected_name)"
-            fail=1
-          fi
-          if [ "$js_build" != "$expected_code" ]; then
-            echo "::error::AboutScreen.tsx APP_BUILD ($js_build) does not match tag-derived code ($expected_code)"
-            fail=1
-          fi
-          exit $fail
-
       - name: Build release APK
         working-directory: apps/mobile/android
         env:
@@ -123,6 +79,47 @@ jobs:
           fi
           ./gradlew :app:assembleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
+
+      - name: Assert built APK carries the tag version
+        # rc.82+: gradle derives versionName/versionCode from the git
+        # tag at build time (see app/build.gradle deriveVersionString).
+        # This step tests the built artifact rather than the sources —
+        # if anything in the version-derivation chain breaks (env
+        # variable not visible to gradle, regex bug, fallback fires
+        # accidentally), the APK manifest will disagree with the tag
+        # and we fail before publishing.
+        run: |
+          tag="${GITHUB_REF##*/}"
+          expected_name="${tag#alpha-}"
+          expected_code="${tag##*-rc.}"
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+
+          # build-tools 35.0.0 is provisioned by android-actions/setup-android above
+          aapt="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt"
+          if [ ! -x "$aapt" ]; then
+            # Fallback for build-tools layout changes
+            aapt=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f -executable | head -1)
+          fi
+
+          badging=$("$aapt" dump badging "$apk")
+          actual_name=$(echo "$badging" | grep -oP "versionName='\K[^']+")
+          actual_code=$(echo "$badging" | grep -oP "versionCode='\K[^']+")
+
+          echo "Expected versionName: $expected_name"
+          echo "Expected versionCode: $expected_code"
+          echo "Actual versionName:   $actual_name"
+          echo "Actual versionCode:   $actual_code"
+
+          fail=0
+          if [ "$actual_name" != "$expected_name" ]; then
+            echo "::error::APK versionName ($actual_name) does not match tag ($expected_name)"
+            fail=1
+          fi
+          if [ "$actual_code" != "$expected_code" ]; then
+            echo "::error::APK versionCode ($actual_code) does not match tag-derived code ($expected_code)"
+            fail=1
+          fi
+          exit $fail
 
       - name: Rename APK with version tag
         id: rename
