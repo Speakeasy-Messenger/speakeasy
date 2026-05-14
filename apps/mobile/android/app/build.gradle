@@ -25,19 +25,22 @@ apply plugin: "com.google.gms.google-services"
 // JS side now reads BuildConfig via VersionModule (see app/src/main/
 // java/.../version/VersionModule.kt).
 // =====================================================================
-// Capture rootDir at script top scope — `project` is available here
-// but may be null inside closures the RN gradle plugin re-evaluates
-// during the variant configuration phase, leading to a NPE.
-def repoRootDir = rootProject.projectDir
-
 def deriveVersionString = { ->
     def env = System.getenv("GITHUB_REF") ?: ""
     if (env.startsWith("refs/tags/")) {
         return env.substring("refs/tags/".length())
     }
     try {
+        // Don't specify cwd — gradle invokes the build from the
+        // project's android/ dir which is inside the git repo, so
+        // `git describe` resolves correctly without a cwd hint.
+        // The previous attempt used `project.rootDir` and then
+        // `rootProject.projectDir`, both of which can be null when
+        // evaluated through the RN gradle plugin's variant config
+        // phase (observed as "Cannot get property 'rootDir' on null
+        // object" in rc.82 and rc.83 release builds).
         def proc = ["git", "describe", "--tags", "--dirty", "--always"]
-                .execute(null, repoRootDir)
+                .execute()
         proc.waitFor()
         if (proc.exitValue() == 0) {
             def desc = proc.text.trim()
