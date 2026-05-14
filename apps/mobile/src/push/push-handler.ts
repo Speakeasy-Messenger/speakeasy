@@ -43,8 +43,14 @@ export function resolveTarget(data: FcmData): TapTarget | null {
   if (!conversation_id || !notify_kind) return null;
 
   if (notify_kind === 'call') {
-    const peerId = conversation_id.replace('dm-', '').slice(0, 16);
-    return { kind: 'call', peerId };
+    // Calls are always direct messages - look up peer from store
+    const conv = useConversations.getState().byId[conversation_id];
+    if (conv?.peerUserId) {
+      return { kind: 'call', peerId: conv.peerUserId };
+    }
+    // Store not hydrated yet - use conversation_id as fallback
+    // (IncomingCall screen will need to resolve peer)
+    return { kind: 'call', peerId: conversation_id };
   }
 
   if (notify_kind === 'message') {
@@ -52,8 +58,13 @@ export function resolveTarget(data: FcmData): TapTarget | null {
       const groupId = conversation_id.replace('group-', '');
       return { kind: 'group', groupId };
     }
-    const peerId = conversation_id.replace('dm-', '').slice(0, 16);
-    return { kind: 'direct', peerId };
+    // Direct message - look up peer from store
+    const conv = useConversations.getState().byId[conversation_id];
+    if (conv?.peerUserId) {
+      return { kind: 'direct', peerId: conv.peerUserId };
+    }
+    // Store not hydrated - use conversation_id as fallback
+    return { kind: 'direct', peerId: conversation_id };
   }
 
   return null;
