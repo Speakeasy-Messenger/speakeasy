@@ -140,8 +140,13 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${{ steps.rename.outputs.apk }}" --clobber
           else
+            # No --prerelease: every release we cut has been meant as
+            # Latest. Pre-creating the release with `gh release create`
+            # before tag-push remains the recommended flow (lets you
+            # set notes / draft state explicitly), but the workflow
+            # fallback now produces a usable Latest release instead of
+            # a prerelease that requires manual promotion every time.
             gh release create "$tag" "${{ steps.rename.outputs.apk }}" \
-              --prerelease \
               --title "$tag" \
               --notes "APK built by .github/workflows/release.yml. See commits since previous tag."
           fi
