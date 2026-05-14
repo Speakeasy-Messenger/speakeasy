@@ -204,8 +204,15 @@ android {
         //     uses auto routing now
         //   - outgoing-call ringback (system default tone) plays
         //     while waiting for the peer to answer
-        versionCode 58
-        versionName "0.5.0-rc.58"
+        // alpha-0.5.0-rc.81 — version-drift fix:
+        //   - bump versionName/versionCode (stuck at rc.58 since the
+        //     last manual sync; APKs for rc.59–rc.80 all reported
+        //     "rc.58" inside the app, which made user bug reports
+        //     misleading)
+        //   - paired CI guard in release.yml asserts versionName ==
+        //     git tag, so this can no longer silently drift
+        versionCode 81
+        versionName "0.5.0-rc.81"
         // Phase 5b: BuildConfig fields for Vouchflow SDK init. Pulled from
         // android/gradle.properties (the api key is gitignored — see
         // android/gradle.properties.example for the placeholder).

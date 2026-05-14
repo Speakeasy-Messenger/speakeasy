@@ -67,6 +67,50 @@ jobs:
           npm run typecheck
           npm run test
 
+      - name: Assert versionName matches git tag
+        # Stops the rc.58-stuck-for-22-releases problem from recurring.
+        # The gradle versionName, the JS APP_VERSION constant, and the
+        # git tag being built must all agree, or the APK lies about
+        # what it is and user bug reports become useless.
+        #
+        # Tag format: alpha-0.5.0-rc.NN → expected versionName "0.5.0-rc.NN"
+        # and expected versionCode NN.
+        run: |
+          tag="${GITHUB_REF##*/}"
+          expected_name="${tag#alpha-}"
+          expected_code="${tag##*-rc.}"
+
+          gradle_name=$(grep -oP 'versionName "\K[^"]+' apps/mobile/android/app/build.gradle | head -1)
+          gradle_code=$(grep -oP 'versionCode \K[0-9]+'  apps/mobile/android/app/build.gradle | head -1)
+          js_version=$(grep -oP "APP_VERSION = '\K[^']+" apps/mobile/src/screens/AboutScreen.tsx)
+          js_build=$(grep -oP "APP_BUILD = '\K[^']+"     apps/mobile/src/screens/AboutScreen.tsx)
+
+          echo "Expected versionName: $expected_name"
+          echo "Expected versionCode: $expected_code"
+          echo "Gradle versionName:   $gradle_name"
+          echo "Gradle versionCode:   $gradle_code"
+          echo "JS APP_VERSION:       $js_version"
+          echo "JS APP_BUILD:         $js_build"
+
+          fail=0
+          if [ "$gradle_name" != "$expected_name" ]; then
+            echo "::error::gradle versionName ($gradle_name) does not match tag ($expected_name)"
+            fail=1
+          fi
+          if [ "$gradle_code" != "$expected_code" ]; then
+            echo "::error::gradle versionCode ($gradle_code) does not match tag-derived code ($expected_code)"
+            fail=1
+          fi
+          if [ "$js_version" != "$expected_name" ]; then
+            echo "::error::AboutScreen.tsx APP_VERSION ($js_version) does not match tag ($expected_name)"
+            fail=1
+          fi
+          if [ "$js_build" != "$expected_code" ]; then
+            echo "::error::AboutScreen.tsx APP_BUILD ($js_build) does not match tag-derived code ($expected_code)"
+            fail=1
+          fi
+          exit $fail
+
       - name: Build release APK
         working-directory: apps/mobile/android
         env:

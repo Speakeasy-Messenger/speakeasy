@@ -26,8 +26,14 @@ const SUPPORT_EMAIL = 'hello@speakeasy.app';
 // versionCode. Manual sync until a build-time bake step lands.
 // Re-exported so other modules (e.g. ChatScreen for feedback
 // app_version field) reference a single source of truth.
-export const APP_VERSION = '0.5.0-rc.58';
-export const APP_BUILD = '58';
+//
+// CI guard: .github/workflows/release.yml asserts that this string
+// matches both the gradle versionName and the git tag being built
+// before the APK is uploaded — so a mismatch fails the release
+// before users see the wrong version in the About screen / feedback
+// reports.
+export const APP_VERSION = '0.5.0-rc.81';
+export const APP_BUILD = '81';
 const VERSION = APP_VERSION;
 const BUILD = APP_BUILD;
 
