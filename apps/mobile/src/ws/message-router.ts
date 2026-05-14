@@ -99,6 +99,32 @@ export interface MessageRouterDeps {
    * works regardless.
    */
   onInboundAttachments?: (attachments: Attachment[]) => void;
+  /**
+   * Called every time the server returns an `authed` frame — i.e.
+   * after every successful WS handshake (cold start, warm resume,
+   * reconnect after network blip). App.tsx wires this to a
+   * best-effort `tryRegisterPushToken()` re-sync.
+   *
+   * Why: signup's push-token registration is fire-and-forget
+   * (HandleStep.tsx) and can silently fail (Firebase not ready,
+   * network blip, app backgrounded mid-request). When it does, the
+   * server has the device row but no push_token, so any push the
+   * server tries to send hits the "no devices with push_token"
+   * branch and gets silently dropped. The only thing that triggers
+   * another attempt is a cold app launch — meaning brand-new users
+   * are unreachable by push for the entire window between signup
+   * and their next cold launch (~2 min observed in tester14's
+   * incident on 2026-05-14).
+   *
+   * Wiring this to the `authed` frame closes the window from
+   * "until next cold launch" to "next WS connection" (~1 second
+   * after signup). Idempotent: `tryRegisterPushToken` collapses
+   * duplicate calls via its in-flight + recency cache, so this
+   * costs nothing when registration already succeeded.
+   *
+   * Optional so tests that don't care about push can omit it.
+   */
+  onAuthed?: () => void;
   /** Optional structured logger; defaults to console. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
@@ -149,6 +175,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
     diag('router', `frame: ${frame.type}`, breadcrumb);
     switch (frame.type) {
       case 'authed':
+        // Re-sync push token on every successful handshake. See
+        // `onAuthed` doc comment for the bug this closes.
+        deps.onAuthed?.();
+        return;
+
       case 'pong':
         return;
 

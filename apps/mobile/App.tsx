@@ -578,6 +578,22 @@ export default function App() {
       onCallFrame: callOrch
         ? (frame) => void callOrch!.handleFrame(frame)
         : undefined,
+      // rc.84 — re-sync push token on every WS handshake. Closes
+      // the post-signup black hole where the device row exists but
+      // push_token is NULL, causing every push to be silently
+      // dropped until the user next cold-launches the app (see
+      // MessageRouterDeps.onAuthed doc for the full incident
+      // analysis). `tryRegisterPushToken` is idempotent + dedupes,
+      // so this is a no-op when registration already succeeded.
+      onAuthed: () => {
+        const dt = useIdentity.getState().deviceToken;
+        if (!dt) return;
+        void tryRegisterPushToken(dt).catch((err) => {
+          diag('app', 'authed push re-register failed (non-fatal)', {
+            err: String(err),
+          });
+        });
+      },
       onPrekeysLow: () => void replenisher.trigger(),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
