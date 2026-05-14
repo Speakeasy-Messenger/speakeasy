@@ -405,10 +405,14 @@ describe('user-story message + presence (Tier B, ioredis-mock)', () => {
     expect(incoming.from).toBe('alice');
     expect(incoming.ciphertext).toBe('TElWRQ==');
 
-    // Crucially: NO push fired (Bob was online on B). Pre-rc.58 this
-    // path fired a push every time because the local-fan-out check
-    // missed cross-instance peers.
-    expect(cluster.pushA.calls).toHaveLength(0);
+    // Always-push policy: push fires from the originating instance
+    // even when the recipient is live on another instance, because
+    // we no longer gate push on a `presence:{userId}` lookup that
+    // could be stale (orphaned session keys silenced push for
+    // legitimately-offline users — see handler.ts inline rationale).
+    // Push runs once (on A), never on B (B doesn't own the send).
+    expect(cluster.pushA.calls).toHaveLength(1);
+    expect(cluster.pushA.calls[0]!.userId).toBe('bob');
     expect(cluster.pushB.calls).toHaveLength(0);
   });
 

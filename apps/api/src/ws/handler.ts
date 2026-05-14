@@ -442,31 +442,35 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               msg_type: msg.msg_type,
               conversation_id: conversation,
             };
-            const localDevices = deps.connections.getDevices(recipientId);
-            const onlineLocally = localDevices.length > 0;
-            const peerInstance = onlineLocally
-              ? deps.instanceId
-              : await deps.presence.lookupInstance(recipientId);
-            const onlineSomewhere = onlineLocally || !!peerInstance;
-            if (onlineSomewhere) {
-              deps.userNotifier.notify(recipientId, frame);
-            } else {
-              // Truly offline. Notify-only push wakes the device and
-              // it drains the relay buffer on next WS auth. No content
-              // in the payload per spec §11.
-              void deps.push
-                .notifyDelivery({
-                  userId: recipientId,
-                  conversationId: conversation,
-                  msgType: msg.msg_type,
-                  // Sealed-sender messages don't reveal the sender to
-                  // the server-side push surface — degrades to generic
-                  // "speakeasy: New message" regardless of recipient
-                  // privacy preference.
-                  senderId: sealed ? undefined : senderUserId,
-                })
-                .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
-            }
+            // Always fan out live AND fire a notify-only push. The
+            // previous `onlineSomewhere ? notify : push` gate relied
+            // on `presence:{userId}` being a perfect mirror of socket
+            // liveness — which it isn't. Anything that severs the
+            // TCP without firing the WS close handler (process crash,
+            // fly machine swap, cellular handoff, k8s eviction)
+            // leaves `session:{userId}` set in Redis forever and
+            // routes every subsequent message via the dead socket
+            // instead of FCM. The client already dedupes by
+            // `message_id` (see store/conversations.ts add()) and
+            // the foreground FCM handler suppresses the OS tray
+            // notification on Android when the app is open (see
+            // commit 3d969ad), so a redundant push for a foregrounded
+            // user is a no-op visually. Cost: one FCM data call per
+            // message even when the user is online — negligible
+            // versus the "@x didn't get a push" reports this fixes.
+            deps.userNotifier.notify(recipientId, frame);
+            void deps.push
+              .notifyDelivery({
+                userId: recipientId,
+                conversationId: conversation,
+                msgType: msg.msg_type,
+                // Sealed-sender messages don't reveal the sender to
+                // the server-side push surface — degrades to generic
+                // "speakeasy: New message" regardless of recipient
+                // privacy preference.
+                senderId: sealed ? undefined : senderUserId,
+              })
+              .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
           }),
         );
 
@@ -550,28 +554,23 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           ciphertext: msg.ciphertext,
           message_id: rowId,
         };
-        const skdmLocalDevices = deps.connections.getDevices(msg.to);
-        const skdmOnlineLocally = skdmLocalDevices.length > 0;
-        const skdmPeerInstance = skdmOnlineLocally
-          ? deps.instanceId
-          : await deps.presence.lookupInstance(msg.to);
-        const skdmOnlineSomewhere = skdmOnlineLocally || !!skdmPeerInstance;
-        if (skdmOnlineSomewhere) {
-          deps.userNotifier.notify(msg.to, skdmFrame);
-        } else {
-          void deps.push
-            .notifyDelivery({
-              userId: msg.to,
-              conversationId: conversation,
-              msgType: 'direct',
-              // SKDM is the group-key-distribution carrier — sender
-              // identity is fine to surface (member adds member, you
-              // see who added the SKDM that unlocks future group
-              // messages).
-              senderId: senderUserId,
-            })
-            .catch((err) => deps.log.warn({ err, recipientId: msg.to }, 'push notify failed'));
-        }
+        // Always fan out live AND push — same rationale as the
+        // direct/group message branch above: the presence gate is
+        // unreliable when the WS close handler doesn't fire, and the
+        // client dedupes by message_id.
+        deps.userNotifier.notify(msg.to, skdmFrame);
+        void deps.push
+          .notifyDelivery({
+            userId: msg.to,
+            conversationId: conversation,
+            msgType: 'direct',
+            // SKDM is the group-key-distribution carrier — sender
+            // identity is fine to surface (member adds member, you
+            // see who added the SKDM that unlocks future group
+            // messages).
+            senderId: senderUserId,
+          })
+          .catch((err) => deps.log.warn({ err, recipientId: msg.to }, 'push notify failed'));
         return;
       }
       case 'call_offer':

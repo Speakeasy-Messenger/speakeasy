@@ -621,10 +621,19 @@ describe('ws messaging — Phase 3', () => {
     await expect(laptopQ.next(150)).rejects.toThrow();
   });
 
-  it('Phase 4: fires push when recipient is offline; no push when online', async () => {
-    // Online: Bob is connected → no push.
+  it('always-push policy: push fires for every recipient, online or offline', async () => {
+    // Rationale: the prior `onlineSomewhere ? notify : push` gate
+    // relied on `presence:{userId}` being a perfect mirror of socket
+    // liveness, which it isn't (any disconnect that skips the WS
+    // close handler — process crash, fly machine swap, cellular
+    // handoff — orphaned the session key and silenced push forever).
+    // The client dedupes by message_id and the foreground FCM handler
+    // suppresses the OS tray when foregrounded, so a redundant push
+    // for an online recipient is a no-op visually.
     const a = await authedSocket('alice-blue-fox');
     const b = await authedSocket('bob-red-bear');
+
+    // Online: Bob is connected → still pushed (live WS frame also sent).
     a.ws.send(
       JSON.stringify({
         type: 'message',
@@ -633,10 +642,12 @@ describe('ws messaging — Phase 3', () => {
         msg_type: 'direct',
       }),
     );
-    await b.q.next(); // message
-    expect(pushProvider.calls).toHaveLength(0);
+    await b.q.next(); // message delivered live via WS
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(pushProvider.calls[0]!.userId).toBe('bob-red-bear');
 
-    // Offline: Carol isn't connected → push fires.
+    // Offline: Carol isn't connected → push still fires.
     a.ws.send(
       JSON.stringify({
         type: 'message',
@@ -646,10 +657,10 @@ describe('ws messaging — Phase 3', () => {
       }),
     );
     await new Promise((r) => setTimeout(r, 30));
-    expect(pushProvider.calls).toHaveLength(1);
-    expect(pushProvider.calls[0]!.userId).toBe('carol-pink-owl');
-    expect(pushProvider.calls[0]!.msgType).toBe('direct');
-    expect(pushProvider.calls[0]!.conversationId).toMatch(/^dm-[0-9a-f]{16}$/);
+    expect(pushProvider.calls).toHaveLength(2);
+    expect(pushProvider.calls[1]!.userId).toBe('carol-pink-owl');
+    expect(pushProvider.calls[1]!.msgType).toBe('direct');
+    expect(pushProvider.calls[1]!.conversationId).toMatch(/^dm-[0-9a-f]{16}$/);
   });
 
   it('uses deterministic conversation id for direct messages', async () => {
@@ -1107,7 +1118,11 @@ describe('ws messaging — Phase 5d push-token integration', () => {
     expect(devices[0]!.pushToken).toBe('new-token');
   });
 
-  it('no push when recipient is online even with push token', async () => {
+  it('push fires even when recipient is online (client dedupes by message_id)', async () => {
+    // Always-push policy. The live WS frame and the FCM push both go
+    // out; the mobile client dedupes by `message_id` in
+    // store/conversations.ts:add(), and the foreground FCM handler
+    // suppresses the OS tray notification when the app is open.
     const alice = await authedSocket('alice-blue-fox');
     const bob = await authedSocket('bob-red-bear');
 
@@ -1118,7 +1133,6 @@ describe('ws messaging — Phase 5d push-token integration', () => {
       platform: 'android',
     });
 
-    // Alice sends to online Bob — no push.
     alice.ws.send(
       JSON.stringify({
         type: 'message',
@@ -1129,7 +1143,8 @@ describe('ws messaging — Phase 5d push-token integration', () => {
     );
     await bob.q.next(); // message delivered via WS
     await new Promise((r) => setTimeout(r, 30));
-    expect(pushProvider.calls).toHaveLength(0);
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(pushProvider.calls[0]!.userId).toBe('bob-red-bear');
   });
 });
 
