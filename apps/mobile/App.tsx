@@ -44,7 +44,6 @@ import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
 import { SplashScreen } from './src/components/SplashScreen.js';
 import {
-  registerBackgroundMessageHandler,
   registerForegroundMessageHandler,
   registerNotificationOpenedListener,
   usePushNavigation,
@@ -64,15 +63,9 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
   if (typeof _origHandler === 'function') _origHandler(e, isFatal);
 });
 
-// Phase 6 fix: register FCM background + foreground message handlers at
-// module level (MUST run before any React lifecycle —
-// @react-native-firebase/messaging requires setBackgroundMessageHandler
-// for headless JS on Android, and onMessage must be registered before
-// any push arrives to prevent auto-display of system notifications
-// while the app is foregrounded — the "2x push" bug).
-
-// FIX: Use v24 modular API with messaging instance parameter
-registerBackgroundMessageHandler();
+// Phase 6 fix: register FCM foreground + notification-opened handlers
+// Background handler is registered at module load in push-handler.ts
+// (top-level, synchronous, Android only)
 registerForegroundMessageHandler();
 registerNotificationOpenedListener();
 

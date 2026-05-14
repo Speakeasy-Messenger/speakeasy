@@ -8,29 +8,27 @@
 
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
-import messaging from '@react-native-firebase/messaging';
+import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
+import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
 import { CallKeepBridge } from '../calls/callkeep-bridge.js';
+
+type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
 // ---------------------------------------------------------------------------
 // FCM data-payload shape
 // ---------------------------------------------------------------------------
 
-type FcmData = {
+export type FcmData = {
   conversation_id?: string;
   notify_kind?: 'message' | 'call';
   msg_type?: 'direct' | 'group';
-};
-
-type RemoteMessageShape = {
-  data?: Record<string, string | undefined> | null;
-  messageId?: string;
 };
 
 type TapTarget =
@@ -40,7 +38,7 @@ type TapTarget =
 
 const TAP_TARGET_KEY = '@speakeasy/push-tap-target';
 
-function resolveTarget(data: FcmData): TapTarget | null {
+export function resolveTarget(data: FcmData): TapTarget | null {
   const { conversation_id, notify_kind, msg_type } = data;
   if (!conversation_id || !notify_kind) return null;
 
@@ -86,7 +84,7 @@ async function consumeTapTarget(): Promise<TapTarget | null> {
 // ---------------------------------------------------------------------------
 
 if (Platform.OS === 'android') {
-  messaging().setBackgroundMessageHandler(async (remoteMessage: RemoteMessageShape) => {
+  messaging().setBackgroundMessageHandler(async (remoteMessage: RemoteMessage) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
     diag('push-bg', 'background message received', {
       conversationId: data.conversation_id,
@@ -116,7 +114,7 @@ let foregroundHandlerUnsub: (() => void) | undefined;
 export function registerForegroundMessageHandler(): void {
   if (foregroundHandlerUnsub) return;
 
-  foregroundHandlerUnsub = messaging().onMessage((remoteMessage: RemoteMessageShape) => {
+  foregroundHandlerUnsub = messaging().onMessage((remoteMessage: RemoteMessage) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
     diag('push-fg', 'foreground push received (suppressed OS banner)', {
       conversationId: data.conversation_id,
@@ -143,7 +141,7 @@ export function registerNotificationOpenedListener(): void {
   if (notificationOpenedRegistered) return;
   notificationOpenedRegistered = true;
   
-  messaging().onNotificationOpenedApp((remoteMessage: RemoteMessageShape) => {
+  messaging().onNotificationOpenedApp((remoteMessage: RemoteMessage) => {
     if (!remoteMessage?.data) return;
     const data = remoteMessage.data as FcmData;
     const target = resolveTarget(data);
@@ -170,9 +168,7 @@ async function routeTarget(
   callOrchestrator?: CallOrchestrator,
 ): Promise<void> {
   if (target.kind === 'call') {
-    if (callOrchestrator) {
-      await CallKeepBridge.start(callOrchestrator);
-    }
+    // CallKeepBridge will be started by IncomingCall screen
     navRef.current?.navigate('IncomingCall');
   } else if (target.kind === 'group') {
     navRef.current?.navigate('GroupChat', { groupId: target.groupId });
@@ -186,7 +182,7 @@ export function usePushNavigation(
   callOrchestrator?: CallOrchestrator,
 ): void {
   const hydrated = useConversations((s) => s.hydrated);
-  const userId = useConversations((s) => s.userId);
+  const userId = useIdentity((s) => s.userId);
   const routedRef = useRef(false);
 
   useEffect(() => {
