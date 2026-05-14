@@ -9,13 +9,6 @@
 import { useEffect, useRef } from 'react';
 import { Platform } from 'react-native';
 import messaging from '@react-native-firebase/messaging';
-import { 
-  getMessaging, 
-  onMessage, 
-  setBackgroundMessageHandler, 
-  onNotificationOpenedApp,
-  getInitialNotification 
-} from '@react-native-firebase/messaging';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
@@ -89,10 +82,11 @@ async function consumeTapTarget(): Promise<TapTarget | null> {
 
 // ---------------------------------------------------------------------------
 // TOP-LEVEL BACKGROUND HANDLER REGISTRATION (Android only)
+// CRITICAL: This MUST execute at module load, not in a function
 // ---------------------------------------------------------------------------
 
 if (Platform.OS === 'android') {
-  setBackgroundMessageHandler(async (remoteMessage: RemoteMessageShape) => {
+  messaging().setBackgroundMessageHandler(async (remoteMessage: RemoteMessageShape) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
     diag('push-bg', 'background message received', {
       conversationId: data.conversation_id,
@@ -122,9 +116,7 @@ let foregroundHandlerUnsub: (() => void) | undefined;
 export function registerForegroundMessageHandler(): void {
   if (foregroundHandlerUnsub) return;
 
-  const fcm = getMessaging();
-  
-  foregroundHandlerUnsub = onMessage(fcm, (remoteMessage: RemoteMessageShape) => {
+  foregroundHandlerUnsub = messaging().onMessage((remoteMessage: RemoteMessageShape) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
     diag('push-fg', 'foreground push received (suppressed OS banner)', {
       conversationId: data.conversation_id,
@@ -151,9 +143,7 @@ export function registerNotificationOpenedListener(): void {
   if (notificationOpenedRegistered) return;
   notificationOpenedRegistered = true;
   
-  const fcm = getMessaging();
-  
-  onNotificationOpenedApp(fcm, (remoteMessage: RemoteMessageShape) => {
+  messaging().onNotificationOpenedApp((remoteMessage: RemoteMessageShape) => {
     if (!remoteMessage?.data) return;
     const data = remoteMessage.data as FcmData;
     const target = resolveTarget(data);
@@ -207,10 +197,8 @@ export function usePushNavigation(
 
     async function handleInitialNotification() {
       try {
-        const fcm = getMessaging();
-        
         // 1. Cold start — check getInitialNotification
-        const initial = await getInitialNotification(fcm);
+        const initial = await messaging().getInitialNotification();
         if (initial?.data && !routedRef.current && !cancelled) {
           const data = initial.data as FcmData;
           const target = resolveTarget(data);
