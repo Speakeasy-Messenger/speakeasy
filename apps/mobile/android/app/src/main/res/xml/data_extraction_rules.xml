@@ -2,11 +2,13 @@
 <!--
   Android 12+ replacement for backup_rules.xml. Splits cloud backup
   (Google Drive, e.g. for uninstall/reinstall) and device-to-device
-  transfer rules. Speakeasy treats both the same: include AsyncStorage
-  + RN settings; exclude the Signal SQLCipher DB and any Vouchflow
-  attestation state.
+  transfer rules.
 
-  See backup_rules.xml for rationale.
+  Policy: backup nothing user-keyed for either flow. See
+  backup_rules.xml for the full rationale (rc.79 ghost-identity bug).
+  Both <cloud-backup> and <device-transfer> exclude the same set so
+  the policy is consistent regardless of which Android backup channel
+  fires.
 -->
 <data-extraction-rules>
   <cloud-backup>
@@ -16,6 +18,11 @@
     <exclude domain="database" path="speakeasy.db-shm" />
     <exclude domain="sharedpref" path="vouchflow_attestation.xml" />
     <exclude domain="sharedpref" path="vouchflow.xml" />
+    <exclude domain="database" path="RKStorage" />
+    <exclude domain="database" path="RKStorage-journal" />
+    <exclude domain="file" path="RKStorage" />
+    <exclude domain="sharedpref" path="RCTAsyncLocalStorage.xml" />
+    <exclude domain="sharedpref" path="RCTAsyncLocalStorage_V1.xml" />
   </cloud-backup>
   <device-transfer>
     <exclude domain="database" path="speakeasy.db" />
@@ -24,5 +31,10 @@
     <exclude domain="database" path="speakeasy.db-shm" />
     <exclude domain="sharedpref" path="vouchflow_attestation.xml" />
     <exclude domain="sharedpref" path="vouchflow.xml" />
+    <exclude domain="database" path="RKStorage" />
+    <exclude domain="database" path="RKStorage-journal" />
+    <exclude domain="file" path="RKStorage" />
+    <exclude domain="sharedpref" path="RCTAsyncLocalStorage.xml" />
+    <exclude domain="sharedpref" path="RCTAsyncLocalStorage_V1.xml" />
   </device-transfer>
 </data-extraction-rules>

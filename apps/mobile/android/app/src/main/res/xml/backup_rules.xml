@@ -3,21 +3,39 @@
   Auto Backup rules (Android < 12, API < 31). The newer
   data_extraction_rules.xml takes precedence on Android 12+.
 
-  Goal: preserve identity (userId + deviceToken) across uninstall so
-  reinstalling on the same Google account lands the user back in their
-  account without going through onboarding. Per the comment in
-  SpeakeasyDb.kt, Vouchflow's `verify({existingDeviceToken})` recovers
-  the prior token if one is passed in — but we lose that opportunity
-  if AsyncStorage is wiped.
+  Policy: backup nothing user-keyed. The earlier policy tried to
+  preserve userId across uninstall so reinstall would land back in
+  the same account — but the Vouchflow deviceToken (which is what
+  actually proves identity) is correctly excluded for security, so
+  the userId-only resurrection produces a broken half-state: the JS
+  side restores userId from AsyncStorage, SpeakeasyDb can't open
+  without the matching cachedDeviceToken, biometric prompt fails,
+  identity gets cleared — but the AsyncStorage-restored conversation
+  list survives, so the user finishes onboarding as a new id with
+  ghost conversations from their prior identity. Reported in the
+  rc.79 test cycle (tester9 → reinstall → tester13 saw tester9's
+  conversation with @lunchbox8).
 
-  Excluded for security:
-    - databases/speakeasy.db (+ -journal/-wal): Signal SQLCipher
+  Excluded for security (unchanged):
+    - databases/speakeasy.db (+ -journal/-wal/-shm): Signal SQLCipher
       encrypted store. Backing this up to Google Drive (even encrypted)
-      crosses the spec §1 trust boundary. Reinstall starts with fresh
-      keys — peers will need to renegotiate sessions, but the @-handle
-      is what matters for the alpha-tester pain point.
-    - Any Vouchflow attestation files: the device-bound attestation
-      shouldn't be hauled across devices.
+      crosses the spec §1 trust boundary.
+    - sharedpref/vouchflow*.xml: device-bound attestation must not
+      cross devices.
+
+  Excluded to fix the rc.79 ghost-identity bug:
+    - databases/RKStorage(+-journal): @react-native-async-storage v2's
+      SQLite-backed AsyncStorage. Holds @speakeasy/identity, /conversations,
+      /profiles, /groups, /settings, etc.
+    - files/RKStorage: file-backed AsyncStorage path used on some v2
+      configurations; excluded defensively.
+    - sharedpref/RCTAsyncLocalStorage*.xml: legacy filename if any
+      stragglers survived an AsyncStorage version bump.
+
+  Net effect: reinstall = full re-onboard. Same posture as Signal/
+  WhatsApp. Users who want to "land back in their account" need to
+  use the (future) handle-recovery flow, which goes through the
+  identity-recovery server probe, not Android Auto Backup.
 -->
 <full-backup-content>
   <exclude domain="database" path="speakeasy.db" />
@@ -26,4 +44,9 @@
   <exclude domain="database" path="speakeasy.db-shm" />
   <exclude domain="sharedpref" path="vouchflow_attestation.xml" />
   <exclude domain="sharedpref" path="vouchflow.xml" />
+  <exclude domain="database" path="RKStorage" />
+  <exclude domain="database" path="RKStorage-journal" />
+  <exclude domain="file" path="RKStorage" />
+  <exclude domain="sharedpref" path="RCTAsyncLocalStorage.xml" />
+  <exclude domain="sharedpref" path="RCTAsyncLocalStorage_V1.xml" />
 </full-backup-content>

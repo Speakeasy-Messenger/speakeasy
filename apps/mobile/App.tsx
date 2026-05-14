@@ -11,6 +11,7 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
+import { wipeAllPersistedState } from './src/store/wipe.js';
 import { useBlocks } from './src/store/blocks.js';
 import { useOwnership } from './src/store/ownership.js';
 import { useConversations } from './src/store/conversations.js';
@@ -280,10 +281,31 @@ export default function App() {
   // Idempotent: the native module returns the existing key on a re-call.
   useEffect(() => {
     if (!hydrated || !userId) return;
-    void signalProtocol.generateIdentityKey().catch((err) => {
+    void signalProtocol.generateIdentityKey().catch(async (err) => {
+      const msg = String(err);
       diag('app', 'identity-key load FAILED — group send will error', {
-        err: String(err),
+        err: msg,
       });
+      // rc.80 heal: this exact failure signature is the ghost-identity
+      // bug — Android Auto Backup restored AsyncStorage (which holds
+      // the JS userId + conversation list) but Vouchflow attestation
+      // was correctly excluded, so the deviceToken can't open the
+      // SQLCipher store. Wipe every persisted Speakeasy key and
+      // clear identity so the next render routes to onboarding with
+      // a clean slate. Without this heal, the user finishes
+      // onboarding as a new id but still sees the prior identity's
+      // conversations (reported with tester9 → tester13 in the
+      // rc.79 test cycle).
+      const corrupted =
+        msg.includes('Vouchflow.cachedDeviceToken is null') ||
+        msg.includes('SpeakeasyDb cannot open');
+      if (corrupted) {
+        diag('app', 'identity-key load corrupted-state — wiping persisted state', {
+          userId,
+        });
+        await wipeAllPersistedState();
+        await useIdentity.getState().reset();
+      }
     });
   }, [hydrated, userId]);
 
@@ -325,6 +347,12 @@ export default function App() {
           diag('app', 'launch verify FAILED — clearing identity', {
             err: String(err),
           });
+          // rc.80: also wipe other persisted stores. The launch-verify
+          // failure path is hit by the same ghost-identity bug — if
+          // we only reset() identity, the conversation list / profiles
+          // / groups for the now-orphaned userId stay behind and
+          // re-attach to whatever userId the user onboards as next.
+          await wipeAllPersistedState();
           await useIdentity.getState().reset();
           return;
         }
