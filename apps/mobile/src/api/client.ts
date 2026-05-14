@@ -257,14 +257,10 @@ export class ApiClient {
    * Used when identity recovery fails due to missing local keys.
    */
   async deleteMyDevice(deviceToken: string): Promise<void> {
-    try {
-      await this.doFetch(`${this.baseUrl}/v1/devices/${deviceToken}`, {
-        method: 'DELETE',
-        headers: { authorization: `Bearer ${deviceToken}` },
-      });
-    } catch {
-      // Best-effort - if it fails, onboarding will show an error anyway
-    }
+    await this.doFetch(`${this.baseUrl}/v1/devices/${deviceToken}`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${deviceToken}` },
+    });
   }
 
   /**
