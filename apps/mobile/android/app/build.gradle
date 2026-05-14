@@ -25,6 +25,11 @@ apply plugin: "com.google.gms.google-services"
 // JS side now reads BuildConfig via VersionModule (see app/src/main/
 // java/.../version/VersionModule.kt).
 // =====================================================================
+// Capture rootDir at script top scope — `project` is available here
+// but may be null inside closures the RN gradle plugin re-evaluates
+// during the variant configuration phase, leading to a NPE.
+def repoRootDir = rootProject.projectDir
+
 def deriveVersionString = { ->
     def env = System.getenv("GITHUB_REF") ?: ""
     if (env.startsWith("refs/tags/")) {
@@ -32,7 +37,7 @@ def deriveVersionString = { ->
     }
     try {
         def proc = ["git", "describe", "--tags", "--dirty", "--always"]
-                .execute(null, project.rootDir)
+                .execute(null, repoRootDir)
         proc.waitFor()
         if (proc.exitValue() == 0) {
             def desc = proc.text.trim()
