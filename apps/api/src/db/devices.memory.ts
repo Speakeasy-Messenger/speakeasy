@@ -31,10 +31,26 @@ export class InMemoryDevicesRepo implements DevicesRepo {
     platform: 'ios' | 'android';
     notificationPrivacy?: NotificationPrivacy;
   }): Promise<void> {
+    // rc.80: rotate the FCM token off any OTHER device row that
+    // currently holds it. FCM tokens are device-installation-
+    // scoped — if the same physical device reinstalls and onboards
+    // as a different userId, both rows would otherwise share the
+    // token, and pushes for the old userId would surface on the
+    // new userId's lockscreen. See devices.drizzle.ts for the
+    // full repro narrative.
+    for (const [otherToken, otherDevice] of this.devices) {
+      if (
+        otherToken !== args.deviceToken &&
+        otherDevice.pushToken === args.pushToken
+      ) {
+        otherDevice.pushToken = undefined;
+      }
+    }
     const device = this.devices.get(args.deviceToken);
     if (device) {
       device.pushToken = args.pushToken;
       device.platform = args.platform;
+      device.lastPushError = undefined;
       // Only overwrite the privacy field when the caller actually
       // supplied one — see DevicesRepo.setPushToken contract.
       if (args.notificationPrivacy !== undefined) {

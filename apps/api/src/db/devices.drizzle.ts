@@ -1,4 +1,4 @@
-import { eq, sql } from 'drizzle-orm';
+import { and, eq, ne, sql } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { devices } from './schema.js';
 import type { DeviceRecord, DevicesRepo, NotificationPrivacy } from './devices.js';
@@ -67,10 +67,38 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     if (args.notificationPrivacy !== undefined) {
       set.notificationPrivacy = args.notificationPrivacy;
     }
-    await db
-      .update(devices)
-      .set(set)
-      .where(eq(devices.deviceToken, args.deviceToken));
+    // rc.80: FCM tokens are device-installation-scoped, not
+    // user-scoped. If the same physical device reinstalls the app
+    // and onboards as a different userId, Google re-issues the SAME
+    // FCM token but binds it (via the new Vouchflow deviceToken) to
+    // the new user row. Without this transactional rotation, the
+    // OLD device row keeps the FCM token too — and the next push to
+    // the old userId wakes up the device that now belongs to the
+    // new userId, leaking metadata across identities.
+    //
+    // Concrete repro (rc.79 test cycle): tester9 reinstalls →
+    // becomes tester13 with FCM `d-44a4EE…`. Both device rows held
+    // that same FCM token. Any push for tester9 would have surfaced
+    // on tester13's lockscreen as "@<sender>: New message" if the
+    // recipient had 'rich' privacy mode.
+    //
+    // Wrap both writes in a single transaction so we never observe
+    // an interim state where two rows claim the same FCM token.
+    await db.transaction(async (tx) => {
+      await tx
+        .update(devices)
+        .set({ pushToken: null })
+        .where(
+          and(
+            eq(devices.pushToken, args.pushToken),
+            ne(devices.deviceToken, args.deviceToken),
+          ),
+        );
+      await tx
+        .update(devices)
+        .set(set)
+        .where(eq(devices.deviceToken, args.deviceToken));
+    });
   }
 
   async reportPushError(args: { deviceToken: string; error: string }): Promise<void> {
