@@ -120,6 +120,11 @@ export default function App() {
   const userId = useIdentity((s) => s.userId);
   const hydrated = useIdentity((s) => s.hydrated);
   const navRef = useRef<NavigationContainerRef<RootStack>>(null);
+  // Flips true on NavigationContainer's onReady. usePushNavigation must
+  // wait for it: a push tapped from a cold start resolves a target
+  // before the navigator mounts, and navRef.current?.navigate() would
+  // otherwise no-op into a null ref and lose the navigation.
+  const [navReady, setNavReady] = useState(false);
   // useState (not useRef) — assigning to a ref doesn't re-render, so the
   // RootNavigator below would never see the orchestrator. State triggers
   // a re-render and the navigator picks up the new prop on next pass.
@@ -243,7 +248,7 @@ export default function App() {
   // navigates to Chat/GroupChat/IncomingCall instead of always
   // landing on the conversation list. Covers cold start, warm
   // resume, and deferred (background-handler persisted) taps.
-  usePushNavigation(navRef, callOrchestrator);
+  usePushNavigation(navRef, navReady, callOrchestrator);
 
   // Load (or generate) the local SpeakeasySignalStore identity key.
   // OnboardingFlow's RoomStep calls this once at signup; subsequent
@@ -770,6 +775,7 @@ export default function App() {
         {!showSplash ? (
           <RootNavigator
             navRef={navRef}
+            onReady={() => setNavReady(true)}
             callOrchestrator={callOrchestrator}
             onBannerTap={(target) => {
               if (target.kind === 'direct') {

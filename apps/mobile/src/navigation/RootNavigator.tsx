@@ -65,6 +65,8 @@ const Stack = createNativeStackNavigator<RootStack>();
 
 interface RootNavigatorProps {
   navRef: React.RefObject<NavigationContainerRef<RootStack>>;
+  /** Fires once the NavigationContainer is mounted and navRef is usable. */
+  onReady?: () => void;
   onBannerTap: (target: BannerData['target']) => void;
   /**
    * Optional voice-call orchestrator. When undefined the call screens
@@ -74,11 +76,11 @@ interface RootNavigatorProps {
   callOrchestrator?: CallOrchestrator;
 }
 
-export function RootNavigator({ navRef, onBannerTap, callOrchestrator }: RootNavigatorProps) {
+export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }: RootNavigatorProps) {
   const userId = useIdentity((s) => s.userId);
 
   return (
-    <NavigationContainer ref={navRef}>
+    <NavigationContainer ref={navRef} onReady={onReady}>
       <InAppBanner onTap={onBannerTap} />
       <Stack.Navigator
         screenOptions={{ headerShown: false, animation: 'fade', animationDuration: 400 }}

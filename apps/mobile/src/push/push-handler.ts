@@ -309,6 +309,7 @@ async function routeTarget(
 
 export function usePushNavigation(
   navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
+  navReady: boolean,
   callOrchestrator?: CallOrchestrator,
 ): void {
   const hydrated = useConversations((s) => s.hydrated);
@@ -316,7 +317,11 @@ export function usePushNavigation(
   const routedRef = useRef(false);
 
   useEffect(() => {
-    if (!hydrated || !userId) return;
+    // navReady gates the whole thing: on a cold start the stores
+    // hydrate before the NavigationContainer mounts, and routing now
+    // would call navigate() on a null navRef and silently drop the
+    // tap (it's consumed + routedRef latched, so there's no retry).
+    if (!hydrated || !userId || !navReady) return;
     if (routedRef.current) return;
 
     let cancelled = false;
@@ -386,5 +391,5 @@ export function usePushNavigation(
     return () => {
       cancelled = true;
     };
-  }, [hydrated, userId, navRef, callOrchestrator]);
+  }, [hydrated, userId, navReady, navRef, callOrchestrator]);
 }
