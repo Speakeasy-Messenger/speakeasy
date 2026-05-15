@@ -13,17 +13,16 @@ import { diag } from '../diag/log.js';
  * producing the duplicate `[push] registering token` log lines and
  * two redundant POSTs to /devices/push-token.
  *
- * rc.84 — bumped from 5s to 60s. The original 5s value was sized for
- * the cold-launch burst only. In rc.84 we also re-call this on every
- * WS `authed` frame to close the post-signup "no push_token on file"
- * window (see message-router's onAuthed). A WS reconnect can fire
- * within seconds of the cold-launch register (e.g. brief network blip
- * shortly after open), and an FCM token genuinely rotates on the
- * order of hours-to-days, not seconds, so 60s of dedupe is safe.
- * Settings toggles for notificationPrivacy that *want* an immediate
- * re-register can call __resetPushRegisterDedupForTests first or
- * accept the (worst-case) 60s delay before the new privacy mode
- * propagates to the server.
+ * Only a *successful* registration is cached for the window. A failed
+ * attempt (`no_token` / `register_failed`) is never cached: the retry
+ * triggers (WS `authed` frame, AppState `active`, post-recovery) exist
+ * precisely to recover from failures — e.g. the user grants the
+ * Android 13 POST_NOTIFICATIONS permission a few seconds after the
+ * first attempt. Caching a failure would make every one of those
+ * triggers a no-op until the window elapsed, stranding the device
+ * with no push token (the bug behind the `push.no_devices` reports).
+ * An FCM token rotates on the order of hours-to-days, so caching the
+ * success for 60s is safe.
  */
 type RegisterResult = 'registered' | 'no_token' | 'register_failed';
 const DEDUP_WINDOW_MS = 60_000;
@@ -70,7 +69,11 @@ export async function tryRegisterPushToken(
   inFlight = doRegisterPushToken(deviceToken);
   try {
     const result = await inFlight;
-    lastResult = { at: Date.now(), result, deviceToken };
+    // Cache successes only — a failure must stay retryable so the next
+    // trigger (authed frame, AppState active) actually re-attempts.
+    if (result === 'registered') {
+      lastResult = { at: Date.now(), result, deviceToken };
+    }
     return result;
   } finally {
     inFlight = null;
