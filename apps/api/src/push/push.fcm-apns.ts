@@ -124,20 +124,12 @@ export class FcmApnsPushProvider implements PushProvider {
     // is the lightest way to carry that mapping out of the loop.
     const sends: { send: Promise<admin.messaging.BatchResponse>; tokens: string[] }[] = [];
     for (const { title, body, platform, tokens } of buckets.values()) {
-      // Android: data-only message. When the app is foregrounded,
-      // onMessage fires and the library suppresses auto-display.
-      // When the app is backgrounded/killed, Android still auto-
-      // displays the notification because FCM shows data-only
-      // messages in the system tray for apps with a default
-      // notification channel configured in AndroidManifest.xml.
-      //
-      // Actually, data-only messages on Android do NOT auto-display.
-      // We need the notification key for background/killed state.
-      // The duplicate-notification fix is purely on the client side:
-      // onMessage registered at module level suppresses auto-display
-      // when the app is foregrounded. We keep the notification key
-      // here so the OS still shows a banner when the app is in the
-      // background.
+      // Android payload carries both `data` and `android.notification`.
+      // The notification block is required: when the app is
+      // backgrounded/killed the OS displays the banner itself (a
+      // data-only message would show nothing). When the app is
+      // foregrounded the client's module-level `onMessage` handler
+      // fires and suppresses the OS banner, so there's no duplicate.
       if (platform === 'android') {
         const payload: admin.messaging.MulticastMessage = {
           data,
