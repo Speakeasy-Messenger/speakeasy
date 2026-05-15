@@ -21,6 +21,7 @@ function makeStubDeps(over: Partial<MessageRouterDeps> = {}): MessageRouterDeps 
     markDelivered: vi.fn(),
     markMessageRead: vi.fn(),
     ensureGroupHydrated: vi.fn(async () => undefined),
+    conversationIdFor: vi.fn(() => 'conv-stub'),
     log: vi.fn(),
     ...over,
   };
