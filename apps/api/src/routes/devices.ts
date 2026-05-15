@@ -38,11 +38,23 @@ export async function registerDeviceRoutes(
     },
     async (request, reply) => {
       const deviceToken = request.auth?.deviceToken;
+      const userId = request.auth?.userId;
       if (!deviceToken) {
         return reply.code(403).send({ error: 'not_enrolled' });
       }
+      // Pass `userId` so the repo can insert-on-conflict the row if
+      // it does not exist yet. Closes the wipe-and-recover race:
+      // mobile may POST /v1/devices/push-token under a freshly-minted
+      // Vouchflow deviceToken BEFORE the WS handshake has had a
+      // chance to upsertOnSeen it. Without this, the old row's
+      // push_token gets nulled by the rotation while the UPDATE for
+      // the new deviceToken matches zero rows — leaving the user
+      // with zero devices holding the live token (tester15 incident,
+      // 2026-05-14: `push.no_devices` for every message during the
+      // window between identity recovery and the next WS auth).
       await opts.devices.setPushToken({
         deviceToken,
+        userId,
         pushToken: request.body.push_token,
         platform: request.body.platform,
         notificationPrivacy: request.body.notification_privacy,

@@ -117,7 +117,12 @@ export class FcmApnsPushProvider implements PushProvider {
       }
     }
 
-    const sends: Promise<admin.messaging.BatchResponse>[] = [];
+    // Track which tokens went into which send so we can correlate
+    // per-response error codes back to the original FCM tokens in the
+    // failure handler below. `sendEachForMulticast` returns
+    // `responses[i]` aligned with `tokens[i]`, so a parallel array
+    // is the lightest way to carry that mapping out of the loop.
+    const sends: { send: Promise<admin.messaging.BatchResponse>; tokens: string[] }[] = [];
     for (const { title, body, platform, tokens } of buckets.values()) {
       // Android: data-only message. When the app is foregrounded,
       // onMessage fires and the library suppresses auto-display.
@@ -147,7 +152,10 @@ export class FcmApnsPushProvider implements PushProvider {
           },
           tokens,
         };
-        sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
+        sends.push({
+          send: admin.messaging(this.app).sendEachForMulticast(payload),
+          tokens,
+        });
       } else {
         // iOS: include top-level notification for APNs to display
         // when the app is killed, plus content-available for
@@ -166,10 +174,13 @@ export class FcmApnsPushProvider implements PushProvider {
           },
           tokens,
         };
-        sends.push(admin.messaging(this.app).sendEachForMulticast(payload));
+        sends.push({
+          send: admin.messaging(this.app).sendEachForMulticast(payload),
+          tokens,
+        });
       }
     }
-    const responses = await Promise.all(sends);
+    const responses = await Promise.all(sends.map((s) => s.send));
     const totalSuccesses = responses.reduce((acc, r) => acc + r.successCount, 0);
     const totalFailures = responses.reduce((acc, r) => acc + r.failureCount, 0);
     // rc.55: log every push attempt with its outcome so the next
@@ -207,20 +218,71 @@ export class FcmApnsPushProvider implements PushProvider {
         /* eventLog is best-effort */
       });
     if (totalFailures > 0) {
-      const allFailed = responses.flatMap((r) => r.responses.filter((x) => !x.success));
+      // Flatten per-token failures with their originating FCM token
+      // so we can both (a) log specifically and (b) reap dead tokens.
+      // FCM's `messaging/registration-token-not-registered`
+      // (UNREGISTERED) and `messaging/invalid-registration-token`
+      // are terminal — the app was uninstalled, data cleared, or the
+      // token rotated. Continuing to send to them wastes FCM quota
+      // and pollutes `push.attempted` aggregates with phantom
+      // successes (FCM accepts dead tokens for a small grace window
+      // after rotation — exactly the "successes:1 but no banner"
+      // pattern we kept chasing). Reap them here so the next
+      // notifyDelivery for this user filters them out at
+      // `withPush = userDevices.filter(d => d.pushToken)`.
+      const perTokenFailures: { token: string; code?: string; message?: string }[] = [];
+      for (let i = 0; i < responses.length; i++) {
+        const resp = responses[i]!;
+        const sendTokens = sends[i]!.tokens;
+        resp.responses.forEach((r, j) => {
+          if (!r.success) {
+            perTokenFailures.push({
+              token: sendTokens[j]!,
+              code: r.error?.code,
+              message: r.error?.message,
+            });
+          }
+        });
+      }
       // eslint-disable-next-line no-console
       console.warn(
-        { failures: allFailed.map((f) => f.error?.message) },
+        { failures: perTokenFailures.map((f) => ({ code: f.code, message: f.message })) },
         'FCM push: some deliveries failed',
       );
+      const deadCodes = new Set([
+        'messaging/registration-token-not-registered',
+        'messaging/invalid-registration-token',
+        'messaging/invalid-argument',
+      ]);
+      const reaped: string[] = [];
+      for (const f of perTokenFailures) {
+        if (f.code && deadCodes.has(f.code)) {
+          try {
+            await this.devices.clearPushToken({
+              pushToken: f.token,
+              reason: `fcm:${f.code}`,
+            });
+            reaped.push(f.token.slice(0, 8));
+          } catch (err) {
+            // eslint-disable-next-line no-console
+            console.warn(
+              { err: (err as Error).message },
+              'FCM push: clearPushToken failed',
+            );
+          }
+        }
+      }
       void this.eventLog
         .record({
           eventType: 'push.fcm_failure',
           userId: notice.userId,
           payload: {
-            failures: allFailed.map((f) => f.error?.message ?? 'unknown'),
+            failures: perTokenFailures.map(
+              (f) => f.message ?? f.code ?? 'unknown',
+            ),
             successes: totalSuccesses,
             kind,
+            reapedTokenPreviews: reaped,
           },
         })
         .catch(() => {

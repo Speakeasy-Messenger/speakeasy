@@ -1,6 +1,7 @@
 # Fly.io production config for the Speakeasy API — Phase 4 hardening.
 #
-# Deploy:        flyctl deploy --config infra/fly/api.toml --dockerfile apps/api/Dockerfile
+# Deploy (CI):   .github/workflows/ci.yml `deploy-api` job — runs on push to main.
+# Deploy (manual): flyctl deploy --config infra/fly/api.toml --dockerfile apps/api/Dockerfile --build-arg GIT_SHA=$(git rev-parse HEAD)
 # Scale check:   flyctl scale show
 # Logs:          flyctl logs
 # Volume snaps:  managed at the Postgres app level — see infra/fly/README.md

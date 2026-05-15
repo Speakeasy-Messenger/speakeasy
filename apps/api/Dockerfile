@@ -39,5 +39,16 @@ COPY --from=builder /repo/package.json ./package.json
 COPY infra/migrations ./infra/migrations
 
 ENV PORT=8080
+
+# Bake the git SHA into the image at build time so `/version` truthfully
+# reports the running code's commit, with no possibility of a stale
+# `flyctl secrets set GIT_SHA=...` drifting from the actual rolled
+# image. CI passes `--build-arg GIT_SHA=$GITHUB_SHA`; local
+# `flyctl deploy` callers can pass `--build-arg GIT_SHA=$(git rev-parse HEAD)`
+# or omit it (falls back to "unknown", which is fine for ad-hoc deploys).
+# Read by getVersion() at runtime — see apps/api/src/server.ts.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=${GIT_SHA}
+
 EXPOSE 8080
 CMD ["node", "apps/api/dist/server.js"]

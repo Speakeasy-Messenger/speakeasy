@@ -54,6 +54,7 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     pushToken: string;
     platform: 'ios' | 'android';
     notificationPrivacy?: NotificationPrivacy;
+    userId?: string;
   }): Promise<void> {
     const db = getDb();
     const set: Record<string, unknown> = {
@@ -67,24 +68,72 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     if (args.notificationPrivacy !== undefined) {
       set.notificationPrivacy = args.notificationPrivacy;
     }
-    // rc.80: FCM tokens are device-installation-scoped, not
-    // user-scoped. If the same physical device reinstalls the app
+    // rc.80 (the rotation): FCM tokens are device-installation-scoped,
+    // not user-scoped. If the same physical device reinstalls the app
     // and onboards as a different userId, Google re-issues the SAME
     // FCM token but binds it (via the new Vouchflow deviceToken) to
-    // the new user row. Without this transactional rotation, the
-    // OLD device row keeps the FCM token too — and the next push to
-    // the old userId wakes up the device that now belongs to the
-    // new userId, leaking metadata across identities.
+    // the new user row. Without this rotation, the OLD device row
+    // keeps the FCM token too — and the next push to the old userId
+    // wakes up the device that now belongs to the new userId, leaking
+    // metadata across identities.
     //
     // Concrete repro (rc.79 test cycle): tester9 reinstalls →
     // becomes tester13 with FCM `d-44a4EE…`. Both device rows held
     // that same FCM token. Any push for tester9 would have surfaced
-    // on tester13's lockscreen as "@<sender>: New message" if the
-    // recipient had 'rich' privacy mode.
+    // on tester13's lockscreen as "@<sender>: New message".
     //
-    // Wrap both writes in a single transaction so we never observe
-    // an interim state where two rows claim the same FCM token.
+    // rc.92 (the ordering + insert): the rc.80 transaction had a
+    // latent bug — UPDATE-then-UPDATE silently no-ops when the target
+    // deviceToken has no row yet. That is exactly what happens during
+    // Vouchflow wipe-and-recover: the mobile app POSTs
+    // /v1/devices/push-token under a freshly-minted deviceToken
+    // BEFORE the WS handshake has had a chance to `upsertOnSeen` it.
+    // The rotation clause then nulls the OLD row's push_token, the
+    // second UPDATE matches zero rows, and the user is left with
+    // ZERO devices holding the live token. Every subsequent
+    // `notifyDelivery` short-circuits to `push.no_devices` —
+    // exactly tester15's 2026-05-14 incident.
+    //
+    // The fix has two halves:
+    //
+    //   1. Insert-on-conflict the target row FIRST, so by the time
+    //      the rotation runs we're guaranteed at least one row owned
+    //      by this user holds the live token. Requires `userId`; for
+    //      backward compatibility (tests, WS handler that paired
+    //      upsertOnSeen+setPushToken historically) we keep the
+    //      legacy UPDATE-then-UPDATE path when userId is omitted.
+    //
+    //   2. Run the rotation AFTER the target write so we never have a
+    //      window with zero rows holding the token.
+    //
+    // Wrapped in a transaction so concurrent /devices/push-token
+    // calls can't interleave a NULL between halves.
     await db.transaction(async (tx) => {
+      if (args.userId !== undefined) {
+        // New path: target row is guaranteed to exist after this.
+        await tx
+          .insert(devices)
+          .values({
+            deviceToken: args.deviceToken,
+            userId: args.userId,
+            pushToken: args.pushToken,
+            platform: args.platform,
+            notificationPrivacy: args.notificationPrivacy ?? null,
+            lastPushError: null,
+          })
+          .onConflictDoUpdate({
+            target: devices.deviceToken,
+            set,
+          });
+      } else {
+        // Legacy path: row must exist; missing row is a silent no-op
+        // (preserves pre-rc.92 behavior for tests + WS handler).
+        await tx
+          .update(devices)
+          .set(set)
+          .where(eq(devices.deviceToken, args.deviceToken));
+      }
+      // Rotation comes AFTER the target write — see header comment.
       await tx
         .update(devices)
         .set({ pushToken: null })
@@ -94,10 +143,6 @@ export class DrizzleDevicesRepo implements DevicesRepo {
             ne(devices.deviceToken, args.deviceToken),
           ),
         );
-      await tx
-        .update(devices)
-        .set(set)
-        .where(eq(devices.deviceToken, args.deviceToken));
     });
   }
 
@@ -107,5 +152,13 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       .update(devices)
       .set({ lastPushError: args.error })
       .where(eq(devices.deviceToken, args.deviceToken));
+  }
+
+  async clearPushToken(args: { pushToken: string; reason: string }): Promise<void> {
+    const db = getDb();
+    await db
+      .update(devices)
+      .set({ pushToken: null, lastPushError: args.reason })
+      .where(eq(devices.pushToken, args.pushToken));
   }
 }

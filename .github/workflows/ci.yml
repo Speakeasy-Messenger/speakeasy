@@ -35,3 +35,89 @@ jobs:
 
       - name: Test
         run: npm run test
+
+  # Deploy the API to Fly on every push to `main`. Gated by the `build`
+  # job, so a failing typecheck/lint/test blocks the deploy. PR runs
+  # skip this job entirely (the `if` predicate).
+  #
+  # Why on every push and not on tag: the server has no version coupling
+  # — `apps/api` does not read git tags, and we want main to track
+  # production continuously. Mobile keeps its tag-driven APK release
+  # workflow (`release.yml`); server prod = HEAD of main.
+  #
+  # Manual rollback: `flyctl deploy --image registry.fly.io/speakeasy-api-1:<previous-deployment-id> --config infra/fly/api.toml`.
+  # Previous deployment IDs are visible in `flyctl releases --app speakeasy-api-1`.
+  deploy-api:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # Avoid two main-pushes deploying at the same time (later commit
+    # would race the earlier one and machines could end up split across
+    # versions briefly). Concurrency at the top of the file is already
+    # ref-scoped, but it cancels in-progress runs — for deploys we want
+    # to QUEUE instead of cancel, so each main commit gets its own
+    # full roll. Hence the override here.
+    concurrency:
+      group: deploy-api
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install flyctl
+        uses: superfly/flyctl-actions/setup-flyctl@master
+
+      - name: Deploy to Fly
+        # `--config` points at the shared toml; `--dockerfile` mirrors
+        # the path documented in `infra/fly/api.toml` header so local
+        # `flyctl deploy` and CI deploy stay byte-identical.
+        # `--wait-timeout` covers slow registry pushes; defaults are
+        # ~2 min which races the second `lhr` machine on cold builds.
+        # `--strategy rolling` is fly's default for >1 machine apps
+        # but we set it explicitly so any future config edit that
+        # downgrades to immediate doesn't silently take effect.
+        # `--build-arg GIT_SHA` bakes the commit SHA into the runner
+        # image so `/version` can truthfully report it after deploy.
+        # See apps/api/Dockerfile + apps/api/src/server.ts getVersion().
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: |
+          flyctl deploy \
+            --config infra/fly/api.toml \
+            --dockerfile apps/api/Dockerfile \
+            --build-arg "GIT_SHA=${{ github.sha }}" \
+            --strategy rolling \
+            --wait-timeout 300 \
+            --verbose
+
+      - name: Verify deploy via /version SHA match
+        # Two-layer check, both run from outside fly's network so we
+        # catch the "machine healthy but proxy didn't pick it up"
+        # class of flake:
+        #
+        #   1. /healthz returns {"ok":true}
+        #   2. /version returns the SHORT git SHA that matches this
+        #      commit. The Dockerfile builds the version string from
+        #      a `--build-arg GIT_SHA=...` arg; if the wrong image
+        #      somehow went live (race, rollback, manual deploy
+        #      collision) this catches it. Without this, "deploy
+        #      succeeded" can mean "we redeployed an older image".
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          expected_short="${EXPECTED_SHA:0:7}"
+          echo "Expecting /version to contain: $expected_short"
+          for i in 1 2 3 4 5 6; do
+            healthz=$(curl -fsS --max-time 10 https://speakeasy-api-1.fly.dev/healthz || echo "FAIL")
+            version=$(curl -fsS --max-time 10 https://speakeasy-api-1.fly.dev/version || echo "FAIL")
+            echo "Attempt $i: healthz=$healthz version=$version"
+            if echo "$healthz" | grep -q '"ok":true' && echo "$version" | grep -q "$expected_short"; then
+              echo "Deploy verified: healthz=ok, version contains $expected_short"
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::Deploy verification failed after 6 attempts."
+          echo "::error::Expected /version to contain $expected_short."
+          echo "::error::If /version reports a different SHA, the wrong image went live."
+          exit 1

@@ -18,7 +18,7 @@ import { useConversations } from './src/store/conversations.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
-import { useProfiles } from './src/store/profiles.js';
+
 import { useOnboardingCards } from './src/store/onboarding-cards.js';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider.js';
 import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
@@ -26,7 +26,7 @@ import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
-import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js';
+import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js'; // vouchflow kept — used by post-enrollment refresh effect
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
@@ -165,67 +165,42 @@ export default function App() {
     }
   }, [hydrated]);
 
-  // Fresh-install identity recovery (rc.45). After hydrate completes,
-  // if there's no cached userId, ask Vouchflow for a device token and
-  // probe `GET /v1/users/me`. If the server recognizes the device,
-  // restore identity directly — the user skips onboarding entirely.
-  // If the probe 404s (genuinely new device) or errors, fall through
-  // to the regular onboarding flow.
+  // Fresh-install identity recovery — DISABLED (rc.92).
   //
-  // Vouchflow's hardware-anchored attestation survives uninstall, so
-  // the same deviceToken comes back on reinstall — that's what makes
-  // this work. Before rc.45, reinstalling forced a new @-handle.
-  // (recoveryDone is declared up top with the other splash-related
-  // state since `showSplash` reads it.)
+  // The rc.45 recovery flow asked Vouchflow for a fresh deviceToken
+  // and probed `GET /v1/users/me` on cold launch when no cached
+  // identity was present. Two problems killed it:
+  //
+  //   1. Mints a Vouchflow deviceToken even when the user is about
+  //      to onboard fresh, producing two deviceTokens for one
+  //      physical device (the recovery-probe one + the one minted
+  //      again during the actual onboarding flow). The push-token
+  //      registration race that fell out of this surfaced as
+  //      tester15's 2026-05-14 incident: `push.no_devices` for every
+  //      message during the window between recovery and the next WS
+  //      auth. Server-side mitigation (insert-on-conflict in
+  //      `setPushToken`, rc.92) closes the race, but the underlying
+  //      dual-deviceToken state is still smelly and breaks future
+  //      assumptions.
+  //
+  //   2. It's a UX wart, not a feature. Reinstall on the same device
+  //      is rare; when it happens the user gets to re-pick their
+  //      @-handle, which is a fine penalty for the work the path
+  //      saves. The "skip onboarding" magic also confuses testers
+  //      mid-cycle and burned three investigation sessions chasing
+  //      ghosts.
+  //
+  // The state plumbing (`recoveryDone`, splash hold) stays in place
+  // so the splash gate behaves identically — we just flip
+  // `recoveryDone` to true immediately after hydration so the
+  // onboarding flow renders for any unbound device. If we ever want
+  // a "restore your account" flow back, it should be an explicit
+  // user gesture (a button on the onboarding screen), not a silent
+  // cold-launch probe.
   useEffect(() => {
     if (!hydrated || userId || recoveryDone) return;
-    void (async () => {
-      try {
-        diag('app', 'identity recovery: probing /v1/users/me');
-        const r = await vouchflow.verify({ context: 'login' });
-        // Logs the deviceToken prefix so when recovery fails we can
-        // see at a glance whether Vouchflow returned the user's
-        // previous token (server should recognize it) vs a freshly-
-        // minted one (server will 404 → onboarding). The latter is
-        // the LocalDevValidator dev-build behavior on uninstall —
-        // the production hardware-anchored attestation preserves it.
-        const tokenPrefix = r.deviceToken.slice(0, 16);
-        diag('app', 'identity recovery: vouchflow returned', { tokenPrefix });
-        const me = await api.fetchMe(r.deviceToken);
-        if (me) {
-          diag('app', 'identity recovery: restored', {
-            userId: me.id,
-            tokenPrefix,
-          });
-          if (me.selected_avatar_id) {
-            useProfiles.getState().set(me.id, {
-              selectedAvatarId: me.selected_avatar_id,
-              fetchedAt: Date.now(),
-            });
-          }
-          useIdentity.getState().setDeviceToken(r.deviceToken);
-          useIdentity.getState().setUserId(me.id);
-          // Register push token immediately — don't wait for the
-          // useEffect below. This closes the window where the server
-          // has the device record but no FCM token → push.no_devices.
-          void tryRegisterPushToken(r.deviceToken).catch((err) => {
-            diag('app', 'push token registration after recovery failed (non-fatal)', {
-              err: String(err),
-            });
-          });
-        } else {
-          diag('app', 'identity recovery: no user bound — onboarding', {
-            tokenPrefix,
-          });
-        }
-      } catch (err) {
-        diag('app', 'identity recovery: failed (falling through)', {
-          err: String(err),
-        });
-      } finally {
-        setRecoveryDone(true);
-      }
-    })();
+    diag('app', 'identity recovery: disabled (rc.92) — proceeding to onboarding');
+    setRecoveryDone(true);
   }, [hydrated, userId, recoveryDone]);
 
   // After hydration, if we have a cached identity, refresh
