@@ -25,6 +25,7 @@ import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
+import type { AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
 import { routeCallFrame } from './call-router.js';
 
@@ -50,6 +51,12 @@ interface Deps {
    * the why.
    */
   callBuffer: CallOfferBuffer;
+  /**
+   * Catch-up buffer for `delivered` / `read` acks addressed to a sender
+   * with no live WS. The live AckRouter path only reaches connected
+   * sockets; this is drained on the sender's next auth. See ack-buffer.ts.
+   */
+  ackBuffer: AckBuffer;
   /**
    * Cross-instance fan-out for live frames. Used by the call signaling
    * path (rc.57) so a `call_answer` / `call_ice` / `call_end` reaches
@@ -257,6 +264,25 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
             'delivered buffered call signaling',
           );
         }
+        // Drain delivery/read acks produced while this user's WS was
+        // down (it closes on background). The live AckRouter path only
+        // reaches connected sockets; without this catch-up a sent
+        // message stays on a single ✓.
+        const pendingAcks = await deps.ackBuffer.drain(session.userId);
+        for (const a of pendingAcks) {
+          send(
+            socket,
+            a.kind === 'read'
+              ? { type: 'read', from: a.fromUserId, message_id: a.messageId }
+              : { type: 'delivered', message_id: a.messageId },
+          );
+        }
+        if (pendingAcks.length > 0) {
+          deps.log.info(
+            { userId: session.userId, count: pendingAcks.length },
+            'delivered buffered acks',
+          );
+        }
       } catch (err) {
         const code =
           err instanceof VouchflowValidationError ? err.reason : 'auth_failed';
@@ -304,6 +330,13 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
             instanceId: deps.instanceId,
             kind: 'delivered',
           });
+          // Catch-up: the announce above only reaches a sender who is
+          // online right now. Buffer it so a backgrounded sender still
+          // sees ✓✓ on reconnect.
+          deps.ackBuffer.put(result.senderId, {
+            kind: 'delivered',
+            messageId: msg.message_id,
+          });
         }
         // 'pending' (other devices haven't acked yet) and 'not_found'
         // both produce no further side effect.
@@ -311,12 +344,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
       }
       case 'read': {
         // Phase 6 read receipts. Recipient signals to the original
-        // sender that the message has been visibly opened. We do not
-        // persist anything server-side — the read state is a UI
-        // affordance and only matters when the sender is online to
-        // receive it. Cross-instance route via AckRouter so the
-        // sender's connection (which may be on the other Fly machine)
-        // gets the frame.
+        // sender that the message has been visibly opened. Cross-
+        // instance route via AckRouter so the sender's connection
+        // (which may be on the other Fly machine) gets the frame, and
+        // buffer it so a sender who is offline at this moment still
+        // sees the receipt on reconnect.
         if (
           typeof msg.to !== 'string' ||
           typeof msg.message_id !== 'string'
@@ -330,6 +362,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           instanceId: deps.instanceId,
           kind: 'read',
           fromUserId: session.userId, // who read it
+        });
+        deps.ackBuffer.put(msg.to, {
+          kind: 'read',
+          messageId: msg.message_id,
+          fromUserId: session.userId,
         });
         return;
       }

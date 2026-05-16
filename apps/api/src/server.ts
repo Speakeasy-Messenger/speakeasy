@@ -55,6 +55,8 @@ import {
   type CallOfferBuffer,
 } from './ws/call-offer-buffer.js';
 import { createRedisCallOfferBuffer } from './ws/call-offer-buffer.redis.js';
+import { createAckBuffer, type AckBuffer } from './ws/ack-buffer.js';
+import { createRedisAckBuffer } from './ws/ack-buffer.redis.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
 import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
@@ -84,6 +86,9 @@ export interface BuildServerOptions {
   /** Override the call-offer buffer (test injection). Defaults to
    *  Redis-backed when REDIS_URL is set, else in-memory. */
   callBuffer?: CallOfferBuffer;
+  /** Override the ack buffer (test injection). Defaults to Redis-backed
+   *  when REDIS_URL is set, else in-memory. */
+  ackBuffer?: AckBuffer;
   /** Override the persistent event log (test injection). Defaults to
    *  Drizzle when DATABASE_URL is set, else in-memory. */
   eventLog?: EventLogRepo;
@@ -253,6 +258,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
     const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
     const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
+    const ackBuffer = opts.ackBuffer ?? defaultAckBuffer();
 
     attachWebsocket(app, {
       validator,
@@ -267,6 +273,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       devices,
       users: repo,
       callBuffer,
+      ackBuffer,
       userNotifier,
       eventLog,
     });
@@ -327,6 +334,13 @@ function defaultCallOfferBuffer(): CallOfferBuffer {
   // (Redis stall blocks puts) scoped to call signaling instead of
   // cascading into ack routing or notifications.
   return createRedisCallOfferBuffer(new Redis(url, { lazyConnect: false }));
+}
+
+function defaultAckBuffer(): AckBuffer {
+  const url = process.env.REDIS_URL;
+  if (!url) return createAckBuffer();
+  // Single connection — list RPUSH/LTRIM/LRANGE/DEL only, no pub/sub.
+  return createRedisAckBuffer(new Redis(url, { lazyConnect: false }));
 }
 
 function defaultUserNotifier(connections: Connections, instanceId: string): UserNotifier {

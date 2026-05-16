@@ -13,6 +13,7 @@ import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
 import { createCallOfferBuffer } from './call-offer-buffer.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
+import { createAckBuffer, type AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
 import type { EventLogRepo } from '../db/event-log.js';
 
@@ -33,6 +34,12 @@ export interface AttachWsOptions {
    * per attachWebsocket call with the default 30s ringing TTL.
    */
   callBuffer?: CallOfferBuffer;
+  /**
+   * Optional injected ack buffer (tests). When omitted, an in-memory
+   * one is created. Production passes the Redis-backed variant so the
+   * buffer is shared across fly machines.
+   */
+  ackBuffer?: AckBuffer;
   /**
    * UserNotifier for cross-instance frame routing — required for
    * call signaling to work in a multi-instance deploy (rc.57). The
@@ -61,6 +68,7 @@ export function attachWebsocket(
   const path = opts.path ?? '/ws';
   const wss = new WebSocketServer({ noServer: true });
   const callBuffer = opts.callBuffer ?? createCallOfferBuffer();
+  const ackBuffer = opts.ackBuffer ?? createAckBuffer();
 
   app.server.on('upgrade', (req, socket, head) => {
     if (req.url !== path) {
@@ -83,6 +91,7 @@ export function attachWebsocket(
         devices: opts.devices,
         users: opts.users,
         callBuffer,
+        ackBuffer,
         userNotifier: opts.userNotifier,
         eventLog: opts.eventLog,
         log: app.log,
