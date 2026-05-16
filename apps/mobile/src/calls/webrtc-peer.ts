@@ -42,6 +42,8 @@ class WebRtcCallPeer implements CallPeer {
   ) => void;
   private remoteStreamCb?: (url: string | undefined) => void;
   private startedManager = false;
+  /** Last requested speaker state — re-applied on (re)connect. */
+  private speakerOn = false;
   private cameraFacing: 'user' | 'environment' = 'user';
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
@@ -96,6 +98,11 @@ class WebRtcCallPeer implements CallPeer {
       // ice / dtls connection states.
       if (s === 'connecting' || s === 'failed' || s === 'closed' || s === 'disconnected') {
         void this.dumpIceStats(s);
+      }
+      if (s === 'connected') {
+        // Re-assert audio routing now that media is flowing — see
+        // reassertAudioRoute() for the callee-mic bug this addresses.
+        this.reassertAudioRoute();
       }
       if (s === 'connecting' || s === 'connected' || s === 'failed' || s === 'closed') {
         this.connStateCb?.(s);
@@ -348,6 +355,8 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   setSpeakerOn(on: boolean): void {
+    this.speakerOn = on;
+    diag('webrtc', 'setSpeakerOn', { on });
     InCallManager.setForceSpeakerphoneOn(on);
   }
 
@@ -410,6 +419,10 @@ class WebRtcCallPeer implements CallPeer {
           : false,
     })) as MediaStream;
     this.localStream = stream;
+    diag('webrtc', 'local media acquired', {
+      audioTracks: stream.getAudioTracks().length,
+      videoTracks: stream.getVideoTracks().length,
+    });
     for (const track of stream.getAudioTracks()) {
       this.pc.addTrack(track as MediaStreamTrack, stream);
     }
@@ -461,9 +474,28 @@ class WebRtcCallPeer implements CallPeer {
     // user's mute / speaker controls in CallScreen still flip
     // `setForceSpeakerphoneOn(true|false)` on demand.
     InCallManager.start({ media: 'audio', auto: true });
-    InCallManager.setForceSpeakerphoneOn(false);
+    InCallManager.setForceSpeakerphoneOn(this.speakerOn);
     InCallManager.setKeepScreenOn(true);
     this.startedManager = true;
+    diag('webrtc', 'InCallManager started', { speakerOn: this.speakerOn });
+  }
+
+  /**
+   * Re-apply the audio route once the peer connection reaches
+   * `connected`. On some Android devices the routing set by
+   * `InCallManager.start()` doesn't engage the mic-capture path until
+   * a route change occurs — the symptom being a callee whose audio the
+   * caller can't hear until the callee manually toggles speakerphone
+   * (which is itself just another `setForceSpeakerphoneOn` call).
+   * Re-asserting the intended route here reproduces that toggle
+   * automatically, without changing what the user hears.
+   */
+  private reassertAudioRoute(): void {
+    if (!this.startedManager) return;
+    InCallManager.setForceSpeakerphoneOn(this.speakerOn);
+    diag('webrtc', 'audio route re-asserted (connected)', {
+      speakerOn: this.speakerOn,
+    });
   }
 
   /**
