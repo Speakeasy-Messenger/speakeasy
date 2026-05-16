@@ -10,6 +10,7 @@ import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
 import { ChatScreen } from '../screens/ChatScreen.js';
+import { FullMessageScreen } from '../screens/FullMessageScreen.js';
 import { ConversationSettingsScreen } from '../screens/ConversationSettingsScreen.js';
 import { GroupChatScreen } from '../screens/GroupChatScreen.js';
 import { GroupSettingsScreen } from '../screens/GroupSettingsScreen.js';
@@ -59,6 +60,8 @@ export type RootStack = {
   About: undefined;
   Call: undefined;
   IncomingCall: undefined;
+  /** Full text of a long message, reached via "See more" in a bubble. */
+  FullMessage: { text: string };
 };
 
 const Stack = createNativeStackNavigator<RootStack>();
@@ -238,6 +241,9 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                 <ChatScreen
                   peerId={route.params.peerId}
                   onBack={() => navigation.goBack()}
+                  onOpenFullMessage={(text) =>
+                    navigation.navigate('FullMessage', { text })
+                  }
                   onOpenSettings={() =>
                     navigation.navigate('ConversationSettings', {
                       peerId: route.params.peerId,
@@ -307,6 +313,9 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                 <GroupChatScreen
                   groupId={route.params.groupId}
                   onBack={() => navigation.goBack()}
+                  onOpenFullMessage={(text) =>
+                    navigation.navigate('FullMessage', { text })
+                  }
                   // GROUP-SETTINGS.md §2: tapping the AppBar title block
                   // opens the room's full settings screen.
                   onManageMembers={() =>
@@ -314,6 +323,14 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                       groupId: route.params.groupId,
                     })
                   }
+                />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="FullMessage">
+              {({ navigation, route }: NativeStackScreenProps<RootStack, 'FullMessage'>) => (
+                <FullMessageScreen
+                  text={route.params.text}
+                  onBack={() => navigation.goBack()}
                 />
               )}
             </Stack.Screen>

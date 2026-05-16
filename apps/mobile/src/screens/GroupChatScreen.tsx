@@ -48,6 +48,8 @@ interface Props {
   /** Open the manage-members screen — tapped from the member-count
    * subline in the chat header. */
   onManageMembers?: () => void;
+  /** Open the full-text screen for a long message ("See more" tap). */
+  onOpenFullMessage?: (text: string) => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal here
@@ -74,7 +76,12 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
  * The orchestrator is constructed per-render (cheap; bootstrap state is
  * a captured Map). All other deps come from singleton services.
  */
-export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
+export function GroupChatScreen({
+  groupId,
+  onBack,
+  onManageMembers,
+  onOpenFullMessage,
+}: Props) {
   const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
   if (!myUserId) {
@@ -416,6 +423,7 @@ export function GroupChatScreen({ groupId, onBack, onManageMembers }: Props) {
                   variant={isSelf ? 'sent' : 'received'}
                   onTapPhoto={(a) => setViewerAttachment(a)}
                   onTapFile={(a) => void saveAndAnnounceFile(a)}
+                  onSeeMore={() => onOpenFullMessage?.(item.text)}
                 />
               </View>
             );

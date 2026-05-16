@@ -2,7 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, StyleSheet, Text } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
-import { MentionText } from './MentionText.js';
+import { RichMessageText } from './RichMessageText.js';
 import { radius, space, useColors } from '../theme/index.js';
 import { accent, font } from '../theme/tokens.js';
 
@@ -46,6 +46,8 @@ export interface DisappearingMessageBubbleProps {
   onTapPhoto?: (attachment: Attachment) => void;
   /** Tap a file → host writes to Downloads / opens externally. */
   onTapFile?: (attachment: Attachment) => void;
+  /** Tap "See more" on a long message → host opens the full-text screen. */
+  onSeeMore?: () => void;
   /** Fires when the current stage's animation completes. */
   onStageAnimated?: (stage: DisappearingStage) => void;
   /**
@@ -100,6 +102,7 @@ export function DisappearingMessageBubble({
   mentions,
   onTapPhoto,
   onTapFile,
+  onSeeMore,
   onStageAnimated,
   delivered,
   read,
@@ -203,25 +206,15 @@ export function DisappearingMessageBubble({
         />
       ) : null}
       {text ? (
-        mentions?.length ? (
-          <MentionText
-            text={text}
-            mentions={mentions}
-            style={[
-              styles.text,
-              isSent ? styles.sentText : { color: themed.ink },
-            ]}
-          />
-        ) : (
-          <Text
-            style={[
-              styles.text,
-              isSent ? styles.sentText : { color: themed.ink },
-            ]}
-          >
-            {text}
-          </Text>
-        )
+        <RichMessageText
+          text={text}
+          mentions={mentions}
+          onSeeMore={onSeeMore}
+          style={[
+            styles.text,
+            isSent ? styles.sentText : { color: themed.ink },
+          ]}
+        />
       ) : null}
       {/* Read-receipt glyph — only on sent 1:1 bubbles. ✓ = sent +
           buffered server-side; ✓✓ = recipient acked across all

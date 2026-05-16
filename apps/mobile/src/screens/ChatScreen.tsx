@@ -70,6 +70,8 @@ interface Props {
   /** Open the conversation-settings screen — fired from the AppBar
    * title-block tap. When omitted, the title block becomes inert. */
   onOpenSettings?: () => void;
+  /** Open the full-text screen for a long message ("See more" tap). */
+  onOpenFullMessage?: (text: string) => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal in the
@@ -105,6 +107,7 @@ export function ChatScreen({
   onBack,
   onStartCall,
   onOpenSettings,
+  onOpenFullMessage,
 }: Props) {
   const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
@@ -590,6 +593,7 @@ export function ChatScreen({
                 read={!!item.readAt}
                 onTapPhoto={(a) => setViewerAttachment(a)}
                 onTapFile={(a) => void saveAndAnnounceFile(a)}
+                onSeeMore={() => onOpenFullMessage?.(item.text)}
               />
             );
           }}
