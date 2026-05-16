@@ -228,6 +228,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   app.get('/healthz', async () => ({ ok: true }));
 
+  // Reports the commit SHA baked into the image at build time
+  // (Dockerfile: ARG GIT_SHA -> ENV GIT_SHA). CI's post-deploy step
+  // curls this and matches it against the pushed commit so a stale
+  // image silently going live is caught.
+  app.get('/version', async () => ({ version: process.env.GIT_SHA ?? 'unknown' }));
+
   // Prometheus metrics — /metrics on the main listener when enabled.
   // Set METRICS_ENABLED=1 to activate. Scraped by Fly's internal Prometheus.
   if (process.env.METRICS_ENABLED === '1') {
