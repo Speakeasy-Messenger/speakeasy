@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Path } from 'react-native-svg';
+import Svg, { G, Path } from 'react-native-svg';
 import { useTheme } from '../../theme/ThemeProvider.js';
 
 interface IconProps {
@@ -28,21 +28,25 @@ export function PhoneIcon({ size = 24, color }: IconProps): React.JSX.Element {
 }
 
 /**
- * Phone receiver rotated ~135° — used for the "end call" button.
- * Same path geometry as PhoneIcon, transformed.
+ * The PhoneIcon receiver rotated 135° — the universal "hang up" glyph.
+ * It is literally PhoneIcon's path inside a rotated <G>, so the end
+ * button reads unmistakably as a phone (the prior hand-rolled path was
+ * an unrecognisable blob).
  */
 export function PhoneEndIcon({ size = 24, color }: IconProps): React.JSX.Element {
   const theme = useTheme();
   const stroke = color ?? theme.text;
   return (
     <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M3 14 a14 14 0 0 1 18 0 l-2 2 -3 -1 -3 2 a8 8 0 0 0 -2 0 l-3 -2 -3 1 z"
-        stroke={stroke}
-        strokeWidth={1.5}
-        strokeLinecap="square"
-        strokeLinejoin="miter"
-      />
+      <G rotation={135} origin="12, 12">
+        <Path
+          d="M5 5 a2 2 0 0 1 2 -2 h2 l2 5 -2.5 1.5 a11 11 0 0 0 6 6 L16 13 l5 2 v2 a2 2 0 0 1 -2 2 A14 14 0 0 1 5 5"
+          stroke={stroke}
+          strokeWidth={1.5}
+          strokeLinecap="square"
+          strokeLinejoin="miter"
+        />
+      </G>
     </Svg>
   );
 }
