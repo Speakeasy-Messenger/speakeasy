@@ -250,37 +250,6 @@ export function unregisterForegroundMessageHandler(): void {
 }
 
 // ---------------------------------------------------------------------------
-// NOTIFICATION-OPENED LISTENER
-// ---------------------------------------------------------------------------
-
-let notificationOpenedRegistered = false;
-
-export function registerNotificationOpenedListener(): void {
-  if (notificationOpenedRegistered) return;
-  notificationOpenedRegistered = true;
-
-  messaging().onNotificationOpenedApp((remoteMessage: RemoteMessage) => {
-    if (!remoteMessage?.data) return;
-    const data = remoteMessage.data as FcmData;
-    if (!data.conversation_id || !data.notify_kind) return;
-
-    diag('push-open', 'warm resume from push tap', {
-      conversationId: data.conversation_id,
-      kind: data.notify_kind,
-      msgType: data.msg_type,
-    });
-    void persistRawPush({
-      conversationId: data.conversation_id,
-      kind: data.notify_kind,
-      msgType: data.msg_type,
-      persistedAt: Date.now(),
-    });
-  });
-
-  diag('push', 'notification-opened listener registered');
-}
-
-// ---------------------------------------------------------------------------
 // NAVIGATION
 // ---------------------------------------------------------------------------
 
@@ -314,82 +283,93 @@ export function usePushNavigation(
 ): void {
   const hydrated = useConversations((s) => s.hydrated);
   const userId = useIdentity((s) => s.userId);
-  const routedRef = useRef(false);
+  const startupHandledRef = useRef(false);
 
   useEffect(() => {
-    // navReady gates the whole thing: on a cold start the stores
-    // hydrate before the NavigationContainer mounts, and routing now
-    // would call navigate() on a null navRef and silently drop the
-    // tap (it's consumed + routedRef latched, so there's no retry).
+    // navReady gates routing: on a cold start the stores hydrate
+    // before the NavigationContainer mounts, and navigate() on a null
+    // navRef is a silent no-op.
     if (!hydrated || !userId || !navReady) return;
-    if (routedRef.current) return;
 
     let cancelled = false;
 
-    async function handleInitialNotification() {
+    async function route(p: PersistedPush, source: string): Promise<void> {
+      const target = resolveTargetAtConsumeTime(p);
+      if (!target) {
+        diag('push-nav', 'tap-target could not be resolved', {
+          source,
+          conversationId: p.conversationId,
+          kind: p.kind,
+        });
+        return;
+      }
+      diag('push-nav', 'routing tapped push', {
+        source,
+        conversationId: p.conversationId,
+        kind: p.kind,
+        target: target.kind,
+      });
+      await routeTarget(navRef, target, callOrchestrator);
+    }
+
+    // Cold start: the notification that launched the app from a quit
+    // state, plus any push the background handler persisted before
+    // this hook mounted. Runs once per process.
+    async function handleStartup() {
+      if (startupHandledRef.current) return;
+      startupHandledRef.current = true;
       try {
-        // 1. Cold start — check getInitialNotification. We wrap the
-        // raw FCM data into the same PersistedPush shape so resolution
-        // goes through one code path.
         const initial = await messaging().getInitialNotification();
-        if (initial?.data && !routedRef.current && !cancelled) {
-          const data = initial.data as FcmData;
-          if (data.conversation_id && data.notify_kind) {
-            const target = resolveTargetAtConsumeTime({
+        const data = initial?.data as FcmData | undefined;
+        if (data?.conversation_id && data?.notify_kind && !cancelled) {
+          await route(
+            {
               conversationId: data.conversation_id,
               kind: data.notify_kind,
               msgType: data.msg_type,
-              // Cold-start tap — there's no separate "persisted at" so
-              // we use now; the call-staleness check is meaningless
-              // for a cold start anyway because the user just tapped.
               persistedAt: Date.now(),
-            });
-            if (target) {
-              diag('push-nav', 'cold start from push tap', {
-                conversationId: data.conversation_id,
-                kind: data.notify_kind,
-                target: target.kind,
-              });
-              routedRef.current = true;
-              await routeTarget(navRef, target, callOrchestrator);
-              return;
-            }
-          }
+            },
+            'cold-start',
+          );
+          return;
         }
-
-        // 2. Deferred — consume any push the background handler
-        // persisted. Resolution uses the *original* persistedAt so
-        // call-staleness reflects how long the user waited to tap.
-        if (!routedRef.current && !cancelled) {
+        if (!cancelled) {
           const deferred = await consumeRawPush();
-          if (deferred) {
-            const target = resolveTargetAtConsumeTime(deferred);
-            if (target) {
-              diag('push-nav', 'deferred tap-target from background handler', {
-                conversationId: deferred.conversationId,
-                kind: deferred.kind,
-                ageMs: Date.now() - deferred.persistedAt,
-                target: target.kind,
-              });
-              routedRef.current = true;
-              await routeTarget(navRef, target, callOrchestrator);
-            } else {
-              diag('push-nav', 'deferred tap-target could not be resolved', {
-                conversationId: deferred.conversationId,
-                kind: deferred.kind,
-              });
-            }
-          }
+          if (deferred) await route(deferred, 'deferred');
         }
       } catch (err) {
-        diag('push-nav', 'FCM handler setup failed', { err: String(err) });
+        diag('push-nav', 'startup notification handling failed', {
+          err: String(err),
+        });
       }
     }
+    void handleStartup();
 
-    void handleInitialNotification();
+    // Warm taps: the app was already running and the user tapped a
+    // notification. onNotificationOpenedApp fires every time — the
+    // previous design routed only once per process, so every tap after
+    // the first was silently dropped.
+    const unsubscribe = messaging().onNotificationOpenedApp((rm) => {
+      const data = (rm?.data ?? {}) as FcmData;
+      if (!data.conversation_id || !data.notify_kind) return;
+      // Drain any slot the background handler persisted for this push
+      // so it can't re-fire as a stale deferred nav on the next cold
+      // start.
+      void consumeRawPush();
+      void route(
+        {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+          persistedAt: Date.now(),
+        },
+        'warm-tap',
+      );
+    });
 
     return () => {
       cancelled = true;
+      unsubscribe();
     };
   }, [hydrated, userId, navReady, navRef, callOrchestrator]);
 }

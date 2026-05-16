@@ -46,7 +46,6 @@ import { colors } from './src/theme/index.js';
 import { SplashScreen } from './src/components/SplashScreen.js';
 import {
   registerForegroundMessageHandler,
-  registerNotificationOpenedListener,
   usePushNavigation,
 } from './src/push/push-handler.js';
 
@@ -64,11 +63,10 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
   if (typeof _origHandler === 'function') _origHandler(e, isFatal);
 });
 
-// Phase 6 fix: register FCM foreground + notification-opened handlers
-// Background handler is registered at module load in push-handler.ts
-// (top-level, synchronous, Android only)
+// Register the FCM foreground handler. The background handler is
+// registered at module load in push-handler.ts (top-level, Android
+// only); notification taps are handled inside usePushNavigation.
 registerForegroundMessageHandler();
-registerNotificationOpenedListener();
 
 /**
  * Minimum visible duration for the SplashScreen. Hydration completes

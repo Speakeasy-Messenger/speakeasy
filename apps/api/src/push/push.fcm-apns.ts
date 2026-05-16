@@ -135,11 +135,17 @@ export class FcmApnsPushProvider implements PushProvider {
           data,
           android: {
             priority: 'high' as const,
+            // No clickAction: it sets the notification's tap intent to
+            // a custom action, and no activity in AndroidManifest.xml
+            // declares an intent-filter for one. With it set, tapping
+            // the notification resolved to nothing and the FCM tap
+            // events (onNotificationOpenedApp / getInitialNotification)
+            // never fired. The default launch intent is what RNFirebase
+            // expects.
             notification: {
               title,
               body,
               channelId: 'speakeasy_default',
-              clickAction: 'OPEN_FROM_PUSH',
             },
           },
           tokens,
