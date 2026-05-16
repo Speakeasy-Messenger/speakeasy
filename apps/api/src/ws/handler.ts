@@ -4,6 +4,7 @@ import {
   conversationIdForCommunity,
   conversationIdForDirect,
   conversationIdForGroup,
+  isMessageId,
   newMessageId,
 } from '@speakeasy/shared';
 import type {
@@ -433,7 +434,19 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         // For direct: one row, one message_id (the value also returned in
         // `delivered` to sender). For group/community: one row per recipient
         // so each can be acked + deleted independently.
-        const directMessageId = msg.msg_type === 'direct' ? newMessageId() : undefined;
+        //
+        // The direct id is the *client-supplied* `message_id` — the
+        // sender stamped its optimistic bubble with it, so the
+        // `delivered`/`read` frames routed back carry an id that bubble
+        // actually has (without this they never attach — receipts are
+        // stuck on a single ✓). Fall back to a server id if the client
+        // omitted it (older builds) or sent something malformed.
+        const directMessageId =
+          msg.msg_type === 'direct'
+            ? isMessageId(msg.message_id)
+              ? msg.message_id
+              : newMessageId()
+            : undefined;
 
         await Promise.all(
           recipients.map(async (recipientId) => {

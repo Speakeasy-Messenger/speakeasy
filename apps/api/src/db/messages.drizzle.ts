@@ -23,7 +23,12 @@ export class DrizzleMessagesRepo implements MessagesRepo {
       delivered: false,
       createdAt: msg.createdAt ?? new Date(),
       expiresAt: msg.expiresAt,
-    });
+    })
+      // Message ids are now client-supplied (so receipts can attach).
+      // A reconnect that re-flushes the same queued frame would
+      // otherwise collide on the primary key; ignore the duplicate so
+      // the resend is a harmless no-op instead of erroring the send.
+      .onConflictDoNothing({ target: messages.id });
   }
 
   async listUndeliveredFor(

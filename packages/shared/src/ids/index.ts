@@ -123,6 +123,14 @@ export function newMessageId(): string {
   return ulid();
 }
 
+/** A bare ULID, as produced by `newMessageId()`. */
+export const MESSAGE_ID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
+
+/** True when `value` is a well-formed message id (a bare ULID). */
+export function isMessageId(value: unknown): value is string {
+  return typeof value === 'string' && MESSAGE_ID_REGEX.test(value);
+}
+
 export const CALL_ID_REGEX = /^call-[0-9A-HJKMNP-TV-Z]{26}$/;
 
 export function newCallId(): string {

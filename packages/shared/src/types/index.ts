@@ -88,6 +88,17 @@ export type WsClientMsg =
        * more invasive design).
        */
       sealed?: boolean;
+      /**
+       * Client-generated message id. The sender stamps its optimistic
+       * bubble with this id; for `direct` messages the server adopts
+       * it as the row id, so the `delivered` / `read` frames routed
+       * back to the sender carry an id the sender's bubble actually
+       * has — without it, receipts can never attach. Optional: if a
+       * client omits it the server generates one (older clients still
+       * work, just without working receipts). Ignored for
+       * group/community (server assigns per-recipient ids).
+       */
+      message_id?: MessageId;
     }
   | { type: 'ack'; message_id: MessageId }
   /**

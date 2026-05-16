@@ -400,6 +400,11 @@ export function ChatScreen({
         to: peerId,
         ciphertext: bytesToB64(ciphertext),
         msg_type: 'direct',
+        // Stamp the wire frame with the same id as the optimistic
+        // bubble so the server's `delivered`/`read` frames come back
+        // with an id this bubble actually has — otherwise receipts
+        // never attach and the bubble is stuck on a single ✓.
+        message_id: id,
       });
       diag('chat', 'send: ws.send OK', { peerId });
     } catch (err: unknown) {

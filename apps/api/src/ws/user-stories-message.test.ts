@@ -265,6 +265,43 @@ describe('user-story message + presence (Tier B, ioredis-mock)', () => {
     expect(cluster.messages.buffer.size).toBe(0);
   });
 
+  // ---- Story 7b: client-supplied direct message_id round-trips -----
+  // Regression: a direct message's id must be the *client's* id end to
+  // end. The sender stamps its optimistic bubble with it; if the server
+  // mints its own instead, the `delivered`/`read` frames carry an id the
+  // bubble never had and receipts can't attach (stuck on a single ✓).
+  it('story 7b: a client-supplied direct message_id is what B receives and what `delivered` carries', async () => {
+    const alice = await authedSocket(cluster.urlA, 'dvt_alice');
+    track(alice.ws);
+    const bob = await authedSocket(cluster.urlA, 'dvt_bob');
+    track(bob.ws);
+
+    const clientId = '01ARZ3NDEKTSV4RRFFQ69G5FAV'; // a well-formed ULID
+    alice.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob',
+        ciphertext: 'aGVsbG8=',
+        msg_type: 'direct',
+        message_id: clientId,
+      }),
+    );
+    const incoming = (await bob.q.next()) as {
+      type: string;
+      message_id: string;
+    };
+    expect(incoming.type).toBe('message');
+    expect(incoming.message_id).toBe(clientId);
+
+    bob.ws.send(JSON.stringify({ type: 'ack', message_id: incoming.message_id }));
+    const delivered = (await alice.q.next()) as {
+      type: string;
+      message_id: string;
+    };
+    expect(delivered.type).toBe('delivered');
+    expect(delivered.message_id).toBe(clientId);
+  });
+
   // ---- Story 8: offline → buffered → reconnect → drain → ack --------
   it('story 8: A sends to offline B → buffered → B comes online → drains → acks → A gets delivered', async () => {
     const alice = await authedSocket(cluster.urlA, 'dvt_alice');
