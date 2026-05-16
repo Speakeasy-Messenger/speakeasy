@@ -68,6 +68,12 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
 // only); notification taps are handled inside usePushNavigation.
 registerForegroundMessageHandler();
 
+// Kick off FCM token provisioning now, in parallel with onboarding.
+// The first getToken() on a fresh install is slow; starting it here
+// lets it finish before registration needs it, instead of racing a
+// short first session.
+void pushNotifications.warmUp();
+
 /**
  * Minimum visible duration for the SplashScreen. Hydration completes
  * in ~50–200ms on a warm cache; without a floor the splash flashes

@@ -29,6 +29,33 @@ const DEDUP_WINDOW_MS = 60_000;
 let inFlight: Promise<RegisterResult> | null = null;
 let lastResult: { at: number; result: RegisterResult; deviceToken: string } | null = null;
 
+// In-session backoff retry. A failed registration — a slow first
+// getToken() on a fresh install, permission granted moments later, a
+// transient POST error — would otherwise wait for the next external
+// trigger (AppState `active`, a WS reconnect), which may not come for
+// a while in a steady foreground session. These retries close that
+// gap so the token lands within the session it was meant to. Bounded;
+// a success clears the loop. A fresh process starts the count over.
+const RETRY_DELAYS_MS = [2_000, 4_000, 8_000, 16_000, 32_000];
+let retryTimer: ReturnType<typeof setTimeout> | null = null;
+let retryAttempt = 0;
+
+function clearRetry(): void {
+  if (retryTimer) clearTimeout(retryTimer);
+  retryTimer = null;
+  retryAttempt = 0;
+}
+
+function scheduleRetry(deviceToken: string): void {
+  if (retryTimer || retryAttempt >= RETRY_DELAYS_MS.length) return;
+  const delay = RETRY_DELAYS_MS[retryAttempt]!;
+  retryAttempt += 1;
+  retryTimer = setTimeout(() => {
+    retryTimer = null;
+    void tryRegisterPushToken(deviceToken);
+  }, delay);
+}
+
 /**
  * Try to register the device's FCM/APNs token with the server.
  *
@@ -69,10 +96,13 @@ export async function tryRegisterPushToken(
   inFlight = doRegisterPushToken(deviceToken);
   try {
     const result = await inFlight;
-    // Cache successes only — a failure must stay retryable so the next
-    // trigger (authed frame, AppState active) actually re-attempts.
     if (result === 'registered') {
+      // Cache successes only — a failure must stay retryable so the
+      // next trigger (authed frame, AppState active) re-attempts.
       lastResult = { at: Date.now(), result, deviceToken };
+      clearRetry();
+    } else {
+      scheduleRetry(deviceToken);
     }
     return result;
   } finally {
@@ -80,10 +110,11 @@ export async function tryRegisterPushToken(
   }
 }
 
-/** Test-only: clear the dedupe cache between cases. */
+/** Test-only: clear the dedupe cache + retry state between cases. */
 export function __resetPushRegisterDedupForTests(): void {
   inFlight = null;
   lastResult = null;
+  clearRetry();
 }
 
 async function doRegisterPushToken(deviceToken: string): Promise<RegisterResult> {

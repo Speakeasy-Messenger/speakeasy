@@ -21,6 +21,14 @@ export interface PushNotificationService {
    * app foreground if undefined.
    */
   getToken(): Promise<PushTokenResult | undefined>;
+
+  /**
+   * Best-effort: start FCM token provisioning early, without a
+   * permission prompt or a result. Call once at app launch so the
+   * slow first-install provisioning overlaps onboarding instead of
+   * racing a short first session.
+   */
+  warmUp(): Promise<void>;
 }
 
 /**
@@ -38,6 +46,38 @@ export class NativePushNotificationService implements PushNotificationService {
    * one-off logs.
    */
   lastFailureReason: string | undefined;
+
+  /**
+   * Trigger FCM installation provisioning without requesting any
+   * permission. The first `getToken()` on a fresh install is slow —
+   * Google provisions the app installation over the network — and a
+   * short first session can end before it finishes. Running this at
+   * launch overlaps that work with onboarding so the real
+   * `getToken()` later resolves from FCM's cache. Best-effort: a
+   * failure here just means the real `getToken()` pays the cost.
+   */
+  async warmUp(): Promise<void> {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const { NativeModules } = require('react-native') as {
+        NativeModules: Record<string, unknown>;
+      };
+      if (
+        !NativeModules.RNFBMessagingModule &&
+        !NativeModules.RNFirebaseMessaging
+      ) {
+        return;
+      }
+      // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+      const fcm = require('@react-native-firebase/messaging') as {
+        getMessaging: () => unknown;
+        getToken: (m: unknown) => Promise<string>;
+      };
+      await fcm.getToken(fcm.getMessaging());
+    } catch {
+      /* best-effort warm-up */
+    }
+  }
 
   async getToken(): Promise<PushTokenResult | undefined> {
     this.lastFailureReason = undefined;
@@ -131,6 +171,8 @@ export class NativePushNotificationService implements PushNotificationService {
 export class MockPushNotificationService implements PushNotificationService {
   constructor(private readonly result?: PushTokenResult) {}
 
+  async warmUp(): Promise<void> {}
+
   async getToken(): Promise<PushTokenResult | undefined> {
     return (
       this.result ?? {
@@ -145,6 +187,8 @@ export class MockPushNotificationService implements PushNotificationService {
  * Noop for builds that don't want push (e.g. Storybook).
  */
 export class NoopPushNotificationService implements PushNotificationService {
+  async warmUp(): Promise<void> {}
+
   async getToken(): Promise<PushTokenResult | undefined> {
     return undefined;
   }
