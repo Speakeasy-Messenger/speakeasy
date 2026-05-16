@@ -295,11 +295,10 @@ const styles = StyleSheet.create({
   // weight bump on delivered so ✓ → ✓✓ reads as a real state shift.
   receiptSent: { color: `${accent.foreground}59` }, // 0x59 ≈ 35%
   receiptDelivered: { color: accent.foreground, fontWeight: '700' as const },
-  // Read = bone-on-brass (cream foreground) so the glyph visibly
-  // shifts hue when the recipient opens the chat. Distinct enough
-  // from delivered's ink-on-brass to read at a glance without an
-  // extra glyph or motion.
-  receiptRead: { color: '#F2E9D8', fontWeight: '700' as const },
+  // Read uses the same ink as delivered — the prior cream glyph read
+  // as a washed-out "white" against the brass bubble. Delivered and
+  // read now share a colour; the ✓✓ vs ✓ shape still carries the state.
+  receiptRead: { color: accent.foreground, fontWeight: '700' as const },
 });
 
 /**

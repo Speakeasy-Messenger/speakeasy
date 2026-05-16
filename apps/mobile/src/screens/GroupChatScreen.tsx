@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState, useCallback } from 'react';
 import {
   FlatList,
+  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -191,6 +192,17 @@ export function GroupChatScreen({
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
+  // First content-size change scrolls without animation so the chat
+  // opens directly on the newest message; later ones animate.
+  const didInitialScrollRef = useRef(false);
+  // Keep the newest message visible above the composer when the
+  // keyboard opens.
+  useEffect(() => {
+    const sub = Keyboard.addListener('keyboardDidShow', () => {
+      listRef.current?.scrollToEnd({ animated: true });
+    });
+    return () => sub.remove();
+  }, []);
 
   // Phase 2 brand overhaul: groups don't have photos OR custom marks.
   // The header tile renders a deterministic geometric room mark from
@@ -387,6 +399,7 @@ export function GroupChatScreen({
           ref={listRef}
           data={messages}
           keyExtractor={(m) => m.id}
+          style={styles.list}
           contentContainerStyle={styles.listContent}
           renderItem={({ item, index }) => {
             // System messages (joins, leaves, name changes, etc.)
@@ -436,7 +449,11 @@ export function GroupChatScreen({
               </Text>
             </View>
           }
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => {
+            const animated = didInitialScrollRef.current;
+            didInitialScrollRef.current = true;
+            listRef.current?.scrollToEnd({ animated });
+          }}
         />
         {mentionQuery !== null && group && (
           <MentionPicker
@@ -597,6 +614,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs,
   },
   body: { flex: 1 },
+  // flex:1 bounds the list to the space between the header and the
+  // composer (without it the composer overlapped the newest message
+  // when the keyboard opened).
+  list: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },
   tagline: {
     flexDirection: 'row',

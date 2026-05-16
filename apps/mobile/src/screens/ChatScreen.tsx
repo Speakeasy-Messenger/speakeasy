@@ -143,6 +143,9 @@ export function ChatScreen({
   // in a Modal layered over the chat. Null = closed.
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const listRef = useRef<FlatList>(null);
+  // First content-size change scrolls without animation so the chat
+  // opens directly on the newest message; later ones animate.
+  const didInitialScrollRef = useRef(false);
 
   // Scroll to bottom when the keyboard appears so the last message
   // stays visible above the input bar. Without this, opening the
@@ -582,6 +585,7 @@ export function ChatScreen({
           ref={listRef}
           data={messages}
           keyExtractor={(m) => m.id}
+          style={styles.list}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
             if (item.from === 'system') {
@@ -612,7 +616,11 @@ export function ChatScreen({
               </Text>
             </View>
           }
-          onContentSizeChange={() => listRef.current?.scrollToEnd({ animated: true })}
+          onContentSizeChange={() => {
+            const animated = didInitialScrollRef.current;
+            didInitialScrollRef.current = true;
+            listRef.current?.scrollToEnd({ animated });
+          }}
         />
         {/* Brand §6.5 InputBar: top border 1px text-faint, padding 14/20,
             canvas bg, "say something..." placeholder in text-mute body,
@@ -811,6 +819,10 @@ const styles = StyleSheet.create({
   },
   callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
   body: { flex: 1 },
+  // flex:1 bounds the list to the space between the header and the
+  // composer — without it the list sized to its content and the
+  // composer overlapped the newest message when the keyboard opened.
+  list: { flex: 1 },
   listContent: { padding: space.md, paddingBottom: space.lg },
   // Tagline at the head of the list — `meta`-style uppercase
   // ("END-TO-END ENCRYPTED · LEAVES IN <TTL>") prefaced by the §6.10

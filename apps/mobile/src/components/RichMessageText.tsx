@@ -6,7 +6,6 @@ import {
   type StyleProp,
   type TextStyle,
 } from 'react-native';
-import { colors } from '../theme/index.js';
 import { LONG_MESSAGE_CHARS, tokenize } from './rich-message-text.js';
 
 interface Props {
@@ -72,17 +71,20 @@ export function RichMessageText({ text, mentions, style, onSeeMore }: Props) {
   );
 }
 
+// No `color` on these — a nested <Text> inherits the parent body
+// colour, so links/mentions stay legible on both bubble variants (the
+// hardcoded brass was invisible on the brass sent bubble). Weight +
+// underline carry the affordance instead.
 const styles = StyleSheet.create({
   mention: {
-    color: colors.primary,
     fontWeight: '600',
   },
   link: {
-    color: colors.primary,
+    fontWeight: '600',
     textDecorationLine: 'underline',
   },
   seeMore: {
-    color: colors.primary,
     fontWeight: '600',
+    textDecorationLine: 'underline',
   },
 });
