@@ -66,4 +66,13 @@ export interface UserRepo {
    * the client computes from userId).
    */
   setSelectedAvatar(userId: string, animalId: string | undefined): Promise<void>;
+
+  /**
+   * Permanently delete a user and everything tied to them — devices,
+   * prekey bundle, group/community memberships, key envelopes, and
+   * buffered messages to/from them. Groups and communities the user
+   * created are deleted too (their members lose them). Frees the
+   * handle for reuse. Backs `DELETE /v1/users/me`.
+   */
+  deleteUser(userId: string): Promise<void>;
 }

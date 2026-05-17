@@ -69,4 +69,8 @@ export class MockSignalProtocolClient implements SignalProtocolModule {
   async resetPeer(_peerUserId: string): Promise<void> {
     // Mock has no per-peer state; nothing to clear.
   }
+
+  async wipeStore(): Promise<void> {
+    // Mock has no persistent store; nothing to wipe.
+  }
 }

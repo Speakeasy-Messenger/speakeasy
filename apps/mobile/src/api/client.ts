@@ -264,6 +264,21 @@ export class ApiClient {
   }
 
   /**
+   * Permanently delete the caller's account server-side — frees the
+   * handle and removes all server-held data. Backs Delete Account.
+   * Throws `ApiError` on a non-2xx response.
+   */
+  async deleteAccount(deviceToken: string): Promise<void> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/users/me`, {
+      method: 'DELETE',
+      headers: { authorization: `Bearer ${deviceToken}` },
+    });
+    if (res.status !== 200) {
+      throw new ApiError(res.status, 'delete_account_failed');
+    }
+  }
+
+  /**
    * Check whether a candidate handle is available for enrollment.
    * Returns the same shape as the server: `{available, reason?}` where
    * `reason` is one of `'invalid' | 'reserved' | 'taken'`.

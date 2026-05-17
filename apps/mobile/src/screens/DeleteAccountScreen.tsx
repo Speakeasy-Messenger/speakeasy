@@ -9,13 +9,20 @@ import {
 } from 'react-native';
 import { Handle } from '../components/Handle.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
+import notifee from '@notifee/react-native';
 import { useBlocks } from '../store/blocks.js';
 import { useCalls } from '../store/calls.js';
 import { useConversations } from '../store/conversations.js';
+import { useDistributionIds } from '../store/distribution-ids.js';
 import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
+import { useOnboardingCards } from '../store/onboarding-cards.js';
+import { useOwnership } from '../store/ownership.js';
 import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
+import { wipeAllPersistedState } from '../store/wipe.js';
+import { clearAvatarCache } from '../push/avatar-cache.js';
+import { api, signalProtocol } from '../services.js';
 import { space, useColors } from '../theme/index.js';
 import { font, type as typeScale } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
@@ -27,23 +34,51 @@ interface Props {
 /**
  * SETTINGS.md §8 — full-screen confirmation. Three honest paragraphs.
  *
- * Server endpoint `POST /v1/accounts/delete` doesn't exist yet —
- * tap-Delete clears local stores and resets the user to onboarding.
- * The wire commit is a documented follow-up; without it, the user
- * remains a stranger on this device but their server-side handle
- * + keypair stay registered until the endpoint lands.
+ * Delete is a true clean slate: the account is deleted server-side
+ * (`DELETE /v1/users/me` — frees the handle), the native SQLCipher
+ * Signal store is wiped, the avatar cache + notifications are cleared,
+ * and every persisted store is dropped. Then `userId` clears and the
+ * navigator routes to Onboarding.
  */
 export function DeleteAccountScreen({ onBack }: Props): React.ReactElement {
   const themed = useColors();
   const userId = useIdentity((s) => s.userId);
 
   async function handleDelete() {
-    diag('delete-account', 'commit (local-only, server endpoint TODO)', {
-      userId,
-    });
-    // Walk the local stores and reset everything. The user lands
-    // on onboarding step 1 once `userId` clears in the identity
-    // store (App.tsx already routes on that flag).
+    const deviceToken = useIdentity.getState().deviceToken;
+    diag('delete-account', 'commit', { userId, hasToken: !!deviceToken });
+
+    // 1. Server-side delete — best-effort. A network failure must not
+    //    trap the user on this screen; the local wipe runs regardless.
+    if (deviceToken) {
+      try {
+        await api.deleteAccount(deviceToken);
+        diag('delete-account', 'server delete OK');
+      } catch (err) {
+        diag('delete-account', 'server delete failed (continuing wipe)', {
+          err: String(err),
+        });
+      }
+    }
+
+    // 2. Native Signal store — delete the SQLCipher DB so a re-onboard
+    //    can't resurrect this identity's keys, sessions, or caches.
+    try {
+      await signalProtocol.wipeStore();
+    } catch (err) {
+      diag('delete-account', 'wipeStore failed (continuing)', { err: String(err) });
+    }
+
+    // 3. Notification avatar cache + any notifications still showing.
+    await clearAvatarCache();
+    try {
+      await notifee.cancelAllNotifications();
+    } catch {
+      /* best-effort */
+    }
+
+    // 4. In-memory store state — reset everything so the live session
+    //    shows no ghost data.
     try {
       await Promise.all([
         useConversations.getState().reset(),
@@ -52,13 +87,22 @@ export function DeleteAccountScreen({ onBack }: Props): React.ReactElement {
         useBlocks.getState().reset(),
         useGroups.getState().reset(),
         useCalls.getState().reset?.(),
-        useIdentity.getState().reset(),
+        useDistributionIds.getState().reset(),
+        useOnboardingCards.getState().reset(),
+        useOwnership.getState().reset(),
       ]);
     } catch (err) {
-      diag('delete-account', 'reset failure (continuing)', {
+      diag('delete-account', 'store reset failure (continuing)', {
         err: String(err),
       });
     }
+
+    // 5. Every persisted `speakeasy.*` AsyncStorage key — catches any
+    //    store without a reset() and the push tap-target slot.
+    await wipeAllPersistedState();
+
+    // 6. Identity last — clearing `userId` routes App.tsx to Onboarding.
+    await useIdentity.getState().reset();
   }
 
   function confirm() {

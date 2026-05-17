@@ -35,3 +35,14 @@ export async function writeAvatarPng(userId: string, base64: string): Promise<vo
   }
   await RNFS.writeFile(avatarCachePath(userId), base64, 'base64');
 }
+
+/** Delete the whole avatar cache — used by account deletion. Best-effort. */
+export async function clearAvatarCache(): Promise<void> {
+  try {
+    if (await RNFS.exists(CACHE_DIR)) {
+      await RNFS.unlink(CACHE_DIR);
+    }
+  } catch {
+    /* best-effort — a leftover cache dir is harmless */
+  }
+}

@@ -1,6 +1,13 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, or, sql } from 'drizzle-orm';
 import { getDb } from './client.js';
-import { prekeyBundles, users } from './schema.js';
+import {
+  communities,
+  communityKeyEnvelopes,
+  groups,
+  messages,
+  prekeyBundles,
+  users,
+} from './schema.js';
 import type { PreKeyBundleInput, UserRepo, UserSummary } from './users.js';
 
 export class DrizzleUserRepo implements UserRepo {
@@ -74,5 +81,27 @@ export class DrizzleUserRepo implements UserRepo {
       .update(users)
       .set({ selectedAvatarId: animalId ?? null })
       .where(eq(users.id, userId));
+  }
+
+  async deleteUser(userId: string): Promise<void> {
+    const db = getDb();
+    // Ordered to satisfy the non-cascading FKs back to `users.id`
+    // (messages.sender_id, groups/communities.created_by,
+    // community_key_envelopes.wrapped_by_user_id). The remaining
+    // children — devices, prekey_bundles, *_members, recipient
+    // envelopes — cascade off the final `users` delete.
+    await db.transaction(async (tx) => {
+      await tx
+        .delete(messages)
+        .where(or(eq(messages.senderId, userId), eq(messages.recipientId, userId)));
+      await tx
+        .delete(communityKeyEnvelopes)
+        .where(eq(communityKeyEnvelopes.wrappedByUserId, userId));
+      // Groups/communities the user created go too (cascades their
+      // members + key envelopes) — the created_by FK doesn't cascade.
+      await tx.delete(groups).where(eq(groups.createdBy, userId));
+      await tx.delete(communities).where(eq(communities.createdBy, userId));
+      await tx.delete(users).where(eq(users.id, userId));
+    });
   }
 }

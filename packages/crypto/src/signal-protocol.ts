@@ -101,6 +101,15 @@ export interface SignalProtocolModule {
    * `crypto/session.ts`).
    */
   resetPeer(peerUserId: string): Promise<void>;
+
+  /**
+   * Permanently wipe the entire local Signal store — identity key,
+   * sessions, prekeys, sender keys, and the decrypt cache — by deleting
+   * the encrypted SQLCipher database. Used by account deletion so a
+   * later re-enrollment starts from a genuinely empty store rather than
+   * resurrecting the previous identity's keys.
+   */
+  wipeStore(): Promise<void>;
 }
 
 /** Mirrors error reasons from the Kotlin module (apps/mobile/.../SignalProtocolModule.kt). */
@@ -132,6 +141,7 @@ interface NativeSignalModule {
   encrypt(peerUserId: string, plaintextB64: string): Promise<string>;
   decrypt(peerUserId: string, ciphertextB64: string): Promise<string>;
   resetPeer(peerUserId: string): Promise<null>;
+  wipeStore(): Promise<null>;
 }
 
 /**
@@ -214,6 +224,10 @@ export class NativeSignalProtocolModule implements SignalProtocolModule {
 
   async resetPeer(peerUserId: string): Promise<void> {
     await this.callBridge(() => this.module.resetPeer(peerUserId));
+  }
+
+  async wipeStore(): Promise<void> {
+    await this.callBridge(() => this.module.wipeStore());
   }
 
   private async callBridge<T>(fn: () => Promise<T>): Promise<T> {

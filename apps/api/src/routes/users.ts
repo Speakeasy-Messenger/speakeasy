@@ -158,4 +158,22 @@ export async function registerUserRoutes(
       return reply.code(204).send();
     },
   );
+
+  /**
+   * DELETE /v1/users/me — permanently delete the caller's account and
+   * everything tied to them (devices, prekeys, memberships, buffered
+   * messages, groups/communities they created). Frees the handle for
+   * reuse. Backs the mobile Delete Account screen.
+   */
+  app.delete(
+    '/v1/users/me',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const userId = request.auth?.userId;
+      if (!userId) return reply.code(401).send({ error: 'not_enrolled' });
+      await opts.repo.deleteUser(userId);
+      request.log.info({ audit: 'account_deleted', userId }, 'account deleted');
+      return reply.code(200).send({ ok: true });
+    },
+  );
 }

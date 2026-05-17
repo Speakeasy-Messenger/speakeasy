@@ -3,6 +3,7 @@ package xyz.speakeasyapp.app.db
 import android.content.Context
 import dev.vouchflow.sdk.Vouchflow
 import net.zetetic.database.sqlcipher.SQLiteDatabase
+import java.io.File
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
 
@@ -87,6 +88,24 @@ object SpeakeasyDb {
     synchronized(this) {
       db?.close()
       db = null
+    }
+  }
+
+  /**
+   * Permanently delete the encrypted DB: close the handle and remove
+   * the file plus its SQLite sidecars. Used by account deletion so a
+   * later re-enrollment starts from a genuinely empty store instead of
+   * resurrecting the previous identity's keys.
+   */
+  fun wipe(context: Context) {
+    synchronized(this) {
+      db?.close()
+      db = null
+      val dbPath = context.getDatabasePath(DB_FILENAME).path
+      for (suffix in listOf("", "-journal", "-wal", "-shm")) {
+        val f = File(dbPath + suffix)
+        if (f.exists()) f.delete()
+      }
     }
   }
 

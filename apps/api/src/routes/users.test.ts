@@ -231,3 +231,42 @@ describe('PUT /v1/users/me/avatar', () => {
     await app.close();
   });
 });
+
+describe('DELETE /v1/users/me', () => {
+  it('deletes the account and frees the handle for reuse', async () => {
+    const { app, repo } = await makeApp();
+    const del = await app.inject({
+      method: 'DELETE',
+      url: '/v1/users/me',
+      headers: { authorization: 'Bearer dvt_silent-golden-hawk' },
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json()).toEqual({ ok: true });
+
+    // The user row is gone.
+    expect(await repo.findById('silent-golden-hawk')).toBeUndefined();
+    const get = await app.inject({
+      method: 'GET',
+      url: '/v1/users/silent-golden-hawk',
+      headers: { authorization: 'Bearer dvt_demo' },
+    });
+    expect(get.statusCode).toBe(404);
+
+    // The handle is claimable again — re-create succeeds.
+    const reclaimed = await repo.tryCreate({
+      userId: 'silent-golden-hawk',
+      deviceToken: 'dvt_new-owner',
+      publicKey: Buffer.from('new-pk'),
+      bundle: bundle(),
+    });
+    expect(reclaimed).toBe(true);
+    await app.close();
+  });
+
+  it('401 without bearer', async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({ method: 'DELETE', url: '/v1/users/me' });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});

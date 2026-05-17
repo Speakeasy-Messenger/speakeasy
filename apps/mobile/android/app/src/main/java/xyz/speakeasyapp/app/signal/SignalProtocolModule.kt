@@ -274,4 +274,21 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
       promise.reject("reset_peer_failed", e.message, e)
     }
   }
+
+  /**
+   * Permanently wipe the entire Signal store — drop the in-memory
+   * handle and delete the encrypted SQLCipher database. Backs account
+   * deletion: a later re-enrollment then starts from an empty store
+   * rather than resurrecting the previous identity's keys.
+   */
+  @ReactMethod
+  fun wipeStore(promise: Promise) {
+    try {
+      SpeakeasySignalStore.reset()
+      SpeakeasyDb.wipe(reactContext)
+      promise.resolve(null)
+    } catch (e: Throwable) {
+      promise.reject("wipe_store_failed", e.message, e)
+    }
+  }
 }

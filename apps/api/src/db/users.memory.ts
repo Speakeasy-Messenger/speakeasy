@@ -51,4 +51,13 @@ export class InMemoryUserRepo implements UserRepo {
     if (!u) return; // caller's `requireAuth` already proved enrollment
     u.selectedAvatarId = animalId;
   }
+
+  async deleteUser(userId: string): Promise<void> {
+    const u = this.users.get(userId);
+    if (u) this.byDeviceToken.delete(u.deviceToken);
+    this.users.delete(userId);
+    // Cross-table children (devices, messages, groups) live in their
+    // own in-memory repos; the Drizzle impl cascades them. Tests that
+    // need that coverage use the Postgres path.
+  }
 }
