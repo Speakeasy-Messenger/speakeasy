@@ -1,10 +1,9 @@
-import React, { useCallback, useEffect, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Alert,
   Animated,
   Easing,
   FlatList,
-  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -144,22 +143,10 @@ export function ChatScreen({
   // in a Modal layered over the chat. Null = closed.
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const listRef = useRef<FlatList>(null);
-  // First content-size change scrolls without animation so the chat
-  // opens directly on the newest message; later ones animate.
-  const didInitialScrollRef = useRef(false);
-
-  // Scroll to bottom when the keyboard appears so the last message
-  // stays visible above the input bar. Without this, opening the
-  // keyboard pushes the view up but the scroll position doesn't
-  // adjust — the last message is hidden behind the keyboard.
-  useEffect(() => {
-    const showSub = Keyboard.addListener('keyboardDidShow', () => {
-      listRef.current?.scrollToEnd({ animated: true });
-    });
-    return () => {
-      showSub.remove();
-    };
-  }, []);
+  // The FlatList is `inverted`, so it renders data[0] at the visual
+  // bottom — the newest message must come first. The store keeps
+  // messages oldest-first, so feed the list a reversed copy.
+  const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   // BURN.md §5 — feed dissolve. ConvSettings sets
   // `burningConversationId`; we drive the local fade here. The
@@ -295,9 +282,9 @@ export function ChatScreen({
     if (!trimmed) return;
     setInput('');
     void sendOutbound({ text: trimmed });
-    // Immediately scroll to bottom so the user sees their message
-    // without waiting for the content size change.
-    listRef.current?.scrollToEnd({ animated: true });
+    // Inverted list: offset 0 is the newest message. Jump there so the
+    // user sees their message even if they'd scrolled up into history.
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
   }
 
   // Paperclip → bottom sheet with Photo / Camera / Document choices.
@@ -587,7 +574,8 @@ export function ChatScreen({
         <Animated.View style={{ flex: 1, opacity: burnFade }}>
         <FlatList
           ref={listRef}
-          data={messages}
+          inverted
+          data={orderedMessages}
           keyExtractor={(m) => m.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
@@ -610,7 +598,7 @@ export function ChatScreen({
               />
             );
           }}
-          ListHeaderComponent={
+          ListFooterComponent={
             <View style={styles.tagline}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
               <Text style={[styles.taglineText, { color: themed.slate }]}>
@@ -622,11 +610,6 @@ export function ChatScreen({
               </Text>
             </View>
           }
-          onContentSizeChange={() => {
-            const animated = didInitialScrollRef.current;
-            didInitialScrollRef.current = true;
-            listRef.current?.scrollToEnd({ animated });
-          }}
         />
         {/* Brand §6.5 InputBar: top border 1px text-faint, padding 14/20,
             canvas bg, "say something..." placeholder in text-mute body,
@@ -838,17 +821,16 @@ const styles = StyleSheet.create({
   },
   callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
   body: { flex: 1 },
-  // flex:1 bounds the list to the space between the header and the
-  // composer — without it the list sized to its content and the
-  // composer overlapped the newest message when the keyboard opened.
   list: { flex: 1 },
-  listContent: { padding: space.md, paddingBottom: space.lg },
-  // Tagline at the head of the list — `meta`-style uppercase
+  // The list is `inverted`, so the contentContainer is flipped:
+  // paddingTop here is the visual breathing room above the composer
+  // (below the newest message).
+  listContent: { padding: space.md, paddingTop: space.lg },
+  // Tagline at the top of the conversation — `meta`-style uppercase
   // ("END-TO-END ENCRYPTED · LEAVES IN <TTL>") prefaced by the §6.10
-  // brass square. Was at the bottom (ListFooterComponent) but it
-  // tested as a "rolling tail of the chat" rather than the trust
-  // statement it's meant to be — moved to the head so it reads as
-  // the conversation's ground truth instead of an afterthought.
+  // brass square. The list is inverted, so it rides in
+  // ListFooterComponent, which renders at the visual top — reading as
+  // the conversation's ground truth, not a rolling tail.
   // The dot is the only color outside text-mute.
   tagline: {
     flexDirection: 'row',

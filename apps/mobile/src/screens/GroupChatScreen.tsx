@@ -1,7 +1,6 @@
-import React, { useEffect, useRef, useState, useCallback } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import {
   FlatList,
-  Keyboard,
   KeyboardAvoidingView,
   Modal,
   Platform,
@@ -192,17 +191,10 @@ export function GroupChatScreen({
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const [attachOpen, setAttachOpen] = useState(false);
   const listRef = useRef<FlatList>(null);
-  // First content-size change scrolls without animation so the chat
-  // opens directly on the newest message; later ones animate.
-  const didInitialScrollRef = useRef(false);
-  // Keep the newest message visible above the composer when the
-  // keyboard opens.
-  useEffect(() => {
-    const sub = Keyboard.addListener('keyboardDidShow', () => {
-      listRef.current?.scrollToEnd({ animated: true });
-    });
-    return () => sub.remove();
-  }, []);
+  // The FlatList is `inverted`, so it renders data[0] at the visual
+  // bottom — the newest message must come first. The store keeps
+  // messages oldest-first, so feed the list a reversed copy.
+  const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
 
   // Phase 2 brand overhaul: groups don't have photos OR custom marks.
   // The header tile renders a deterministic geometric room mark from
@@ -397,7 +389,8 @@ export function GroupChatScreen({
       >
         <FlatList
           ref={listRef}
-          data={messages}
+          inverted
+          data={orderedMessages}
           keyExtractor={(m) => m.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
@@ -416,8 +409,13 @@ export function GroupChatScreen({
             //
             // Burst boundary = the previous message has a different
             // `from`, OR this is the first message in the list.
+            // The list is inverted (newest-first), so the
+            // conversation-older neighbour is at index + 1.
             const isSelf = item.from === 'me';
-            const prev = index > 0 ? messages[index - 1] : undefined;
+            const prev =
+              index + 1 < orderedMessages.length
+                ? orderedMessages[index + 1]
+                : undefined;
             const showAttribution =
               !isSelf && (!prev || prev.from !== item.from);
             return (
@@ -441,7 +439,7 @@ export function GroupChatScreen({
               </View>
             );
           }}
-          ListHeaderComponent={
+          ListFooterComponent={
             <View style={styles.tagline}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
               <Text style={[styles.taglineText, { color: themed.slate }]}>
@@ -449,11 +447,6 @@ export function GroupChatScreen({
               </Text>
             </View>
           }
-          onContentSizeChange={() => {
-            const animated = didInitialScrollRef.current;
-            didInitialScrollRef.current = true;
-            listRef.current?.scrollToEnd({ animated });
-          }}
         />
         {mentionQuery !== null && group && (
           <MentionPicker
@@ -614,11 +607,10 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.xs,
   },
   body: { flex: 1 },
-  // flex:1 bounds the list to the space between the header and the
-  // composer (without it the composer overlapped the newest message
-  // when the keyboard opened).
   list: { flex: 1 },
-  listContent: { padding: space.md, paddingBottom: space.lg },
+  // The list is `inverted`, so the contentContainer is flipped:
+  // paddingTop is the visual breathing room above the composer.
+  listContent: { padding: space.md, paddingTop: space.lg },
   tagline: {
     flexDirection: 'row',
     alignItems: 'center',
