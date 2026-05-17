@@ -5,6 +5,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import xyz.speakeasyapp.app.db.SpeakeasyDb
 import org.signal.libsignal.protocol.SignalProtocolAddress
 import org.signal.libsignal.protocol.groups.GroupCipher
 import org.signal.libsignal.protocol.groups.GroupSessionBuilder
@@ -82,6 +83,17 @@ class GroupMessagingModule(reactContext: ReactApplicationContext) :
   private fun b64(bytes: ByteArray): String =
       Base64.encodeToString(bytes, Base64.NO_WRAP)
   private fun unb64(s: String): ByteArray = Base64.decode(s, Base64.NO_WRAP)
+
+  /**
+   * Restore the persistent store from disk if it isn't loaded yet. The
+   * headless FCM background handler may call [decryptFromGroupMember]
+   * before any foreground code has touched the store.
+   */
+  private fun ensureRestored() {
+    if (!SpeakeasySignalStore.isInitialized()) {
+      SpeakeasySignalStore.initializeFromDb(reactApplicationContext)
+    }
+  }
 
   /**
    * Create a fresh SenderKey for the local user in the named group.
@@ -178,9 +190,15 @@ class GroupMessagingModule(reactContext: ReactApplicationContext) :
       promise: Promise,
   ) {
     try {
+      ensureRestored()
       val store = SpeakeasySignalStore.requireInitialized()
-      val cipher = GroupCipher(store, SignalProtocolAddress(senderUserId, deviceId))
-      val plaintext = cipher.decrypt(unb64(ciphertextB64))
+      val raw = unb64(ciphertextB64)
+      // Idempotent decrypt — same rationale as SignalProtocolModule.decrypt.
+      val plaintext =
+          DecryptCache.decryptCached(SpeakeasyDb.open(reactApplicationContext), raw) {
+            val cipher = GroupCipher(store, SignalProtocolAddress(senderUserId, deviceId))
+            cipher.decrypt(raw)
+          }
       promise.resolve(b64(plaintext))
     } catch (e: org.signal.libsignal.protocol.NoSessionException) {
       promise.reject("no_session", e.message, e)

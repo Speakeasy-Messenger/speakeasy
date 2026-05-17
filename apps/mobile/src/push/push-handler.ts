@@ -23,9 +23,11 @@
  */
 
 import { useEffect, useRef } from 'react';
-import { Platform } from 'react-native';
+import { AppState, Platform } from 'react-native';
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
+import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { decodePayload } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -33,8 +35,13 @@ import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
+import { signalProtocol, groupMessaging } from '../services.js';
+import { b64ToBytes, utf8FromBytes } from '../utils/bytes.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
+
+/** Android notification channel — also created natively in MainActivity. */
+const CHANNEL_ID = 'speakeasy_default';
 
 // ---------------------------------------------------------------------------
 // FCM data-payload shape
@@ -44,6 +51,16 @@ export type FcmData = {
   conversation_id?: string;
   notify_kind?: 'message' | 'call';
   msg_type?: 'direct' | 'group';
+  /** Server-resolved fallback banner copy (privacy-aware). */
+  title?: string;
+  body?: string;
+  /** Buffered message id (for decrypt + de-dup). */
+  message_id?: string;
+  /** Sender handle — the address the decrypt is keyed on. */
+  sender_id?: string;
+  /** Message ciphertext (base64). Present only for 'rich' devices on a
+   * non-sealed message that fits FCM's payload cap. */
+  ciphertext?: string;
 };
 
 /**
@@ -188,39 +205,134 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
   return null;
 }
 
+/** Wrap a raw FCM/notifee data payload into a `PersistedPush`. */
+function toPersistedPush(data: FcmData): PersistedPush | null {
+  if (!data.conversation_id || !data.notify_kind) return null;
+  return {
+    conversationId: data.conversation_id,
+    kind: data.notify_kind,
+    msgType: data.msg_type,
+    persistedAt: Date.now(),
+  };
+}
+
 // ---------------------------------------------------------------------------
-// TOP-LEVEL BACKGROUND HANDLER REGISTRATION (Android only)
-// CRITICAL: This MUST execute at module load, not in a function
+// NOTIFICATION RENDERING (the app owns display — see notification redesign)
+// ---------------------------------------------------------------------------
+
+/**
+ * Decrypt the forwarded ciphertext for a message push and return the
+ * text to show in the notification. `null` when there's nothing to
+ * show. Throws on a decrypt failure — the caller falls back to the
+ * server's generic copy.
+ *
+ * The native decrypt is idempotent (see Android DecryptCache), so
+ * running it here does not break the in-app decrypt when the same
+ * message later drains over the WebSocket.
+ */
+async function decryptForNotification(data: FcmData): Promise<string | null> {
+  if (!data.ciphertext || !data.sender_id) return null;
+  const ciphertext = b64ToBytes(data.ciphertext);
+  const plaintext =
+    data.msg_type === 'group'
+      ? await groupMessaging.decryptFromGroupMember(data.sender_id, ciphertext)
+      : await signalProtocol.decrypt(data.sender_id, ciphertext);
+  const payload = decodePayload(utf8FromBytes(plaintext));
+  // Attachments: don't surface metadata — just "@sender sent an
+  // attachment" (title already carries the handle).
+  if (payload.attachments && payload.attachments.length > 0) {
+    return 'sent an attachment';
+  }
+  return payload.text ?? null;
+}
+
+/**
+ * Render the notification for an inbound FCM data message. For 'rich'
+ * recipients the server forwards the ciphertext — decrypt it on-device
+ * and show the real text; otherwise fall back to the server's generic
+ * title/body. The notification id is the conversation id, so repeated
+ * messages from one conversation coalesce into a single banner.
+ */
+async function displayPushNotification(data: FcmData): Promise<void> {
+  let title = data.title ?? 'speakeasy';
+  let body = data.body ?? 'New message';
+  if (data.notify_kind === 'message' && data.ciphertext && data.sender_id) {
+    try {
+      const text = await decryptForNotification(data);
+      if (text) body = text;
+      diag('push-bg', 'notification decrypted', {
+        conversationId: data.conversation_id,
+      });
+    } catch (err) {
+      diag('push-bg', 'notification decrypt failed — generic fallback', {
+        conversationId: data.conversation_id,
+        err: String(err),
+      });
+    }
+  }
+  // Idempotent — re-creating an existing channel is a no-op. Needed
+  // because a headless launch may run before MainActivity created it.
+  await notifee.createChannel({
+    id: CHANNEL_ID,
+    name: 'Messages',
+    importance: AndroidImportance.HIGH,
+  });
+  await notifee.displayNotification({
+    // conversation id as the notification id → one banner per
+    // conversation; a newer message replaces the older.
+    id: data.conversation_id,
+    title,
+    body,
+    data: {
+      conversation_id: data.conversation_id ?? '',
+      notify_kind: data.notify_kind ?? 'message',
+      ...(data.msg_type ? { msg_type: data.msg_type } : {}),
+    },
+    android: {
+      channelId: CHANNEL_ID,
+      smallIcon: 'ic_notification',
+      pressAction: { id: 'default' },
+    },
+  });
+}
+
+// ---------------------------------------------------------------------------
+// TOP-LEVEL HANDLER REGISTRATION (Android only)
+// CRITICAL: This MUST execute at module load, not in a function.
+// Android Headless JS expects the handlers to exist when the bundle loads.
 // ---------------------------------------------------------------------------
 
 if (Platform.OS === 'android') {
+  // Data-only FCM messages — the OS shows nothing, so the app renders
+  // the notification itself (and decrypts it for 'rich' devices).
   messaging().setBackgroundMessageHandler(async (remoteMessage: RemoteMessage) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
     diag('push-bg', 'background message received', {
       conversationId: data.conversation_id,
       kind: data.notify_kind,
       msgType: data.msg_type,
-      timestamp: Date.now(),
+      hasCiphertext: !!data.ciphertext,
     });
-
     if (!data.conversation_id || !data.notify_kind) {
-      diag('push-bg', 'incomplete FCM data — skipping persist', { data });
+      diag('push-bg', 'incomplete FCM data — skipping', { data });
       return;
     }
-
-    await persistRawPush({
-      conversationId: data.conversation_id,
-      kind: data.notify_kind,
-      msgType: data.msg_type,
-      persistedAt: Date.now(),
-    });
-    diag('push-bg', 'tap-target persisted', {
-      conversationId: data.conversation_id,
-      kind: data.notify_kind,
-    });
+    await displayPushNotification(data);
   });
 
-  diag('push', 'background message handler registered');
+  // Notification taps that land while the app is backgrounded/quit.
+  // The headless context can't navigate, so persist the tap target —
+  // the foreground app drains it (see usePushNavigation).
+  notifee.onBackgroundEvent(async ({ type, detail }) => {
+    if (type !== EventType.PRESS) return;
+    const p = toPersistedPush((detail.notification?.data ?? {}) as FcmData);
+    if (p) {
+      await persistRawPush(p);
+      diag('push-bg', 'tap-target persisted', { conversationId: p.conversationId });
+    }
+  });
+
+  diag('push', 'background message + notifee handlers registered');
 }
 
 // ---------------------------------------------------------------------------
@@ -234,7 +346,9 @@ export function registerForegroundMessageHandler(): void {
 
   foregroundHandlerUnsub = messaging().onMessage((remoteMessage: RemoteMessage) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
-    diag('push-fg', 'foreground push received (suppressed OS banner)', {
+    // No notification while the app is foregrounded — the message
+    // renders in-app once it drains over the WebSocket.
+    diag('push-fg', 'foreground push received (no banner)', {
       conversationId: data.conversation_id,
       kind: data.notify_kind,
       msgType: data.msg_type,
@@ -312,26 +426,24 @@ export function usePushNavigation(
       await routeTarget(navRef, target, callOrchestrator);
     }
 
-    // Cold start: the notification that launched the app from a quit
-    // state, plus any push the background handler persisted before
-    // this hook mounted. Runs once per process.
+    // Cold start: the notifee notification that launched the app from a
+    // quit state, plus any tap target the background event handler
+    // persisted before this hook mounted. Runs once per process.
     async function handleStartup() {
       if (startupHandledRef.current) return;
       startupHandledRef.current = true;
       try {
-        const initial = await messaging().getInitialNotification();
-        const data = initial?.data as FcmData | undefined;
-        if (data?.conversation_id && data?.notify_kind && !cancelled) {
-          await route(
-            {
-              conversationId: data.conversation_id,
-              kind: data.notify_kind,
-              msgType: data.msg_type,
-              persistedAt: Date.now(),
-            },
-            'cold-start',
-          );
-          return;
+        const initial = await notifee.getInitialNotification();
+        const data = initial?.notification?.data as FcmData | undefined;
+        if (data && !cancelled) {
+          const p = toPersistedPush(data);
+          if (p) {
+            await route(p, 'cold-start');
+            // Drain the slot the background tap handler also persisted
+            // for this same tap so it can't re-fire on resume.
+            void consumeRawPush();
+            return;
+          }
         }
         if (!cancelled) {
           const deferred = await consumeRawPush();
@@ -345,31 +457,28 @@ export function usePushNavigation(
     }
     void handleStartup();
 
-    // Warm taps: the app was already running and the user tapped a
-    // notification. onNotificationOpenedApp fires every time — the
-    // previous design routed only once per process, so every tap after
-    // the first was silently dropped.
-    const unsubscribe = messaging().onNotificationOpenedApp((rm) => {
-      const data = (rm?.data ?? {}) as FcmData;
-      if (!data.conversation_id || !data.notify_kind) return;
-      // Drain any slot the background handler persisted for this push
-      // so it can't re-fire as a stale deferred nav on the next cold
-      // start.
-      void consumeRawPush();
-      void route(
-        {
-          conversationId: data.conversation_id,
-          kind: data.notify_kind,
-          msgType: data.msg_type,
-          persistedAt: Date.now(),
-        },
-        'warm-tap',
-      );
+    // Warm taps on a notification while the app is already foregrounded
+    // (the banner was still in the tray). Routes immediately.
+    const fgUnsub = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type !== EventType.PRESS) return;
+      const p = toPersistedPush((detail.notification?.data ?? {}) as FcmData);
+      if (p) void route(p, 'fg-tap');
+    });
+
+    // A tap that landed while the app was backgrounded was persisted by
+    // notifee.onBackgroundEvent — drain it when the app returns active.
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      if (state !== 'active') return;
+      void (async () => {
+        const deferred = await consumeRawPush();
+        if (deferred && !cancelled) await route(deferred, 'resume-tap');
+      })();
     });
 
     return () => {
       cancelled = true;
-      unsubscribe();
+      fgUnsub();
+      appStateSub.remove();
     };
   }, [hydrated, userId, navReady, navRef, callOrchestrator]);
 }

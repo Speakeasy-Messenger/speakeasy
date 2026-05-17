@@ -30,6 +30,10 @@ import net.zetetic.database.sqlcipher.SQLiteDatabase
  *   one sender holds N records (one per group they participate in),
  *   and one recipient holds M records (one per (sender, group) pair
  *   they've received an SKDM for).
+ * - **decrypt_cache** (v3): plaintext keyed by `SHA-256(ciphertext)`.
+ *   Makes decryption idempotent — see `signal/DecryptCache.kt` for why
+ *   (the headless push handler and the in-app WS path both decrypt the
+ *   same message; the ratchet may only advance once).
  */
 object Schema {
   private val MIGRATIONS: List<List<String>> =
@@ -81,6 +85,16 @@ object Schema {
                 distribution_id TEXT NOT NULL,
                 record BLOB NOT NULL,
                 PRIMARY KEY (name, device_id, distribution_id)
+              )
+              """,
+          ),
+          // version 3 (idempotent-decrypt plaintext cache)
+          listOf(
+              """
+              CREATE TABLE decrypt_cache (
+                ct_hash TEXT PRIMARY KEY,
+                plaintext BLOB NOT NULL,
+                created_at INTEGER NOT NULL
               )
               """,
           ),

@@ -11,6 +11,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import notifee from '@notifee/react-native';
 import { type Attachment, encodePayload, newMessageId, parseMentions } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
@@ -195,6 +196,12 @@ export function GroupChatScreen({
   // bottom — the newest message must come first. The store keeps
   // messages oldest-first, so feed the list a reversed copy.
   const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  // Opening the group clears its push notification (notifee keys the
+  // notification by conversation id, which for a group is the groupId).
+  useEffect(() => {
+    void notifee.cancelNotification(groupId);
+  }, [groupId]);
 
   // Phase 2 brand overhaul: groups don't have photos OR custom marks.
   // The header tile renders a deterministic geometric room mark from

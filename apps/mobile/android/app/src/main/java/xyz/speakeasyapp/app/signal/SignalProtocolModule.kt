@@ -7,6 +7,7 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import com.facebook.react.bridge.ReadableMap
+import xyz.speakeasyapp.app.db.SpeakeasyDb
 import org.signal.libsignal.protocol.IdentityKey
 import org.signal.libsignal.protocol.IdentityKeyPair
 import org.signal.libsignal.protocol.SessionBuilder
@@ -222,16 +223,19 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
         promise.reject("decrypt_failed", "empty ciphertext")
         return
       }
-      val typeByte = raw[0].toInt() and 0xFF
-      val body = raw.copyOfRange(1, raw.size)
-      val cipher = SessionCipher(store, SignalProtocolAddress(peerUserId, deviceId))
-      val plaintext: ByteArray =
-          when (typeByte) {
-            3 -> cipher.decrypt(PreKeySignalMessage(body))
-            2 -> cipher.decrypt(SignalMessage(body))
-            else -> {
-              promise.reject("decrypt_failed", "unknown ciphertext type byte $typeByte")
-              return
+      // Idempotent decrypt: the headless push handler and the in-app WS
+      // path both decrypt the same ciphertext; the ratchet may advance
+      // only once. See DecryptCache.
+      val plaintext =
+          DecryptCache.decryptCached(SpeakeasyDb.open(reactContext), raw) {
+            val typeByte = raw[0].toInt() and 0xFF
+            val body = raw.copyOfRange(1, raw.size)
+            val cipher = SessionCipher(store, SignalProtocolAddress(peerUserId, deviceId))
+            when (typeByte) {
+              3 -> cipher.decrypt(PreKeySignalMessage(body))
+              2 -> cipher.decrypt(SignalMessage(body))
+              else ->
+                  throw IllegalArgumentException("unknown ciphertext type byte $typeByte")
             }
           }
       promise.resolve(b64(plaintext))

@@ -9,11 +9,22 @@ import type { DevicesRepo } from '../db/devices.js';
 import type { EventLogRepo } from '../db/event-log.js';
 
 /**
+ * Max base64 ciphertext length to forward in the FCM `data` block.
+ * FCM caps `data` at 4 KB total; the other fields + keys cost ~250 B,
+ * so cap the ciphertext at 3.5 KB. Anything larger is dropped and the
+ * device falls back to a generic "New message".
+ */
+const CIPHERTEXT_MAX_B64 = 3500;
+
+/**
  * Production push provider — FCM (Android) + APNs (iOS).
  *
- * Notify-only per spec §11: payloads carry no message content. Just a
- * data-only FCM message so the device wakes and drains buffered messages
- * via the WS reconnect path.
+ * Android is **data-only**: no `notification` block, so the headless
+ * background handler always runs and renders the notification itself —
+ * letting it decrypt the forwarded ciphertext and show the real message
+ * text ('rich' devices). 'private' devices and sealed/oversized messages
+ * get no ciphertext and fall back to a generic banner. iOS still uses an
+ * APNs `notification` block (on-device rendering deferred with iOS push).
  */
 export class FcmApnsPushProvider implements PushProvider {
   private app: admin.app.App;
@@ -74,32 +85,39 @@ export class FcmApnsPushProvider implements PushProvider {
 
     // Per-device privacy: a user can have a 'rich' work phone and a
     // 'private' bedside tablet. Group device tokens by the resolved
-    // banner copy so every device sees its preferred treatment in
-    // one batched FCM call. Sealed senderId is forced to undefined
-    // upstream (handler.ts doesn't pass it through) so 'rich' devices
-    // still degrade gracefully when the message can't be attributed.
+    // banner copy + privacy so every device sees its preferred
+    // treatment in one batched FCM call. Sealed senderId is forced to
+    // undefined upstream (handler.ts doesn't pass it through) so 'rich'
+    // devices still degrade gracefully when the message can't be
+    // attributed.
     const kind = notice.kind ?? 'message';
-    const data = {
+    // Base data block — present on every platform. The mobile client
+    // reads conversation_id + notify_kind for tap routing.
+    const baseData: Record<string, string> = {
       conversation_id: notice.conversationId,
       msg_type: notice.msgType,
       notify_kind: kind,
     };
-    // Bucket by (title, body, platform) so we can build
-    // platform-specific payloads: data-only for Android (the
-    // onMessage handler suppresses auto-display when the app is
-    // foregrounded, and the OS auto-displays when the app is
-    // backgrounded/killed), and notification+data for iOS (APNs
-    // needs the alert key to display when the app is killed).
-    const buckets = new Map<string, { title: string; body: string; platform: 'ios' | 'android'; tokens: string[] }>();
+    // Bucket by (title, body, platform, privacy) so each bucket maps to
+    // one FCM payload. Android is data-only (the headless handler
+    // renders + may decrypt); iOS keeps a notification block.
+    const buckets = new Map<
+      string,
+      {
+        title: string;
+        body: string;
+        platform: 'ios' | 'android';
+        privacy: 'rich' | 'private';
+        tokens: string[];
+      }
+    >();
     for (const d of withPush) {
       const privacy = d.notificationPrivacy ?? 'rich';
       const showSender = privacy === 'rich' && !!notice.senderId;
-      // Spec §11/§12: notify-only, no message content. 'rich' surfaces
-      // sender handle ("from whom") but never preview text ("what they
-      // said") — message content is E2E, the server can't read it.
-      // Exception: `notice.body` is set only by the @speaker broadcast,
-      // whose announcements are plaintext the server *does* have, so a
-      // 'rich' device can show the real text.
+      // 'rich' surfaces the sender handle. Preview text is the server's
+      // fallback ("New message") — for E2E messages the device decrypts
+      // the forwarded ciphertext and overrides it. `notice.body` is the
+      // @speaker exception: plaintext announcements the server has.
       let title: string;
       let body: string;
       if (kind === 'call') {
@@ -110,14 +128,24 @@ export class FcmApnsPushProvider implements PushProvider {
         body = privacy === 'rich' && notice.body ? notice.body : 'New message';
       }
       const platform = d.platform ?? 'android';
-      const key = `${title}\0${body}\0${platform}`;
+      const key = `${title}\0${body}\0${platform}\0${privacy}`;
       const bucket = buckets.get(key);
       if (bucket) {
         bucket.tokens.push(d.pushToken!);
       } else {
-        buckets.set(key, { title, body, platform, tokens: [d.pushToken!] });
+        buckets.set(key, { title, body, platform, privacy, tokens: [d.pushToken!] });
       }
     }
+
+    // Whether the ciphertext can ride along for on-device decryption:
+    // a real message (not a call), the server knows the sender (not
+    // sealed — the device needs the sender to address the decrypt),
+    // and it fits FCM's data-payload cap.
+    const ciphertextEligible =
+      kind === 'message' &&
+      !!notice.ciphertext &&
+      !!notice.senderId &&
+      notice.ciphertext.length <= CIPHERTEXT_MAX_B64;
 
     // Track which tokens went into which send so we can correlate
     // per-response error codes back to the original FCM tokens in the
@@ -125,31 +153,25 @@ export class FcmApnsPushProvider implements PushProvider {
     // `responses[i]` aligned with `tokens[i]`, so a parallel array
     // is the lightest way to carry that mapping out of the loop.
     const sends: { send: Promise<admin.messaging.BatchResponse>; tokens: string[] }[] = [];
-    for (const { title, body, platform, tokens } of buckets.values()) {
-      // Android payload carries both `data` and `android.notification`.
-      // The notification block is required: when the app is
-      // backgrounded/killed the OS displays the banner itself (a
-      // data-only message would show nothing). When the app is
-      // foregrounded the client's module-level `onMessage` handler
-      // fires and suppresses the OS banner, so there's no duplicate.
+    for (const { title, body, platform, privacy, tokens } of buckets.values()) {
+      // Android is data-only — no `notification` block. A message with
+      // one would be OS-rendered and the headless background handler
+      // would never run, so it could neither decrypt nor coalesce. The
+      // handler builds the banner from this data: `title`/`body` are
+      // the fallback copy, and when `ciphertext` is present it decrypts
+      // it on-device and shows the real text.
       if (platform === 'android') {
+        const data: Record<string, string> = { ...baseData, title, body };
+        if (notice.messageId) data.message_id = notice.messageId;
+        if (notice.senderId) data.sender_id = notice.senderId;
+        // Ciphertext only for 'rich' devices — 'private' devices opt
+        // out of content preview, so they never receive it.
+        if (ciphertextEligible && privacy === 'rich') {
+          data.ciphertext = notice.ciphertext!;
+        }
         const payload: admin.messaging.MulticastMessage = {
           data,
-          android: {
-            priority: 'high' as const,
-            // No clickAction: it sets the notification's tap intent to
-            // a custom action, and no activity in AndroidManifest.xml
-            // declares an intent-filter for one. With it set, tapping
-            // the notification resolved to nothing and the FCM tap
-            // events (onNotificationOpenedApp / getInitialNotification)
-            // never fired. The default launch intent is what RNFirebase
-            // expects.
-            notification: {
-              title,
-              body,
-              channelId: 'speakeasy_default',
-            },
-          },
+          android: { priority: 'high' as const },
           tokens,
         };
         sends.push({
@@ -163,7 +185,7 @@ export class FcmApnsPushProvider implements PushProvider {
         // or wakes the app briefly).
         const payload: admin.messaging.MulticastMessage = {
           notification: { title, body },
-          data,
+          data: baseData,
           apns: {
             payload: {
               aps: {

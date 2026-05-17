@@ -42,6 +42,21 @@ export interface PushDeliveryNotice {
    * directly in the banner. 'rich' devices only.
    */
   body?: string;
+  /**
+   * The buffered message's id. Forwarded to the device in the FCM data
+   * block so the headless push handler can decrypt + render the message
+   * (and so the notification can be keyed for de-dup).
+   */
+  messageId?: string;
+  /**
+   * The message ciphertext, base64. The server can't read it (E2E), but
+   * it forwards it in the FCM data block so the headless push handler
+   * can decrypt it on-device and show the real text in the notification.
+   * Omitted for sealed-sender messages and calls. Dropped from the push
+   * when it would push the data payload past FCM's 4 KB limit — the
+   * device then falls back to a generic "New message".
+   */
+  ciphertext?: string;
 }
 
 export interface PushProvider {

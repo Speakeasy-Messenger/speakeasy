@@ -519,6 +519,12 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 // "speakeasy: New message" regardless of recipient
                 // privacy preference.
                 senderId: sealed ? undefined : senderUserId,
+                // Forward id + ciphertext so the recipient's headless
+                // push handler can decrypt and show the real text.
+                // The server can't read it (E2E); push.fcm-apns gates
+                // inclusion (rich device, not sealed, size cap).
+                messageId: rowId,
+                ciphertext: msg.ciphertext,
               })
               .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
           }),

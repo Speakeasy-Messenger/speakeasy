@@ -14,6 +14,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import notifee from '@notifee/react-native';
 import {
   conversationIdForDirect,
   encodePayload,
@@ -147,6 +148,13 @@ export function ChatScreen({
   // bottom — the newest message must come first. The store keeps
   // messages oldest-first, so feed the list a reversed copy.
   const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
+
+  // Opening the chat clears its push notification (notifee keys the
+  // notification by conversation id). Tapping the notification already
+  // dismisses it; this covers opening the chat any other way.
+  useEffect(() => {
+    void notifee.cancelNotification(conversationId);
+  }, [conversationId]);
 
   // BURN.md §5 — feed dissolve. ConvSettings sets
   // `burningConversationId`; we drive the local fade here. The

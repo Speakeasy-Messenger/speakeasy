@@ -407,6 +407,10 @@ describe('user-story message + presence (Tier B, ioredis-mock)', () => {
     // `kind` is omitted (defaults to 'message') for ordinary messages.
     // Critical: must NOT be 'call' (would render the wrong banner).
     expect(notice.kind ?? 'message').toBe('message');
+    // The id + ciphertext ride along so the recipient's headless push
+    // handler can decrypt and show the real message text on-device.
+    expect(notice.ciphertext).toBe('cHVzaA==');
+    expect(typeof notice.messageId).toBe('string');
   });
 
   // ---- Story 9b: cross-instance LIVE message delivery (new) ---------
