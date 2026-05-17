@@ -23,19 +23,21 @@ function randomRegistrationId(): number {
  *   2. On 401 `not_enrolled`, silently re-enroll with the SAME handle
  *      + a fresh prekey bundle (same identity key — the native module
  *      persists it). This rebuilds the server-side row.
- *   3. On 409 `taken` during re-enroll, the handle's been claimed by
- *      someone else (rare; mostly a sign that the in-memory server's
- *      state has rolled past us). Reset the identity store so the
- *      navigator falls back to fresh Onboarding.
+ *   3. On 409 `taken` during re-enroll, leave the identity ALONE. The
+ *      handle existing server-side is almost always the user's own row
+ *      (a transient probe 401 sent us down the re-enroll path
+ *      needlessly) — never destroy the account over it.
  *   4. On any other error (network, validator), bail silently — the
  *      user can retry by relaunching.
  *
- * Idempotent. Safe to call once on every app boot before the WS connect.
+ * Never wipes the local identity — that is reserved for explicit user
+ * action (DeleteAccountScreen). Idempotent. Safe to call once on every
+ * app boot before the WS connect.
  */
 export async function ensureServerBinding(deps: {
   signalProtocol: SignalProtocolModule;
   vouchflow: VouchflowClient;
-}): Promise<'ok' | 'reenrolled' | 'reset' | 'noop'> {
+}): Promise<'ok' | 'reenrolled' | 'noop'> {
   const { userId, deviceToken } = useIdentity.getState();
   if (!userId || !deviceToken) return 'noop';
 
@@ -85,14 +87,15 @@ export async function ensureServerBinding(deps: {
     return 'reenrolled';
   } catch (err) {
     if (err instanceof ApiError && err.status === 409 && err.code === 'taken') {
-      // Someone else has the handle now. Drop the identity so the
-      // navigator falls back to Onboarding and the user can pick a
-      // fresh handle.
-      diag('auth', 'silent re-enroll: handle taken — resetting identity', {
+      // The handle already exists server-side — almost always the
+      // user's OWN row (a transient probe 401 sent us down the
+      // re-enroll path needlessly). NEVER destroy the identity over
+      // this: keep it; the next probe / WS auth succeeds once the
+      // token is fresh again.
+      diag('auth', 're-enroll hit 409 taken — keeping identity intact', {
         userId,
       });
-      await useIdentity.getState().reset();
-      return 'reset';
+      return 'noop';
     }
     diag('auth', 'silent re-enroll FAILED (non-fatal)', {
       err: String(err),
