@@ -25,7 +25,11 @@
 import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
-import notifee, { AndroidImportance, EventType } from '@notifee/react-native';
+import notifee, {
+  AndroidImportance,
+  AndroidStyle,
+  EventType,
+} from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodePayload } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
@@ -35,8 +39,13 @@ import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
-import { signalProtocol, groupMessaging } from '../services.js';
+import { signalProtocol, groupMessaging, getWsClient } from '../services.js';
 import { b64ToBytes, utf8FromBytes } from '../utils/bytes.js';
+import {
+  sendReplyMessage,
+  loadPersistedDeviceToken,
+  type ReplySenderDeps,
+} from './reply-sender.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -246,30 +255,20 @@ async function decryptForNotification(data: FcmData): Promise<string | null> {
   return payload.text ?? null;
 }
 
-/**
- * Render the notification for an inbound FCM data message. For 'rich'
- * recipients the server forwards the ciphertext — decrypt it on-device
- * and show the real text; otherwise fall back to the server's generic
- * title/body. The notification id is the conversation id, so repeated
- * messages from one conversation coalesce into a single banner.
- */
-async function displayPushNotification(data: FcmData): Promise<void> {
-  let title = data.title ?? 'speakeasy';
-  let body = data.body ?? 'New message';
-  if (data.notify_kind === 'message' && data.ciphertext && data.sender_id) {
-    try {
-      const text = await decryptForNotification(data);
-      if (text) body = text;
-      diag('push-bg', 'notification decrypted', {
-        conversationId: data.conversation_id,
-      });
-    } catch (err) {
-      diag('push-bg', 'notification decrypt failed — generic fallback', {
-        conversationId: data.conversation_id,
-        err: String(err),
-      });
-    }
-  }
+/** One line in an Android MessagingStyle notification. */
+type MsgStyleMsg = {
+  text: string;
+  timestamp: number;
+  /** Sender — omitted means the local user (a sent reply). */
+  person?: { id?: string; name: string };
+};
+
+/** The local user, for MessagingStyle's required `person`. */
+const SELF_PERSON = { id: 'self', name: 'You' };
+/** How many recent messages to keep stacked in one notification. */
+const MAX_NOTIF_MESSAGES = 6;
+
+async function ensureChannel(): Promise<void> {
   // Idempotent — re-creating an existing channel is a no-op. Needed
   // because a headless launch may run before MainActivity created it.
   await notifee.createChannel({
@@ -277,12 +276,86 @@ async function displayPushNotification(data: FcmData): Promise<void> {
     name: 'Messages',
     importance: AndroidImportance.HIGH,
   });
+}
+
+/**
+ * The messages already stacked on the displayed notification for this
+ * conversation. Returns [] when none is showing — so once the user
+ * opens the chat (which cancels the notification) the next message
+ * starts a fresh stack.
+ */
+async function existingMessages(conversationId: string): Promise<MsgStyleMsg[]> {
+  try {
+    const shown = await notifee.getDisplayedNotifications();
+    const match = shown.find((n) => n.notification?.id === conversationId);
+    const style = match?.notification?.android?.style;
+    if (style && style.type === AndroidStyle.MESSAGING && Array.isArray(style.messages)) {
+      return style.messages.map((m) => ({
+        text: String(m.text ?? ''),
+        timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now(),
+        person: m.person ? { id: m.person.id, name: m.person.name } : undefined,
+      }));
+    }
+  } catch {
+    /* getDisplayedNotifications can fail headlessly — start fresh */
+  }
+  return [];
+}
+
+/**
+ * Render (or update) a conversation's MessagingStyle notification —
+ * stacks `messages` and, for 1:1 chats, attaches an inline Reply field.
+ */
+async function displayMessagingNotification(args: {
+  conversationId: string;
+  peerHandle: string;
+  msgType: string;
+  messages: MsgStyleMsg[];
+  withReply: boolean;
+}): Promise<void> {
+  await ensureChannel();
+  const messages = args.messages.slice(-MAX_NOTIF_MESSAGES);
+  const latest = messages[messages.length - 1];
   await notifee.displayNotification({
-    // conversation id as the notification id → one banner per
-    // conversation; a newer message replaces the older.
+    id: args.conversationId,
+    // Fallbacks for surfaces that don't render MessagingStyle.
+    title: '@' + args.peerHandle,
+    body: latest?.text ?? 'New message',
+    data: {
+      conversation_id: args.conversationId,
+      notify_kind: 'message',
+      msg_type: args.msgType,
+      sender_id: args.peerHandle,
+    },
+    android: {
+      channelId: CHANNEL_ID,
+      smallIcon: 'ic_notification',
+      pressAction: { id: 'default' },
+      style: {
+        type: AndroidStyle.MESSAGING,
+        person: SELF_PERSON,
+        messages,
+      },
+      actions: args.withReply
+        ? [
+            {
+              title: 'Reply',
+              pressAction: { id: 'reply' },
+              input: { allowFreeFormInput: true, placeholder: 'Reply' },
+            },
+          ]
+        : undefined,
+    },
+  });
+}
+
+/** Plain single-line notification — private device / sealed / call. */
+async function displayGenericNotification(data: FcmData): Promise<void> {
+  await ensureChannel();
+  await notifee.displayNotification({
     id: data.conversation_id,
-    title,
-    body,
+    title: data.title ?? 'speakeasy',
+    body: data.body ?? 'New message',
     data: {
       conversation_id: data.conversation_id ?? '',
       notify_kind: data.notify_kind ?? 'message',
@@ -294,6 +367,105 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       pressAction: { id: 'default' },
     },
   });
+}
+
+/**
+ * Render the notification for an inbound FCM data message. For 'rich'
+ * recipients the server forwards the ciphertext — decrypt it on-device
+ * and stack it in a MessagingStyle notification with an inline reply.
+ * Anything not decryptable (private device / sealed / call / failure)
+ * falls back to a plain single-line banner.
+ */
+async function displayPushNotification(data: FcmData): Promise<void> {
+  const conversationId = data.conversation_id;
+  if (
+    conversationId &&
+    data.notify_kind === 'message' &&
+    data.ciphertext &&
+    data.sender_id
+  ) {
+    try {
+      const text = await decryptForNotification(data);
+      if (text) {
+        const peer = data.sender_id;
+        const prior = await existingMessages(conversationId);
+        await displayMessagingNotification({
+          conversationId,
+          peerHandle: peer,
+          msgType: data.msg_type ?? 'direct',
+          messages: [
+            ...prior,
+            { text, timestamp: Date.now(), person: { id: peer, name: '@' + peer } },
+          ],
+          // Inline reply is 1:1 only — group send needs JS-side
+          // SenderKey state that isn't reachable headlessly.
+          withReply: data.msg_type !== 'group',
+        });
+        diag('push-bg', 'messaging notification displayed', { conversationId });
+        return;
+      }
+    } catch (err) {
+      diag('push-bg', 'notification decrypt failed — generic fallback', {
+        conversationId,
+        err: String(err),
+      });
+    }
+  }
+  await displayGenericNotification(data);
+}
+
+/** Service-backed deps for the headless inline-reply sender. */
+function replyDeps(): ReplySenderDeps {
+  return {
+    encrypt: (peer, plain) => signalProtocol.encrypt(peer, plain),
+    getWsClient,
+    loadDeviceToken: loadPersistedDeviceToken,
+  };
+}
+
+/**
+ * Handle an inline-reply submission from a notification's RemoteInput.
+ * Sends the reply (encrypt + WS) and updates the notification thread to
+ * reflect it — or, on failure, an "open the app" marker.
+ */
+async function handleInlineReply(
+  notifData: Record<string, unknown> | undefined,
+  input: string | undefined,
+): Promise<void> {
+  const conversationId =
+    typeof notifData?.conversation_id === 'string' ? notifData.conversation_id : undefined;
+  const peerId =
+    typeof notifData?.sender_id === 'string' ? notifData.sender_id : undefined;
+  const msgType =
+    typeof notifData?.msg_type === 'string' ? notifData.msg_type : 'direct';
+  const text = (input ?? '').trim();
+  if (!conversationId || !peerId || !text) return;
+  try {
+    await sendReplyMessage(peerId, text, replyDeps());
+    const prior = await existingMessages(conversationId);
+    // No `person` → MessagingStyle renders it as the local user.
+    await displayMessagingNotification({
+      conversationId,
+      peerHandle: peerId,
+      msgType,
+      messages: [...prior, { text, timestamp: Date.now() }],
+      withReply: msgType !== 'group',
+    });
+    diag('push-reply', 'reply sent + notification updated', { conversationId });
+  } catch (err) {
+    diag('push-reply', 'reply send FAILED', { conversationId, err: String(err) });
+    const prior = await existingMessages(conversationId);
+    await displayMessagingNotification({
+      conversationId,
+      peerHandle: peerId,
+      msgType,
+      messages: [
+        ...prior,
+        { text: `⚠️ Not sent — open the app to resend: "${text}"`, timestamp: Date.now() },
+      ],
+      withReply: msgType !== 'group',
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -324,6 +496,11 @@ if (Platform.OS === 'android') {
   // The headless context can't navigate, so persist the tap target —
   // the foreground app drains it (see usePushNavigation).
   notifee.onBackgroundEvent(async ({ type, detail }) => {
+    // Inline reply submitted from a notification's RemoteInput field.
+    if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'reply') {
+      await handleInlineReply(detail.notification?.data, detail.input);
+      return;
+    }
     if (type !== EventType.PRESS) return;
     const p = toPersistedPush((detail.notification?.data ?? {}) as FcmData);
     if (p) {
@@ -457,9 +634,13 @@ export function usePushNavigation(
     }
     void handleStartup();
 
-    // Warm taps on a notification while the app is already foregrounded
-    // (the banner was still in the tray). Routes immediately.
+    // Warm taps / inline replies on a notification while the app is
+    // already foregrounded (the banner was still in the tray).
     const fgUnsub = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'reply') {
+        void handleInlineReply(detail.notification?.data, detail.input);
+        return;
+      }
       if (type !== EventType.PRESS) return;
       const p = toPersistedPush((detail.notification?.data ?? {}) as FcmData);
       if (p) void route(p, 'fg-tap');
