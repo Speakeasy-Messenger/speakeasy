@@ -202,7 +202,7 @@ describe('routeCallFrame — always-push for call_offer (rc.58)', () => {
     expect(deps._push.calls).toHaveLength(1);
   });
 
-  it('does NOT push for call_answer / call_ice / call_end', async () => {
+  it('does NOT push for call_answer / call_ice / non-cancel call_end', async () => {
     const deps = buildDeps({
       localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_phone' },
     });
@@ -218,10 +218,32 @@ describe('routeCallFrame — always-push for call_offer (rc.58)', () => {
       type: 'call_end',
       to: 'bob',
       call_id: CALL_ID,
-      reason: 'cancel',
+      reason: 'hangup',
     });
     await new Promise((r) => setImmediate(r));
     expect(deps._push.calls).toHaveLength(0);
+  });
+});
+
+describe('routeCallFrame — missed-call push', () => {
+  it('pushes a missed-call notification on call_end with reason cancel', async () => {
+    const deps = buildDeps({
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_phone' },
+    });
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_end',
+      to: 'bob',
+      call_id: CALL_ID,
+      reason: 'cancel',
+    });
+    await new Promise((r) => setImmediate(r));
+    expect(deps._push.calls).toHaveLength(1);
+    expect(deps._push.calls[0]).toMatchObject({
+      userId: 'bob',
+      senderId: 'alice',
+      kind: 'call',
+      callEvent: 'missed',
+    });
   });
 });
 

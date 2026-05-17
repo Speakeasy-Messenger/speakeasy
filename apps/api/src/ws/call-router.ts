@@ -146,6 +146,32 @@ export async function routeCallFrame(
       );
   }
 
+  // -- missed-call push on caller-cancel ------------------------------
+  // The caller gives up (45 s ring timeout, or manual cancel) → it
+  // sends `call_end` with reason `cancel`. Fire a push so the callee's
+  // stale "Incoming call" notification updates to "Missed call" — same
+  // conversationId, so it replaces in place. Unconditional like the
+  // offer push: this is the case the user hit, and it must land even
+  // when the callee's app was killed (no live WS to deliver call_end).
+  if (msg.type === 'call_end' && msg.reason === 'cancel') {
+    const conversation = conversationIdForDirect(senderUserId, msg.to);
+    void deps.push
+      .notifyDelivery({
+        userId: msg.to,
+        conversationId: conversation,
+        msgType: 'direct',
+        senderId: senderUserId,
+        kind: 'call',
+        callEvent: 'missed',
+      })
+      .catch((err) =>
+        deps.log.warn(
+          { err, recipientId: msg.to },
+          'missed-call push notify failed',
+        ),
+      );
+  }
+
   // -- presence check: online anywhere? -------------------------------
   // Local fast path first (cheap, avoids Redis). If not local, ask
   // presence whether the user is authed on any instance in the

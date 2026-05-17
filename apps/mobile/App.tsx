@@ -8,6 +8,7 @@ import {
   newMessageId,
 } from '@speakeasy/shared';
 import type { NavigationContainerRef } from '@react-navigation/native';
+import notifee from '@notifee/react-native';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { useIdentity } from './src/store/identity.js';
@@ -118,6 +119,13 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
     sentAt: Date.now(),
     stage: 'sent',
   });
+  // Clear the stale "Incoming call" notification for answered or
+  // outgoing calls. A *missed incoming* call is left alone — the
+  // server's call-end push replaces it with "Missed call" (and stays
+  // correctly silent when the app is foregrounded).
+  if (everConnected || !wasIncoming) {
+    void notifee.cancelNotification(cid);
+  }
 }
 
 export default function App() {

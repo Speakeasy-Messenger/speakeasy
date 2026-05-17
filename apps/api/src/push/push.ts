@@ -34,6 +34,13 @@ export interface PushDeliveryNotice {
    */
   kind?: 'message' | 'call';
   /**
+   * For `kind: 'call'` only. `'missed'` flips the banner body to
+   * "Missed call" — fired when the caller gives up so the callee's
+   * stale "Incoming call" notification updates in place (same
+   * conversationId → the notification replaces itself).
+   */
+  callEvent?: 'missed';
+  /**
    * Explicit notification body. Normally omitted — payloads are
    * notify-only ("New message") because message content is E2E and the
    * server can't read it. The @speaker broadcast bot is the exception:

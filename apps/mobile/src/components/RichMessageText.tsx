@@ -35,7 +35,10 @@ export function RichMessageText({ text, mentions, style, onSeeMore }: Props) {
   const segs = tokenize(shown, !!mentions?.length);
 
   return (
-    <Text style={style}>
+    // `selectable` enables the native long-press select + copy menu so
+    // users can copy message text. Nested link / "see more" onPress
+    // children still work — tap fires onPress, long-press selects.
+    <Text style={style} selectable>
       {segs.map((s, i) => {
         if (s.kind === 'mention') {
           return (

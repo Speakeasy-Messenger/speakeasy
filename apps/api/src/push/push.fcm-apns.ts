@@ -122,7 +122,12 @@ export class FcmApnsPushProvider implements PushProvider {
       let body: string;
       if (kind === 'call') {
         title = showSender ? `@${notice.senderId}` : 'speakeasy';
-        body = showSender ? 'Calling…' : 'Incoming call';
+        body =
+          notice.callEvent === 'missed'
+            ? 'Missed call'
+            : showSender
+              ? 'Calling…'
+              : 'Incoming call';
       } else {
         title = showSender ? `@${notice.senderId}` : 'speakeasy';
         body = privacy === 'rich' && notice.body ? notice.body : 'New message';

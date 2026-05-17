@@ -1342,8 +1342,9 @@ describe('ws voice call signaling — Phase 6', () => {
     // Call frames are never persisted to the relay buffer.
     expect(messagesRepo.buffer.size).toBe(0);
 
-    // call_end / call_ice / call_answer to an offline peer = no-op,
-    // no push fired (only call_offer wakes the device).
+    // call_end with reason `cancel` (the caller gave up) fires a
+    // second push — a "Missed call" notification that replaces the
+    // callee's stale incoming-call banner even if their app was killed.
     a.ws.send(
       JSON.stringify({
         type: 'call_end',
@@ -1353,7 +1354,13 @@ describe('ws voice call signaling — Phase 6', () => {
       }),
     );
     await new Promise((r) => setTimeout(r, 30));
-    expect(pushProvider.calls).toHaveLength(1);
+    expect(pushProvider.calls).toHaveLength(2);
+    expect(pushProvider.calls[1]).toMatchObject({
+      userId: 'offline-foo-bar',
+      kind: 'call',
+      callEvent: 'missed',
+      senderId: 'alice-blue-fox',
+    });
   });
 
   it('delivers a buffered call_offer when the callee reconnects within the ringing window', async () => {
