@@ -46,6 +46,7 @@ import {
   loadPersistedDeviceToken,
   type ReplySenderDeps,
 } from './reply-sender.js';
+import { cachedAvatarUri } from './avatar-cache.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -260,7 +261,7 @@ type MsgStyleMsg = {
   text: string;
   timestamp: number;
   /** Sender — omitted means the local user (a sent reply). */
-  person?: { id?: string; name: string };
+  person?: { id?: string; name: string; icon?: string };
 };
 
 /** The local user, for MessagingStyle's required `person`. */
@@ -314,7 +315,16 @@ async function displayMessagingNotification(args: {
   withReply: boolean;
 }): Promise<void> {
   await ensureChannel();
-  const messages = args.messages.slice(-MAX_NOTIF_MESSAGES);
+  // Stamp each peer message's Person with the cached avatar so the
+  // notification shows the real animal portrait (a Person with no icon
+  // renders Android's generic silhouette). Self messages keep no
+  // person → MessagingStyle treats them as the local user.
+  const peerIcon = await cachedAvatarUri(args.peerHandle);
+  const messages = args.messages.slice(-MAX_NOTIF_MESSAGES).map((m) =>
+    m.person
+      ? { ...m, person: { ...m.person, ...(peerIcon ? { icon: peerIcon } : {}) } }
+      : m,
+  );
   const latest = messages[messages.length - 1];
   await notifee.displayNotification({
     id: args.conversationId,

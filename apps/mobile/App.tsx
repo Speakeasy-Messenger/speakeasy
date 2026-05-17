@@ -11,6 +11,7 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import notifee from '@notifee/react-native';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
+import { AvatarCacheWarmer } from './src/avatars/AvatarCacheWarmer.js';
 import { useIdentity } from './src/store/identity.js';
 import { wipeAllPersistedState } from './src/store/wipe.js';
 import { useBlocks } from './src/store/blocks.js';
@@ -785,18 +786,22 @@ export default function App() {
       <ThemeProvider>
         <ThemedStatusBar />
         {!showSplash ? (
-          <RootNavigator
-            navRef={navRef}
-            onReady={() => setNavReady(true)}
-            callOrchestrator={callOrchestrator}
-            onBannerTap={(target) => {
-              if (target.kind === 'direct') {
-                navRef.current?.navigate('Chat', { peerId: target.peerId });
-              } else {
-                navRef.current?.navigate('GroupChat', { groupId: target.groupId });
-              }
-            }}
-          />
+          <>
+            <RootNavigator
+              navRef={navRef}
+              onReady={() => setNavReady(true)}
+              callOrchestrator={callOrchestrator}
+              onBannerTap={(target) => {
+                if (target.kind === 'direct') {
+                  navRef.current?.navigate('Chat', { peerId: target.peerId });
+                } else {
+                  navRef.current?.navigate('GroupChat', { groupId: target.groupId });
+                }
+              }}
+            />
+            {/* Off-screen — rasterizes peer avatars for notifications. */}
+            <AvatarCacheWarmer />
+          </>
         ) : (
           <SplashScreen />
         )}
