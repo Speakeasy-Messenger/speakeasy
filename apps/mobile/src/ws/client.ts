@@ -10,8 +10,14 @@ export type WsState =
 
 export interface SpeakeasyWsClientOptions {
   url: string;
-  /** Called when the client needs a fresh attestation token to authenticate. */
-  getToken: () => Promise<string>;
+  /**
+   * Supplies the attestation token for the `auth` handshake. Called
+   * with `{ forceRefresh: true }` when the previous connection failed
+   * during auth, so the impl can re-attest (`vouchflow.verify`) instead
+   * of handing back a known-bad cached token — this is what lets a
+   * stale/expired token self-heal on reconnect with no user action.
+   */
+  getToken: (opts?: { forceRefresh?: boolean }) => Promise<string>;
   /** Override WebSocket impl (for tests). Defaults to globalThis.WebSocket. */
   webSocketImpl?: typeof WebSocket;
   /** ms between client→server pings while authed. Default 30s. */
@@ -62,6 +68,10 @@ export class SpeakeasyWsClient {
   private reconnectTimer?: ReturnType<typeof setTimeout>;
   private reconnectAttempts = 0;
   private intentionalClose = false;
+  // True after a socket closed mid-`authenticating` (a bad token). The
+  // next `handleOpen` then asks `getToken` for a freshly re-attested
+  // token instead of the cached (likely-bad) one.
+  private lastAuthFailed = false;
   private readonly Ws: typeof WebSocket;
   private readonly subscribers = new Set<Subscriber>();
   private readonly stateSubscribers = new Set<(state: WsState) => void>();
@@ -271,7 +281,9 @@ export class SpeakeasyWsClient {
   private async handleOpen(): Promise<void> {
     this.setState('authenticating');
     try {
-      const token = await this.opts.getToken();
+      const token = await this.opts.getToken(
+        this.lastAuthFailed ? { forceRefresh: true } : undefined,
+      );
       this.socket?.send(JSON.stringify({ type: 'auth', token }));
     } catch (err) {
       // Bad token / no token: drop the socket; reconnect loop will retry.
@@ -289,6 +301,7 @@ export class SpeakeasyWsClient {
     if (this.state === 'authenticating' && msg.type === 'authed') {
       this.setState('authed');
       this.reconnectAttempts = 0;
+      this.lastAuthFailed = false;
       this.startPingLoop();
       this.flushAcks();
       this.flushSends();
@@ -312,6 +325,12 @@ export class SpeakeasyWsClient {
   private handleClose(): void {
     this.clearTimers();
     this.socket = undefined;
+    // Closed while still authenticating → the token was rejected (or
+    // the getToken fetch failed). Flag it so the next attempt forces a
+    // fresh re-attestation rather than retrying the same bad token.
+    if (this.state === 'authenticating') {
+      this.lastAuthFailed = true;
+    }
     if (this.intentionalClose) {
       this.setState('closed');
       return;

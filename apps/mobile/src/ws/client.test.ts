@@ -310,4 +310,59 @@ describe('SpeakeasyWsClient', () => {
     const acks = sock.sent.map((s) => JSON.parse(s)).filter((m) => m.type === 'ack');
     expect(acks).toEqual([{ type: 'ack', message_id: 'msg-1' }]);
   });
+
+  it('re-attests (getToken forceRefresh) after a socket closes mid-authentication', async () => {
+    const calls: Array<{ forceRefresh?: boolean } | undefined> = [];
+    let n = 0;
+    const getToken = async (opts?: { forceRefresh?: boolean }) => {
+      calls.push(opts);
+      return `tok-${++n}`;
+    };
+    const { client } = makeClient(getToken);
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Server rejected the token: the socket closes WITHOUT an `authed`
+    // message — i.e. it closes while still `authenticating`.
+    first.close();
+    expect(client.getState()).toBe('reconnecting');
+
+    vi.advanceTimersByTime(100);
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // First connect: plain getToken. Reconnect after the auth-phase
+    // close: getToken is asked to force a fresh re-attestation.
+    expect(calls[0]).toBeUndefined();
+    expect(calls[1]).toEqual({ forceRefresh: true });
+    expect(JSON.parse(second.sent[0]!)).toEqual({ type: 'auth', token: 'tok-2' });
+  });
+
+  it('does NOT force a refresh on a network-blip close (closed while authed)', async () => {
+    const calls: Array<{ forceRefresh?: boolean } | undefined> = [];
+    const getToken = async (opts?: { forceRefresh?: boolean }) => {
+      calls.push(opts);
+      return 'tok';
+    };
+    const { client } = makeClient(getToken);
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    first.message({ type: 'authed', user_id: 'me' });
+    // Drop while authed — a network blip, not an auth failure.
+    first.close();
+    vi.advanceTimersByTime(100);
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(calls[0]).toBeUndefined();
+    expect(calls[1]).toBeUndefined();
+  });
 });

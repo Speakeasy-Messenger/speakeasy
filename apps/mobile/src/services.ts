@@ -58,7 +58,9 @@ export const pushNotifications: PushNotificationService = new NativePushNotifica
 
 let _ws: SpeakeasyWsClient | undefined;
 
-export function getWsClient(getToken: () => Promise<string>): SpeakeasyWsClient {
+export function getWsClient(
+  getToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
+): SpeakeasyWsClient {
   if (!_ws) {
     _ws = new SpeakeasyWsClient({
       url: config.wsUrl,

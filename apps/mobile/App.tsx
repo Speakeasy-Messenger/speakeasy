@@ -396,15 +396,20 @@ export default function App() {
   }, [hydrated, userId]);
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.
-  // Token comes from the identity store (set at signup); we only fall
-  // back to vouchflow.verify() if the store is empty (unexpected — implies
-  // we got into App-with-userId without going through OnboardingScreen).
+  // Token comes from the identity store (set at signup). On `forceRefresh`
+  // — passed by the WS client after a connection failed mid-auth — we
+  // re-attest via `vouchflow.verify()` so a stale/expired token
+  // self-heals on reconnect with no user action. Also falls back to
+  // verify if the store is somehow empty.
   useEffect(() => {
     if (!userId) return;
     diag('app', 'mounting router for userId', { userId });
-    const getToken = async () => {
+    const getToken = async (opts?: { forceRefresh?: boolean }) => {
       const cached = useIdentity.getState().deviceToken;
-      if (cached) return cached;
+      if (cached && !opts?.forceRefresh) return cached;
+      diag('app', 'ws getToken: re-attesting', {
+        reason: opts?.forceRefresh ? 'auth-failed' : 'no-cached-token',
+      });
       const r = await vouchflow.verify({ context: 'login' });
       useIdentity.getState().setDeviceToken(r.deviceToken);
       void tryRegisterPushToken(r.deviceToken).catch(() => {
