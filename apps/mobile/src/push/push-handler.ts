@@ -44,6 +44,7 @@ import { b64ToBytes, utf8FromBytes } from '../utils/bytes.js';
 import {
   sendReplyMessage,
   loadPersistedDeviceToken,
+  loadPersistedUserId,
   type ReplySenderDeps,
 } from './reply-sender.js';
 import { cachedAvatarUri } from './avatar-cache.js';
@@ -315,11 +316,15 @@ async function displayMessagingNotification(args: {
   withReply: boolean;
 }): Promise<void> {
   await ensureChannel();
-  // Stamp each peer message's Person with the cached avatar so the
-  // notification shows the real animal portrait (a Person with no icon
-  // renders Android's generic silhouette). Self messages keep no
-  // person → MessagingStyle treats them as the local user.
+  // Stamp each Person with its cached avatar so the notification shows
+  // the real animal portrait (a Person with no icon renders Android's
+  // generic silhouette). Peer messages carry a `person`; self messages
+  // (sent replies) have none — MessagingStyle renders those as the
+  // top-level `style.person`, which carries the local user's avatar.
   const peerIcon = await cachedAvatarUri(args.peerHandle);
+  const myUserId = await loadPersistedUserId();
+  const selfIcon = myUserId ? await cachedAvatarUri(myUserId) : undefined;
+  const selfPerson = selfIcon ? { ...SELF_PERSON, icon: selfIcon } : SELF_PERSON;
   const messages = args.messages.slice(-MAX_NOTIF_MESSAGES).map((m) =>
     m.person
       ? { ...m, person: { ...m.person, ...(peerIcon ? { icon: peerIcon } : {}) } }
@@ -343,7 +348,7 @@ async function displayMessagingNotification(args: {
       pressAction: { id: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,
-        person: SELF_PERSON,
+        person: selfPerson,
         messages,
       },
       actions: args.withReply

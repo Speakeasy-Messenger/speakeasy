@@ -52,6 +52,17 @@ export async function loadPersistedDeviceToken(): Promise<string | undefined> {
   }
 }
 
+/** Read the local user's id from the persisted identity store. */
+export async function loadPersistedUserId(): Promise<string | undefined> {
+  try {
+    const raw = await AsyncStorage.getItem(IDENTITY_KEY);
+    if (!raw) return undefined;
+    return (JSON.parse(raw) as { userId?: string }).userId;
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * Encrypt `text` for `peerId` and send it as a direct message. Throws on
  * any failure (no token, encrypt error, WS auth timeout) so the caller
