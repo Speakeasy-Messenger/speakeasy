@@ -35,6 +35,15 @@ export interface DevicesRepo {
   upsertOnSeen(args: { deviceToken: string; userId: string }): Promise<void>;
   /** All devices currently associated with the user. */
   listForUser(userId: string): Promise<DeviceRecord[]>;
+  /**
+   * Distinct userIds owning at least one device whose `last_seen` is
+   * within `maxAgeMs` of now. `last_seen` is touched (`upsertOnSeen`)
+   * only after a WS handshake passed Vouchflow `validate()`, so "seen
+   * recently" is the persisted proxy for "had a valid Vouchflow
+   * session" — used by the @speaker broadcast to skip dead accounts
+   * (Vouchflow itself stores no session; validity is checked live).
+   */
+  listActiveUserIds(maxAgeMs: number): Promise<string[]>;
   /** Detach a device — used for sign-out / loss-of-trust. */
   remove(deviceToken: string): Promise<'removed' | 'not_found'>;
   /** Store or update the push notification token for a device. The

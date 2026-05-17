@@ -5,7 +5,7 @@ import {
   newMessageId,
   SPEAKER_HANDLE,
 } from '@speakeasy/shared';
-import type { UserRepo } from '../db/users.js';
+import type { DevicesRepo } from '../db/devices.js';
 import type { MessagesRepo } from '../db/messages.js';
 import type { PushProvider } from '../push/push.js';
 import type { UserNotifier } from '../ws/user-notifier.js';
@@ -15,9 +15,18 @@ const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000;
 const MAX_TEXT = 1000;
 
 /**
+ * Only fan out to users whose device authed within this window. A
+ * successful auth means Vouchflow `validate()` passed, so this skips
+ * dead test accounts that never come back. Matches Vouchflow's 24h
+ * verification-freshness window.
+ */
+const ACTIVE_WINDOW_MS = 24 * 60 * 60 * 1000;
+
+/**
  * POST /v1/broadcast — fan a plaintext announcement out from the
- * `@speaker` bot to every enrolled user. The release workflow calls
- * this so everyone learns a new build is available.
+ * `@speaker` bot to every recently-active user (a device authed in
+ * the last 24h). The release workflow calls this so everyone on a
+ * live install learns a new build is available.
  *
  * Admin-gated (ADMIN_TOKEN bearer). NOT end-to-end encrypted — @speaker
  * announcements are public; the wire `ciphertext` is just the plaintext
@@ -27,7 +36,7 @@ const MAX_TEXT = 1000;
 export async function registerBroadcastRoute(
   app: FastifyInstance,
   deps: {
-    users: UserRepo;
+    devices: DevicesRepo;
     messages: MessagesRepo;
     push: PushProvider;
     userNotifier: UserNotifier;
@@ -69,7 +78,7 @@ export async function registerBroadcastRoute(
       const ciphertextB64 = ciphertext.toString('base64');
       const expiresAt = new Date(Date.now() + RELAY_TTL_MS);
 
-      const userIds = await deps.users.listAllUserIds();
+      const userIds = await deps.devices.listActiveUserIds(ACTIVE_WINDOW_MS);
       let sent = 0;
       for (const userId of userIds) {
         if (userId === SPEAKER_HANDLE) continue;

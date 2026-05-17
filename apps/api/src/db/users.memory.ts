@@ -51,8 +51,4 @@ export class InMemoryUserRepo implements UserRepo {
     if (!u) return; // caller's `requireAuth` already proved enrollment
     u.selectedAvatarId = animalId;
   }
-
-  async listAllUserIds(): Promise<string[]> {
-    return [...this.users.keys()];
-  }
 }

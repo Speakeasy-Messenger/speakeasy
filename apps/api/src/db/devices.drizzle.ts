@@ -1,4 +1,4 @@
-import { and, eq, ne, sql } from 'drizzle-orm';
+import { and, eq, gte, ne, sql } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { devices } from './schema.js';
 import type { DeviceRecord, DevicesRepo, NotificationPrivacy } from './devices.js';
@@ -38,6 +38,16 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       enrolledAt: r.enrolledAt,
       lastSeen: r.lastSeen,
     }));
+  }
+
+  async listActiveUserIds(maxAgeMs: number): Promise<string[]> {
+    const db = getDb();
+    const cutoff = new Date(Date.now() - maxAgeMs);
+    const rows = await db
+      .selectDistinct({ userId: devices.userId })
+      .from(devices)
+      .where(gte(devices.lastSeen, cutoff));
+    return rows.map((r) => r.userId);
   }
 
   async remove(deviceToken: string): Promise<'removed' | 'not_found'> {

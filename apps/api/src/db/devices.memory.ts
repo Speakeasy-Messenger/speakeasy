@@ -21,6 +21,15 @@ export class InMemoryDevicesRepo implements DevicesRepo {
     return [...this.devices.values()].filter((d) => d.userId === userId);
   }
 
+  async listActiveUserIds(maxAgeMs: number): Promise<string[]> {
+    const cutoff = Date.now() - maxAgeMs;
+    const ids = new Set<string>();
+    for (const d of this.devices.values()) {
+      if (d.lastSeen.getTime() >= cutoff) ids.add(d.userId);
+    }
+    return [...ids];
+  }
+
   async remove(deviceToken: string): Promise<'removed' | 'not_found'> {
     return this.devices.delete(deviceToken) ? 'removed' : 'not_found';
   }

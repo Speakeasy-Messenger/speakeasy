@@ -75,10 +75,4 @@ export class DrizzleUserRepo implements UserRepo {
       .set({ selectedAvatarId: animalId ?? null })
       .where(eq(users.id, userId));
   }
-
-  async listAllUserIds(): Promise<string[]> {
-    const db = getDb();
-    const rows = await db.select({ id: users.id }).from(users);
-    return rows.map((r) => r.id);
-  }
 }
