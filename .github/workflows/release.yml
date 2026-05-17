@@ -150,3 +150,23 @@ jobs:
               --title "$tag" \
               --notes "APK built by .github/workflows/release.yml. See commits since previous tag."
           fi
+
+      - name: Announce the build via @speaker
+        # Fans a "new build available" message out from the @speaker
+        # bot to every user (POST /v1/broadcast). Best-effort: if the
+        # ADMIN_TOKEN secret isn't set the step is skipped, and a
+        # broadcast failure is a warning, not a build failure.
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: |
+          if [ -z "$ADMIN_TOKEN" ]; then
+            echo "ADMIN_TOKEN secret not set — skipping @speaker broadcast."
+            exit 0
+          fi
+          tag="${GITHUB_REF##*/}"
+          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+          curl -fsS -X POST "https://api.speakeasyapp.xyz/v1/broadcast" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "{\"text\": \"New build ${tag} is available — ${url}\"}" \
+            || echo "::warning::@speaker broadcast failed (non-fatal)."

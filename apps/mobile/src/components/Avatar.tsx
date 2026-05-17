@@ -1,10 +1,12 @@
 import React, { useEffect } from 'react';
-import type { StyleProp, ViewStyle } from 'react-native';
+import { View, type StyleProp, type ViewStyle } from 'react-native';
+import { isSpeakerHandle } from '@speakeasy/shared';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { api } from '../services.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { PortraitTile } from './PortraitTile.js';
+import { IconMark } from './IconMark.js';
 
 /**
  * 1:1 user avatar — animal portrait inside a sharp surface tile.
@@ -39,8 +41,10 @@ export function Avatar({ userId, size = 36 }: Props): React.ReactElement {
   const profile = useProfiles((s) => s.byUserId[userId]);
   const isFresh = useProfiles((s) => s.isFresh);
   const setProfile = useProfiles((s) => s.set);
+  const speaker = isSpeakerHandle(userId);
 
   useEffect(() => {
+    if (speaker) return; // @speaker is a bot — no profile to fetch
     if (isFresh(userId)) return;
     const deviceToken = useIdentity.getState().deviceToken;
     if (!deviceToken) return;
@@ -62,7 +66,24 @@ export function Avatar({ userId, size = 36 }: Props): React.ReactElement {
     return () => {
       cancelled = true;
     };
-  }, [userId, isFresh, setProfile]);
+  }, [userId, isFresh, setProfile, speaker]);
+
+  // @speaker — the broadcast bot — shows the app's brand mark instead
+  // of a deterministic animal.
+  if (speaker) {
+    return (
+      <View
+        style={{
+          width: size,
+          height: size,
+          alignItems: 'center',
+          justifyContent: 'center',
+        }}
+      >
+        <IconMark size={Math.round(size * 0.86)} />
+      </View>
+    );
+  }
 
   const animalId = profile?.selectedAvatarId ?? defaultAnimalForUser(userId);
 

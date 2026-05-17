@@ -19,6 +19,7 @@ import {
   conversationIdForDirect,
   encodePayload,
   isFeedbackHandle,
+  isSpeakerHandle,
   newMessageId,
   type Attachment,
 } from '@speakeasy/shared';
@@ -214,6 +215,7 @@ export function ChatScreen({
   useEffect(() => {
     if (peerId === myUserId) return;
     if (isFeedbackHandle(peerId)) return;
+    if (isSpeakerHandle(peerId)) return; // @speaker is a one-way broadcast
     const ws = getWsClient(async () => {
       const cached = useIdentity.getState().deviceToken;
       if (cached) return cached;
@@ -549,9 +551,11 @@ export function ChatScreen({
           >
             {isBlocked
               ? 'BLOCKED'
-              : isFeedbackHandle(peerId)
-                ? 'NOT E2E'
-                : `E2E · LEAVES IN ${ttlLabel}`}
+              : isSpeakerHandle(peerId)
+                ? 'ANNOUNCEMENTS'
+                : isFeedbackHandle(peerId)
+                  ? 'NOT E2E'
+                  : `E2E · LEAVES IN ${ttlLabel}`}
           </Text>
         </Pressable>
         {/* CALLS.md §01: tapping ☎ opens the call-type sheet, not
@@ -559,7 +563,7 @@ export function ChatScreen({
             of the brand discipline — calling is a significant
             action and should feel that way. Hidden when blocked
             per BLOCK.md §5.1. */}
-        {onStartCall && !isBlocked && !isFeedbackHandle(peerId) ? (
+        {onStartCall && !isBlocked && !isFeedbackHandle(peerId) && !isSpeakerHandle(peerId) ? (
           <Pressable
             testID="chat-call"
             onPress={() => setCallTypeOpen(true)}
@@ -610,9 +614,11 @@ export function ChatScreen({
             <View style={styles.tagline}>
               <View style={[styles.dot, { backgroundColor: themed.primary }]} />
               <Text style={[styles.taglineText, { color: themed.slate }]}>
-                {isFeedbackHandle(peerId)
-                  ? 'NOT E2E · GOES TO THE DEV TEAM'
-                  : `END-TO-END ENCRYPTED · LEAVES IN ${ttlLabel}`}
+                {isSpeakerHandle(peerId)
+                  ? 'ANNOUNCEMENTS · FROM SPEAKEASY'
+                  : isFeedbackHandle(peerId)
+                    ? 'NOT E2E · GOES TO THE DEV TEAM'
+                    : `END-TO-END ENCRYPTED · LEAVES IN ${ttlLabel}`}
               </Text>
             </View>
           }
@@ -634,6 +640,19 @@ export function ChatScreen({
             blocked them." + brass "Unblock"). */}
         {isBlocked ? (
           <FrozenInputBar onUnblock={() => setUnblockSheetOpen(true)} />
+        ) : isSpeakerHandle(peerId) ? (
+          // @speaker is a one-way broadcast — no composer, just a note
+          // where the input bar would be.
+          <View
+            style={[
+              styles.composer,
+              { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            ]}
+          >
+            <Text style={[styles.speakerNote, { color: themed.slate }]}>
+              Announcements only — you can't reply here
+            </Text>
+          </View>
         ) : (
         <View
           style={[
@@ -851,6 +870,11 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 20,
     paddingVertical: 14,
+  },
+  speakerNote: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    textAlign: 'center',
   },
   inputBar: {
     flexDirection: 'row',

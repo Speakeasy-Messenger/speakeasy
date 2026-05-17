@@ -96,8 +96,10 @@ export class FcmApnsPushProvider implements PushProvider {
       const showSender = privacy === 'rich' && !!notice.senderId;
       // Spec §11/§12: notify-only, no message content. 'rich' surfaces
       // sender handle ("from whom") but never preview text ("what they
-      // said"); preview-text would need a Notification Service
-      // Extension that decrypts on-device, deferred to Phase 6.
+      // said") — message content is E2E, the server can't read it.
+      // Exception: `notice.body` is set only by the @speaker broadcast,
+      // whose announcements are plaintext the server *does* have, so a
+      // 'rich' device can show the real text.
       let title: string;
       let body: string;
       if (kind === 'call') {
@@ -105,7 +107,7 @@ export class FcmApnsPushProvider implements PushProvider {
         body = showSender ? 'Calling…' : 'Incoming call';
       } else {
         title = showSender ? `@${notice.senderId}` : 'speakeasy';
-        body = 'New message';
+        body = privacy === 'rich' && notice.body ? notice.body : 'New message';
       }
       const platform = d.platform ?? 'android';
       const key = `${title}\0${body}\0${platform}`;

@@ -66,4 +66,7 @@ export interface UserRepo {
    * the client computes from userId).
    */
   setSelectedAvatar(userId: string, animalId: string | undefined): Promise<void>;
+
+  /** Every enrolled user id — used by the @speaker broadcast fan-out. */
+  listAllUserIds(): Promise<string[]>;
 }

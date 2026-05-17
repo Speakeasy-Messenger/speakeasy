@@ -33,6 +33,15 @@ export interface PushDeliveryNotice {
    * iOS APNs setup).
    */
   kind?: 'message' | 'call';
+  /**
+   * Explicit notification body. Normally omitted — payloads are
+   * notify-only ("New message") because message content is E2E and the
+   * server can't read it. The @speaker broadcast bot is the exception:
+   * its messages are plaintext announcements the server *does* have, so
+   * the broadcast passes the announcement text here to surface it
+   * directly in the banner. 'rich' devices only.
+   */
+  body?: string;
 }
 
 export interface PushProvider {

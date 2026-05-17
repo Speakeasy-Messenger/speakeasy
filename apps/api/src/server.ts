@@ -63,6 +63,7 @@ import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
 import { registerDeviceRoutes } from './routes/devices.js';
 import { registerFeedbackRoute } from './routes/feedback.js';
+import { registerBroadcastRoute } from './routes/broadcast.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import {
   registerTurnRoutes,
@@ -225,9 +226,14 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Resolve it once so both paths share the same instance.
   const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
   const eventLog: EventLogRepo = opts.eventLog ?? (hasDb ? new DrizzleEventLogRepo() : new InMemoryEventLogRepo());
+  // messages + push are resolved here (not only in the WS block) so the
+  // @speaker broadcast route can deliver through the same relay + push.
+  const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
+  const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
   await registerDeviceRoutes(app, { devices });
   await registerFeedbackRoute(app);
   await registerAdminRoutes(app, { eventLog, devices, users: repo });
+  await registerBroadcastRoute(app, { users: repo, messages, push, userNotifier });
   const turnProvider = opts.turnProvider ?? turnProviderFromEnv();
   await registerTurnRoutes(app, { provider: turnProvider });
 
@@ -253,10 +259,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const { presence, redis } = opts.presence
       ? { presence: opts.presence, redis: undefined as Redis | undefined }
       : defaultPresence(app.log);
-    // instanceId already computed above for the user notifier.
-    const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
+    // instanceId already computed above; messages + push are hoisted
+    // above (shared with the broadcast route).
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
-    const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
     const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
     const ackBuffer = opts.ackBuffer ?? defaultAckBuffer();
 

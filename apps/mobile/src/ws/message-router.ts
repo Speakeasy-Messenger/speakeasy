@@ -6,6 +6,7 @@ import type {
 import { SignalClientError } from '@speakeasy/crypto';
 import {
   decodePayload,
+  isSpeakerHandle,
   type Attachment,
   type WsServerMsg,
 } from '@speakeasy/shared';
@@ -307,13 +308,17 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               // decrypt against a self-paired session that may not exist.
               let attachments: Attachment[] | undefined;
               let mentions: string[] | undefined;
-              if (senderId === deps.myUserId) {
+              if (senderId === deps.myUserId || isSpeakerHandle(senderId)) {
+                // Plaintext path: self-DM (raw utf-8, no self-session)
+                // and @speaker broadcasts (announcements aren't E2E).
+                // No libsignal decrypt — decode the v1 envelope directly.
                 const raw = utf8FromBytes(ciphertext);
                 const payload = decodePayload(raw);
                 bubble = payload.text ?? '';
                 attachments = payload.attachments;
                 mentions = payload.mentions;
-                diag('router', 'message: self-DM utf8 decoded', {
+                decryptedOk = true;
+                diag('router', 'message: plaintext decoded', {
                   ...frameDesc,
                   textPreview: bubble.slice(0, 24),
                   attachCount: attachments?.length ?? 0,

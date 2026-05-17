@@ -71,6 +71,10 @@ export const RESERVED_HANDLES: ReadonlySet<string> = new Set([
   // it as `taken` so users can reach the chat. Reserving it here means
   // no user can claim it via /v1/enroll.
   'feedback',
+  // Broadcast bot. A seeded bot user row; the server fans release
+  // announcements out from @speaker to every user. Reserved so nobody
+  // can enroll it.
+  'speaker',
 ]);
 
 export const GROUP_ID_REGEX = /^grp-[0-9A-HJKMNP-TV-Z]{26}$/;
@@ -152,6 +156,17 @@ export const FEEDBACK_HANDLE = 'feedback';
 
 export function isFeedbackHandle(handle: string): boolean {
   return handle.toLowerCase() === FEEDBACK_HANDLE;
+}
+
+/**
+ * The broadcast bot handle. A seeded bot user; the server sends
+ * release announcements from @speaker to every user. Plaintext, not
+ * E2E — the client renders @speaker messages without Signal decrypt.
+ */
+export const SPEAKER_HANDLE = 'speaker';
+
+export function isSpeakerHandle(handle: string): boolean {
+  return handle.toLowerCase() === SPEAKER_HANDLE;
 }
 
 export function newFeedbackId(): string {
