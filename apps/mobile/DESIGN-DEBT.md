@@ -24,39 +24,48 @@ do them as deliberate, separately-reviewed passes — not one mega-diff.
 
 ## Done (2026-05-18)
 
-- ✅ **A11y on shared row primitives** — `ListItem.tsx` and
-  `SettingsListItem.tsx` got `accessibilityRole="button"` + a
-  text-derived `accessibilityLabel`; the settings `Switch` got an
-  `accessibilityLabel`. Commit `4ddf235`. This labelled the majority of
-  the app's tappable rows. Accessibility F → ~C.
+- ✅ **A11y on shared row primitives** — `ListItem` + `SettingsListItem`
+  got `accessibilityRole="button"` + a text-derived `accessibilityLabel`;
+  the settings `Switch` got a label. Accessibility F → ~C. (`4ddf235`)
+- ✅ **Pass 1 — list primitives onto the type scale.** `ListItem` +
+  `SettingsListItem` now render through the typed `Text*` components
+  from `theme/Text.tsx` (previously 100% dead code). (`5496cf8`)
+- ✅ **Pass 3 — de-hardcode brand-screen colors.** 7 onboarding/brand
+  screens now source `BONE/BRASS/INK/TEXT_MUTE/TEXT_FAINT` from theme
+  tokens; the `TEXT_FAINT` 0.18 drift corrected to 0.12. (`46f7bb6`)
 
-## Remediation passes (open)
+Passes 1 + 3 were exact-value token swaps — rendered output is
+unchanged, so they were safe to do without a device. The remaining
+passes change rendered pixels and need emulator verification.
 
-1. **A11y — finish the job.** Icon-only buttons (call, attachment,
-   camera, back arrows, FAB) and the 10+ hand-rolled per-screen headers
-   still announce nothing. Add `accessibilityRole`/`accessibilityLabel`.
-2. **Typography — adopt or delete `theme/Text.tsx`.** It is 100% dead
-   code while 52 files hand-roll `fontFamily`+`fontSize`. Migrate the
-   shared primitives first (`ListItem`, `SettingsListItem`, `Bubble`),
-   which pulls most screens onto the scale for free. Reconcile the
-   `14` vs `type.body.size` (15) body-size question.
-3. **Spacing — sweep the 128 magic numbers** onto the 4px `space`
-   scale. Worst files: `GroupSettingsScreen.tsx`, `Bubble.tsx`,
-   `ChatScreen.tsx`. The recurring `14` should map to `space.m`/`base`.
-4. **Color — de-hardcode the brand screens.** `FaceStep`, `HandleStep`,
-   `RoomStep`, `PermissionsStep`, `IdRevealScreen`, `ShareHandleScreen`,
-   `AcquireSheet` redeclare `BONE/BRASS/TEXT_MUTE` as literals — route
-   through `theme.brand`/`theme.accent`. `VideoCallScreen.tsx` needs
-   `scrim`/`overlay` tokens for its 10 raw literals. Fix the
-   `TEXT_FAINT` `0.18`-vs-`0.12`-token drift.
-5. **Component consistency — resolve the dead primitives.** `Bubble.tsx`
-   and `AppBar.tsx` are imported by nobody; `Button.tsx` only by
-   onboarding. Either delete them, or (better) make `AppBar` flexible
-   enough to replace the 10+ copy-pasted header fragments and migrate.
-   Collapse `ListItem` + `SettingsListItem` (two row primitives, same
-   concept, different heights/paddings/type sizes) into one.
-6. **Motion — route durations through `motion.*`** tokens; add the
-   missing slow durations (`750`, `900`) as named tokens.
+## Remediation passes (open — need the emulator)
+
+These change rendered pixels. Do them with the Android emulator
+running so each change is screenshot-verified — not blind.
+
+- **Pass 2 — unified AppBar.** `AppBar.tsx` is imported by nobody;
+  10+ screens hand-roll the `back: {width:32,paddingVertical:4}`
+  header fragment. Make `AppBar` flexible for Chat/Conversations/
+  Settings and migrate the screens; delete the dead `Bubble.tsx`.
+  Collapse `ListItem` + `SettingsListItem` into one row primitive.
+- **Pass 4 — spacing + motion.** Snap the ~128 off-scale spacing
+  magic numbers onto the 4px `space` scale (the recurring `14` is the
+  worst — decide `space.m` 12 vs `space.base` 16 per instance, with
+  the emulator open). Route animation durations through `motion.*`;
+  add named tokens for the slow durations (`750`, `900`) it lacks.
+
+## Open (no device needed)
+
+- **Finish a11y.** Icon-only buttons (call, attachment, camera, back
+  arrows, FAB) still announce nothing — add `accessibilityRole` +
+  `accessibilityLabel`. Mechanical, safe.
+- **Typography — the screen tail.** Pass 1 did the list primitives;
+  ~50 screens still hand-roll `fontFamily`+`fontSize`. Migrate them to
+  the `Text*` components. Reconcile the `14` vs `type.body` (15)
+  body-size question first.
+- **`VideoCallScreen.tsx`** — 10 raw color literals (`#000`, `#FFF`,
+  `#FFFFFFCC`, …). Needs new `scrim`/`overlay` tokens designed for a
+  full-screen video surface, then routed.
 
 ## No DESIGN.md
 
