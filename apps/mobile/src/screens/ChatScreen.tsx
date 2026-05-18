@@ -53,7 +53,7 @@ import { ensureSessionWithPeer, clearSessionCacheFor } from '../crypto/session.j
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 import { diag } from '../diag/log.js';
 import { colors, fonts, space } from '../theme/index.js';
-import { font, type } from '../theme/tokens.js';
+import { font, motion, type } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 
@@ -176,7 +176,7 @@ export function ChatScreen({
     // through it) and avoiding the snap keeps motion continuous.
     Animated.timing(burnFade, {
       toValue: 0,
-      duration: 600,
+      duration: motion.dissolve,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start(({ finished }) => {

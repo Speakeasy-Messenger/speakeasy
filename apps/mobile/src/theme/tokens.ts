@@ -149,8 +149,23 @@ export const space = {
  */
 export const radius = { none: 0, xs: 2, sm: 4, frame: 28 } as const;
 
-/** ms durations. Linear ease-out unless otherwise noted. */
-export const motion = { tap: 100, fade: 150, dissolve: 600, screen: 240 } as const;
+/**
+ * ms durations. Linear ease-out unless otherwise noted.
+ *
+ * `pulse` / `ripple` are the slow brand moments on CallScreen — the
+ * connecting-state breathing pulse of the Door mark, and the speech
+ * ring that expands off the peer portrait while they talk. They sit
+ * past `dissolve` on purpose: slow enough to read as ambient
+ * atmosphere rather than as a UI transition.
+ */
+export const motion = {
+  tap: 100,
+  fade: 150,
+  screen: 240,
+  dissolve: 600,
+  pulse: 750,
+  ripple: 900,
+} as const;
 
 export type Mode = 'dark' | 'light';
 

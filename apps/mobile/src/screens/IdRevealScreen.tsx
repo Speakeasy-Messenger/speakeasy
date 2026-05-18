@@ -11,7 +11,7 @@ import {
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useProfiles } from '../store/profiles.js';
-import { accent, brand, font, type as typeScale, workspace } from '../theme/tokens.js';
+import { accent, brand, font, motion, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 
 interface Props {
@@ -50,7 +50,7 @@ export function IdRevealScreen({
   useEffect(() => {
     Animated.timing(reveal, {
       toValue: 1,
-      duration: 600,
+      duration: motion.dissolve,
       easing: Easing.out(Easing.cubic),
       useNativeDriver: true,
     }).start();

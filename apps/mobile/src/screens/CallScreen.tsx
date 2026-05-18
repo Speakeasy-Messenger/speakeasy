@@ -15,7 +15,7 @@ import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
 import { space, useColors } from '../theme/index.js';
-import { callPalette, font, type as typeScale } from '../theme/tokens.js';
+import { callPalette, font, motion, type as typeScale } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -325,13 +325,13 @@ function BrandPulse(): React.ReactElement {
       Animated.sequence([
         Animated.timing(opacity, {
           toValue: 1,
-          duration: 750,
+          duration: motion.pulse,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
         Animated.timing(opacity, {
           toValue: 0.6,
-          duration: 750,
+          duration: motion.pulse,
           easing: Easing.inOut(Easing.sin),
           useNativeDriver: true,
         }),
@@ -443,13 +443,13 @@ function SpeechRing({
         Animated.parallel([
           Animated.timing(scale, {
             toValue: 1.18,
-            duration: 900,
+            duration: motion.ripple,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: true,
           }),
           Animated.timing(opacity, {
             toValue: 0,
-            duration: 900,
+            duration: motion.ripple,
             easing: Easing.out(Easing.cubic),
             useNativeDriver: true,
           }),

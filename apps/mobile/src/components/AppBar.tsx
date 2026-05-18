@@ -1,45 +1,80 @@
-import React, { Fragment } from 'react';
+import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { font, space, type } from '../theme/tokens.js';
+import { font, space } from '../theme/tokens.js';
+import { TextSubtitle, TextMeta } from '../theme/Text.js';
 import { useTheme } from '../theme/ThemeProvider.js';
 
 /**
- * Top app bar — BRANDING1.md §6.1.
+ * Unified top app bar — BRANDING1.md §6.1.
  *
- *   - height 56 (status-bar inset added by caller via SafeAreaView)
- *   - canvas bg, 1px text-faint bottom border
- *   - left: handle (with brass `·` separators), optional Back affordance
- *   - right: meta status (`E2E`, `OFFLINE`) in `text-mute`
+ * One component for every screen header. Three shapes fall out of the
+ * same slots:
  *
- * The handle is rendered with brass-period punctuation between
- * segments — splitting on `·`, `-`, or `_` so legacy 3-word ids
- * (silent-golden-hawk) and new handles (alice_2026) both render with
- * the brand's brass-dot motif.
+ *  - **Workspace** (Settings, Privacy, Account, …): `onBack` + a string
+ *    `title`, optional `trailing` action.
+ *  - **Conversation** (Chat, GroupChat): `onBack` + a `leading` portrait
+ *    + a node `title` (Handle + StatusSquare) + a meta `subtitle` line +
+ *    a `trailing` call button, with the title block `onTitlePress`-able.
+ *  - **Root** (Conversations): no `onBack`; `leading` self-portrait +
+ *    node `title` + `trailing` settings glyph.
+ *
+ * Replaces the `back: {width:32,paddingVertical:4}` header fragment that
+ * was hand-rolled across 10+ screens (DESIGN-DEBT.md, Pass 2).
+ *
+ * Layout is snapped to the 4px `space` scale: 16/12 padding, 8 gap,
+ * 56 min-height, 1px hairline bottom border in `text-faint`.
  */
 export interface AppBarProps {
-  handle: string;
-  /** Optional secondary line under the handle (e.g. "2 members"). */
-  subtitle?: string;
-  /** Right-side status: 'E2E' / 'OFFLINE' / 'CONNECTING'. */
-  meta?: string;
-  /** When set, renders a back arrow on the left. */
+  /** Renders the brass `‹` back chevron at the left edge. */
   onBack?: () => void;
+  /** Leading content (avatar / portrait tile), after the back chevron. */
+  leading?: React.ReactNode;
+  /**
+   * Title. A plain string renders at the `subtitle` scale; pass a node
+   * for the conversation variants (a Handle + StatusSquare row).
+   */
+  title: React.ReactNode;
+  /** Optional meta-style sub-line under the title. */
+  subtitle?: string;
+  /** When set, the title + subtitle block is pressable. */
+  onTitlePress?: () => void;
+  /** Trailing content (call button, settings glyph, action label). */
+  trailing?: React.ReactNode;
+  /**
+   * a11y label for a pressable title block. Defaults to the title when
+   * it is a string; required when `title` is a node and `onTitlePress`
+   * is set.
+   */
+  titleA11yLabel?: string;
   testID?: string;
 }
 
 export function AppBar({
-  handle,
-  subtitle,
-  meta,
   onBack,
+  leading,
+  title,
+  subtitle,
+  onTitlePress,
+  trailing,
+  titleA11yLabel,
   testID,
 }: AppBarProps): React.JSX.Element {
   const theme = useTheme();
-  // Split on hyphen, underscore, or `·`. Brass `·` re-inserted between
-  // segments so the same component renders both legacy 3-word ids and
-  // new @handles consistently. For an unsegmented handle this just
-  // shows the bare token.
-  const segments = handle.split(/[-_·]/g).filter((s) => s.length > 0);
+
+  const titleBlock = (
+    <View style={styles.titleCol}>
+      {typeof title === 'string' ? (
+        <TextSubtitle numberOfLines={1}>{title}</TextSubtitle>
+      ) : (
+        title
+      )}
+      {subtitle ? (
+        <TextMeta tone="mute" numberOfLines={1}>
+          {subtitle}
+        </TextMeta>
+      ) : null}
+    </View>
+  );
 
   return (
     <View
@@ -49,68 +84,35 @@ export function AppBar({
       ]}
       testID={testID}
     >
-      <View style={styles.left}>
-        {onBack ? (
-          <Pressable onPress={onBack} hitSlop={8}>
-            <Text
-              style={{
-                color: theme.accent,
-                fontFamily: font.medium,
-                fontSize: type.subtitle.size,
-              }}
-            >
-              ‹
-            </Text>
-          </Pressable>
-        ) : null}
-        <View style={styles.handleCol}>
-          <Text
-            style={[
-              styles.handle,
-              {
-                color: theme.text,
-                fontFamily: font.medium,
-                fontSize: type.handle.size,
-              },
-            ]}
-            numberOfLines={1}
-          >
-            {segments.map((s, i) => (
-              <Fragment key={i}>
-                {i > 0 ? <Text style={{ color: theme.accent }}>·</Text> : null}
-                {s}
-              </Fragment>
-            ))}
-          </Text>
-          {subtitle ? (
-            <Text
-              style={{
-                color: theme.textMute,
-                fontFamily: font.regular,
-                fontSize: type.caption.size,
-              }}
-              numberOfLines={1}
-            >
-              {subtitle}
-            </Text>
-          ) : null}
-        </View>
-      </View>
-      {meta ? (
-        <Text
-          style={[
-            styles.meta,
-            {
-              color: theme.textMute,
-              fontFamily: font.medium,
-              fontSize: type.meta.size,
-              letterSpacing: type.meta.letterSpacingEm * type.meta.size,
-            },
-          ]}
+      {onBack ? (
+        <Pressable
+          onPress={onBack}
+          hitSlop={8}
+          style={styles.back}
+          accessibilityRole="button"
+          accessibilityLabel="Back"
+          testID={testID ? `${testID}-back` : undefined}
         >
-          {meta}
-        </Text>
+          <Text style={[styles.backGlyph, { color: theme.accent }]}>‹</Text>
+        </Pressable>
       ) : null}
+      {leading ? <View>{leading}</View> : null}
+      {onTitlePress ? (
+        <Pressable
+          onPress={onTitlePress}
+          hitSlop={4}
+          style={styles.titleCol}
+          accessibilityRole="button"
+          accessibilityLabel={
+            titleA11yLabel ?? (typeof title === 'string' ? title : undefined)
+          }
+        >
+          {titleBlock}
+        </Pressable>
+      ) : (
+        titleBlock
+      )}
+      {trailing ? <View style={styles.trailing}>{trailing}</View> : null}
     </View>
   );
 }
@@ -118,17 +120,15 @@ export function AppBar({
 const styles = StyleSheet.create({
   bar: {
     minHeight: 56,
-    paddingHorizontal: 18,
-    paddingTop: space.s,
-    paddingBottom: 14,
-    borderBottomWidth: 1,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: space.m,
+    paddingHorizontal: space.base,
+    paddingVertical: space.m,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+    gap: space.s,
   },
-  left: { flexDirection: 'row', alignItems: 'center', gap: space.s, flex: 1 },
-  handleCol: { gap: 2, flex: 1 },
-  handle: { letterSpacing: 0 },
-  meta: { textTransform: 'uppercase' },
+  back: { alignItems: 'center', justifyContent: 'center' },
+  backGlyph: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
+  titleCol: { flex: 1, gap: space.xs, minWidth: 0 },
+  trailing: { marginLeft: space.s },
 });
