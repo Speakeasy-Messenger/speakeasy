@@ -280,7 +280,7 @@ const styles = StyleSheet.create({
     fontFamily: font.medium,
     fontSize: 10,
     alignSelf: 'flex-end',
-    marginTop: 2,
+    marginTop: space.xs,
     marginRight: -2,
     letterSpacing: 0.5,
   },

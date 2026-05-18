@@ -253,7 +253,7 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     paddingVertical: space.s,
     paddingHorizontal: space.m,
-    gap: 2,
+    gap: space.xs,
     position: 'relative',
   },
   dismiss: {
@@ -265,5 +265,5 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
-  iconWrap: { marginBottom: 2 },
+  iconWrap: { marginBottom: space.xs },
 });

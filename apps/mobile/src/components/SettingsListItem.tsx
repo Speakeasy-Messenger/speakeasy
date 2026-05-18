@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
 import { TextBodyEmphasis, TextCaption } from '../theme/Text.js';
 import { useColors } from '../theme/index.js';
-import { font } from '../theme/tokens.js';
+import { font, space } from '../theme/tokens.js';
 
 /**
  * SETTINGS.md §10 — standard settings row primitive.
@@ -104,13 +104,13 @@ const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    gap: space.m,
+    paddingHorizontal: space.base,
+    paddingVertical: space.base,
     minHeight: 52,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  body: { flex: 1, gap: 3, minWidth: 0 },
+  body: { flex: 1, gap: space.xs, minWidth: 0 },
   arrow: {
     fontFamily: font.regular,
     fontSize: 18,

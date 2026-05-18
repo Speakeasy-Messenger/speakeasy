@@ -1,8 +1,8 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import type { TtlOption } from '@speakeasy/shared';
-import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 
 /**
  * NEW-CONVERSATION.md §4.5 / GROUP-SETTINGS.md §3.11 — segmented
@@ -80,12 +80,12 @@ export function TTLSegmentedControl({
 const styles = StyleSheet.create({
   row: {
     flexDirection: 'row',
-    gap: 4,
+    gap: space.xs,
   },
   // Sharp corners — brand never softens.
   cell: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: space.m,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,

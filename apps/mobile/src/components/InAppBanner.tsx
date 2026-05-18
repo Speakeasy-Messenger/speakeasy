@@ -7,8 +7,8 @@ import { PortraitTile } from './PortraitTile.js';
 import { useBanner } from '../store/banner.js';
 import { useGroups } from '../store/groups.js';
 import { useProfiles } from '../store/profiles.js';
-import { space, useColors } from '../theme/index.js';
-import { font, motion, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, motion, space, type as typeScale } from '../theme/tokens.js';
 
 /**
  * In-app foreground notification toast (CLAUDECODENOTE.md §5).
@@ -195,19 +195,19 @@ const styles = StyleSheet.create({
     top: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: space.md,
+    paddingHorizontal: space.base,
     zIndex: 1000,
   },
   // Sharp corners, faint border, no shadow per note.
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 12,
-    paddingHorizontal: 12,
+    gap: space.m,
+    paddingVertical: space.m,
+    paddingHorizontal: space.m,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  body: { flex: 1, gap: 2, minWidth: 0 },
+  body: { flex: 1, gap: space.xs, minWidth: 0 },
   groupName: {
     fontFamily: font.medium,
     fontSize: 13,
