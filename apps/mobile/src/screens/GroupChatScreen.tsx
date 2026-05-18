@@ -15,6 +15,7 @@ import notifee from '@notifee/react-native';
 import { type Attachment, encodePayload, newMessageId, parseMentions } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import { AppBar } from '../components/AppBar.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
@@ -360,20 +361,13 @@ export function GroupChatScreen({
           room mark + `# group-name` + status square (line 1), then a
           meta sub-line `<N> IN THE ROOM · LEAVES IN <TTL>` (line 2).
           Tapping the title block opens manage-members (no kebab). */}
-      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
-        {onBack ? (
-          <Pressable testID="group-chat-back" onPress={onBack} hitSlop={8} style={styles.back}>
-            <Text style={[styles.backText, { color: themed.primary }]}>‹</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.back} />
-        )}
-        <PortraitTile kind="room" id={groupId} size={28} />
-        <Pressable
-          style={styles.headerTitle}
-          onPress={onManageMembers}
-          testID="group-chat-manage-members"
-        >
+      <AppBar
+        onBack={onBack}
+        testID="group-chat-appbar"
+        leading={<PortraitTile kind="room" id={groupId} size={28} />}
+        onTitlePress={onManageMembers}
+        titleA11yLabel={`${group?.name ?? groupId}, manage members`}
+        title={
           <View style={styles.headerTitleLine}>
             <Text style={[styles.handleText, { color: themed.ink }]} numberOfLines={1}>
               <Text style={{ color: themed.primary }}>#</Text>
@@ -382,14 +376,9 @@ export function GroupChatScreen({
             </Text>
             <StatusSquare variant="sealed" />
           </View>
-          <Text
-            style={[styles.headerSub, { color: themed.slate }]}
-            numberOfLines={1}
-          >
-            {memberCount} IN THE ROOM · LEAVES IN {ttlLabel}
-          </Text>
-        </Pressable>
-      </View>
+        }
+        subtitle={`${memberCount} IN THE ROOM · LEAVES IN ${ttlLabel}`}
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.body}
@@ -575,18 +564,6 @@ function SendIcon({ size = 22, color }: { size?: number; color: string }): React
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
   // CONVERSATIONS.md §3.2 / §4.1 — two-line AppBar matching ChatScreen.
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 60,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  headerTitle: { flex: 1 },
   headerTitleLine: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -597,13 +574,6 @@ const styles = StyleSheet.create({
     fontSize: type.subtitle.size,
     letterSpacing: type.subtitle.size * type.subtitle.letterSpacingEm,
     flexShrink: 1,
-  },
-  headerSub: {
-    fontFamily: type.meta.weight,
-    fontSize: type.meta.size,
-    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
-    textTransform: 'uppercase',
-    marginTop: 2,
   },
   attribution: {
     flexDirection: 'row',

@@ -9,6 +9,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import {
   GetStartedCards,
@@ -189,9 +190,10 @@ export function ConversationsScreen({
           (28px) + handle + brass status square + settings glyph.
           Compact, single-line; the longer "YOU ARE"-eyebrow hero from
           the previous iteration competed with the row content. */}
-      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
-        <View style={styles.headerInner}>
-          {userId ? (
+      <AppBar
+        testID="conversations-appbar"
+        leading={
+          userId ? (
             <PortraitTile
               kind="animal"
               id={ownAnimalId ?? defaultAnimalForUser(userId)}
@@ -199,7 +201,9 @@ export function ConversationsScreen({
             />
           ) : (
             <View style={styles.headerSelfPlaceholder} />
-          )}
+          )
+        }
+        title={
           <View style={styles.headerHandle} testID="conversations-userid">
             {userId ? (
               <Handle value={userId} variant="body" />
@@ -208,6 +212,8 @@ export function ConversationsScreen({
             )}
             <StatusSquare variant={wsState === 'authed' ? 'online' : 'offline'} />
           </View>
+        }
+        trailing={
           <Pressable
             onPress={onOpenSettings}
             // Long-press → emergency diag dump to clipboard. If a UI
@@ -237,8 +243,8 @@ export function ConversationsScreen({
           >
             <SettingsIcon size={24} />
           </Pressable>
-        </View>
-      </View>
+        }
+      />
 
       <FlatList
         data={rows}
@@ -577,20 +583,6 @@ function relativeTime(ms: number): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
-  // CONVERSATIONS.md §2.2: list AppBar — 56 high, padding 14/14,
-  // 1px text-faint bottom border. Self portrait + handle + brass
-  // status square + settings glyph.
-  header: {
-    paddingHorizontal: space.md,
-    paddingVertical: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  headerInner: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    minHeight: 32,
-  },
   headerSelfPlaceholder: { width: 28, height: 28 },
   headerHandle: {
     flex: 1,
