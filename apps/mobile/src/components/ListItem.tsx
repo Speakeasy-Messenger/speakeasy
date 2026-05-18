@@ -42,10 +42,16 @@ export function ListItem({
 }: ListItemProps): React.JSX.Element {
   const theme = useTheme();
   const Comp = onPress ? Pressable : View;
+  // Interactive rows announce as a single "button" node with a label
+  // built from the row's text. Without this a screen reader reads the
+  // Pressable as an unlabelled control.
+  const a11yLabel = subtitle ? `${title}, ${subtitle}` : title;
   return (
     <Comp
       onPress={onPress}
       testID={testID}
+      accessibilityRole={onPress ? 'button' : undefined}
+      accessibilityLabel={onPress ? a11yLabel : undefined}
       style={({ pressed }: { pressed?: boolean } = {}) =>
         [
           styles.row,

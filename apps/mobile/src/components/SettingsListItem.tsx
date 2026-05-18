@@ -63,6 +63,7 @@ export function SettingsListItem(props: Props): React.ReactElement {
           value={props.value}
           onValueChange={props.disabled ? undefined : props.onChange}
           disabled={props.disabled}
+          accessibilityLabel={props.title}
           trackColor={{ false: themed.divider, true: themed.primary }}
           thumbColor={props.value ? themed.cream : themed.slate}
           style={props.disabled ? { opacity: 0.4 } : undefined}
@@ -79,6 +80,12 @@ export function SettingsListItem(props: Props): React.ReactElement {
       <Pressable
         onPress={props.kind === 'drilldown' ? props.onPress : props.onPress}
         testID={props.testID}
+        accessibilityRole="button"
+        accessibilityLabel={
+          props.description
+            ? `${props.title}, ${props.description}`
+            : props.title
+        }
         style={({ pressed }) => [
           pressed ? { backgroundColor: themed.soft } : null,
         ]}
