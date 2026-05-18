@@ -54,15 +54,20 @@ compile-verified.
 - [ ] fast-follow: Simulator launch smoke test (needs a
       Release/bundled build — deferred so the build gate lands first)
 
-### Track 2 — quick parity fixes · IN PROGRESS
+### Track 2 — quick parity fixes · DONE
 
-- [x] Vouchflow iOS SDK `2.0.0` → `2.1.1` — built clean (see Step 0)
-- [x] cross-platform copy confirmation — new `<Toast>` (`store/toast.ts`
-      + `components/Toast.tsx`, mounted in `RootNavigator`) replaces
-      the Android-only `ToastAndroid`; both platforms confirm a copy
-- [ ] iOS crash handler in `AppDelegate` (uncaught-NSException →
-      timestamped file in Documents)
-- [ ] Version Swift module (kills the `0.0.0-test` bug)
+- [x] Vouchflow iOS SDK `2.0.0` → `2.1.1`
+- [x] cross-platform copy confirmation — `<Toast>` (`store/toast.ts` +
+      `components/Toast.tsx`, mounted in `RootNavigator`) replaces the
+      Android-only `ToastAndroid`
+- [x] iOS crash handler — `AppDelegate.mm` installs an
+      `NSSetUncaughtExceptionHandler` that writes a timestamped report
+      to the app's Documents dir (catches RN's RCTFatal path)
+- [x] Version Swift module (`SpeakeasyBridges/Version/`) — iOS reports
+      a real bundle version instead of `0.0.0-test`; `version.ts` reads
+      the `SpeakeasyVersion` native module on both platforms
+
+All four verified by a clean iOS build on the Mac.
 
 ### Track 4 — iOS push parity · BLOCKED on Step 0
 
@@ -91,9 +96,10 @@ Update every doc to match the shipped state:
 
 ## Current state
 
-- 2026-05-18: **Step 0 + Track 1 done** — iOS builds clean and is now
-  CI-gated (`ios.yml` green on GitHub). Track 2 (parity fixes) in
-  progress.
+- 2026-05-18: **Step 0, Track 1, Track 2 done.** iOS builds clean, is
+  CI-gated, and now reaches parity on version reporting, crash
+  capture, copy feedback, and the Vouchflow SDK. Remaining: Track 4
+  (push parity — design first) and the docs refresh.
 
 ## Log
 
@@ -105,3 +111,8 @@ Update every doc to match the shipped state:
   2.0.0) — all 9 SpeakeasyBridges Swift files compiled, no errors.
   Bumped Vouchflow SDK to 2.1.1, re-`pod install`, rebuilt — clean.
   Step 0 complete. Drafted `.github/workflows/ios.yml`.
+- 2026-05-18: `ios.yml` verified green on GitHub (Track 1 done).
+  Track 2: copy `<Toast>`, AppDelegate crash handler, and the Version
+  native module — registered via the `xcodeproj` gem and verified by
+  a clean iOS build. Note: after a `git reset --hard` on the Mac,
+  always re-run `pod install` (it reverts `Podfile.lock`).

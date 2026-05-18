@@ -1,4 +1,4 @@
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 
 /**
  * Single source of truth for the app's version.
@@ -44,13 +44,15 @@ interface SpeakeasyVersionModule {
 }
 
 function readNativeVersion(): { name: string; build: string } {
-  if (Platform.OS !== 'android') {
-    return { name: '0.0.0-test', build: '0' };
-  }
+  // Both platforms register the `SpeakeasyVersion` native module
+  // (Android: VersionModule.kt; iOS: SpeakeasyBridges/Version).
   const mod = (NativeModules as { SpeakeasyVersion?: SpeakeasyVersionModule })
     .SpeakeasyVersion;
   if (!mod) {
-    return { name: 'unknown', build: '0' };
+    // No native module — a non-native context (vitest, web preview)
+    // or a stale Metro bundle against an older binary. Either way the
+    // value is visibly not a real version.
+    return { name: '0.0.0-test', build: '0' };
   }
   return {
     name: mod.versionName,
