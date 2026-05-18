@@ -32,6 +32,7 @@ import { CallTypeSheet } from '../components/CallTypeSheet.js';
 import { FrozenInputBar } from '../components/FrozenInputBar.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { PhoneIcon } from '../components/icons/CallIcons.js';
+import { AppBar } from '../components/AppBar.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Avatar } from '../components/Avatar.js';
@@ -509,37 +510,28 @@ export function ChatScreen({
           screen exists at the conversation level — the title block
           stays unpressable; settings live behind the gear in the
           conversation list AppBar. */}
-      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
-        {onBack ? (
-          <Pressable testID="chat-back" onPress={onBack} hitSlop={8} style={styles.back}>
-            <Text style={[styles.backText, { color: themed.primary }]}>‹</Text>
-          </Pressable>
-        ) : (
-          <View style={styles.back} />
-        )}
-        {/* BLOCK.md §5.1: blocked peers swap the animal portrait for
-            the brass Peephole mark in the same surface tile shape. */}
-        {isBlocked ? (
-          <View
-            style={[
-              styles.peepholeTile,
-              {
-                backgroundColor: themed.pale,
-                borderColor: themed.divider,
-              },
-            ]}
-          >
-            <PeepholeMark size={Math.round(28 * 0.78)} />
-          </View>
-        ) : (
-          <Avatar userId={peerId} size={28} />
-        )}
-        <Pressable
-          style={styles.headerTitle}
-          onPress={onOpenSettings}
-          testID="chat-title-block"
-          hitSlop={4}
-        >
+      <AppBar
+        onBack={onBack}
+        testID="chat-appbar"
+        onTitlePress={onOpenSettings}
+        titleA11yLabel={`${peerId}, conversation settings`}
+        // BLOCK.md §5.1: blocked peers swap the animal portrait for
+        // the brass Peephole mark in the same surface tile shape.
+        leading={
+          isBlocked ? (
+            <View
+              style={[
+                styles.peepholeTile,
+                { backgroundColor: themed.pale, borderColor: themed.divider },
+              ]}
+            >
+              <PeepholeMark size={Math.round(28 * 0.78)} />
+            </View>
+          ) : (
+            <Avatar userId={peerId} size={28} />
+          )
+        }
+        title={
           <View style={styles.headerTitleLine}>
             <Handle value={peerId} variant="body" />
             {/* Status square — present for the unblocked path. The
@@ -547,37 +539,34 @@ export function ChatScreen({
                 visible to you anymore per BLOCK.md §5.1). */}
             {!isBlocked ? <StatusSquare variant="offline" /> : null}
           </View>
-          <Text
-            style={[styles.headerSub, { color: themed.slate }]}
-            numberOfLines={1}
-          >
-            {isBlocked
-              ? 'BLOCKED'
-              : isSpeakerHandle(peerId)
-                ? 'ANNOUNCEMENTS'
-                : isFeedbackHandle(peerId)
-                  ? 'NOT E2E'
-                  : `E2E · LEAVES IN ${ttlLabel}`}
-          </Text>
-        </Pressable>
-        {/* CALLS.md §01: tapping ☎ opens the call-type sheet, not
-            an immediate call. The deliberate ~300ms friction is part
-            of the brand discipline — calling is a significant
-            action and should feel that way. Hidden when blocked
-            per BLOCK.md §5.1. */}
-        {onStartCall && !isBlocked && !isFeedbackHandle(peerId) && !isSpeakerHandle(peerId) ? (
-          <Pressable
-            testID="chat-call"
-            onPress={() => setCallTypeOpen(true)}
-            hitSlop={8}
-            style={styles.callBtn}
-          >
-            <PhoneIcon size={22} color={themed.primary} />
-          </Pressable>
-        ) : (
-          <View style={styles.callBtn} />
-        )}
-      </View>
+        }
+        subtitle={
+          isBlocked
+            ? 'BLOCKED'
+            : isSpeakerHandle(peerId)
+              ? 'ANNOUNCEMENTS'
+              : isFeedbackHandle(peerId)
+                ? 'NOT E2E'
+                : `E2E · LEAVES IN ${ttlLabel}`
+        }
+        // CALLS.md §01: tapping ☎ opens the call-type sheet, not an
+        // immediate call. Hidden when blocked per BLOCK.md §5.1.
+        trailing={
+          onStartCall &&
+          !isBlocked &&
+          !isFeedbackHandle(peerId) &&
+          !isSpeakerHandle(peerId) ? (
+            <Pressable
+              testID="chat-call"
+              onPress={() => setCallTypeOpen(true)}
+              hitSlop={8}
+              style={styles.callBtn}
+            >
+              <PhoneIcon size={22} color={themed.primary} />
+            </Pressable>
+          ) : undefined
+        }
+      />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.body}
@@ -798,23 +787,9 @@ function SendIcon({ size = 22, color }: { size?: number; color: string }): React
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
-  // CONVERSATIONS.md §3.2: two-line AppBar — 60 high, padding 14/14,
-  // 1px text-faint bottom border. Back chevron + 28px peer portrait
-  // tile + handle/sub stack + optional call icon.
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.sm,
-    minHeight: 60,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { width: 28, paddingVertical: 4, alignItems: 'center' },
-  backText: { fontFamily: font.regular, fontSize: 24, lineHeight: 28 },
   // Frozen-state Peephole portrait — sized to match the standard
   // animal portrait tile (28×28 surface tile + faint border + 78%
-  // inner mark) so AppBar layout doesn't shift when block toggles.
+  // inner mark) so the AppBar layout doesn't shift when block toggles.
   peepholeTile: {
     width: 28,
     height: 28,
@@ -822,17 +797,10 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  headerTitle: { flex: 1, gap: 2, minWidth: 0 },
   headerTitleLine: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-  },
-  headerSub: {
-    fontFamily: font.medium,
-    fontSize: 10,
-    letterSpacing: 0.18 * 10,
-    textTransform: 'uppercase',
   },
   callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
   body: { flex: 1 },

@@ -22,8 +22,9 @@ import { api } from '../services.js';
 import { useIdentity } from '../store/identity.js';
 import { useOwnership } from '../store/ownership.js';
 import { useProfiles } from '../store/profiles.js';
-import { space, useColors } from '../theme/index.js';
-import { accent, font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { accent, font } from '../theme/tokens.js';
+import { AppBar } from '../components/AppBar.js';
 import { diag } from '../diag/log.js';
 
 interface Props {
@@ -121,13 +122,7 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
       style={[styles.root, { backgroundColor: themed.cream }]}
       testID="avatar-picker-screen"
     >
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.back}>
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: themed.ink }]}>Change my face</Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Change my face" testID="avatar-picker-appbar" />
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.helper, { color: themed.slate }]}>
@@ -324,23 +319,6 @@ function LockedTile({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  title: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   content: { padding: 16, paddingBottom: 32 },
   helper: {
     fontFamily: font.regular,

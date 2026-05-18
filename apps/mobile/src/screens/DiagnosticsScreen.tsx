@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { AppBar } from '../components/AppBar.js';
 import {
   clearDiag,
   formatDiag,
@@ -160,15 +161,7 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
       testID="diagnostics-screen"
       style={[styles.root, { backgroundColor: themed.cream }]}
     >
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.back}>
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.appbarTitle, { color: themed.ink }]}>
-          Diagnostics
-        </Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Diagnostics" testID="diagnostics-appbar" />
 
       <View style={[styles.actionsBar, { borderBottomColor: themed.divider }]}>
         <ActionButton
@@ -413,23 +406,6 @@ function timeAgo(at: number | string): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  appbarTitle: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   // Sharp-bordered transparent action buttons docked under the bar.
   actionsBar: {
     flexDirection: 'row',

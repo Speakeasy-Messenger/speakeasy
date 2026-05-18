@@ -31,9 +31,10 @@ export interface AppBarProps {
   leading?: React.ReactNode;
   /**
    * Title. A plain string renders at the `subtitle` scale; pass a node
-   * for the conversation variants (a Handle + StatusSquare row).
+   * for the conversation variants (a Handle + StatusSquare row). Omit
+   * for a back-only bar (e.g. a media/preview screen).
    */
-  title: React.ReactNode;
+  title?: React.ReactNode;
   /** Optional meta-style sub-line under the title. */
   subtitle?: string;
   /** When set, the title + subtitle block is pressable. */
@@ -66,7 +67,7 @@ export function AppBar({
       {typeof title === 'string' ? (
         <TextSubtitle numberOfLines={1}>{title}</TextSubtitle>
       ) : (
-        title
+        title ?? null
       )}
       {subtitle ? (
         <TextMeta tone="mute" numberOfLines={1}>

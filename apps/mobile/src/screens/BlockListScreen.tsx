@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { AppBar } from '../components/AppBar.js';
 import { Handle } from '../components/Handle.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import { BlockConfirmSheet, UnblockConfirmSheet } from '../components/BlockSheets.js';
@@ -56,18 +57,7 @@ export function BlockListScreen({ onBack }: Props): React.ReactElement {
       style={[styles.root, { backgroundColor: themed.cream }]}
       testID="block-list-screen"
     >
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable
-          onPress={onBack}
-          hitSlop={8}
-          style={styles.back}
-          testID="block-list-back"
-        >
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.appbarTitle, { color: themed.ink }]}>Blocked</Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Blocked" testID="block-list-appbar" />
 
       {/* BURN.md §11.5: "Block someone" entry at the top — opens
           the find sheet in block mode. The find sheet's result-card
@@ -210,23 +200,6 @@ function timeSince(at: number): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  appbarTitle: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   // "Block someone" row — same geometry as a block-list row but
   // with a brass `+` glyph in place of the Peephole mark.
   blockSomeoneRow: {

@@ -1,8 +1,9 @@
 import React from 'react';
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { useColors } from '../theme/index.js';
 import { font, type as typeScale, space } from '../theme/tokens.js';
 import { ANIMAL_IDS, ANIMALS } from '../avatars/components.js';
+import { AppBar } from '../components/AppBar.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Handle } from '../components/Handle.js';
 
@@ -32,12 +33,7 @@ export function AvatarPreviewScreen({ onBack }: Props): React.ReactElement {
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
-      <View style={[styles.header, { borderBottomColor: themed.divider }]}>
-        <Pressable onPress={onBack} hitSlop={8}>
-          <Text style={[styles.back, { color: themed.primary }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: themed.ink }]}>Avatar preview</Text>
-      </View>
+      <AppBar onBack={onBack} title="Avatar preview" testID="avatar-preview-appbar" />
 
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={[styles.section, { color: themed.slate }]}>HANDLES</Text>
@@ -91,21 +87,6 @@ export function AvatarPreviewScreen({ onBack }: Props): React.ReactElement {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  header: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: space.m,
-    paddingHorizontal: space.lg,
-    paddingTop: space.m,
-    paddingBottom: 14,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-  },
-  back: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  title: {
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   content: { padding: space.lg, gap: space.s },
   section: {
     fontFamily: typeScale.meta.weight,

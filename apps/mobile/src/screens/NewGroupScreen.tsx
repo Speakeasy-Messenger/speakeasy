@@ -11,6 +11,7 @@ import {
   View,
 } from 'react-native';
 import type { TtlOption } from '@speakeasy/shared';
+import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
@@ -155,27 +156,28 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
         style={styles.body}
       >
         {/* AppBar per spec §4.1: back / title / Create action. */}
-        <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-          <Pressable onPress={onCancel} hitSlop={8} style={styles.back}>
-            <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-          </Pressable>
-          <Text style={[styles.title, { color: themed.ink }]}>New room</Text>
-          <Pressable
-            testID="new-group-create"
-            onPress={() => void handleCreate()}
-            hitSlop={8}
-            disabled={!isValid}
-          >
-            <Text
-              style={[
-                styles.createAction,
-                { color: isValid ? themed.primary : themed.slate },
-              ]}
+        <AppBar
+          onBack={onCancel}
+          title="New room"
+          testID="new-group-appbar"
+          trailing={
+            <Pressable
+              testID="new-group-create"
+              onPress={() => void handleCreate()}
+              hitSlop={8}
+              disabled={!isValid}
             >
-              {busy ? 'Creating…' : 'Create'}
-            </Text>
-          </Pressable>
-        </View>
+              <Text
+                style={[
+                  styles.createAction,
+                  { color: isValid ? themed.primary : themed.slate },
+                ]}
+              >
+                {busy ? 'Creating…' : 'Create'}
+              </Text>
+            </Pressable>
+          }
+        />
 
         <ScrollView
           contentContainerStyle={styles.content}
@@ -311,23 +313,6 @@ function MemberRow({ handle, onRemove }: MemberRowProps): React.ReactElement {
 const styles = StyleSheet.create({
   root: { flex: 1 },
   body: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  title: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   createAction: {
     fontFamily: font.medium,
     fontSize: 13,

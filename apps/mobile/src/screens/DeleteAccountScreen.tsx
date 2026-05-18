@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { AppBar } from '../components/AppBar.js';
 import { Handle } from '../components/Handle.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import notifee from '@notifee/react-native';
@@ -24,7 +25,7 @@ import { wipeAllPersistedState } from '../store/wipe.js';
 import { clearAvatarCache } from '../push/avatar-cache.js';
 import { api, signalProtocol } from '../services.js';
 import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { font } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
 
 interface Props {
@@ -121,13 +122,7 @@ export function DeleteAccountScreen({ onBack }: Props): React.ReactElement {
       style={[styles.root, { backgroundColor: themed.cream }]}
       testID="delete-account-screen"
     >
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.back}>
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: themed.ink }]}>Delete account</Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Delete account" testID="delete-account-appbar" />
 
       <View style={styles.body}>
         <View style={styles.markWrap}>
@@ -182,23 +177,6 @@ export function DeleteAccountScreen({ onBack }: Props): React.ReactElement {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  title: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   body: { flex: 1, paddingHorizontal: 24, paddingTop: 28 },
   markWrap: { alignItems: 'center', marginBottom: 20 },
   heading: {
