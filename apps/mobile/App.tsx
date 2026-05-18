@@ -9,6 +9,7 @@ import {
 } from '@speakeasy/shared';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import notifee from '@notifee/react-native';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { AvatarCacheWarmer } from './src/avatars/AvatarCacheWarmer.js';
@@ -84,6 +85,13 @@ void pushNotifications.warmUp();
 const SPLASH_MIN_DURATION_MS = 1500;
 
 /**
+ * AsyncStorage flag marking that the first-launch splash floor has
+ * already been served. Present → skip the artificial hold on every
+ * subsequent cold start.
+ */
+const SPLASH_SEEN_KEY = 'speakeasy.splash.seenV1';
+
+/**
  * rc.55: write the system bubble for a finished call into the
  * direct conversation with the peer. Was in CallScreen / VideoCallScreen
  * useEffects keyed on `prev && !active` — fragile when a fresh
@@ -151,8 +159,37 @@ export default function App() {
   // because `showSplash` needs it.
   const [recoveryDone, setRecoveryDone] = useState(false);
   useEffect(() => {
-    const t = setTimeout(() => setSplashHoldElapsed(true), SPLASH_MIN_DURATION_MS);
-    return () => clearTimeout(t);
+    // The 1500ms artificial floor is a first-launch-after-install
+    // brand moment — not something to repeat on every cold start.
+    // Android frequently kills a backgrounded process, so without
+    // this gate the floor reapplied every time the app was reopened
+    // (user feedback, rc.104). After the first launch we skip the
+    // floor entirely; the splash then shows only for the genuine
+    // hydration window (~50–200ms).
+    let cancelled = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    void (async () => {
+      let seen = false;
+      try {
+        seen = (await AsyncStorage.getItem(SPLASH_SEEN_KEY)) !== null;
+      } catch {
+        // Treat a read failure as not-seen — worst case is one extra
+        // hold, never a missing brand moment.
+      }
+      if (cancelled) return;
+      if (seen) {
+        setSplashHoldElapsed(true);
+        return;
+      }
+      timer = setTimeout(() => {
+        if (!cancelled) setSplashHoldElapsed(true);
+      }, SPLASH_MIN_DURATION_MS);
+      void AsyncStorage.setItem(SPLASH_SEEN_KEY, '1').catch(() => {});
+    })();
+    return () => {
+      cancelled = true;
+      if (timer) clearTimeout(timer);
+    };
   }, []);
   // Hold the splash through the recovery probe so users with a
   // restorable identity don't see Onboarding flash before being

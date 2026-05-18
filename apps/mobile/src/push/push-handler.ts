@@ -32,7 +32,7 @@ import notifee, {
   type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePayload } from '@speakeasy/shared';
+import { decodePayload, newMessageId } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -119,6 +119,12 @@ type NavTarget =
 const TAP_TARGET_KEY = '@speakeasy/push-tap-target';
 
 /**
+ * Queue of inline replies sent from a notification banner, awaiting a
+ * hydrated foreground store to be folded into the conversation log.
+ */
+const PENDING_REPLIES_KEY = '@speakeasy/pending-sent-replies';
+
+/**
  * How long after a call push arrives we still consider it "live" enough
  * to route to IncomingCallScreen. Beyond this we assume the offer
  * expired (orchestrator default ring timeout is ~30 s; we add a small
@@ -150,6 +156,73 @@ async function consumeRawPush(): Promise<PersistedPush | null> {
   } catch {
     return null;
   }
+}
+
+/**
+ * An inline reply sent from a notification, captured for the in-app
+ * conversation log. The background headless JS context runs an
+ * un-hydrated conversations store, so the reply can't be written
+ * straight into it — a persist would clobber the real on-disk
+ * history. It's queued here and drained on the next foreground.
+ */
+type PendingReply = {
+  conversationId: string;
+  /** Peer handle — used to (re)open the direct conversation. */
+  peerId: string;
+  messageId: string;
+  text: string;
+  sentAt: number;
+};
+
+async function enqueuePendingReply(p: PendingReply): Promise<void> {
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_REPLIES_KEY);
+    const list: PendingReply[] = raw ? (JSON.parse(raw) as PendingReply[]) : [];
+    list.push(p);
+    await AsyncStorage.setItem(PENDING_REPLIES_KEY, JSON.stringify(list));
+  } catch {
+    // Non-fatal — worst case the reply is missing from the in-app log.
+  }
+}
+
+/**
+ * Fold any queued inline replies into the in-app conversation store.
+ * No-op until the conversations store is hydrated — draining into an
+ * un-hydrated store would persist over the real on-disk history.
+ * Safe to call from any foreground entry point; the queue is cleared
+ * once consumed.
+ */
+export async function drainPendingReplies(): Promise<void> {
+  if (!useConversations.getState().hydrated) return;
+  let list: PendingReply[];
+  try {
+    const raw = await AsyncStorage.getItem(PENDING_REPLIES_KEY);
+    if (!raw) return;
+    list = JSON.parse(raw) as PendingReply[];
+    await AsyncStorage.removeItem(PENDING_REPLIES_KEY);
+  } catch {
+    return;
+  }
+  if (list.length === 0) return;
+  const myUserId = await loadPersistedUserId();
+  for (const p of list) {
+    // openDirect sets peerUserId (so the row lists) and is idempotent
+    // on an existing entry. It returns conversationIdForDirect(...),
+    // the same key inbound messages bucket under. Fall back to the
+    // FCM conversationId if myUserId is somehow unavailable.
+    const cid = myUserId
+      ? useConversations.getState().openDirect(myUserId, p.peerId)
+      : p.conversationId;
+    useConversations.getState().add(cid, {
+      id: p.messageId,
+      from: 'me',
+      text: p.text,
+      kind: 'direct',
+      sentAt: p.sentAt,
+      stage: 'sent',
+    });
+  }
+  diag('push-reply', 'drained pending inline replies', { count: list.length });
 }
 
 /**
@@ -504,6 +577,18 @@ async function handleInlineReply(
 
   try {
     await sendReplyMessage(peerId, text, replyDeps());
+    // Record the reply in the in-app conversation log. Queued (not
+    // added straight to the store) because this may run headlessly
+    // with an un-hydrated store; drained right away when the app is
+    // already foreground, otherwise on the next foreground.
+    await enqueuePendingReply({
+      conversationId,
+      peerId,
+      messageId: newMessageId(),
+      text,
+      sentAt: Date.now(),
+    });
+    if (AppState.currentState === 'active') await drainPendingReplies();
     diag('push-reply', 'reply sent + notification updated', { conversationId });
   } catch (err) {
     diag('push-reply', 'reply send FAILED', { conversationId, err: String(err) });
@@ -685,6 +770,10 @@ export function usePushNavigation(
       }
     }
     void handleStartup();
+    // Fold any inline replies sent from a notification banner into
+    // the in-app conversation log (queued headlessly, drained here
+    // now that the foreground store is hydrated).
+    void drainPendingReplies();
 
     // Warm taps / inline replies on a notification while the app is
     // already foregrounded (the banner was still in the tray).
@@ -702,6 +791,7 @@ export function usePushNavigation(
     // notifee.onBackgroundEvent — drain it when the app returns active.
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
+      void drainPendingReplies();
       void (async () => {
         const deferred = await consumeRawPush();
         if (deferred && !cancelled) await route(deferred, 'resume-tap');

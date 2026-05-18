@@ -1,11 +1,14 @@
 import React from 'react';
 import {
   Linking,
+  Platform,
   StyleSheet,
   Text,
+  ToastAndroid,
   type StyleProp,
   type TextStyle,
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
 import { LONG_MESSAGE_CHARS, tokenize } from './rich-message-text.js';
 
 interface Props {
@@ -34,11 +37,21 @@ export function RichMessageText({ text, mentions, style, onSeeMore }: Props) {
   const shown = truncate ? text.slice(0, LONG_MESSAGE_CHARS).trimEnd() : text;
   const segs = tokenize(shown, !!mentions?.length);
 
+  // Long-press copies the full message text. The prior approach —
+  // `selectable` on the <Text> — renders the OS selection handles but
+  // doesn't reliably wire through to copy on Android (users reported
+  // copy not working), so we drive the clipboard explicitly. Nested
+  // link / "see more" onPress children still fire on tap; long-press
+  // anywhere on the text copies.
+  function copyText() {
+    Clipboard.setString(text);
+    if (Platform.OS === 'android') {
+      ToastAndroid.show('Copied', ToastAndroid.SHORT);
+    }
+  }
+
   return (
-    // `selectable` enables the native long-press select + copy menu so
-    // users can copy message text. Nested link / "see more" onPress
-    // children still work — tap fires onPress, long-press selects.
-    <Text style={style} selectable>
+    <Text style={style} onLongPress={copyText}>
       {segs.map((s, i) => {
         if (s.kind === 'mention') {
           return (
