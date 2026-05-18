@@ -1,0 +1,101 @@
+name: iOS
+
+# Compile-gate for the iOS app — runs on every change to mobile or
+# shared code. Mirrors android.yml. iOS has no git-tag version
+# derivation (that is Android-only, see app/build.gradle), so this is a
+# pure build gate: if a shared-code change breaks the iOS build, this
+# catches it instead of it being discovered weeks later on a Mac.
+#
+# Runner: GitHub-hosted macos-latest. If its bundled Xcode ever lags
+# what the project needs, switch to a self-hosted Mac runner (the repo
+# already builds locally on Xcode 26.4.1).
+#
+# One-time setup: reuses the VOUCHFLOW_WRITE_KEY repo secret that
+# android.yml / release.yml already rely on.
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/**'
+      - '.github/workflows/ios.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/**'
+      - '.github/workflows/ios.yml'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ios-build:
+    runs-on: macos-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Cache libsignal prebuilt FFI
+        # Versioned artifact from the Signal CDN — keyed by the pinned
+        # libsignal version, so it never goes stale.
+        uses: actions/cache@v4
+        with:
+          path: ~/Library/Caches/org.signal.libsignal
+          key: libsignal-${{ runner.os }}-v0.59.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Write Vouchflow.plist
+        # apps/mobile/ios/Speakeasy/Vouchflow.plist is gitignored — the
+        # iOS counterpart of Android's VOUCHFLOW_WRITE_KEY. Built from
+        # the committed .example by substituting the real sandbox key.
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
+            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set."
+            echo "::error::Configure it: gh secret set VOUCHFLOW_WRITE_KEY"
+            exit 1
+          fi
+          sed "s|vsk_sandbox_replace_with_real_key|${VOUCHFLOW_WRITE_KEY}|" \
+            Vouchflow.plist.example > Vouchflow.plist
+          plutil -lint Vouchflow.plist
+
+      - name: pod install
+        working-directory: apps/mobile/ios
+        # USE_FRAMEWORKS=static is required — LibSignalClient is a Swift
+        # pod and needs use_frameworks!. libsignal's prebuilt FFI binary
+        # is fetched from the Signal CDN by the pod's prepare script
+        # (cached above).
+        run: USE_FRAMEWORKS=static pod install
+
+      - name: Build (iOS Simulator)
+        working-directory: apps/mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace Speakeasy.xcworkspace \
+            -scheme Speakeasy \
+            -configuration Debug \
+            -sdk iphonesimulator \
+            -destination 'generic/platform=iOS Simulator' \
+            CODE_SIGNING_ALLOWED=NO \
+            build
