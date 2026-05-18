@@ -69,37 +69,40 @@ compile-verified.
 
 All four verified by a clean iOS build on the Mac.
 
-### Track 4 — iOS push parity · BLOCKED on Step 0
+### Track 4 — iOS push parity · SPEC'D, not built
 
-- [ ] background push handling
+Full design in `PUSH-PARITY.md`. Deferred as its own focused project:
+it needs a new NSE Xcode target, an App Group, a server payload
+change, and real-device APNs testing to verify.
+
+- [ ] APNs `mutable-content` delivery (server)
 - [ ] Notification Service Extension — on-device decrypt
-- [ ] `UNNotificationAction` inline reply
+- [ ] App Group + shared Signal store
+- [ ] `UNNotificationAction` inline reply + rich display
 
 ### Audit doc · DONE
 
 - `apps/mobile/ios/PARITY.md`
 
-### Docs refresh · DO LAST (when all tracks land)
+### Docs refresh · DONE (2026-05-18, post Steps 0–2)
 
-Update every doc to match the shipped state:
+Refreshed to match the shipped state:
 
-- [ ] `CLAUDE.md` — fix stale "repo not cloned on the Mac yet";
-      refresh the iOS toolchain / libsignal section
-- [ ] `apps/mobile/ios/SpeakeasyBridges/README.md` — update the
-      "Verification status" section (no longer un-verified) and the
-      one-time Xcode setup status
-- [ ] `apps/mobile/ios/PARITY.md` — drop the "never compile-verified"
-      reality-check note; update the Version-module row and the
-      `// 🍎`-deferred markers
-- [ ] `apps/mobile/ios/HARDENING.md` — final state
-- [ ] `spec.md` — reflect iOS status if it tracks platform state
+- [x] `CLAUDE.md` — repo-on-Mac reality, SSH `PATH` quirk, libsignal
+      settings now committed, new iOS build-status section
+- [x] `apps/mobile/ios/SpeakeasyBridges/README.md` — verification
+      status updated (it builds)
+- [x] `apps/mobile/ios/PARITY.md` — rewritten for post-hardening state
+- [x] `apps/mobile/ios/HARDENING.md` — this file
+- [x] `spec.md` — iOS compile-verified + CI status
 
 ## Current state
 
-- 2026-05-18: **Step 0, Track 1, Track 2 done.** iOS builds clean, is
-  CI-gated, and now reaches parity on version reporting, crash
-  capture, copy feedback, and the Vouchflow SDK. Remaining: Track 4
-  (push parity — design first) and the docs refresh.
+- 2026-05-18: **Steps 0–2 done; Track 4 spec'd.** iOS builds clean,
+  is CI-gated, and is at parity on version reporting, crash capture,
+  copy feedback, and the Vouchflow SDK. Push parity (Track 4) is fully
+  designed in `PUSH-PARITY.md` — deferred as its own focused project.
+  Docs refreshed. The initiative is parked at a clean milestone.
 
 ## Log
 
@@ -116,3 +119,8 @@ Update every doc to match the shipped state:
   native module — registered via the `xcodeproj` gem and verified by
   a clean iOS build. Note: after a `git reset --hard` on the Mac,
   always re-run `pod install` (it reverts `Podfile.lock`).
+- 2026-05-18: Track 4 (push parity) designed — see `PUSH-PARITY.md`;
+  deferred as a separate project (needs an NSE target + device APNs
+  testing). Docs refreshed across `CLAUDE.md`, `spec.md`, `PARITY.md`,
+  and the `SpeakeasyBridges` README. Initiative parked at a clean
+  milestone: iOS builds, is CI-gated, and is at parity except push.

@@ -1,6 +1,6 @@
 # Speakeasy iOS native bridges (Phase 5b)
 
-Swift/ObjC counterparts of the four Android Kotlin bridges under
+Swift/ObjC counterparts of the five Android Kotlin bridges under
 `apps/mobile/android/app/src/main/java/xyz/speakeasyapp/app/`.
 
 | Module           | iOS file                                           | Android counterpart                  | JS-side name           |
@@ -9,6 +9,7 @@ Swift/ObjC counterparts of the four Android Kotlin bridges under
 | Channel keys     | `ChannelKey/ChannelKeyModule.{swift,m}`            | `channelkey/ChannelKeyModule.kt`     | `NativeModules.ChannelKey`    |
 | Signal Protocol  | `Signal/SignalProtocolModule.{swift,m}`            | `signal/SignalProtocolModule.kt`     | `NativeModules.SignalProtocol`|
 | Group Messaging  | `Signal/GroupMessagingModule.{swift,m}`            | `signal/GroupMessagingModule.kt`     | `NativeModules.GroupMessaging`|
+| Version          | `Version/VersionModule.{swift,m}`                  | `version/VersionModule.kt`           | `NativeModules.SpeakeasyVersion`|
 
 Plus the persistence + store layer (no direct JS interface — used by the
 modules above):
@@ -66,16 +67,15 @@ First build on a Mac requires:
 
 ## Verification status
 
-These files were authored without compile-verification (Linux dev box).
-Anything labeled `// libsignal:` in the Signal/Sender Keys modules is
-my best guess at the libsignal-client iOS Swift API surface based on
-the Java/Kotlin reference. The structural shape, wire formats, and JS
-interfaces all match the Android side; expect minor signature fixes on
-first `xcodebuild` run.
+✅ **Compile-verified** — 2026-05-18, Xcode 26.4.1, clean simulator
+build (see `apps/mobile/ios/HARDENING.md`, Step 0). Every bridge file
+compiled without changes: the `// libsignal:` "best guess" API calls
+in the Signal / Sender Keys modules turned out correct, and the
+CryptoKit-only paths compiled clean as expected.
 
-The CryptoKit-only paths (`ChannelKeyModule`, `SpeakeasyDb` HKDF
-derivation) use stable, well-documented Apple APIs and should compile
-clean.
+The build is now CI-gated — `.github/workflows/ios.yml` runs
+`pod install` + `xcodebuild` on `macos-latest` for every mobile or
+shared-code change, so iOS drift is caught automatically.
 
 ## Wire-format compatibility with Android
 
