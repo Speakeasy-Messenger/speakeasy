@@ -8,7 +8,7 @@ import { useBanner } from '../store/banner.js';
 import { useGroups } from '../store/groups.js';
 import { useProfiles } from '../store/profiles.js';
 import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { font, motion, type as typeScale } from '../theme/tokens.js';
 
 /**
  * In-app foreground notification toast (CLAUDECODENOTE.md §5).
@@ -35,7 +35,7 @@ import { font, type as typeScale } from '../theme/tokens.js';
  */
 
 const AUTO_DISMISS_MS = 4000;
-const ANIM_MS = 240;
+const ANIM_MS = motion.screen;
 
 interface Props {
   /** Tap handler — receives the active banner's target so the parent can

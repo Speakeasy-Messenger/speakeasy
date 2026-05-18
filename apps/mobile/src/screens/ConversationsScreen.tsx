@@ -24,7 +24,7 @@ import { useBlocks } from '../store/blocks.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
 import { useColors } from '../theme/index.js';
 import { colors, fonts, space, text } from '../theme/index.js';
-import { font, type } from '../theme/tokens.js';
+import { font, motion, type } from '../theme/tokens.js';
 import { useConnection } from '../store/connection.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
@@ -495,13 +495,13 @@ function BurningRow({
       Animated.parallel([
         Animated.timing(fade, {
           toValue: 0,
-          duration: 600,
+          duration: motion.dissolve,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: false,
         }),
         Animated.timing(height, {
           toValue: 0,
-          duration: 600,
+          duration: motion.dissolve,
           easing: Easing.out(Easing.cubic),
           useNativeDriver: false,
         }),
