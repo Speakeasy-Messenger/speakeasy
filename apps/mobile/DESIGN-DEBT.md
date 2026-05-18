@@ -44,25 +44,19 @@ do them as deliberate, separately-reviewed passes — not one mega-diff.
   `SettingsListItem` stands as the single row primitive. ShareHandle
   intentionally left alone (brand-canvas screen). Verified on the
   Android emulator (release build, before/after screenshots).
-- 🟡 **Pass 4 (in progress) — motion + component spacing done.**
-  `motion` gained `pulse` (750) and `ripple` (900); the slow/`dissolve`/
-  `screen`-matching durations are routed through `motion.*`. All 14
-  component files had their off-scale spacing snapped onto the 4px
-  `space` scale from `tokens.ts` (round-up-to-scale rule: 2→4, 6→8,
-  10→12, 14→16, 18→20, 22→24, 28→32; ties up). Files on the legacy
-  `spacing.ts` scale switched to `tokens.ts` (value-preserving rename).
-  **Remaining:** ~93 off-scale spacing literals across 23 screen files.
+- ✅ **Pass 4 — motion + spacing.** `motion` gained `pulse` (750) and
+  `ripple` (900); the slow/`dissolve`/`screen`-matching durations are
+  routed through `motion.*`. Every off-scale spacing magic number
+  (~150 instances across 14 components + 23 screens) is snapped onto
+  the 4px `space` scale from `tokens.ts` — round-up-to-scale rule
+  (2→4, 6→8, 10→12, 14→16, 18→20, 22→24, 28→32; ties up). Files on
+  the legacy `spacing.ts` scale were switched to `tokens.ts`
+  (value-preserving rename). `grep` confirms zero off-scale
+  `padding`/`margin`/`gap` literals remain. Verified on the Android
+  emulator (release build).
 
-Passes 1 + 3 (and the Pass 4 motion routing) were exact-value token
-swaps — rendered output unchanged. Pass 2 was verified on-device. The
-Pass 4 spacing snaps shift pixels by 1–4px each and want emulator
-verification.
-
-## Remediation passes (open — need the emulator)
-
-- **Pass 4 (finish) — screen spacing.** Snap the remaining ~93
-  off-scale spacing literals across the 23 screen files onto the 4px
-  `space` scale, same round-up rule. Census is done (line-by-line).
+All four design-debt passes (1–4) plus the a11y pass are now
+complete. The remaining open items below need no emulator.
 
 ## Open (no device needed)
 
