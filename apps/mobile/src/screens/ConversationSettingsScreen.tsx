@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import type { TtlOption } from '@speakeasy/shared';
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
+import { AppBar } from '../components/AppBar.js';
 import { BlockConfirmSheet, UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { BurnConfirmSheet } from '../components/BurnConfirmSheet.js';
 import { Handle } from '../components/Handle.js';
@@ -101,20 +102,7 @@ export function ConversationSettingsScreen({
       style={[styles.root, { backgroundColor: themed.cream }]}
       testID="conversation-settings-screen"
     >
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable
-          onPress={onBack}
-          hitSlop={8}
-          style={styles.back}
-          testID="conv-settings-back"
-        >
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.appbarTitle, { color: themed.ink }]}>
-          Conversation
-        </Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Conversation" testID="conv-settings-appbar" />
 
       <ScrollView contentContainerStyle={styles.body}>
         {/* Header — peer portrait + handle + meta. Mirrors the
@@ -270,23 +258,6 @@ function ttlLabel(t: TtlOption): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  appbarTitle: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   body: { paddingBottom: space.xl },
   header: {
     paddingTop: 28,

@@ -1,10 +1,11 @@
 import React from 'react';
-import { Pressable, SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView, ScrollView, StyleSheet, Text } from 'react-native';
+import { AppBar } from '../components/AppBar.js';
 import { SettingsListItem } from '../components/SettingsListItem.js';
 import { useBlocks } from '../store/blocks.js';
 import { useSettings } from '../store/settings.js';
-import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { type as typeScale } from '../theme/tokens.js';
 
 interface Props {
   onBack: () => void;
@@ -30,13 +31,7 @@ export function PrivacyScreen({
       style={[styles.root, { backgroundColor: themed.cream }]}
       testID="privacy-screen"
     >
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.back}>
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.title, { color: themed.ink }]}>Privacy</Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Privacy" testID="privacy-appbar" />
 
       <ScrollView>
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
@@ -93,23 +88,6 @@ export function PrivacyScreen({
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  title: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   sectionLabel: {
     fontFamily: typeScale.meta.weight,
     fontSize: 9.5,
