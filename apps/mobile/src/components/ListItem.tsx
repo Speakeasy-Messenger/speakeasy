@@ -1,6 +1,7 @@
 import React from 'react';
-import { Pressable, StyleSheet, Text, View, type ViewStyle } from 'react-native';
-import { font, space, type } from '../theme/tokens.js';
+import { Pressable, StyleSheet, View, type ViewStyle } from 'react-native';
+import { space } from '../theme/tokens.js';
+import { TextBody, TextCaption } from '../theme/Text.js';
 import { useTheme } from '../theme/ThemeProvider.js';
 
 /**
@@ -66,27 +67,11 @@ export function ListItem({
     >
       {leading ? <View style={styles.leading}>{leading}</View> : null}
       <View style={styles.body}>
-        <Text
-          style={{
-            color: theme.text,
-            fontFamily: font.regular,
-            fontSize: type.body.size,
-          }}
-          numberOfLines={1}
-        >
-          {title}
-        </Text>
+        <TextBody numberOfLines={1}>{title}</TextBody>
         {subtitle ? (
-          <Text
-            style={{
-              color: theme.textMute,
-              fontFamily: font.regular,
-              fontSize: type.caption.size,
-            }}
-            numberOfLines={1}
-          >
+          <TextCaption tone="mute" numberOfLines={1}>
             {subtitle}
-          </Text>
+          </TextCaption>
         ) : null}
       </View>
       {trailing ? <View style={styles.trailing}>{trailing}</View> : null}

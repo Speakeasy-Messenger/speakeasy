@@ -1,5 +1,6 @@
 import React from 'react';
 import { Pressable, StyleSheet, Switch, Text, View } from 'react-native';
+import { TextBodyEmphasis, TextCaption } from '../theme/Text.js';
 import { useColors } from '../theme/index.js';
 import { font } from '../theme/tokens.js';
 
@@ -51,11 +52,13 @@ export function SettingsListItem(props: Props): React.ReactElement {
   const inner = (
     <View style={[styles.row, { borderBottomColor: themed.divider }]}>
       <View style={styles.body}>
-        <Text style={[styles.title, { color: titleColor }]}>{props.title}</Text>
+        <TextBodyEmphasis style={{ color: titleColor }}>
+          {props.title}
+        </TextBodyEmphasis>
         {props.description ? (
-          <Text style={[styles.desc, { color: themed.slate }]}>
+          <TextCaption style={{ color: themed.slate, lineHeight: 16 }}>
             {props.description}
-          </Text>
+          </TextCaption>
         ) : null}
       </View>
       {props.kind === 'toggle' ? (
@@ -108,16 +111,6 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   body: { flex: 1, gap: 3, minWidth: 0 },
-  title: {
-    fontFamily: font.medium,
-    fontSize: 14,
-    letterSpacing: -0.005 * 14,
-  },
-  desc: {
-    fontFamily: font.regular,
-    fontSize: 11.5,
-    lineHeight: 16,
-  },
   arrow: {
     fontFamily: font.regular,
     fontSize: 18,
