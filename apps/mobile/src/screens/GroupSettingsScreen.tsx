@@ -15,6 +15,7 @@ import {
   View,
 } from 'react-native';
 import type { TtlOption } from '@speakeasy/shared';
+import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
@@ -113,13 +114,7 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
   if (!group) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
-        <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-          <Pressable onPress={onBack} hitSlop={8} style={styles.back}>
-            <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-          </Pressable>
-          <Text style={[styles.appbarTitle, { color: themed.ink }]}>Room</Text>
-          <View style={{ width: 32 }} />
-        </View>
+        <AppBar onBack={onBack} title="Room" testID="group-settings-loading-appbar" />
         <Text style={[styles.placeholder, { color: themed.slate }]}>
           Room not loaded.
         </Text>
@@ -185,13 +180,7 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
 
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
-      <View style={[styles.appbar, { borderBottomColor: themed.divider }]}>
-        <Pressable onPress={onBack} hitSlop={8} style={styles.back} testID="group-settings-back">
-          <Text style={[styles.backText, { color: themed.slate }]}>‹</Text>
-        </Pressable>
-        <Text style={[styles.appbarTitle, { color: themed.ink }]}>Room</Text>
-        <View style={{ width: 32 }} />
-      </View>
+      <AppBar onBack={onBack} title="Room" testID="group-settings-appbar" />
 
       <ScrollView contentContainerStyle={styles.body}>
         {/* Header per §3.3 — large room mark + name + meta. */}
@@ -743,23 +732,6 @@ async function getDeviceToken(): Promise<string> {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  appbar: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: space.md,
-    paddingTop: space.md,
-    paddingBottom: 12,
-    borderBottomWidth: StyleSheet.hairlineWidth,
-    gap: space.sm,
-  },
-  back: { width: 32, paddingVertical: 4 },
-  backText: { fontFamily: font.regular, fontSize: 28, lineHeight: 28 },
-  appbarTitle: {
-    flex: 1,
-    fontFamily: font.medium,
-    fontSize: typeScale.subtitle.size,
-    letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
-  },
   body: { paddingBottom: space.xl },
   header: {
     paddingTop: 28,
