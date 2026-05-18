@@ -67,6 +67,14 @@ export interface ChatMessage {
    * same room-activity-leak reason as the `read` frame.
    */
   readAt?: number;
+  /**
+   * For inbound messages (`from !== 'me'`): true once this device has
+   * sent a `read` WS frame for it. Persisted so the receipt is emitted
+   * exactly once — not re-blasted on every ChatScreen remount. The old
+   * per-mount `readSentRef` Set reset on remount/cold-start, so
+   * reopening a chat re-sent `read` for the whole visible history.
+   */
+  readReceiptSent?: boolean;
 }
 
 export interface ConversationState {
@@ -135,6 +143,11 @@ interface ConversationsState {
    * slate to brass.
    */
   markMessageRead: (msgId: string, readAt: number) => void;
+  /**
+   * Mark that a `read` receipt frame has been sent for an inbound
+   * message, so ChatScreen does not re-emit it on remount / cold start.
+   */
+  markReadReceiptSent: (conversationId: string, msgId: string) => void;
   remove: (conversationId: string, msgId: string) => void;
   /** Drop the entire conversation entry. Used by group leave (the
    * room disappears from the user's local list) and by 1:1 delete. */
@@ -321,6 +334,24 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       void persist(next);
       return { byId: next };
     }),
+
+  markReadReceiptSent: (conversationId, msgId) => {
+    set((s) => {
+      const c = s.byId[conversationId];
+      if (!c) return s;
+      let touched = false;
+      const messages = c.messages.map((m) => {
+        if (m.id === msgId && !m.readReceiptSent) {
+          touched = true;
+          return { ...m, readReceiptSent: true };
+        }
+        return m;
+      });
+      if (!touched) return s;
+      return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };
+    });
+    void persist(get().byId);
+  },
 
   remove: (conversationId, msgId) => {
     set((s) => {

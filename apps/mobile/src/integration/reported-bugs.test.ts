@@ -262,3 +262,68 @@ describe('reported bug #4 — identity should persist across app restarts', () =
     expect(useIdentity.getState().deviceToken).toBeUndefined();
   });
 });
+
+describe('reported bug — read receipt re-sent on every chat remount', () => {
+  // The diagnostics log showed the same 8 `read` frames redelivered on
+  // every reconnect. Root cause: ChatScreen tracked sent read-receipts
+  // in a per-mount `useRef` Set (`readSentRef`), which resets whenever
+  // the screen remounts (reopen / app resume / push-tap / cold start).
+  // Each remount re-emitted `read` for the whole visible peer history.
+  // Fix: a persisted per-message `readReceiptSent` flag so a `read`
+  // frame is sent exactly once, ever. This test locks in that the flag
+  // survives a cold-start hydrate — the property `readSentRef` lacked.
+  beforeEach(async () => {
+    __resetAsyncStorageMock();
+    await useConversations.getState().reset();
+  });
+  afterEach(async () => {
+    await useConversations.getState().reset();
+  });
+
+  it('markReadReceiptSent sets the flag and it survives a cold-start hydrate', async () => {
+    const convId = 'dm-readreceipt-test';
+    useConversations.getState().add(convId, {
+      id: 'm1',
+      from: 'bob-red-bear', // inbound peer message
+      text: 'hi',
+      kind: 'direct',
+      sentAt: Date.now(),
+      stage: 'sent',
+    });
+    expect(
+      useConversations.getState().byId[convId]!.messages[0]!.readReceiptSent,
+    ).toBeUndefined();
+
+    useConversations.getState().markReadReceiptSent(convId, 'm1');
+    expect(
+      useConversations.getState().byId[convId]!.messages[0]!.readReceiptSent,
+    ).toBe(true);
+
+    // Let the persist() side-effect flush, then simulate a cold start:
+    // wipe in-memory state and re-hydrate from disk.
+    await new Promise((r) => setTimeout(r, 5));
+    useConversations.setState({ byId: {}, hydrated: false });
+    await useConversations.getState().hydrate();
+
+    expect(
+      useConversations.getState().byId[convId]?.messages[0]?.readReceiptSent,
+    ).toBe(true);
+  });
+
+  it('markReadReceiptSent is idempotent', () => {
+    const convId = 'dm-readreceipt-idem';
+    useConversations.getState().add(convId, {
+      id: 'm1',
+      from: 'bob-red-bear',
+      text: 'hi',
+      kind: 'direct',
+      sentAt: Date.now(),
+      stage: 'sent',
+    });
+    useConversations.getState().markReadReceiptSent(convId, 'm1');
+    useConversations.getState().markReadReceiptSent(convId, 'm1');
+    expect(
+      useConversations.getState().byId[convId]!.messages[0]!.readReceiptSent,
+    ).toBe(true);
+  });
+});

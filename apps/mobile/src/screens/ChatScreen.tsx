@@ -127,6 +127,7 @@ export function ChatScreen({
   const openDirect = useConversations((s) => s.openDirect);
   const markRead = useConversations((s) => s.markRead);
   const markDelivered = useConversations((s) => s.markDelivered);
+  const markReadReceiptSent = useConversations((s) => s.markReadReceiptSent);
 
   // BLOCK.md §5: when the local user has blocked this peer, the
   // chat surface enters frozen mode (Peephole portrait, BLOCKED
@@ -228,11 +229,17 @@ export function ChatScreen({
     for (const m of messages) {
       if (m.from !== peerId) continue;
       if (m.kind !== 'direct') continue;
+      // Persisted per-message dedup — survives remount AND cold start,
+      // so a `read` frame is emitted exactly once per message.
+      // readSentRef alone reset on every mount, which re-blasted a
+      // `read` for the whole visible history on each chat reopen.
+      if (m.readReceiptSent) continue;
       if (readSentRef.current.has(m.id)) continue;
       if (wsState !== 'authed') continue;
       readSentRef.current.add(m.id);
       try {
         ws.send({ type: 'read', to: peerId, message_id: m.id });
+        markReadReceiptSent(conversationId, m.id);
       } catch (err) {
         // Drop the id back so a future render can retry once the
         // WS reconnects.
@@ -240,7 +247,7 @@ export function ChatScreen({
         diag('chat', 'read send threw (will retry)', { err: String(err) });
       }
     }
-  }, [peerId, myUserId, messages, wsState]);
+  }, [peerId, myUserId, messages, wsState, conversationId, markReadReceiptSent]);
 
   // Track the active conversation so the in-app message banner can
   // suppress itself when the user is already staring at this chat.
