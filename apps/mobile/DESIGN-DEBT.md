@@ -44,27 +44,25 @@ do them as deliberate, separately-reviewed passes — not one mega-diff.
   `SettingsListItem` stands as the single row primitive. ShareHandle
   intentionally left alone (brand-canvas screen). Verified on the
   Android emulator (release build, before/after screenshots).
-- 🟡 **Pass 4 (in progress) — motion done, spacing open.** `motion`
-  gained `pulse` (750) and `ripple` (900); the CallScreen slow
-  durations + the `dissolve`/`screen`-matching durations across
-  Chat / Conversations / IdReveal / InAppBanner are routed through
-  `motion.*` (exact-value, no pixel change). **Remaining:** the ~128
-  off-scale spacing magic numbers.
+- 🟡 **Pass 4 (in progress) — motion + component spacing done.**
+  `motion` gained `pulse` (750) and `ripple` (900); the slow/`dissolve`/
+  `screen`-matching durations are routed through `motion.*`. All 14
+  component files had their off-scale spacing snapped onto the 4px
+  `space` scale from `tokens.ts` (round-up-to-scale rule: 2→4, 6→8,
+  10→12, 14→16, 18→20, 22→24, 28→32; ties up). Files on the legacy
+  `spacing.ts` scale switched to `tokens.ts` (value-preserving rename).
+  **Remaining:** ~93 off-scale spacing literals across 23 screen files.
 
 Passes 1 + 3 (and the Pass 4 motion routing) were exact-value token
-swaps — rendered output unchanged, safe without a device. Pass 2 was
-verified on-device. The Pass 4 spacing sweep changes rendered pixels
-and needs emulator verification.
+swaps — rendered output unchanged. Pass 2 was verified on-device. The
+Pass 4 spacing snaps shift pixels by 1–4px each and want emulator
+verification.
 
 ## Remediation passes (open — need the emulator)
 
-These change rendered pixels. Do them with the Android emulator
-running so each change is screenshot-verified — not blind.
-
-- **Pass 4 (finish) — spacing.** Snap the ~128 off-scale spacing
-  magic numbers onto the 4px `space` scale (the recurring `14` is the
-  worst — decide `space.m` 12 vs `space.base` 16 per instance, with
-  the emulator open). Full census of the ~177 instances is done.
+- **Pass 4 (finish) — screen spacing.** Snap the remaining ~93
+  off-scale spacing literals across the 23 screen files onto the 4px
+  `space` scale, same round-up rule. Census is done (line-by-line).
 
 ## Open (no device needed)
 

@@ -29,8 +29,8 @@ import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
-import { space, useColors } from '../theme/index.js';
-import { font, scrim, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, scrim, space, type as typeScale } from '../theme/tokens.js';
 
 interface Props {
   groupId: string;
@@ -732,13 +732,13 @@ async function getDeviceToken(): Promise<string> {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  body: { paddingBottom: space.xl },
+  body: { paddingBottom: space.xxl },
   header: {
-    paddingTop: 28,
-    paddingBottom: 20,
-    paddingHorizontal: space.md,
+    paddingTop: space.xxl,
+    paddingBottom: space.lg,
+    paddingHorizontal: space.base,
     alignItems: 'center',
-    gap: 18,
+    gap: space.lg,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerName: {
@@ -754,18 +754,18 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   section: {
-    paddingHorizontal: space.md,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: space.base,
+    paddingTop: space.base,
+    paddingBottom: space.m,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  sectionLast: { borderBottomWidth: 0, paddingTop: 14, paddingBottom: 14 },
+  sectionLast: { borderBottomWidth: 0, paddingTop: space.base, paddingBottom: space.base },
   sectionLabel: {
     fontFamily: typeScale.meta.weight,
     fontSize: typeScale.meta.size,
     letterSpacing: typeScale.meta.size * typeScale.meta.letterSpacingEm,
     textTransform: 'uppercase',
-    marginBottom: 12,
+    marginBottom: space.m,
   },
   sectionLabelRow: {
     flexDirection: 'row',
@@ -775,7 +775,7 @@ const styles = StyleSheet.create({
   nameRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 8,
+    paddingVertical: space.s,
   },
   nameText: {
     flex: 1,
@@ -787,15 +787,15 @@ const styles = StyleSheet.create({
   memberRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    paddingVertical: 10,
+    gap: space.m,
+    paddingVertical: space.m,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  memberBody: { flex: 1, gap: 1 },
+  memberBody: { flex: 1, gap: space.xs },
   memberHandleLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: space.s,
   },
   youSuffix: {
     fontFamily: font.regular,
@@ -815,10 +815,10 @@ const styles = StyleSheet.create({
   addRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 4,
-    paddingTop: 12,
-    paddingBottom: 4,
-    marginTop: 6,
+    gap: space.xs,
+    paddingTop: space.m,
+    paddingBottom: space.xs,
+    marginTop: space.s,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   addAt: { fontFamily: font.bold, fontSize: 16 },
@@ -827,14 +827,14 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 11,
     lineHeight: 16,
-    marginTop: 6,
+    marginTop: space.s,
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    paddingVertical: 4,
+    paddingVertical: space.xs,
   },
-  toggleBody: { flex: 1, gap: 2 },
+  toggleBody: { flex: 1, gap: space.xs },
   toggleName: {
     fontFamily: font.medium,
     fontSize: 14,
@@ -849,12 +849,12 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 11.5,
     lineHeight: 16,
-    marginTop: 2,
+    marginTop: space.xs,
   },
   placeholder: {
     fontFamily: font.regular,
     fontSize: 14,
-    padding: space.lg,
+    padding: space.xl,
     textAlign: 'center',
   },
 
@@ -875,45 +875,45 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: 22,
-    paddingTop: 16,
-    paddingBottom: 28,
+    paddingHorizontal: space.xl,
+    paddingTop: space.base,
+    paddingBottom: space.xxl,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   sheetGrab: {
     alignSelf: 'center',
     width: 36,
     height: 4,
-    marginBottom: 18,
+    marginBottom: space.lg,
   },
   sheetTitle: {
     fontFamily: font.bold,
     fontSize: 20,
     letterSpacing: -0.02 * 20,
-    marginBottom: 10,
+    marginBottom: space.m,
   },
   sheetBody: {
     fontFamily: font.regular,
     fontSize: 13,
     lineHeight: 20,
-    marginBottom: 22,
+    marginBottom: space.xl,
   },
   sheetInput: {
     fontFamily: font.bold,
     fontSize: 20,
-    paddingBottom: 6,
+    paddingBottom: space.s,
     borderBottomWidth: 1,
-    marginBottom: 8,
+    marginBottom: space.s,
     padding: 0,
   },
   sheetHelper: {
     fontFamily: font.regular,
     fontSize: 11,
-    marginBottom: 22,
+    marginBottom: space.xl,
   },
-  sheetActions: { gap: 8 },
+  sheetActions: { gap: space.s },
   btnPrimary: {
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
   },
   btnPrimaryText: {
@@ -922,7 +922,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   btnSecondary: {
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
     borderWidth: 1,
   },

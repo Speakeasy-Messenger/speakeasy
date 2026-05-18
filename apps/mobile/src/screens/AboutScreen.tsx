@@ -11,7 +11,7 @@ import {
 import { AppBar } from '../components/AppBar.js';
 import { SettingsListItem } from '../components/SettingsListItem.js';
 import { useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 
 interface Props {
   onBack: () => void;
@@ -166,16 +166,16 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     letterSpacing: 0.22 * 9.5,
     textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 10,
+    paddingHorizontal: space.base,
+    paddingTop: space.lg,
+    paddingBottom: space.m,
   },
   aboutSummary: {
     fontFamily: font.regular,
     fontSize: 13,
     lineHeight: 21,
-    paddingHorizontal: 16,
-    paddingBottom: 18,
+    paddingHorizontal: space.base,
+    paddingBottom: space.lg,
   },
   footer: {
     alignItems: 'center',

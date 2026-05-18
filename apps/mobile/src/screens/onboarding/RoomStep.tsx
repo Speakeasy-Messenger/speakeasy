@@ -2,7 +2,7 @@ import React, { useEffect } from 'react';
 import { SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button.js';
 import { signalProtocol } from '../../services.js';
-import { accent, brand, font, type as typeScale, workspace } from '../../theme/tokens.js';
+import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
 import { diag } from '../../diag/log.js';
 
 /**
@@ -84,7 +84,7 @@ const styles = StyleSheet.create({
     lineHeight: 30,
     color: BONE,
     letterSpacing: -0.025 * 26,
-    marginBottom: 40,
+    marginBottom: space.xxxl,
   },
   dot: { color: BRASS },
   list: { gap: 20 },
@@ -92,7 +92,7 @@ const styles = StyleSheet.create({
   // Spec §2.2: a real 6×6 brass square (NOT a bullet character). Mode-
   // invariant — same on aubergine, dark workspace, light workspace.
   bullet: { width: 6, height: 6, backgroundColor: BRASS, marginTop: 8 },
-  rowBody: { flex: 1, gap: 2 },
+  rowBody: { flex: 1, gap: space.xs },
   principle: {
     fontFamily: font.medium,
     fontSize: 18,

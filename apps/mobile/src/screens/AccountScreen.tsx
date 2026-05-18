@@ -4,7 +4,7 @@ import { AppBar } from '../components/AppBar.js';
 import { SettingsHeader } from '../components/SettingsHeader.js';
 import { SettingsListItem } from '../components/SettingsListItem.js';
 import { useColors } from '../theme/index.js';
-import { type as typeScale } from '../theme/tokens.js';
+import { space, type as typeScale } from '../theme/tokens.js';
 
 interface Props {
   onBack: () => void;
@@ -80,8 +80,8 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     letterSpacing: 0.22 * 9.5,
     textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingTop: 24,
-    paddingBottom: 10,
+    paddingHorizontal: space.base,
+    paddingTop: space.xl,
+    paddingBottom: space.m,
   },
 });

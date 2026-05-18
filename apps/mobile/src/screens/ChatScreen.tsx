@@ -802,7 +802,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: 8,
   },
-  callBtn: { padding: 6, minWidth: 44, alignItems: 'flex-end' },
+  callBtn: { padding: space.sm, minWidth: 44, alignItems: 'flex-end' },
   body: { flex: 1 },
   list: { flex: 1 },
   // The list is `inverted`, so the contentContainer is flipped:
@@ -834,7 +834,7 @@ const styles = StyleSheet.create({
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: space.md,
   },
   speakerNote: {
     fontFamily: font.regular,
@@ -859,7 +859,7 @@ const styles = StyleSheet.create({
     minHeight: 32,
     maxHeight: 120,
     paddingHorizontal: space.sm,
-    paddingVertical: 6,
+    paddingVertical: space.sm,
     fontFamily: font.regular,
     fontSize: type.body.size,
   },
@@ -867,7 +867,7 @@ const styles = StyleSheet.create({
   // option; long-press flips to persistence. Quiet by design — most
   // sessions use the default and shouldn't be drawn to it.
   ttlChip: {
-    paddingHorizontal: 6,
+    paddingHorizontal: space.sm,
     paddingVertical: 8,
   },
   ttlText: {

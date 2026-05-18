@@ -24,8 +24,8 @@ import { useSettings } from '../store/settings.js';
 import { wipeAllPersistedState } from '../store/wipe.js';
 import { clearAvatarCache } from '../push/avatar-cache.js';
 import { api, signalProtocol } from '../services.js';
-import { space, useColors } from '../theme/index.js';
-import { font } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, space } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
 
 interface Props {
@@ -177,29 +177,29 @@ export function DeleteAccountScreen({ onBack }: Props): React.ReactElement {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  body: { flex: 1, paddingHorizontal: 24, paddingTop: 28 },
+  body: { flex: 1, paddingHorizontal: space.xl, paddingTop: space.xxl },
   markWrap: { alignItems: 'center', marginBottom: 20 },
   heading: {
     fontFamily: font.bold,
     fontSize: 22,
     letterSpacing: -0.02 * 22,
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: space.base,
   },
   copy: {
     fontFamily: font.regular,
     fontSize: 13,
     lineHeight: 20,
-    marginBottom: 10,
+    marginBottom: space.m,
   },
   copyEm: { fontFamily: font.medium },
   actions: {
-    paddingHorizontal: space.lg,
-    paddingBottom: space.lg,
-    gap: 8,
+    paddingHorizontal: space.xl,
+    paddingBottom: space.xl,
+    gap: space.s,
   },
   btnPrimary: {
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
   },
   btnPrimaryText: {
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   btnSecondary: {
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
     borderWidth: 1,
   },

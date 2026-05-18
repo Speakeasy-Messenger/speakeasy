@@ -13,8 +13,8 @@ import { PeepholeMark } from '../components/PeepholeMark.js';
 import { BlockConfirmSheet, UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import { useBlocks } from '../store/blocks.js';
-import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 
 interface Props {
   onBack: () => void;
@@ -205,9 +205,9 @@ const styles = StyleSheet.create({
   blockSomeoneRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    gap: space.m,
+    paddingHorizontal: space.base,
+    paddingVertical: space.base,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   blockSomeoneLabel: {
@@ -221,9 +221,9 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
   countWrap: {
-    paddingHorizontal: space.md,
-    paddingTop: 16,
-    paddingBottom: 12,
+    paddingHorizontal: space.base,
+    paddingTop: space.base,
+    paddingBottom: space.m,
   },
   countLabel: {
     fontFamily: typeScale.meta.weight,
@@ -231,13 +231,13 @@ const styles = StyleSheet.create({
     letterSpacing: typeScale.meta.size * typeScale.meta.letterSpacingEm,
     textTransform: 'uppercase',
   },
-  listContent: { paddingBottom: space.xl },
+  listContent: { paddingBottom: space.xxl },
   row: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
-    paddingHorizontal: space.md,
-    paddingVertical: 14,
+    gap: space.m,
+    paddingHorizontal: space.base,
+    paddingVertical: space.base,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   peepholeTile: {
@@ -247,7 +247,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  body: { flex: 1, gap: 2 },
+  body: { flex: 1, gap: space.xs },
   meta: {
     fontFamily: font.regular,
     fontSize: 11,
@@ -261,16 +261,16 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 11.5,
     lineHeight: 18,
-    paddingHorizontal: space.md,
-    paddingTop: 24,
+    paddingHorizontal: space.base,
+    paddingTop: space.xl,
     maxWidth: 32 * 8,
   },
   emptyWrap: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    paddingHorizontal: space.xl,
-    gap: 18,
+    paddingHorizontal: space.xxl,
+    gap: space.lg,
   },
   emptyTitle: {
     fontFamily: font.medium,

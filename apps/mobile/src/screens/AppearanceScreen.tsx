@@ -2,7 +2,7 @@ import React from 'react';
 import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { AppBar } from '../components/AppBar.js';
 import { useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 import { useThemePref } from '../theme/ThemeProvider.js';
 
 interface Props {
@@ -79,19 +79,19 @@ const styles = StyleSheet.create({
     fontSize: 9.5,
     letterSpacing: 0.22 * 9.5,
     textTransform: 'uppercase',
-    paddingHorizontal: 16,
-    paddingTop: 18,
-    paddingBottom: 10,
+    paddingHorizontal: space.base,
+    paddingTop: space.lg,
+    paddingBottom: space.m,
   },
   segmented: {
     flexDirection: 'row',
-    gap: 4,
-    paddingHorizontal: 16,
-    marginBottom: 10,
+    gap: space.xs,
+    paddingHorizontal: space.base,
+    marginBottom: space.m,
   },
   segment: {
     flex: 1,
-    paddingVertical: 10,
+    paddingVertical: space.m,
     alignItems: 'center',
     borderWidth: 1,
   },

@@ -159,7 +159,7 @@ const styles = StyleSheet.create({
     borderColor: TEXT_FAINT,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: space.xl,
   },
   copy: {
     fontFamily: font.regular,
@@ -167,7 +167,7 @@ const styles = StyleSheet.create({
     lineHeight: 22,
     color: BONE,
     textAlign: 'center',
-    marginBottom: 14,
+    marginBottom: space.md,
   },
   copyEm: {
     fontFamily: font.medium,
@@ -181,7 +181,7 @@ const styles = StyleSheet.create({
   },
   btnPrimary: {
     backgroundColor: BRASS,
-    paddingVertical: 14,
+    paddingVertical: space.md,
     alignItems: 'center',
   },
   btnPrimaryText: {
@@ -192,7 +192,7 @@ const styles = StyleSheet.create({
   },
   btnSecondary: {
     backgroundColor: 'transparent',
-    paddingVertical: 14,
+    paddingVertical: space.md,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: TEXT_FAINT,
