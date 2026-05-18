@@ -135,14 +135,15 @@ export function ConversationsScreen({
   });
 
   const rows: Row[] = [...directRows, ...groupRows].sort((a, b) => b.sortKey - a.sortKey);
-  // Dock the get-started cards above the FAB when the user has 1–4
+  // Dock the get-started prompt above the FAB when the user has 1–4
   // conversations (still building their room). At zero, the empty
-  // hero renders the same cards inline — the dock would duplicate
-  // them. At 5+, the user's room is full enough that the cards
-  // become noise. Once every card is dismissed, the dock collapses
-  // and the FAB drops back to its default bottom position (the FAB
-  // had been propped up by `fabStackAboveDock`'s 156px to make room
-  // for the dock — once nothing's there, that lift is dead space).
+  // hero renders the same prompt inline — the dock would duplicate
+  // it. At 5+, the user's room is full enough that the prompt
+  // becomes noise. Once dismissed, the dock collapses and the FAB
+  // drops back to its default bottom position. The FAB lift is
+  // measured from the dock's real height (`dockHeight`) rather than
+  // a fixed offset, so it stays correct if the prompt's layout
+  // changes.
   const dismissedCards = useOnboardingCards((s) => s.dismissed);
   const allCardsDismissed =
     GET_STARTED_CARD_IDS.every((id: string) => dismissedCards[id]);
@@ -153,6 +154,10 @@ export function ConversationsScreen({
   // long-press (§7). Track which row id is currently revealed; clear
   // after a short window so the row reverts to its quiet default.
   const [revealedId, setRevealedId] = useState<string | null>(null);
+  // Measured height of the get-started dock — drives the FAB lift so
+  // the brass `+` always clears the prompt. 0 until first layout;
+  // a one-frame fallback below covers that initial paint.
+  const [dockHeight, setDockHeight] = useState(0);
   const revealTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   // Brass `+` FAB opens the Find Someone sheet (NEW-CONVERSATION.md
   // §3). Handle search is the common case; "create a room →" lives
@@ -383,7 +388,10 @@ export function ConversationsScreen({
       />
 
       {showGetStarted ? (
-        <View style={[styles.getStartedDock, { backgroundColor: themed.cream, borderTopColor: themed.divider }]}>
+        <View
+          style={[styles.getStartedDock, { backgroundColor: themed.cream, borderTopColor: themed.divider }]}
+          onLayout={(e) => setDockHeight(e.nativeEvent.layout.height)}
+        >
           <GetStartedCards
             onShareHandle={onShareHandle}
             onNewGroup={onNewGroup}
@@ -396,7 +404,11 @@ export function ConversationsScreen({
         pointerEvents="box-none"
         style={[
           styles.fabStack,
-          showGetStarted ? styles.fabStackAboveDock : null,
+          // Lift the FAB clear of the dock. `dockHeight || 220` covers
+          // the first frame before onLayout measures the real height.
+          showGetStarted
+            ? { bottom: (dockHeight || 220) + space.md }
+            : null,
         ]}
       >
         <Pressable
@@ -684,9 +696,6 @@ const styles = StyleSheet.create({
     bottom: space.lg,
     alignItems: 'center',
     gap: space.sm,
-  },
-  fabStackAboveDock: {
-    bottom: 156,
   },
   // Brand spec: sharp 52×52 brass square, no rounded corners, no
   // Material drop shadow. Contrast with the cream canvas is the only
