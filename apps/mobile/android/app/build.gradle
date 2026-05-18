@@ -66,13 +66,18 @@ def computedVersionName = {
 
 def computedVersionCode = {
     // Extract the rc number for the integer versionCode. On a tag like
-    // "alpha-0.5.0-rc.81" → 81. On any off-tag build → 0 (only release
-    // CI builds on tags, so users never see 0).
+    // "alpha-0.5.0-rc.81" → 81. On any off-tag build (a plain main
+    // commit, a dirty tree, a SHA-only `git describe`) there's no rc
+    // number → fall back to 1. It MUST be a positive integer: the
+    // Android Gradle Plugin rejects versionCode 0 at configuration
+    // time, which previously failed every off-tag build — android.yml
+    // on every push to main, and local dirty builds. Only release CI
+    // builds on a real tag, so this placeholder never ships.
     def m = rawVersionTag =~ /-rc\.(\d+)$/
     if (m.find()) {
         return m.group(1).toInteger()
     }
-    return 0
+    return 1
 }()
 
 println "[version] tag=${rawVersionTag} name=${computedVersionName} code=${computedVersionCode}"
