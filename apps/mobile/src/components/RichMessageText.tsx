@@ -1,14 +1,13 @@
 import React from 'react';
 import {
   Linking,
-  Platform,
   StyleSheet,
   Text,
-  ToastAndroid,
   type StyleProp,
   type TextStyle,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
+import { useToast } from '../store/toast.js';
 import { LONG_MESSAGE_CHARS, tokenize } from './rich-message-text.js';
 
 interface Props {
@@ -42,12 +41,12 @@ export function RichMessageText({ text, mentions, style, onSeeMore }: Props) {
   // doesn't reliably wire through to copy on Android (users reported
   // copy not working), so we drive the clipboard explicitly. Nested
   // link / "see more" onPress children still fire on tap; long-press
-  // anywhere on the text copies.
+  // anywhere on the text copies. The toast confirmation is the app's
+  // own cross-platform `<Toast>` (rc.106 shipped ToastAndroid, which
+  // left iOS with no feedback).
   function copyText() {
     Clipboard.setString(text);
-    if (Platform.OS === 'android') {
-      ToastAndroid.show('Copied', ToastAndroid.SHORT);
-    }
+    useToast.getState().show('Copied');
   }
 
   return (

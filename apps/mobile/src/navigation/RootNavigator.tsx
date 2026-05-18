@@ -5,6 +5,7 @@ import {
   type NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import { InAppBanner } from '../components/InAppBanner.js';
+import { Toast } from '../components/Toast.js';
 import type { BannerData } from '../store/banner.js';
 import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
@@ -85,6 +86,7 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
   return (
     <NavigationContainer ref={navRef} onReady={onReady}>
       <InAppBanner onTap={onBannerTap} />
+      <Toast />
       <Stack.Navigator
         screenOptions={{ headerShown: false, animation: 'fade', animationDuration: 400 }}
       >

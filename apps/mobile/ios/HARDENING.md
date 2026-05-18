@@ -46,23 +46,23 @@ compile-verified.
   Speakeasy -configuration Debug -sdk iphonesimulator
   -destination 'generic/platform=iOS Simulator'`
 
-### Track 1 — iOS CI gate · IN PROGRESS
+### Track 1 — iOS CI gate · DONE
 
-- [x] `.github/workflows/ios.yml` drafted — `macos-latest`,
-      `pod install` + `xcodebuild` Debug-simulator build gate
-- [ ] push + confirm the workflow runs green on GitHub
+- [x] `.github/workflows/ios.yml` — `macos-latest`, `pod install` +
+      `xcodebuild` Debug-simulator build gate
+- [x] verified green on GitHub (run 26035467274, passed first try)
 - [ ] fast-follow: Simulator launch smoke test (needs a
       Release/bundled build — deferred so the build gate lands first)
 
-### Track 2 — quick parity fixes · BLOCKED on Step 0
+### Track 2 — quick parity fixes · IN PROGRESS
 
+- [x] Vouchflow iOS SDK `2.0.0` → `2.1.1` — built clean (see Step 0)
+- [x] cross-platform copy confirmation — new `<Toast>` (`store/toast.ts`
+      + `components/Toast.tsx`, mounted in `RootNavigator`) replaces
+      the Android-only `ToastAndroid`; both platforms confirm a copy
+- [ ] iOS crash handler in `AppDelegate` (uncaught-NSException →
+      timestamped file in Documents)
 - [ ] Version Swift module (kills the `0.0.0-test` bug)
-- [ ] iOS crash handler in `AppDelegate`
-- [ ] cross-platform copy confirmation (the `ToastAndroid` gap in
-      `RichMessageText`, introduced rc.106)
-- [~] Vouchflow iOS SDK `2.0.0` → `2.1.1` — SPM pin edited in
-      `project.pbxproj`; needs Mac re-`pod install` (SPM integration)
-      + rebuild to verify
 
 ### Track 4 — iOS push parity · BLOCKED on Step 0
 
@@ -91,9 +91,9 @@ Update every doc to match the shipped state:
 
 ## Current state
 
-- 2026-05-18: **Step 0 done** — iOS builds clean (first
-  compile-verification ever), confirmed with Vouchflow 2.1.1. Track 1
-  in progress: `ios.yml` drafted, needs a push to verify.
+- 2026-05-18: **Step 0 + Track 1 done** — iOS builds clean and is now
+  CI-gated (`ios.yml` green on GitHub). Track 2 (parity fixes) in
+  progress.
 
 ## Log
 
