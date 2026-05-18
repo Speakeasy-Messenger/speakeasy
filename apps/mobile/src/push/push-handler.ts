@@ -29,6 +29,7 @@ import notifee, {
   AndroidImportance,
   AndroidStyle,
   EventType,
+  type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodePayload } from '@speakeasy/shared';
@@ -281,6 +282,25 @@ async function ensureChannel(): Promise<void> {
 }
 
 /**
+ * Pull the stacked MessagingStyle messages off a notification object.
+ * Works on both a `getDisplayedNotifications()` entry and the
+ * `detail.notification` handed to a notifee event — the latter being
+ * the authoritative source mid-reply, when the notification may no
+ * longer be in the displayed set.
+ */
+function messagesFromNotification(notification: Notification | undefined): MsgStyleMsg[] {
+  const style = notification?.android?.style;
+  if (style && style.type === AndroidStyle.MESSAGING && Array.isArray(style.messages)) {
+    return style.messages.map((m) => ({
+      text: String(m.text ?? ''),
+      timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now(),
+      person: m.person ? { id: m.person.id, name: m.person.name } : undefined,
+    }));
+  }
+  return [];
+}
+
+/**
  * The messages already stacked on the displayed notification for this
  * conversation. Returns [] when none is showing — so once the user
  * opens the chat (which cancels the notification) the next message
@@ -290,18 +310,11 @@ async function existingMessages(conversationId: string): Promise<MsgStyleMsg[]> 
   try {
     const shown = await notifee.getDisplayedNotifications();
     const match = shown.find((n) => n.notification?.id === conversationId);
-    const style = match?.notification?.android?.style;
-    if (style && style.type === AndroidStyle.MESSAGING && Array.isArray(style.messages)) {
-      return style.messages.map((m) => ({
-        text: String(m.text ?? ''),
-        timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now(),
-        person: m.person ? { id: m.person.id, name: m.person.name } : undefined,
-      }));
-    }
+    return messagesFromNotification(match?.notification);
   } catch {
     /* getDisplayedNotifications can fail headlessly — start fresh */
+    return [];
   }
-  return [];
 }
 
 /**
@@ -440,13 +453,24 @@ function replyDeps(): ReplySenderDeps {
 
 /**
  * Handle an inline-reply submission from a notification's RemoteInput.
- * Sends the reply (encrypt + WS) and updates the notification thread to
- * reflect it — or, on failure, an "open the app" marker.
+ *
+ * Receives the *whole* replied-to notification (not just its `data`):
+ * its `android.style.messages` is the authoritative prior stack.
+ * `getDisplayedNotifications()` is unreliable here — a notification
+ * mid-reply-action is often no longer "displayed", which would drop
+ * the peer's message and rebuild a degenerate self-only MessagingStyle
+ * (the empty-header "strange margin" bug).
+ *
+ * The notification is re-posted *optimistically* with the reply
+ * appended before the (multi-second) encrypt + WS send, so the banner
+ * never visibly disappears. On send failure it's re-posted again with
+ * an "open the app to resend" marker.
  */
 async function handleInlineReply(
-  notifData: Record<string, unknown> | undefined,
+  notification: Notification | undefined,
   input: string | undefined,
 ): Promise<void> {
+  const notifData = notification?.data;
   const conversationId =
     typeof notifData?.conversation_id === 'string' ? notifData.conversation_id : undefined;
   const peerId =
@@ -455,21 +479,34 @@ async function handleInlineReply(
     typeof notifData?.msg_type === 'string' ? notifData.msg_type : 'direct';
   const text = (input ?? '').trim();
   if (!conversationId || !peerId || !text) return;
+
+  // Prior stack comes from the replied-to notification itself — the
+  // event detail is authoritative even when the notification is no
+  // longer in the displayed set.
+  const prior = messagesFromNotification(notification);
+  if (prior.length === 0) {
+    diag('push-reply', 'no prior messages on replied notification — stack may be lost', {
+      conversationId,
+    });
+  }
+
+  // Optimistic update FIRST — re-post with the reply appended before
+  // the send so the banner doesn't vanish for the WS round-trip.
+  // No `person` on the sent message → MessagingStyle renders it as the
+  // local user.
+  await displayMessagingNotification({
+    conversationId,
+    peerHandle: peerId,
+    msgType,
+    messages: [...prior, { text, timestamp: Date.now() }],
+    withReply: msgType !== 'group',
+  });
+
   try {
     await sendReplyMessage(peerId, text, replyDeps());
-    const prior = await existingMessages(conversationId);
-    // No `person` → MessagingStyle renders it as the local user.
-    await displayMessagingNotification({
-      conversationId,
-      peerHandle: peerId,
-      msgType,
-      messages: [...prior, { text, timestamp: Date.now() }],
-      withReply: msgType !== 'group',
-    });
     diag('push-reply', 'reply sent + notification updated', { conversationId });
   } catch (err) {
     diag('push-reply', 'reply send FAILED', { conversationId, err: String(err) });
-    const prior = await existingMessages(conversationId);
     await displayMessagingNotification({
       conversationId,
       peerHandle: peerId,
@@ -513,7 +550,7 @@ if (Platform.OS === 'android') {
   notifee.onBackgroundEvent(async ({ type, detail }) => {
     // Inline reply submitted from a notification's RemoteInput field.
     if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'reply') {
-      await handleInlineReply(detail.notification?.data, detail.input);
+      await handleInlineReply(detail.notification, detail.input);
       return;
     }
     if (type !== EventType.PRESS) return;
@@ -653,7 +690,7 @@ export function usePushNavigation(
     // already foregrounded (the banner was still in the tray).
     const fgUnsub = notifee.onForegroundEvent(({ type, detail }) => {
       if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'reply') {
-        void handleInlineReply(detail.notification?.data, detail.input);
+        void handleInlineReply(detail.notification, detail.input);
         return;
       }
       if (type !== EventType.PRESS) return;

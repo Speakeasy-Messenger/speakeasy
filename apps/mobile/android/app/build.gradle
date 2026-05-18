@@ -364,7 +364,10 @@ dependencies {
     // is a data class with enrollmentCause; new AccountStoreAccessDenied
     // error; and FallbackReason enum with requestFallback/submitFallbackOtp
     // for OTP-based verification fallback.
-    implementation("dev.vouchflow:android-sdk:2.0.0")
+    // 2.1.1 fixes a first-launch crash — configure() no longer lets an
+    // AccountManager SecurityException escape Application.onCreate()
+    // (vouchflow/android-sdk#1); it falls back to Keystore-only storage.
+    implementation("dev.vouchflow:android-sdk:2.1.1")
 
     // Phase 5b: Signal Protocol — official AGPLv3 library from Open Whisper
     // Systems. Rust-backed implementation of Double Ratchet + X3DH on top of
