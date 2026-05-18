@@ -33,26 +33,43 @@ do them as deliberate, separately-reviewed passes — not one mega-diff.
 - ✅ **Pass 3 — de-hardcode brand-screen colors.** 7 onboarding/brand
   screens now source `BONE/BRASS/INK/TEXT_MUTE/TEXT_FAINT` from theme
   tokens; the `TEXT_FAINT` 0.18 drift corrected to 0.12. (`46f7bb6`)
+- 🟡 **Pass 2 (in progress) — unified AppBar.** Dead `Bubble.tsx`
+  deleted. `AppBar` rebuilt as a flexible slot component (`onBack` /
+  `leading` / `title` / `subtitle` / `onTitlePress` / `trailing`,
+  layout on the 4px scale). Settings landing + Privacy + Notifications
+  + Appearance + Account + About + the Conversation-settings appbar
+  migrated onto it — verified on the Android emulator (release build,
+  before/after screenshots). **Remaining:** the conversation headers
+  (Chat / GroupChat / Conversations), the other workspace screens
+  (ShareHandle, NewGroup, BlockList, Diagnostics, DeleteAccount,
+  AvatarPicker, AvatarPreview, FullMessage, GroupSettings), and the
+  `ListItem` + `SettingsListItem` merge into one row primitive.
+- 🟡 **Pass 4 (in progress) — motion done, spacing open.** `motion`
+  gained `pulse` (750) and `ripple` (900); the CallScreen slow
+  durations + the `dissolve`/`screen`-matching durations across
+  Chat / Conversations / IdReveal / InAppBanner are routed through
+  `motion.*` (exact-value, no pixel change). **Remaining:** the ~128
+  off-scale spacing magic numbers.
 
-Passes 1 + 3 were exact-value token swaps — rendered output is
-unchanged, so they were safe to do without a device. The remaining
-passes change rendered pixels and need emulator verification.
+Passes 1 + 3 (and the Pass 4 motion routing) were exact-value token
+swaps — rendered output unchanged, safe without a device. Pass 2 and
+the Pass 4 spacing sweep change rendered pixels and need emulator
+verification.
 
 ## Remediation passes (open — need the emulator)
 
 These change rendered pixels. Do them with the Android emulator
 running so each change is screenshot-verified — not blind.
 
-- **Pass 2 — unified AppBar.** `AppBar.tsx` is imported by nobody;
-  10+ screens hand-roll the `back: {width:32,paddingVertical:4}`
-  header fragment. Make `AppBar` flexible for Chat/Conversations/
-  Settings and migrate the screens; delete the dead `Bubble.tsx`.
-  Collapse `ListItem` + `SettingsListItem` into one row primitive.
-- **Pass 4 — spacing + motion.** Snap the ~128 off-scale spacing
+- **Pass 2 (finish) — conversation headers + row merge.** Migrate
+  Chat / GroupChat / Conversations onto `AppBar` (leading portrait +
+  node title + trailing slot), migrate the remaining workspace
+  screens, and collapse `ListItem` + `SettingsListItem` into one row
+  primitive.
+- **Pass 4 (finish) — spacing.** Snap the ~128 off-scale spacing
   magic numbers onto the 4px `space` scale (the recurring `14` is the
   worst — decide `space.m` 12 vs `space.base` 16 per instance, with
-  the emulator open). Route animation durations through `motion.*`;
-  add named tokens for the slow durations (`750`, `900`) it lacks.
+  the emulator open).
 
 ## Open (no device needed)
 
