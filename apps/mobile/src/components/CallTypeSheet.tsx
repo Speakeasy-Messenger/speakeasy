@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
 import { useColors } from '../theme/index.js';
-import { font, scrim } from '../theme/tokens.js';
+import { font, scrim, space } from '../theme/tokens.js';
 
 /**
  * CALLS.md §01 — Call type picker.
@@ -167,38 +167,38 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject },
   wrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    paddingHorizontal: 20,
-    paddingTop: 18,
-    paddingBottom: 28,
+    paddingHorizontal: space.lg,
+    paddingTop: space.lg,
+    paddingBottom: space.xxl,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   grab: {
     alignSelf: 'center',
     width: 36,
     height: 4,
-    marginBottom: 18,
+    marginBottom: space.lg,
   },
   title: {
     fontFamily: font.bold,
     fontSize: 18,
     letterSpacing: -0.02 * 18,
-    marginBottom: 6,
+    marginBottom: space.s,
   },
   sub: {
     fontFamily: font.regular,
     fontSize: 12,
-    marginBottom: 22,
+    marginBottom: space.xl,
   },
   options: {
-    gap: 6,
-    marginBottom: 16,
+    gap: space.s,
+    marginBottom: space.base,
   },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    gap: space.base,
+    paddingHorizontal: space.base,
+    paddingVertical: space.base,
     borderWidth: 1,
   },
   optionDisabled: { opacity: 0.5 },
@@ -219,12 +219,12 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 11,
     lineHeight: 16,
-    marginTop: 2,
+    marginTop: space.xs,
   },
   cancel: {
     fontFamily: font.regular,
     fontSize: 14,
     textAlign: 'center',
-    paddingVertical: 12,
+    paddingVertical: space.m,
   },
 });

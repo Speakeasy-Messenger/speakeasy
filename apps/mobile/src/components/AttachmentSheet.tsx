@@ -7,8 +7,8 @@ import {
   View,
 } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
-import { space, useColors } from '../theme/index.js';
-import { font, scrim, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, scrim, space, type as typeScale } from '../theme/tokens.js';
 
 /**
  * Attachment-type chooser. Three actions stacked vertically:
@@ -239,16 +239,16 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: space.lg,
-    paddingTop: space.md,
-    paddingBottom: space.xl,
+    paddingHorizontal: space.xl,
+    paddingTop: space.base,
+    paddingBottom: space.xxl,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   header: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: space.md,
+    marginBottom: space.base,
     minHeight: 44,
   },
   grab: { width: 36, height: 3 },
@@ -267,15 +267,15 @@ const styles = StyleSheet.create({
     fontFamily: font.bold,
     fontSize: 22,
     letterSpacing: -0.025 * 22,
-    marginBottom: 18,
+    marginBottom: space.lg,
   },
-  options: { gap: 6 },
+  options: { gap: space.s },
   option: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 14,
-    paddingHorizontal: 16,
-    paddingVertical: 14,
+    gap: space.base,
+    paddingHorizontal: space.base,
+    paddingVertical: space.base,
     borderWidth: StyleSheet.hairlineWidth,
   },
   optionIcon: {
@@ -285,7 +285,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     borderWidth: StyleSheet.hairlineWidth,
   },
-  optionText: { flex: 1, gap: 2 },
+  optionText: { flex: 1, gap: space.xs },
   optionLabel: { fontFamily: font.medium, fontSize: 14 },
   optionDesc: {
     fontFamily: typeScale.meta.weight,
