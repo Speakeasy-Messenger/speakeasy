@@ -14,7 +14,7 @@ import { PortraitTile } from '../../components/PortraitTile.js';
 import { FREE_AVATARS } from '../../avatars/catalog.js';
 import { api } from '../../services.js';
 import { useColors } from '../../theme/index.js';
-import { brand, font, motion, type as typeScale } from '../../theme/tokens.js';
+import { accent, brand, font, motion, type as typeScale, workspace } from '../../theme/tokens.js';
 import { diag } from '../../diag/log.js';
 
 /**
@@ -183,10 +183,10 @@ export function FaceStep({ deviceToken, onPicked }: Props): React.ReactElement {
   );
 }
 
-const BONE = '#F2E9D8';
-const BRASS = '#E5A645';
-const TEXT_MUTE = 'rgba(242,233,216,0.55)';
-const TEXT_FAINT = 'rgba(242,233,216,0.12)';
+const BONE = workspace.dark.text;
+const BRASS = accent.base;
+const TEXT_MUTE = workspace.dark.textMute;
+const TEXT_FAINT = workspace.dark.textFaint;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: brand.canvas },

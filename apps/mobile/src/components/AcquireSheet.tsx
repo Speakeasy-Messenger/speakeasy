@@ -12,7 +12,7 @@ import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { descriptorFor, type AvatarDescriptor } from '../avatars/catalog.js';
 import { purchaseAvatar } from '../services/purchases.js';
 import { useOwnership } from '../store/ownership.js';
-import { accent, brand, font, scrim } from '../theme/tokens.js';
+import { accent, brand, font, scrim, workspace } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
 
 /**
@@ -272,9 +272,9 @@ function tierLabel(tier: 'free' | 'rare' | 'legendary'): string {
   return 'FREE';
 }
 
-const TEXT = '#F2E9D8';
-const TEXT_MUTE = 'rgba(242,233,216,0.55)';
-const TEXT_FAINT = 'rgba(242,233,216,0.12)';
+const TEXT = workspace.dark.text;
+const TEXT_MUTE = workspace.dark.textMute;
+const TEXT_FAINT = workspace.dark.textFaint;
 
 const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject },

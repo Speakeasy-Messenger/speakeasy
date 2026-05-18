@@ -11,7 +11,7 @@ import {
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useProfiles } from '../store/profiles.js';
-import { brand, font, type as typeScale } from '../theme/tokens.js';
+import { accent, brand, font, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 
 interface Props {
@@ -124,12 +124,12 @@ export function IdRevealScreen({
   );
 }
 
-const BRASS = '#E5A645';
-const BONE = '#F2E9D8';
-const INK = '#14091A';
-const BRAND_SURFACE = '#1F1126';
-const TEXT_FAINT = 'rgba(242,233,216,0.18)';
-const TEXT_MUTE = 'rgba(242,233,216,0.55)';
+const BRASS = accent.base;
+const BONE = workspace.dark.text;
+const INK = accent.foreground;
+const BRAND_SURFACE = brand.surface;
+const TEXT_FAINT = workspace.dark.textFaint;
+const TEXT_MUTE = workspace.dark.textMute;
 
 const styles = StyleSheet.create({
   // Brand canvas — never themed.

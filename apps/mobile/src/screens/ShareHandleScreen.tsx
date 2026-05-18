@@ -14,7 +14,7 @@ import { PortraitTile } from '../components/PortraitTile.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
-import { brand, font, type as typeScale } from '../theme/tokens.js';
+import { accent, brand, font, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 import { encodeAdd } from '../utils/handle-link.js';
 
@@ -146,11 +146,11 @@ export function ShareHandleScreen({ onBack }: Props): React.ReactElement {
   );
 }
 
-const BRASS = '#E5A645';
-const BONE = '#F2E9D8';
-const INK = '#14091A';
-const TEXT_MUTE = 'rgba(242,233,216,0.55)';
-const TEXT_FAINT = 'rgba(242,233,216,0.18)';
+const BRASS = accent.base;
+const BONE = workspace.dark.text;
+const INK = accent.foreground;
+const TEXT_MUTE = workspace.dark.textMute;
+const TEXT_FAINT = workspace.dark.textFaint;
 
 const styles = StyleSheet.create({
   // Brand canvas — never themed. The share screen is mode-invariant

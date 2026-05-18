@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button.js';
 import { requestStartupPermissions } from '../../permissions/startup.js';
-import { brand, font, type as typeScale } from '../../theme/tokens.js';
+import { accent, brand, font, type as typeScale, workspace } from '../../theme/tokens.js';
 
 /**
  * Onboarding screen 05 — Notifications permission.
@@ -78,9 +78,9 @@ export function PermissionsStep({ onContinue }: Props): React.ReactElement {
   );
 }
 
-const BONE = '#F2E9D8';
-const BRASS = '#E5A645';
-const TEXT_MUTE = 'rgba(242,233,216,0.55)';
+const BONE = workspace.dark.text;
+const BRASS = accent.base;
+const TEXT_MUTE = workspace.dark.textMute;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: brand.canvas, paddingHorizontal: 24 },
