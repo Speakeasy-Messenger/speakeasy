@@ -248,11 +248,32 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
   // Prometheus metrics — /metrics on the main listener when enabled.
   // Set METRICS_ENABLED=1 to activate. Scraped by Fly's internal Prometheus.
+  //
+  // /metrics is mounted on the same public listener as the app, so it must
+  // not be world-readable: an open Prometheus endpoint leaks route names,
+  // request volumes, label cardinality and process internals. Require a
+  // bearer token (METRICS_TOKEN); with none configured the endpoint fails
+  // closed (503) rather than exposing metrics openly. The Prometheus
+  // scraper must send `Authorization: Bearer <METRICS_TOKEN>`.
   if (process.env.METRICS_ENABLED === '1') {
+    const metricsToken = process.env.METRICS_TOKEN;
+    app.addHook('onRequest', async (request, reply) => {
+      if (request.url.split('?')[0] !== '/metrics') return;
+      if (!metricsToken) {
+        return reply.code(503).send({ error: 'metrics_token_unset' });
+      }
+      if (request.headers.authorization !== `Bearer ${metricsToken}`) {
+        return reply.code(401).send({ error: 'unauthorized' });
+      }
+    });
     const mod = await import('fastify-metrics');
     const plugin = mod.default.default ?? mod.default;
     await app.register(plugin as any, { endpoint: '/metrics' });
-    app.log.info('Prometheus /metrics endpoint enabled');
+    app.log.info(
+      metricsToken
+        ? 'Prometheus /metrics endpoint enabled (bearer-token protected)'
+        : 'Prometheus /metrics enabled but METRICS_TOKEN is unset — endpoint will return 503',
+    );
   }
 
   if (!opts.skipWebsocket) {
