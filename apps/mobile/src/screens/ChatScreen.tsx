@@ -21,6 +21,7 @@ import {
   isFeedbackHandle,
   isSpeakerHandle,
   newMessageId,
+  parseMentions,
   type Attachment,
 } from '@speakeasy/shared';
 import { appVersion } from '../version.js';
@@ -75,6 +76,8 @@ interface Props {
   onOpenSettings?: () => void;
   /** Open the full-text screen for a long message ("See more" tap). */
   onOpenFullMessage?: (text: string) => void;
+  /** Open a 1:1 chat with a handle — tapped from an @mention. */
+  onOpenPeer?: (handle: string) => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal in the
@@ -111,6 +114,7 @@ export function ChatScreen({
   onStartCall,
   onOpenSettings,
   onOpenFullMessage,
+  onOpenPeer,
 }: Props) {
   const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
@@ -299,7 +303,11 @@ export function ChatScreen({
     const trimmed = input.trim();
     if (!trimmed) return;
     setInput('');
-    void sendOutbound({ text: trimmed });
+    const mentions = parseMentions(trimmed);
+    void sendOutbound({
+      text: trimmed,
+      mentions: mentions.length ? mentions : undefined,
+    });
     // Inverted list: offset 0 is the newest message. Jump there so the
     // user sees their message even if they'd scrolled up into history.
     listRef.current?.scrollToOffset({ offset: 0, animated: true });
@@ -331,9 +339,14 @@ export function ChatScreen({
     if (file) await sendOutbound({ attachments: [file] });
   }
 
-  async function sendOutbound(opts: { text?: string; attachments?: Attachment[] }) {
+  async function sendOutbound(opts: {
+    text?: string;
+    attachments?: Attachment[];
+    mentions?: string[];
+  }) {
     const text = opts.text?.trim() || undefined;
     const attachments = opts.attachments?.length ? opts.attachments : undefined;
+    const mentions = opts.mentions?.length ? opts.mentions : undefined;
     if (!text && !attachments) return;
     const id = newMessageId();
     // Optimistic local echo — render immediately, encrypt + send
@@ -351,6 +364,7 @@ export function ChatScreen({
       from: 'me',
       text: text ?? '',
       attachments,
+      mentions,
       kind: 'direct',
       sentAt: Date.now(),
       stage: 'sent',
@@ -384,7 +398,7 @@ export function ChatScreen({
       const isSelf = peerId === myUserId;
       // Pack the text + attachments into the v1 envelope. Pre-rebrand
       // peers see legacy raw utf-8 text — `decodePayload` handles both.
-      const plaintext = encodePayload({ v: 1, text, attachments });
+      const plaintext = encodePayload({ v: 1, text, attachments, mentions });
       let ciphertext: Uint8Array;
       if (isSelf) {
         ciphertext = utf8ToBytes(plaintext);
@@ -602,6 +616,10 @@ export function ChatScreen({
                 onTapPhoto={(a) => setViewerAttachment(a)}
                 onTapFile={(a) => void saveAndAnnounceFile(a)}
                 onSeeMore={() => onOpenFullMessage?.(item.text)}
+                onMentionPress={(h) => {
+                  // Tapping the current peer or yourself is a no-op.
+                  if (h !== myUserId && h !== peerId) onOpenPeer?.(h);
+                }}
               />
             );
           }}
