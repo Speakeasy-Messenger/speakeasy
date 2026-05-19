@@ -24,6 +24,12 @@ interface Props {
    * full (used by the full-message screen itself).
    */
   onSeeMore?: () => void;
+  /**
+   * Tap handler for an @mention. Receives the bare handle (no `@`).
+   * When set, mention spans become tappable; when omitted they are
+   * still highlighted but inert (e.g. the full-message screen).
+   */
+  onMentionPress?: (handle: string) => void;
 }
 
 /**
@@ -31,7 +37,13 @@ interface Props {
  * (underlined, open in the browser), and long messages truncated behind
  * a "See more" link. Segmentation logic lives in rich-message-text.ts.
  */
-export function RichMessageText({ text, mentions, style, onSeeMore }: Props) {
+export function RichMessageText({
+  text,
+  mentions,
+  style,
+  onSeeMore,
+  onMentionPress,
+}: Props) {
   const truncate = !!onSeeMore && text.length > LONG_MESSAGE_CHARS;
   const shown = truncate ? text.slice(0, LONG_MESSAGE_CHARS).trimEnd() : text;
   const segs = tokenize(shown, !!mentions?.length);
@@ -53,8 +65,18 @@ export function RichMessageText({ text, mentions, style, onSeeMore }: Props) {
     <Text style={style} onLongPress={copyText}>
       {segs.map((s, i) => {
         if (s.kind === 'mention') {
+          // `s.text` is the matched `@handle`; strip the `@` for the
+          // navigation target.
           return (
-            <Text key={i} style={styles.mention}>
+            <Text
+              key={i}
+              style={styles.mention}
+              onPress={
+                onMentionPress
+                  ? () => onMentionPress(s.text.replace(/^@/, ''))
+                  : undefined
+              }
+            >
               {s.text}
             </Text>
           );

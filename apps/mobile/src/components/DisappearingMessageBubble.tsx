@@ -48,6 +48,8 @@ export interface DisappearingMessageBubbleProps {
   onTapFile?: (attachment: Attachment) => void;
   /** Tap "See more" on a long message → host opens the full-text screen. */
   onSeeMore?: () => void;
+  /** Tap an @mention → host opens a chat with that handle (bare, no `@`). */
+  onMentionPress?: (handle: string) => void;
   /** Fires when the current stage's animation completes. */
   onStageAnimated?: (stage: DisappearingStage) => void;
   /**
@@ -103,6 +105,7 @@ export function DisappearingMessageBubble({
   onTapPhoto,
   onTapFile,
   onSeeMore,
+  onMentionPress,
   onStageAnimated,
   delivered,
   read,
@@ -210,6 +213,7 @@ export function DisappearingMessageBubble({
           text={text}
           mentions={mentions}
           onSeeMore={onSeeMore}
+          onMentionPress={onMentionPress}
           style={[
             styles.text,
             isSent ? styles.sentText : { color: themed.ink },

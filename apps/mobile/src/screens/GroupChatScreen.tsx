@@ -27,7 +27,6 @@ import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Avatar } from '../components/Avatar.js';
 import { MentionPicker } from '../components/MentionPicker.js';
-import { MentionText } from '../components/MentionText.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { MutedIcon } from '../components/icons/MutedIcon.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
@@ -53,6 +52,8 @@ interface Props {
   onManageMembers?: () => void;
   /** Open the full-text screen for a long message ("See more" tap). */
   onOpenFullMessage?: (text: string) => void;
+  /** Open a 1:1 chat with a handle — tapped from an @mention. */
+  onOpenPeer?: (handle: string) => void;
 }
 
 // Stable fallback for the messages selector. A fresh `[]` literal here
@@ -84,6 +85,7 @@ export function GroupChatScreen({
   onBack,
   onManageMembers,
   onOpenFullMessage,
+  onOpenPeer,
 }: Props) {
   const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
@@ -434,6 +436,10 @@ export function GroupChatScreen({
                   onTapPhoto={(a) => setViewerAttachment(a)}
                   onTapFile={(a) => void saveAndAnnounceFile(a)}
                   onSeeMore={() => onOpenFullMessage?.(item.text)}
+                  onMentionPress={(h) => {
+                    // Tapping your own handle is a no-op.
+                    if (h !== myUserId) onOpenPeer?.(h);
+                  }}
                 />
               </View>
             );
