@@ -23,6 +23,8 @@ import { MediaViewerScreen } from './MediaViewerScreen.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import { SystemMessageRow } from '../components/SystemMessageRow.js';
+import { DateSeparatorRow } from '../components/DateSeparatorRow.js';
+import { withDateSeparators } from '../feed/with-date-separators.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Avatar } from '../components/Avatar.js';
@@ -201,6 +203,10 @@ export function GroupChatScreen({
   // bottom — the newest message must come first. The store keeps
   // messages oldest-first, so feed the list a reversed copy.
   const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
+  // Date-change separators interleaved into the inverted-list data so
+  // "Today" / "Yesterday" / etc. sit above the first message of each
+  // day. See `withDateSeparators` for the visual-layout reasoning.
+  const feedItems = useMemo(() => withDateSeparators(orderedMessages), [orderedMessages]);
 
   // Opening the group clears its push notification (notifee keys the
   // notification by conversation id, which for a group is the groupId).
@@ -391,11 +397,14 @@ export function GroupChatScreen({
         <FlatList
           ref={listRef}
           inverted
-          data={orderedMessages}
+          data={feedItems}
           keyExtractor={(m) => m.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
           renderItem={({ item, index }) => {
+            if (item.kind === 'date-separator') {
+              return <DateSeparatorRow timestamp={item.sentAt} />;
+            }
             // System messages (joins, leaves, name changes, etc.)
             // render as centered captions per CONVERSATIONS.md §3.6.
             if (item.from === 'system') {
@@ -411,12 +420,15 @@ export function GroupChatScreen({
             // Burst boundary = the previous message has a different
             // `from`, OR this is the first message in the list.
             // The list is inverted (newest-first), so the
-            // conversation-older neighbour is at index + 1.
+            // conversation-older neighbour is at index + 1. Walk past
+            // any date separator between the two so a day boundary
+            // doesn't fake a burst boundary.
             const isSelf = item.from === 'me';
+            let j = index + 1;
+            while (j < feedItems.length && feedItems[j]!.kind === 'date-separator') j++;
+            const prevItem = j < feedItems.length ? feedItems[j] : undefined;
             const prev =
-              index + 1 < orderedMessages.length
-                ? orderedMessages[index + 1]
-                : undefined;
+              prevItem && prevItem.kind !== 'date-separator' ? prevItem : undefined;
             const showAttribution =
               !isSelf && (!prev || prev.from !== item.from);
             return (
@@ -433,6 +445,7 @@ export function GroupChatScreen({
                   mentions={item.mentions}
                   stage={item.stage as DisappearingStage}
                   variant={isSelf ? 'sent' : 'received'}
+                  timestamp={item.sentAt}
                   onTapPhoto={(a) => setViewerAttachment(a)}
                   onTapFile={(a) => void saveAndAnnounceFile(a)}
                   onSeeMore={() => onOpenFullMessage?.(item.text)}
@@ -495,6 +508,13 @@ export function GroupChatScreen({
               onSubmitEditing={hasInput ? handleSend : undefined}
               returnKeyType="send"
               multiline
+              // Once the typed message exceeds `maxHeight` the input
+              // would otherwise clip the overflow with no way to reach
+              // it. Enabling internal scroll makes a long draft
+              // scrollable instead of hidden. (TextInput doesn't
+              // expose a JS-side `showsVerticalScrollIndicator` —
+              // the indicator appears natively while scrolling.)
+              scrollEnabled
             />
             <Pressable
               onPress={cycleTtl}
