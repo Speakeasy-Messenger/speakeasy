@@ -246,6 +246,11 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                   onOpenFullMessage={(text) =>
                     navigation.navigate('FullMessage', { text })
                   }
+                  // `push`, not `navigate`: native-stack `navigate`
+                  // to the same route name just swaps params on the
+                  // current screen — tapping an @mention should open
+                  // a fresh Chat on top, with a back path home.
+                  onOpenPeer={(peerId) => navigation.push('Chat', { peerId })}
                   onOpenSettings={() =>
                     navigation.navigate('ConversationSettings', {
                       peerId: route.params.peerId,
@@ -318,6 +323,9 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                   onOpenFullMessage={(text) =>
                     navigation.navigate('FullMessage', { text })
                   }
+                  // Tap an @mention in a group message → open a 1:1
+                  // with that member.
+                  onOpenPeer={(peerId) => navigation.navigate('Chat', { peerId })}
                   // GROUP-SETTINGS.md §2: tapping the AppBar title block
                   // opens the room's full settings screen.
                   onManageMembers={() =>
