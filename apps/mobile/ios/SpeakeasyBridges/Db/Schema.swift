@@ -67,6 +67,29 @@ enum Schema {
               PRIMARY KEY (name, device_id, distribution_id)
             )
             """
+        ],
+        // version 3 (idempotent-decrypt plaintext cache) — mirrors
+        // Schema.kt v3; the iOS schema had been a version behind.
+        [
+            """
+            CREATE TABLE decrypt_cache (
+              ct_hash TEXT PRIMARY KEY,
+              plaintext BLOB NOT NULL,
+              created_at INTEGER NOT NULL
+            )
+            """
+        ],
+        // version 4 (encrypted app key-value store) — holds the
+        // decrypted conversation history that used to sit in plaintext
+        // AsyncStorage. See Db/SecureKvModule.swift and
+        // store/conversations.ts.
+        [
+            """
+            CREATE TABLE kv (
+              key TEXT PRIMARY KEY,
+              value BLOB NOT NULL
+            )
+            """
         ]
     ]
 

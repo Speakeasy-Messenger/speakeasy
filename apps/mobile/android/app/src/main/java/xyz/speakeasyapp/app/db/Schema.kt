@@ -98,6 +98,18 @@ object Schema {
               )
               """,
           ),
+          // version 4 (encrypted app key-value store) — holds the
+          // decrypted conversation history that used to sit in
+          // plaintext AsyncStorage. See db/SecureKvModule.kt and
+          // store/conversations.ts.
+          listOf(
+              """
+              CREATE TABLE kv (
+                key TEXT PRIMARY KEY,
+                value BLOB NOT NULL
+              )
+              """,
+          ),
       )
 
   fun applyMigrations(db: SQLiteDatabase) {

@@ -4,13 +4,18 @@ import com.facebook.react.ReactPackage
 import com.facebook.react.bridge.NativeModule
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.uimanager.ViewManager
+import xyz.speakeasyapp.app.db.SecureKvModule
 
 class SignalProtocolPackage : ReactPackage {
-  // Both the 1:1 and group-messaging bridges live here — they share the
-  // same SpeakeasySignalStore singleton and SQLCipher store, so it makes
-  // sense to ship them as one ReactPackage.
+  // The 1:1, group-messaging and secure-KV bridges live here — they all
+  // share the same SQLCipher SpeakeasyDb, so it makes sense to ship
+  // them as one ReactPackage.
   override fun createNativeModules(ctx: ReactApplicationContext): List<NativeModule> =
-      listOf(SignalProtocolModule(ctx), GroupMessagingModule(ctx))
+      listOf(
+          SignalProtocolModule(ctx),
+          GroupMessagingModule(ctx),
+          SecureKvModule(ctx),
+      )
 
   override fun createViewManagers(ctx: ReactApplicationContext): List<ViewManager<*, *>> =
       emptyList()

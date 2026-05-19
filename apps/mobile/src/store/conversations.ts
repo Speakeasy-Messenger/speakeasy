@@ -1,5 +1,6 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
+import { secureKv } from '../native/secure-kv.js';
 import {
   DEFAULT_TTL_SECONDS,
   TTL_OPTIONS,
@@ -13,12 +14,16 @@ import type { DisappearingStage } from '../components/DisappearingMessageBubble.
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
  *
- * Persisted to AsyncStorage so chat history survives app restarts
- * (matches user expectation; Tier B run 25213896438 caught the gap).
+ * Persisted so chat history survives app restarts. The decrypted
+ * message bodies are sensitive, so persistence goes through `secureKv`
+ * — the SQLCipher-backed `kv` table — NOT plaintext AsyncStorage.
  * Spec §5 still says messages disappear by default — that's the local
  * TTL engine's job; persistence here just keeps undisappeared messages
- * across cold starts. Real SQLCipher migration lands when the native
- * shells are scaffolded (§4c).
+ * across cold starts.
+ *
+ * History note: this store used to write cleartext JSON to AsyncStorage
+ * (an unencrypted SQLite file). `hydrate` scrubs that legacy plaintext
+ * key on every run so no decrypted history lingers on disk.
  */
 
 const STORAGE_KEY = 'speakeasy.conversations.v1';
@@ -179,10 +184,11 @@ function emptyConversation(kind: ConversationKind): ConversationState {
 
 async function persist(byId: Record<string, ConversationState>): Promise<void> {
   try {
-    await AsyncStorage.setItem(STORAGE_KEY, JSON.stringify(byId));
+    await secureKv.set(STORAGE_KEY, JSON.stringify(byId));
   } catch {
     // Persistence failure is non-fatal — in-memory state is the source
-    // of truth for the current session.
+    // of truth for the current session. Before enrollment the encrypted
+    // DB isn't open yet; that rejection lands here and is ignored.
   }
 }
 
@@ -433,8 +439,14 @@ export const useConversations = create<ConversationsState>((set, get) => ({
   },
 
   hydrate: async () => {
+    // Scrub the legacy plaintext copy. Earlier builds persisted
+    // decrypted history as cleartext JSON in AsyncStorage; deleting it
+    // here removes that on-disk exposure on the first run of any build
+    // that has this code. Idempotent — a no-op once it's gone. The old
+    // history is intentionally not migrated into the encrypted store.
+    void AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
     try {
-      const raw = await AsyncStorage.getItem(STORAGE_KEY);
+      const raw = await secureKv.get(STORAGE_KEY);
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, ConversationState>;
         // Drop any messages whose TTL has already expired (the local
@@ -464,6 +476,12 @@ export const useConversations = create<ConversationsState>((set, get) => ({
 
   reset: async () => {
     set({ byId: {} });
+    try {
+      await secureKv.delete(STORAGE_KEY);
+    } catch {
+      /* ignore — pre-enrollment the DB isn't open; nothing to clear */
+    }
+    // Also clear any legacy plaintext copy, for the account-delete path.
     try {
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch {
