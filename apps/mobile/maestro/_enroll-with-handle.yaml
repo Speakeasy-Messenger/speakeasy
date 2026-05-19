@@ -1,12 +1,15 @@
-# Shared sub-flow: complete enrollment via the Phase 3 4-screen
-# onboarding flow.
+# Shared sub-flow: complete enrollment via the onboarding flow.
 #
 # Steps:
-#   01 Door     — tap "Open the door"
-#   02 Room     — tap "Step inside"
-#   03 Handle   — type handle → wait for "available" → tap "This one's mine"
-#                 → BiometricPrompt subflow (PIN 0000 on the emulator)
-#   04 Face     — tap the first animal tile → tap "Open the door"
+#   01 Door        — tap "Open the door"
+#   02 Room        — tap "Step inside"
+#   03 Handle      — type handle → wait for "available" → tap continue
+#                    → BiometricPrompt subflow (PIN 0000 on the emulator)
+#   04 Face        — tap the first animal tile → tap confirm
+#   05 Permissions — tap "Continue" on the notifications-permission
+#                    screen. This screen's button is what calls
+#                    identity.setUserId, so the app does NOT flip to
+#                    Conversations until it is tapped through.
 #
 # Each Tier B run boots a fresh in-memory api server, so any well-formed
 # handle is available. Callers don't need to thread a unique value
@@ -97,6 +100,24 @@ appId: xyz.speakeasyapp.app
     id: "onboarding-face-fox"
 - tapOn:
     id: "onboarding-face-confirm"
+
+# ─── Step 05: Notifications permission ───
+# Onboarding screen 05 (PermissionsStep). Its "Continue" button fires
+# the notifications request AND calls identity.setUserId — so the app
+# does not flip to Conversations until this is tapped. On the API-30
+# Tier B emulator POST_NOTIFICATIONS is not a runtime permission, so no
+# system dialog appears.
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-permissions-continue"
+    timeout: 15000
+- tapOn:
+    id: "onboarding-permissions-continue"
+# A POST_NOTIFICATIONS system dialog only appears on API 33+; dismiss it
+# optionally so a future emulator bump doesn't break this flow.
+- tapOn:
+    text: "Allow"
+    optional: true
 
 # Race condition (documented in 01-enroll.yaml): after setUserId the
 # navigator flips to the authed stack; the navigation.replace
