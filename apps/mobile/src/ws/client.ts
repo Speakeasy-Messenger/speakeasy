@@ -43,6 +43,16 @@ export interface SpeakeasyWsClientOptions {
    * subscribers — the client fans out to every subscribed listener.
    */
   onMessage?: (msg: WsServerMsg) => void;
+  /**
+   * Invoked when the socket is closed mid-auth with code 4003
+   * (`not_enrolled`): the attestation token is valid but the server has
+   * no `(token → userId)` binding for it. Re-attesting alone loops
+   * forever — the impl should re-enroll the device (rebuild the
+   * server-side row) before the client reconnects. Awaited; the
+   * reconnect is held until it settles. Fired at most once per
+   * auth-rejection streak.
+   */
+  onAuthRejected?: (info: WsCloseInfo) => void | Promise<void>;
   /** Now provider — injected for deterministic tests. */
   now?: () => number;
 }
@@ -72,6 +82,9 @@ export class SpeakeasyWsClient {
   // next `handleOpen` then asks `getToken` for a freshly re-attested
   // token instead of the cached (likely-bad) one.
   private lastAuthFailed = false;
+  // True while an `onAuthRejected` re-enroll is running. Stops a fast
+  // 4003 reconnect cycle from spawning a re-enroll per close.
+  private authRecoveryInFlight = false;
   private readonly Ws: typeof WebSocket;
   private readonly subscribers = new Set<Subscriber>();
   private readonly stateSubscribers = new Set<(state: WsState) => void>();
@@ -271,7 +284,7 @@ export class SpeakeasyWsClient {
         intentional: this.intentionalClose,
       });
       if (this.socket !== ws) return;
-      this.handleClose();
+      this.handleClose(closeEv.code ?? 0, closeEv.reason ?? '');
     });
     ws.addEventListener('error', () => {
       // 'close' will fire after 'error' — handle reconnect there.
@@ -322,17 +335,47 @@ export class SpeakeasyWsClient {
     return () => this.subscribers.delete(handler);
   }
 
-  private handleClose(): void {
+  private handleClose(code: number, reason: string): void {
     this.clearTimers();
     this.socket = undefined;
     // Closed while still authenticating → the token was rejected (or
     // the getToken fetch failed). Flag it so the next attempt forces a
     // fresh re-attestation rather than retrying the same bad token.
-    if (this.state === 'authenticating') {
+    const wasAuthenticating = this.state === 'authenticating';
+    if (wasAuthenticating) {
       this.lastAuthFailed = true;
     }
     if (this.intentionalClose) {
       this.setState('closed');
+      return;
+    }
+    // 4003 `not_enrolled`: the token is fine but the server has no
+    // binding for it. Re-attesting just loops — drive a one-shot
+    // re-enroll, then reconnect. Without this the WS spins in
+    // `reconnecting` forever (reported 2026-05-19).
+    if (
+      wasAuthenticating &&
+      code === 4003 &&
+      this.opts.onAuthRejected &&
+      !this.authRecoveryInFlight
+    ) {
+      this.authRecoveryInFlight = true;
+      this.setState('reconnecting');
+      void Promise.resolve(
+        this.opts.onAuthRejected({
+          code,
+          reason,
+          stateAtClose: 'authenticating',
+          intentional: false,
+        }),
+      )
+        .catch(() => {
+          /* best-effort — the reconnect retries regardless */
+        })
+        .finally(() => {
+          this.authRecoveryInFlight = false;
+          this.scheduleReconnect();
+        });
       return;
     }
     this.scheduleReconnect();
