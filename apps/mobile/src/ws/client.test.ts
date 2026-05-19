@@ -365,4 +365,69 @@ describe('SpeakeasyWsClient', () => {
     expect(calls[0]).toBeUndefined();
     expect(calls[1]).toBeUndefined();
   });
+
+  it('runs onAuthRejected and holds the reconnect on a 4003 not_enrolled close', async () => {
+    // Reported 2026-05-19: a device whose (token → userId) binding the
+    // server forgot closed every auth attempt with 4003 and the WS spun
+    // in `reconnecting` forever. onAuthRejected drives a re-enroll, and
+    // the reconnect waits for it.
+    const authRejected: Array<{ code: number; reason: string }> = [];
+    let finishReenroll!: () => void;
+    const client = new SpeakeasyWsClient({
+      url: 'ws://x/ws',
+      getToken: async () => 'tok',
+      webSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      reconnectBaseMs: 100,
+      onAuthRejected: (info) => {
+        authRejected.push({ code: info.code, reason: info.reason });
+        return new Promise<void>((resolve) => {
+          finishReenroll = resolve;
+        });
+      },
+    });
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Server rejects the device: close mid-auth with 4003 not_enrolled.
+    first.fire('close', { code: 4003, reason: 'not_enrolled' });
+    expect(authRejected).toEqual([{ code: 4003, reason: 'not_enrolled' }]);
+
+    // Reconnect is held until the re-enroll settles — no new socket yet.
+    vi.advanceTimersByTime(1000);
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    // Re-enroll done → reconnect proceeds.
+    finishReenroll();
+    await Promise.resolve();
+    await Promise.resolve();
+    vi.advanceTimersByTime(100);
+    expect(FakeSocket.instances).toHaveLength(2);
+  });
+
+  it('does NOT run onAuthRejected on a non-4003 mid-auth close', async () => {
+    let called = 0;
+    const client = new SpeakeasyWsClient({
+      url: 'ws://x/ws',
+      getToken: async () => 'tok',
+      webSocketImpl: FakeSocket as unknown as typeof WebSocket,
+      reconnectBaseMs: 100,
+      onAuthRejected: () => {
+        called++;
+      },
+    });
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    // Generic auth-phase close (bad token, code 4005) — re-attestation
+    // handles it; the binding is fine, so no re-enroll.
+    first.fire('close', { code: 4005, reason: 'token_fetch_failed' });
+    expect(called).toBe(0);
+    expect(client.getState()).toBe('reconnecting');
+  });
 });

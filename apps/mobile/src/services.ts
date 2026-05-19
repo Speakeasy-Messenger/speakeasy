@@ -73,6 +73,16 @@ export function getWsClient(
         // socket from the same device — or something else.
         diag('ws', 'closed', { code, reason, stateAtClose, intentional });
       },
+      onAuthRejected: async ({ reason }) => {
+        // The server forgot this device's (token → userId) binding.
+        // Rebuild it before the client reconnects, otherwise the WS
+        // spins in `reconnecting` forever. Dynamic import avoids a
+        // static cycle with ensure-enrolled.ts (which imports `api`).
+        diag('ws', 'auth rejected — re-enrolling device', { reason });
+        const { ensureServerBinding } = await import('./auth/ensure-enrolled.js');
+        const result = await ensureServerBinding({ signalProtocol, vouchflow });
+        diag('ws', 'auth-rejected re-enroll done', { result });
+      },
     });
   }
   return _ws;

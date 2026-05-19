@@ -18,6 +18,7 @@
 		39FCF750BF31B495A466EA67 /* Pods_Speakeasy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C54FDF6DBBBEF8599A785AB8 /* Pods_Speakeasy.framework */; };
 		55BDED2AAA4650B6FF54DC8C /* GroupMessagingModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 4D94E7DB24BAB5E2B77E00B5 /* GroupMessagingModule.m */; };
 		578427435DB05A5BC84EC86F /* SpeakeasyDb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B6B56EBE5C4B89000F5A852 /* SpeakeasyDb.swift */; };
+		DBDBDBDBDBDBDBDB00000001 /* DbKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */; };
 		5D91DCC8B08CC06D8F384337 /* VouchflowSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 1BD051D05D30B64C12D48FF8 /* VouchflowSDK */; };
 		665C3523E54C833C48728EA0 /* ChannelKeyModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB743423C1F0613508C5D48 /* ChannelKeyModule.swift */; };
 		690B25EC8D6B236CDEB84B49 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
@@ -60,6 +61,7 @@
 		3B4392A12AC88292D35C810B /* Pods-Speakeasy.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Speakeasy.debug.xcconfig"; path = "Target Support Files/Pods-Speakeasy/Pods-Speakeasy.debug.xcconfig"; sourceTree = "<group>"; };
 		4960CDE5753A41F373A65ECC /* VouchflowModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VouchflowModule.swift; sourceTree = "<group>"; };
 		4B6B56EBE5C4B89000F5A852 /* SpeakeasyDb.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyDb.swift; sourceTree = "<group>"; };
+		DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DbKeyStore.swift; sourceTree = "<group>"; };
 		4D94E7DB24BAB5E2B77E00B5 /* GroupMessagingModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = GroupMessagingModule.m; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-Speakeasy.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Speakeasy.release.xcconfig"; path = "Target Support Files/Pods-Speakeasy/Pods-Speakeasy.release.xcconfig"; sourceTree = "<group>"; };
 		5B7EB9410499542E8C5724F5 /* Pods-Speakeasy-SpeakeasyTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Speakeasy-SpeakeasyTests.debug.xcconfig"; path = "Target Support Files/Pods-Speakeasy-SpeakeasyTests/Pods-Speakeasy-SpeakeasyTests.debug.xcconfig"; sourceTree = "<group>"; };
@@ -172,6 +174,7 @@
 			children = (
 				1882DB5A9CE9B8416D49950F /* Schema.swift */,
 				4B6B56EBE5C4B89000F5A852 /* SpeakeasyDb.swift */,
+				DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */,
 			);
 			name = Db;
 			path = SpeakeasyBridges/Db;
@@ -527,6 +530,7 @@
 				665C3523E54C833C48728EA0 /* ChannelKeyModule.swift in Sources */,
 				B5532321519E60E237FE61B9 /* Schema.swift in Sources */,
 				578427435DB05A5BC84EC86F /* SpeakeasyDb.swift in Sources */,
+				DBDBDBDBDBDBDBDB00000001 /* DbKeyStore.swift in Sources */,
 				14BCAC180BBDC8A908FA79AC /* VouchflowBootstrap.swift in Sources */,
 				55BDED2AAA4650B6FF54DC8C /* GroupMessagingModule.m in Sources */,
 				A18BA49A77AAE2F5050B06EF /* GroupMessagingModule.swift in Sources */,
