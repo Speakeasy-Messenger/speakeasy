@@ -390,6 +390,51 @@ async function existingMessages(conversationId: string): Promise<MsgStyleMsg[]> 
   }
 }
 
+/** AsyncStorage key prefix for a conversation's persisted MessagingStyle
+ *  stack — see `persistNotifStack`. */
+const NOTIF_STACK_PREFIX = '@speakeasy/notif-stack:';
+
+/**
+ * Persist a conversation's MessagingStyle stack.
+ *
+ * The notifee background-event `detail.notification` handed to an inline
+ * Reply action does not reliably carry `android.style.messages`. Reading
+ * the prior stack back from it dropped the peer's messages, so the reply
+ * re-posted a banner containing only the user's own text. This durable
+ * copy is the authoritative prior stack for `handleInlineReply`.
+ */
+async function persistNotifStack(
+  conversationId: string,
+  messages: MsgStyleMsg[],
+): Promise<void> {
+  try {
+    // Strip the file-URI `icon` — re-derived on the next display.
+    const clean = messages.map((m) => ({
+      text: m.text,
+      timestamp: m.timestamp,
+      ...(m.person ? { person: { id: m.person.id, name: m.person.name } } : {}),
+    }));
+    await AsyncStorage.setItem(
+      NOTIF_STACK_PREFIX + conversationId,
+      JSON.stringify(clean),
+    );
+  } catch {
+    /* best-effort — handleInlineReply falls back to the event's style */
+  }
+}
+
+/** Read back a conversation's persisted MessagingStyle stack. */
+async function loadNotifStack(conversationId: string): Promise<MsgStyleMsg[]> {
+  try {
+    const raw = await AsyncStorage.getItem(NOTIF_STACK_PREFIX + conversationId);
+    if (!raw) return [];
+    const parsed = JSON.parse(raw) as MsgStyleMsg[];
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
 /**
  * Render (or update) a conversation's MessagingStyle notification —
  * stacks `messages` and, for 1:1 chats, attaches an inline Reply field.
@@ -416,6 +461,9 @@ async function displayMessagingNotification(args: {
       ? { ...m, person: { ...m.person, ...(peerIcon ? { icon: peerIcon } : {}) } }
       : m,
   );
+  // Durable copy of the stack so an inline reply can rebuild the full
+  // thread even when the notifee event detail omits `style.messages`.
+  void persistNotifStack(args.conversationId, messages);
   const latest = messages[messages.length - 1];
   await notifee.displayNotification({
     id: args.conversationId,
@@ -453,6 +501,13 @@ async function displayMessagingNotification(args: {
 /** Plain single-line notification — private device / sealed / call. */
 async function displayGenericNotification(data: FcmData): Promise<void> {
   await ensureChannel();
+  // Show the counterparty's avatar as the large icon — a call or a
+  // plain-banner message should still read as "from <peer>", not the
+  // app logo. Sealed messages carry no `sender_id` (the server strips
+  // it upstream), so they keep the logo — the privacy-correct outcome.
+  const largeIcon = data.sender_id
+    ? await cachedAvatarUri(data.sender_id)
+    : undefined;
   await notifee.displayNotification({
     id: data.conversation_id,
     title: data.title ?? 'speakeasy',
@@ -465,6 +520,7 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
+      ...(largeIcon ? { largeIcon } : {}),
       pressAction: { id: 'default' },
     },
   });
@@ -556,7 +612,12 @@ async function handleInlineReply(
   // Prior stack comes from the replied-to notification itself — the
   // event detail is authoritative even when the notification is no
   // longer in the displayed set.
-  const prior = messagesFromNotification(notification);
+  // Durable store first — the notifee event detail doesn't reliably
+  // carry `style.messages`, which previously dropped the peer's messages
+  // and re-posted a self-only banner. Fall back to the event's own
+  // style for the (rare) case where nothing was persisted.
+  let prior = await loadNotifStack(conversationId);
+  if (prior.length === 0) prior = messagesFromNotification(notification);
   if (prior.length === 0) {
     diag('push-reply', 'no prior messages on replied notification — stack may be lost', {
       conversationId,
