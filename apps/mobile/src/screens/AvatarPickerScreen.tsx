@@ -23,7 +23,7 @@ import { useIdentity } from '../store/identity.js';
 import { useOwnership } from '../store/ownership.js';
 import { useProfiles } from '../store/profiles.js';
 import { useColors } from '../theme/index.js';
-import { accent, font } from '../theme/tokens.js';
+import { accent, font, space } from '../theme/tokens.js';
 import { AppBar } from '../components/AppBar.js';
 import { diag } from '../diag/log.js';
 
@@ -329,9 +329,9 @@ const styles = StyleSheet.create({
   sectionHeader: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 10,
-    marginTop: 18,
-    marginBottom: 12,
+    gap: space.m,
+    marginTop: space.lg,
+    marginBottom: space.m,
   },
   sectionRule: {
     flex: 1,
@@ -346,7 +346,7 @@ const styles = StyleSheet.create({
   grid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 6,
+    gap: space.s,
   },
   cell: {
     width: '31.5%',
@@ -354,7 +354,7 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 2,
-    gap: 4,
+    gap: space.xs,
     position: 'relative',
   },
   label: {
@@ -368,8 +368,8 @@ const styles = StyleSheet.create({
     position: 'absolute',
     top: 6,
     right: 6,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    paddingHorizontal: space.s,
+    paddingVertical: space.xs,
     borderWidth: StyleSheet.hairlineWidth,
   },
   priceText: {
@@ -380,8 +380,8 @@ const styles = StyleSheet.create({
   },
   restoreWrap: {
     alignSelf: 'center',
-    paddingVertical: 18,
-    marginTop: 12,
+    paddingVertical: space.lg,
+    marginTop: space.m,
   },
   restoreText: {
     fontFamily: font.regular,

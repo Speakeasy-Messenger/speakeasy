@@ -606,7 +606,7 @@ const styles = StyleSheet.create({
   composer: {
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 20,
-    paddingVertical: 14,
+    paddingVertical: space.md,
   },
   inputBar: {
     flexDirection: 'row',
@@ -624,12 +624,12 @@ const styles = StyleSheet.create({
     minHeight: 32,
     maxHeight: 120,
     paddingHorizontal: space.sm,
-    paddingVertical: 6,
+    paddingVertical: space.sm,
     fontFamily: font.regular,
     fontSize: type.body.size,
   },
   ttlChip: {
-    paddingHorizontal: 6,
+    paddingHorizontal: space.sm,
     paddingVertical: 8,
   },
   ttlText: {

@@ -12,7 +12,7 @@ import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { descriptorFor, type AvatarDescriptor } from '../avatars/catalog.js';
 import { purchaseAvatar } from '../services/purchases.js';
 import { useOwnership } from '../store/ownership.js';
-import { accent, brand, font, scrim, workspace } from '../theme/tokens.js';
+import { accent, brand, font, scrim, space, workspace } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
 
 /**
@@ -280,16 +280,16 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject },
   wrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    paddingHorizontal: 24,
-    paddingTop: 18,
-    paddingBottom: 32,
+    paddingHorizontal: space.xl,
+    paddingTop: space.lg,
+    paddingBottom: space.xxl,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   grab: {
     alignSelf: 'center',
     width: 36,
     height: 4,
-    marginBottom: 24,
+    marginBottom: space.xl,
   },
   portraitWrap: {
     width: 160,
@@ -297,7 +297,7 @@ const styles = StyleSheet.create({
     alignSelf: 'center',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 18,
+    marginBottom: space.lg,
   },
   tierLabel: {
     fontFamily: font.medium,
@@ -312,7 +312,7 @@ const styles = StyleSheet.create({
     fontSize: 28,
     color: TEXT,
     textAlign: 'center',
-    marginTop: 4,
+    marginTop: space.xs,
     letterSpacing: -28 * 0.025,
   },
   blurb: {
@@ -320,7 +320,7 @@ const styles = StyleSheet.create({
     fontSize: 13,
     color: TEXT_MUTE,
     textAlign: 'center',
-    marginTop: 12,
+    marginTop: space.m,
     lineHeight: 19,
   },
   priceLine: {
@@ -329,16 +329,16 @@ const styles = StyleSheet.create({
     color: accent.base,
     textAlign: 'center',
     letterSpacing: -32 * 0.025,
-    marginTop: 18,
-    marginBottom: 14,
+    marginTop: space.lg,
+    marginBottom: space.base,
   },
   disclaimer: {
     backgroundColor: 'rgba(229, 166, 69, 0.08)',
     borderColor: 'rgba(229, 166, 69, 0.3)',
     borderWidth: StyleSheet.hairlineWidth,
-    paddingVertical: 10,
-    paddingHorizontal: 14,
-    marginBottom: 18,
+    paddingVertical: space.m,
+    paddingHorizontal: space.base,
+    marginBottom: space.lg,
   },
   disclaimerText: {
     fontFamily: font.regular,
@@ -351,12 +351,12 @@ const styles = StyleSheet.create({
   divider: {
     height: StyleSheet.hairlineWidth,
     backgroundColor: TEXT_FAINT,
-    marginVertical: 22,
+    marginVertical: space.xl,
   },
   cta: {
     alignItems: 'center',
     justifyContent: 'center',
-    paddingVertical: 16,
+    paddingVertical: space.base,
     minHeight: 52,
   },
   ctaText: {
@@ -370,14 +370,14 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: '#D63E3E',
     textAlign: 'center',
-    marginTop: 10,
+    marginTop: space.m,
   },
   cancel: {
     fontFamily: font.regular,
     fontSize: 14,
     color: TEXT_MUTE,
     textAlign: 'center',
-    paddingVertical: 14,
-    marginTop: 6,
+    paddingVertical: space.base,
+    marginTop: space.s,
   },
 });

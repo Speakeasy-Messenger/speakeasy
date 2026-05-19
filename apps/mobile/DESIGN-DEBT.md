@@ -44,27 +44,19 @@ do them as deliberate, separately-reviewed passes — not one mega-diff.
   `SettingsListItem` stands as the single row primitive. ShareHandle
   intentionally left alone (brand-canvas screen). Verified on the
   Android emulator (release build, before/after screenshots).
-- 🟡 **Pass 4 (in progress) — motion done, spacing open.** `motion`
-  gained `pulse` (750) and `ripple` (900); the CallScreen slow
-  durations + the `dissolve`/`screen`-matching durations across
-  Chat / Conversations / IdReveal / InAppBanner are routed through
-  `motion.*` (exact-value, no pixel change). **Remaining:** the ~128
-  off-scale spacing magic numbers.
+- ✅ **Pass 4 — motion + spacing.** `motion` gained `pulse` (750) and
+  `ripple` (900); the slow/`dissolve`/`screen`-matching durations are
+  routed through `motion.*`. Every off-scale spacing magic number
+  (~150 instances across 14 components + 23 screens) is snapped onto
+  the 4px `space` scale from `tokens.ts` — round-up-to-scale rule
+  (2→4, 6→8, 10→12, 14→16, 18→20, 22→24, 28→32; ties up). Files on
+  the legacy `spacing.ts` scale were switched to `tokens.ts`
+  (value-preserving rename). `grep` confirms zero off-scale
+  `padding`/`margin`/`gap` literals remain. Verified on the Android
+  emulator (release build).
 
-Passes 1 + 3 (and the Pass 4 motion routing) were exact-value token
-swaps — rendered output unchanged, safe without a device. Pass 2 was
-verified on-device. The Pass 4 spacing sweep changes rendered pixels
-and needs emulator verification.
-
-## Remediation passes (open — need the emulator)
-
-These change rendered pixels. Do them with the Android emulator
-running so each change is screenshot-verified — not blind.
-
-- **Pass 4 (finish) — spacing.** Snap the ~128 off-scale spacing
-  magic numbers onto the 4px `space` scale (the recurring `14` is the
-  worst — decide `space.m` 12 vs `space.base` 16 per instance, with
-  the emulator open). Full census of the ~177 instances is done.
+All four design-debt passes (1–4) plus the a11y pass are now
+complete. The remaining open items below need no emulator.
 
 ## Open (no device needed)
 

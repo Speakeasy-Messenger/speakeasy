@@ -1,7 +1,7 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 
 /**
  * BLOCK.md §5.2 — frozen-conversation InputBar replacement.
@@ -38,12 +38,12 @@ export function FrozenInputBar({ onUnblock }: Props): React.ReactElement {
 
 const styles = StyleSheet.create({
   bar: {
-    paddingHorizontal: space.md,
-    paddingTop: 14,
-    paddingBottom: 16,
+    paddingHorizontal: space.base,
+    paddingTop: space.base,
+    paddingBottom: space.base,
     borderTopWidth: StyleSheet.hairlineWidth,
     alignItems: 'center',
-    gap: 6,
+    gap: space.s,
   },
   line: {
     fontFamily: font.regular,

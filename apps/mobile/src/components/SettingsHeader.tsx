@@ -6,7 +6,7 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 
 /**
  * SETTINGS.md §3.2 / §7.1 — reusable header.
@@ -83,10 +83,10 @@ export function SettingsHeader({
 const styles = StyleSheet.create({
   wrap: {
     alignItems: 'center',
-    paddingTop: 28,
-    paddingBottom: 22,
-    paddingHorizontal: 16,
-    gap: 14,
+    paddingTop: space.xxl,
+    paddingBottom: space.xl,
+    paddingHorizontal: space.base,
+    gap: space.base,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   placeholder: {

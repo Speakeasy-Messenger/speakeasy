@@ -502,7 +502,7 @@ const styles = StyleSheet.create({
     height: 144,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 28,
+    marginBottom: space.xl,
   },
   outgoingEyebrow: {
     fontFamily: typeScale.meta.weight,
@@ -511,7 +511,7 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
     marginBottom: 12,
   },
-  outgoingHandle: { marginBottom: 6 },
+  outgoingHandle: { marginBottom: space.sm },
   outgoingState: {
     fontFamily: font.regular,
     fontSize: 14,

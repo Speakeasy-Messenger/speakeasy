@@ -5,8 +5,8 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { useCalls } from '../store/calls.js';
 import { useProfiles } from '../store/profiles.js';
-import { font, type as typeScale } from '../theme/tokens.js';
-import { space, useColors } from '../theme/index.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 interface Props {
@@ -107,15 +107,15 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     alignItems: 'center',
-    paddingTop: 60,
-    paddingHorizontal: space.lg,
+    paddingTop: space.mega,
+    paddingHorizontal: space.xl,
   },
   eyebrow: {
     fontFamily: typeScale.meta.weight,
     fontSize: 11,
     letterSpacing: 0.22 * 11,
     textTransform: 'uppercase',
-    marginBottom: 18,
+    marginBottom: space.lg,
     fontWeight: '600',
   },
   portraitTile: {
@@ -124,9 +124,9 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: 24,
+    marginBottom: space.xl,
   },
-  handleRow: { marginBottom: 8 },
+  handleRow: { marginBottom: space.s },
   sub: {
     fontFamily: font.medium,
     fontSize: 11,
@@ -135,13 +135,13 @@ const styles = StyleSheet.create({
   },
   actions: {
     flexDirection: 'row',
-    paddingHorizontal: space.md,
-    paddingBottom: space.md,
-    gap: 8,
+    paddingHorizontal: space.base,
+    paddingBottom: space.base,
+    gap: space.s,
   },
   btnDecline: {
     flex: 1,
-    paddingVertical: 16,
+    paddingVertical: space.base,
     alignItems: 'center',
     backgroundColor: 'transparent',
     borderWidth: 1,

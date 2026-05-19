@@ -14,7 +14,7 @@ import { PortraitTile } from '../../components/PortraitTile.js';
 import { FREE_AVATARS } from '../../avatars/catalog.js';
 import { api } from '../../services.js';
 import { useColors } from '../../theme/index.js';
-import { accent, brand, font, motion, type as typeScale, workspace } from '../../theme/tokens.js';
+import { accent, brand, font, motion, space, type as typeScale, workspace } from '../../theme/tokens.js';
 import { diag } from '../../diag/log.js';
 
 /**
@@ -208,7 +208,7 @@ const styles = StyleSheet.create({
     maxWidth: 30 * 8,
   },
   content: { paddingHorizontal: 24, paddingBottom: 24 },
-  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: 6 },
+  grid: { flexDirection: 'row', flexWrap: 'wrap', gap: space.s },
   cell: {
     width: '31.5%', // ≈ 3 columns with 6px gaps in a 24-padded container
     aspectRatio: 1,

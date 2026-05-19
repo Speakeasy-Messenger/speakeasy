@@ -14,8 +14,7 @@ import { PortraitTile } from '../components/PortraitTile.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
-import { accent, brand, font, type as typeScale, workspace } from '../theme/tokens.js';
-import { space } from '../theme/index.js';
+import { accent, brand, font, space, type as typeScale, workspace } from '../theme/tokens.js';
 import { encodeAdd } from '../utils/handle-link.js';
 
 /**
@@ -157,8 +156,8 @@ const styles = StyleSheet.create({
   // because it's a brand presentation surface (per spec §5.3).
   root: { flex: 1, backgroundColor: brand.canvas },
   headerBar: {
-    paddingHorizontal: space.lg,
-    paddingTop: space.md,
+    paddingHorizontal: space.xl,
+    paddingTop: space.base,
     paddingBottom: space.xs,
   },
   back: {
@@ -170,8 +169,8 @@ const styles = StyleSheet.create({
   body: {
     flex: 1,
     alignItems: 'center',
-    paddingHorizontal: space.lg,
-    paddingTop: space.lg,
+    paddingHorizontal: space.xl,
+    paddingTop: space.xl,
   },
   eyebrow: {
     fontFamily: typeScale.meta.weight,
@@ -179,18 +178,18 @@ const styles = StyleSheet.create({
     letterSpacing: 0.22 * 10,
     textTransform: 'uppercase',
     color: TEXT_MUTE,
-    marginBottom: 18,
+    marginBottom: space.lg,
   },
   handleRow: {
-    marginTop: 16,
-    marginBottom: 28,
+    marginTop: space.base,
+    marginBottom: space.xxl,
   },
-  // 200×200 frame, bone background, 14px quiet zone padding per spec.
+  // 200×200 frame, bone background, 16px quiet-zone padding per spec.
   qrFrame: {
     width: 200,
     height: 200,
     backgroundColor: BONE,
-    padding: 14,
+    padding: space.base,
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -198,17 +197,17 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: typeScale.caption.size,
     color: TEXT_MUTE,
-    marginTop: 16,
+    marginTop: space.base,
   },
   copiedSpacer: { height: 16 + typeScale.caption.size },
   actions: {
-    paddingHorizontal: space.lg,
-    paddingBottom: space.lg,
-    gap: space.sm,
+    paddingHorizontal: space.xl,
+    paddingBottom: space.xl,
+    gap: space.s,
   },
   btnPrimary: {
     backgroundColor: BRASS,
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
   },
   btnPrimaryText: {
@@ -219,7 +218,7 @@ const styles = StyleSheet.create({
   },
   btnSecondary: {
     backgroundColor: 'transparent',
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
     borderWidth: 1,
     borderColor: TEXT_FAINT,

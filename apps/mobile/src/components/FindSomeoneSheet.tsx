@@ -17,8 +17,8 @@ import { api } from '../services.js';
 import { useBlocks } from '../store/blocks.js';
 import { useIdentity } from '../store/identity.js';
 import { diag } from '../diag/log.js';
-import { space, useColors } from '../theme/index.js';
-import { font, scrim, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, scrim, space, type as typeScale } from '../theme/tokens.js';
 
 /**
  * NEW-CONVERSATION.md §3 — Find Someone sheet.
@@ -583,9 +583,9 @@ const styles = StyleSheet.create({
     left: 0,
     right: 0,
     bottom: 0,
-    paddingHorizontal: space.lg,
-    paddingTop: space.md,
-    paddingBottom: space.xl,
+    paddingHorizontal: space.xl,
+    paddingTop: space.base,
+    paddingBottom: space.xxl,
     borderTopWidth: StyleSheet.hairlineWidth,
     // Fixed minHeight (instead of '60%') — percentage minHeight inside
     // a Modal can compute to 0 on some Android builds, leaving the
@@ -598,7 +598,7 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
-    marginBottom: space.md,
+    marginBottom: space.base,
     minHeight: 44,
   },
   grabPressable: {
@@ -630,7 +630,7 @@ const styles = StyleSheet.create({
     fontFamily: font.bold,
     fontSize: 22,
     letterSpacing: -0.025 * 22,
-    marginBottom: 6,
+    marginBottom: space.s,
   },
   subtitle: {
     fontFamily: font.regular,
@@ -642,10 +642,10 @@ const styles = StyleSheet.create({
   inputRow: {
     flexDirection: 'row',
     alignItems: 'baseline',
-    gap: 4,
-    paddingBottom: 6,
+    gap: space.xs,
+    paddingBottom: space.s,
     borderBottomWidth: 1,
-    marginBottom: 12,
+    marginBottom: space.m,
   },
   atGlyph: {
     fontFamily: font.bold,
@@ -666,28 +666,28 @@ const styles = StyleSheet.create({
   miniRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.sm,
-    marginTop: 14,
+    gap: space.s,
+    marginTop: space.base,
   },
   miniSquare: { width: 6, height: 6 },
   miniText: {
     fontFamily: font.regular,
     fontSize: 13,
-    marginTop: 14,
+    marginTop: space.base,
   },
   card: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: space.md,
-    marginTop: space.sm,
-    padding: 14,
+    gap: space.base,
+    marginTop: space.s,
+    padding: space.base,
     borderWidth: StyleSheet.hairlineWidth,
   },
-  cardBody: { flex: 1, gap: 3 },
+  cardBody: { flex: 1, gap: space.xs },
   cardLine: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 7,
+    gap: space.s,
   },
   cardSub: {
     fontFamily: typeScale.meta.weight,
@@ -709,7 +709,7 @@ const styles = StyleSheet.create({
   },
   footer: {
     marginTop: 'auto',
-    paddingTop: space.lg,
+    paddingTop: space.xl,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   footerText: {

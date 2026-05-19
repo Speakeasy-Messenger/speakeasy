@@ -2,7 +2,7 @@ import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { TtlOption } from '@speakeasy/shared';
 import { useColors } from '../theme/index.js';
-import { font, scrim } from '../theme/tokens.js';
+import { font, scrim, space } from '../theme/tokens.js';
 
 /**
  * BURN.md §4 — whole-conversation Burn confirmation.
@@ -141,33 +141,33 @@ const styles = StyleSheet.create({
   scrim: { ...StyleSheet.absoluteFillObject },
   wrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {
-    paddingHorizontal: 22,
-    paddingTop: 16,
-    paddingBottom: 28,
+    paddingHorizontal: space.xl,
+    paddingTop: space.base,
+    paddingBottom: space.xxl,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   grab: {
     alignSelf: 'center',
     width: 36,
     height: 4,
-    marginBottom: 18,
+    marginBottom: space.lg,
   },
   title: {
     fontFamily: font.bold,
     fontSize: 20,
     letterSpacing: -0.02 * 20,
-    marginBottom: 12,
+    marginBottom: space.m,
   },
-  body: { marginBottom: 22, gap: 10 },
+  body: { marginBottom: space.xl, gap: space.m },
   para: {
     fontFamily: font.regular,
     fontSize: 13,
     lineHeight: 20,
   },
   italic: { fontStyle: 'italic' },
-  actions: { gap: 8 },
+  actions: { gap: space.s },
   btnPrimary: {
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
   },
   btnPrimaryText: {
@@ -176,7 +176,7 @@ const styles = StyleSheet.create({
     letterSpacing: 0.5,
   },
   btnSecondary: {
-    paddingVertical: 14,
+    paddingVertical: space.base,
     alignItems: 'center',
     borderWidth: 1,
   },

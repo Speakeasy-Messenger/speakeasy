@@ -185,5 +185,5 @@ const styles = StyleSheet.create({
     borderWidth: 1,
   },
   fileBadgeText: { fontSize: 10, letterSpacing: 1 },
-  fileMeta: { flex: 1, gap: 2 },
+  fileMeta: { flex: 1, gap: space.xs },
 });

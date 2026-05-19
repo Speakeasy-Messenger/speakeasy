@@ -22,8 +22,8 @@ import { useConversations } from '../store/conversations.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import { useUiState } from '../store/ui.js';
-import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 import { diag } from '../diag/log.js';
 
 interface Props {
@@ -258,13 +258,13 @@ function ttlLabel(t: TtlOption): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1 },
-  body: { paddingBottom: space.xl },
+  body: { paddingBottom: space.xxl },
   header: {
-    paddingTop: 28,
-    paddingBottom: 20,
-    paddingHorizontal: space.md,
+    paddingTop: space.xxl,
+    paddingBottom: space.lg,
+    paddingHorizontal: space.base,
     alignItems: 'center',
-    gap: 16,
+    gap: space.base,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   headerHandle: { marginTop: -2 },
@@ -275,9 +275,9 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   section: {
-    paddingHorizontal: space.md,
-    paddingTop: 16,
-    paddingBottom: 14,
+    paddingHorizontal: space.base,
+    paddingTop: space.base,
+    paddingBottom: space.base,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   sectionLast: { borderBottomWidth: 0 },
@@ -293,14 +293,14 @@ const styles = StyleSheet.create({
     fontSize: typeScale.meta.size,
     letterSpacing: typeScale.meta.size * typeScale.meta.letterSpacingEm,
     textTransform: 'uppercase',
-    marginBottom: 10,
+    marginBottom: space.m,
   },
   toggleRow: {
     flexDirection: 'row',
     alignItems: 'center',
     paddingVertical: 4,
   },
-  toggleBody: { flex: 1, gap: 2 },
+  toggleBody: { flex: 1, gap: space.xs },
   toggleName: { fontFamily: font.medium, fontSize: 14 },
   toggleDesc: {
     fontFamily: font.regular,
@@ -314,8 +314,8 @@ const styles = StyleSheet.create({
     marginTop: 8,
   },
   burnRow: {
-    marginTop: 16,
-    paddingTop: 14,
+    marginTop: space.base,
+    paddingTop: space.base,
     borderTopWidth: StyleSheet.hairlineWidth,
   },
   burnLabel: { fontFamily: font.medium, fontSize: 14 },
@@ -323,7 +323,7 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 11.5,
     lineHeight: 16,
-    marginTop: 2,
+    marginTop: space.xs,
   },
   dangerName: {
     fontFamily: font.medium,

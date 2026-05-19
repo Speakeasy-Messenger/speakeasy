@@ -22,8 +22,8 @@ import {
   readLastJsCrash,
   type CapturedCrash,
 } from '../diag/install-error-handler.js';
-import { space, useColors } from '../theme/index.js';
-import { font, type as typeScale } from '../theme/tokens.js';
+import { useColors } from '../theme/index.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
 import { useOwnership } from '../store/ownership.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
@@ -409,22 +409,22 @@ const styles = StyleSheet.create({
   // Sharp-bordered transparent action buttons docked under the bar.
   actionsBar: {
     flexDirection: 'row',
-    gap: 8,
-    paddingHorizontal: space.md,
-    paddingVertical: 12,
+    gap: space.s,
+    paddingHorizontal: space.base,
+    paddingVertical: space.m,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   actionBtn: {
     flex: 1,
-    paddingVertical: 10,
-    paddingHorizontal: 8,
+    paddingVertical: space.m,
+    paddingHorizontal: space.s,
     borderWidth: 1,
     alignItems: 'center',
   },
   actionBtnSmall: {
     flex: 0,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
+    paddingVertical: space.s,
+    paddingHorizontal: space.base,
   },
   actionLabel: {
     fontFamily: font.medium,
@@ -432,9 +432,9 @@ const styles = StyleSheet.create({
     letterSpacing: 0.02 * 12,
   },
   sectionLabelWrap: {
-    paddingHorizontal: space.md,
-    paddingTop: 16,
-    paddingBottom: 10,
+    paddingHorizontal: space.base,
+    paddingTop: space.base,
+    paddingBottom: space.m,
   },
   sectionLabel: {
     fontFamily: typeScale.meta.weight,
@@ -443,11 +443,11 @@ const styles = StyleSheet.create({
     textTransform: 'uppercase',
   },
   crashCard: {
-    marginHorizontal: space.md,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
+    marginHorizontal: space.base,
+    paddingHorizontal: space.base,
+    paddingVertical: space.m,
     borderWidth: 1,
-    gap: 8,
+    gap: space.s,
   },
   crashTitle: {
     fontFamily: font.medium,
@@ -464,12 +464,12 @@ const styles = StyleSheet.create({
     gap: 8,
     marginTop: 4,
   },
-  listContent: { paddingBottom: space.xl },
+  listContent: { paddingBottom: space.xxl },
   bigAction: {
-    marginHorizontal: space.md,
-    marginTop: 12,
-    paddingVertical: 14,
-    paddingHorizontal: 14,
+    marginHorizontal: space.base,
+    marginTop: space.m,
+    paddingVertical: space.base,
+    paddingHorizontal: space.base,
     borderWidth: 1,
   },
   bigActionTitle: {
@@ -485,9 +485,9 @@ const styles = StyleSheet.create({
   },
   row: {
     flexDirection: 'row',
-    gap: 10,
-    paddingHorizontal: space.md,
-    paddingVertical: 6,
+    gap: space.m,
+    paddingHorizontal: space.base,
+    paddingVertical: space.s,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowTs: {
@@ -512,7 +512,7 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 13,
     textAlign: 'center',
-    paddingTop: 32,
-    paddingHorizontal: space.lg,
+    paddingTop: space.xxl,
+    paddingHorizontal: space.xl,
   },
 });

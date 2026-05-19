@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { SafeAreaView, StyleSheet, Text, View } from 'react-native';
 import { Button } from '../../components/Button.js';
 import { requestStartupPermissions } from '../../permissions/startup.js';
-import { accent, brand, font, type as typeScale, workspace } from '../../theme/tokens.js';
+import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
 
 /**
  * Onboarding screen 05 — Notifications permission.
@@ -104,7 +104,7 @@ const styles = StyleSheet.create({
   list: { gap: 20 },
   row: { flexDirection: 'row', alignItems: 'flex-start', gap: 12 },
   bullet: { width: 6, height: 6, backgroundColor: BRASS, marginTop: 8 },
-  rowBody: { flex: 1, gap: 2 },
+  rowBody: { flex: 1, gap: space.xs },
   heading: {
     fontFamily: font.medium,
     fontSize: 18,

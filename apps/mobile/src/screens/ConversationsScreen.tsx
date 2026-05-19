@@ -631,7 +631,7 @@ const styles = StyleSheet.create({
     justifyContent: 'space-around',
     paddingVertical: space.xl,
   },
-  emptyHeroTop: { alignItems: 'center', gap: 14 },
+  emptyHeroTop: { alignItems: 'center', gap: space.md },
   emptyHeroHandle: { marginTop: -4 },
   emptyHeroLine: {
     fontFamily: font.regular,
@@ -648,11 +648,11 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.md,
     minHeight: 64,
-    paddingVertical: 14,
+    paddingVertical: space.md,
     paddingHorizontal: space.md,
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
-  rowBody: { flex: 1, gap: 3, minWidth: 0 },
+  rowBody: { flex: 1, gap: space.xs, minWidth: 0 },
   groupName: {
     fontFamily: font.medium,
     fontSize: 14,
@@ -675,7 +675,7 @@ const styles = StyleSheet.create({
   meta: {
     flexDirection: 'column',
     alignItems: 'flex-end',
-    gap: 6,
+    gap: space.sm,
     flexShrink: 0,
   },
   metaTime: {

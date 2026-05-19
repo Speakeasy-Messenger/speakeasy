@@ -15,7 +15,7 @@ import { api, signalProtocol, vouchflow, pushNotifications } from '../../service
 import { ApiError } from '../../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../../native/vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
-import { accent, brand, font, type as typeScale, workspace } from '../../theme/tokens.js';
+import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
 import { generateShortHandle } from '../../utils/generate-handle.js';
 import { diag } from '../../diag/log.js';
 
@@ -386,7 +386,7 @@ const styles = StyleSheet.create({
     alignItems: 'baseline',
     gap: 4,
     borderBottomWidth: 1,
-    paddingBottom: 6,
+    paddingBottom: space.s,
     marginBottom: 8,
   },
   atGlyph: {
