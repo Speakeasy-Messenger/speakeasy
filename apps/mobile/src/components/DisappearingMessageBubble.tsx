@@ -1,10 +1,11 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, Text } from 'react-native';
+import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
 import { RichMessageText } from './RichMessageText.js';
 import { radius, space, useColors } from '../theme/index.js';
 import { accent, font } from '../theme/tokens.js';
+import { formatMessageTime } from '../utils/time.js';
 
 /**
  * Five-stage dissolve per spec §14 motion #2. **Real Animated transitions,
@@ -68,6 +69,12 @@ export interface DisappearingMessageBubbleProps {
    * bubbles.
    */
   read?: boolean;
+  /**
+   * Wall-clock send time (ms). When present, the bubble shows a small
+   * trailing timestamp ("3:04 PM"). Optional so older call-sites
+   * that don't pass it just render without one.
+   */
+  timestamp?: number;
 }
 
 interface StageTarget {
@@ -109,6 +116,7 @@ export function DisappearingMessageBubble({
   onStageAnimated,
   delivered,
   read,
+  timestamp,
 }: DisappearingMessageBubbleProps) {
   const themed = useColors();
   const opacity = useRef(new Animated.Value(1)).current;
@@ -220,25 +228,40 @@ export function DisappearingMessageBubble({
           ]}
         />
       ) : null}
-      {/* Read-receipt glyph — only on sent 1:1 bubbles. ✓ = sent +
-          buffered server-side; ✓✓ = recipient acked across all
-          devices. The receipt sits at the trailing edge of the
-          bubble, slightly faded so it never competes with the
-          content. */}
-      {isSent && delivered !== undefined ? (
-        <Text
-          testID="bubble-receipt"
-          style={[
-            styles.receipt,
-            read
-              ? styles.receiptRead
-              : delivered
-                ? styles.receiptDelivered
-                : styles.receiptSent,
-          ]}
-        >
-          {delivered || read ? '✓✓' : '✓'}
-        </Text>
+      {/* Trailing meta line: send time and (sent-bubble only) the
+          read-receipt glyph. ✓ = buffered server-side; ✓✓ = acked /
+          read. Both sit at the trailing edge, slightly faded so they
+          never compete with the content. The row only renders when
+          there's something to show. */}
+      {timestamp !== undefined || (isSent && delivered !== undefined) ? (
+        <View style={styles.metaRow}>
+          {timestamp !== undefined ? (
+            <Text
+              testID="bubble-time"
+              style={[
+                styles.time,
+                isSent ? styles.timeSent : { color: themed.slate },
+              ]}
+            >
+              {formatMessageTime(timestamp)}
+            </Text>
+          ) : null}
+          {isSent && delivered !== undefined ? (
+            <Text
+              testID="bubble-receipt"
+              style={[
+                styles.receipt,
+                read
+                  ? styles.receiptRead
+                  : delivered
+                    ? styles.receiptDelivered
+                    : styles.receiptSent,
+              ]}
+            >
+              {delivered || read ? '✓✓' : '✓'}
+            </Text>
+          ) : null}
+        </View>
       ) : null}
     </Animated.View>
   );
@@ -283,8 +306,8 @@ const styles = StyleSheet.create({
   receipt: {
     fontFamily: font.medium,
     fontSize: 10,
-    alignSelf: 'flex-end',
-    marginTop: space.xs,
+    // alignSelf + marginTop intentionally omitted: the receipt now
+    // lives inside `metaRow` which owns alignment + top spacing.
     marginRight: -2,
     letterSpacing: 0.5,
   },
@@ -303,6 +326,26 @@ const styles = StyleSheet.create({
   // as a washed-out "white" against the brass bubble. Delivered and
   // read now share a colour; the ✓✓ vs ✓ shape still carries the state.
   receiptRead: { color: accent.foreground, fontWeight: '700' as const },
+  // Trailing meta row: holds the timestamp and (on sent bubbles) the
+  // read-receipt glyph. Aligned to the bubble's trailing edge, small
+  // gap between the two so they read as paired metadata not as part
+  // of the message body.
+  metaRow: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    alignSelf: 'flex-end',
+    marginTop: space.xs,
+    gap: 6,
+  },
+  time: {
+    fontFamily: font.regular,
+    fontSize: 10,
+    letterSpacing: 0.3,
+  },
+  // Sent-bubble time picks up the same low-contrast ink as the receipt
+  // so the brass background reads cleanly. Received-bubble time falls
+  // back to the themed `slate` (set inline at the render site).
+  timeSent: { color: `${accent.foreground}99` },
 });
 
 /**

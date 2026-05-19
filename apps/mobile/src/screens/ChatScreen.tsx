@@ -46,6 +46,8 @@ import Svg, { Path } from 'react-native-svg';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { SystemMessageRow } from '../components/SystemMessageRow.js';
+import { DateSeparatorRow } from '../components/DateSeparatorRow.js';
+import { withDateSeparators } from '../feed/with-date-separators.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useUiState } from '../store/ui.js';
 import { useIdentity } from '../store/identity.js';
@@ -156,6 +158,10 @@ export function ChatScreen({
   // bottom — the newest message must come first. The store keeps
   // messages oldest-first, so feed the list a reversed copy.
   const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
+  // Date-change separators interleaved into the inverted-list data so
+  // "Today" / "Yesterday" / etc. sit above the first message of each
+  // day. See `withDateSeparators` for the visual-layout reasoning.
+  const feedItems = useMemo(() => withDateSeparators(orderedMessages), [orderedMessages]);
 
   // Opening the chat clears its push notification (notifee keys the
   // notification by conversation id). Tapping the notification already
@@ -596,11 +602,14 @@ export function ChatScreen({
         <FlatList
           ref={listRef}
           inverted
-          data={orderedMessages}
+          data={feedItems}
           keyExtractor={(m) => m.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
           renderItem={({ item }) => {
+            if (item.kind === 'date-separator') {
+              return <DateSeparatorRow timestamp={item.sentAt} />;
+            }
             if (item.from === 'system') {
               return <SystemMessageRow text={item.text} />;
             }
@@ -613,6 +622,7 @@ export function ChatScreen({
                 variant={item.from === 'me' ? 'sent' : 'received'}
                 delivered={item.delivered}
                 read={!!item.readAt}
+                timestamp={item.sentAt}
                 onTapPhoto={(a) => setViewerAttachment(a)}
                 onTapFile={(a) => void saveAndAnnounceFile(a)}
                 onSeeMore={() => onOpenFullMessage?.(item.text)}
@@ -702,6 +712,13 @@ export function ChatScreen({
               onSubmitEditing={hasInput ? handleSend : undefined}
               returnKeyType="send"
               multiline
+              // Once the typed message exceeds `maxHeight` the input
+              // would otherwise clip the overflow with no way to reach
+              // it. Enabling internal scroll makes a long draft
+              // scrollable instead of hidden. (TextInput doesn't
+              // expose a JS-side `showsVerticalScrollIndicator` —
+              // the indicator appears natively while scrolling.)
+              scrollEnabled
             />
             <Pressable
               onPress={cycleTtl}
