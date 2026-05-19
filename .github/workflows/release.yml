@@ -43,6 +43,15 @@ jobs:
         run: |
           set -euo pipefail
           sha="$GITHUB_SHA"
+          # Deliberate, auditable escape hatch: set the repo variable
+          # SKIP_TIERB_GATE=1 to publish a release without a green Tier B.
+          # Intended for the rare case where the suite is red on stale
+          # test-rot (not an app regression) and a release can't wait.
+          # The bypass is loud in the log and should be unset right after.
+          if [ "${{ vars.SKIP_TIERB_GATE }}" = "1" ]; then
+            echo "::warning::SKIP_TIERB_GATE=1 — Tier B release gate bypassed for $sha."
+            exit 0
+          fi
           echo "Release gate: requiring tier-b-emulator.yml = success for $sha"
           # ~65 min ceiling — Tier B runs <=60 min, plus runner queue time.
           deadline=$(( $(date +%s) + 3900 ))
