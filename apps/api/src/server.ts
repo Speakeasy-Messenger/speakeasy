@@ -7,6 +7,7 @@ import {
 } from '@speakeasy/vouchflow';
 
 import { vouchflowPlugin } from './auth/vouchflow.js';
+import { assertProductionConfig } from './production-guard.js';
 import { DrizzleUserRepo } from './db/users.drizzle.js';
 import { InMemoryUserRepo } from './db/users.memory.js';
 import type { UserRepo } from './db/users.js';
@@ -293,6 +294,15 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 }
 
 async function main() {
+  // Fail closed: refuse to boot a production deployment that would silently
+  // run on mock/in-memory/no-op fallbacks. No-op outside production.
+  try {
+    assertProductionConfig();
+  } catch (err) {
+    // No Fastify logger yet — write the violation list straight to stderr.
+    console.error(err instanceof Error ? err.message : String(err));
+    process.exit(1);
+  }
   const app = await buildServer();
   try {
     await app.listen({ port: PORT, host: HOST });
