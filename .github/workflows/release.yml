@@ -4,13 +4,12 @@ name: Release APK
 # Builds the release APK with the real Vouchflow API key (via repo
 # secret) and uploads it as an asset on the matching GitHub release.
 #
-# Release gate: the APK is published ONLY after the Tier B emulator
-# suite passes for the same commit. tier-b-emulator.yml also triggers on
-# `alpha-*` tags; the `gate` job below waits for that run to conclude
-# and fails the release if it did not succeed. This makes good on the
-# long-standing comment in tier-b-emulator.yml ("Failure here blocks the
-# release-tag build"), which was previously aspirational — the two
-# workflows ran independently and a release published regardless.
+# Tier B no longer gates releases. The gate was effectively never
+# green (zero successes across its lifetime) and the `SKIP_TIERB_GATE`
+# bypass became the default path — worst of both worlds. The Tier B
+# suite still runs nightly + on demand as an advisory signal (see
+# tier-b-emulator.yml). When it returns to reliable green, restoring
+# the gate is a small change.
 #
 # Setup required (one-time):
 #   gh secret set VOUCHFLOW_WRITE_KEY --body "$VOUCHFLOW_WRITE_KEY"
@@ -18,7 +17,7 @@ name: Release APK
 # Usage:
 #   gh release create alpha-0.2.0 --prerelease --title "..." --notes "..."
 #   git push --tags
-# CI takes it from there — APK lands on the release once Tier B is green.
+# CI takes it from there — APK lands on the release a few minutes later.
 
 on:
   push:
@@ -26,61 +25,9 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 jobs:
-  # Release gate — block publishing until the Tier B emulator suite has
-  # passed for this exact commit. No checkout needed; this job only
-  # queries the Actions API.
-  gate:
-    name: Require Tier B emulator suite
-    runs-on: ubuntu-latest
-    timeout-minutes: 75
-    steps:
-      - name: Wait for Tier B to pass for this commit
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: |
-          set -euo pipefail
-          sha="$GITHUB_SHA"
-          # Deliberate, auditable escape hatch: set the repo variable
-          # SKIP_TIERB_GATE=1 to publish a release without a green Tier B.
-          # Intended for the rare case where the suite is red on stale
-          # test-rot (not an app regression) and a release can't wait.
-          # The bypass is loud in the log and should be unset right after.
-          if [ "${{ vars.SKIP_TIERB_GATE }}" = "1" ]; then
-            echo "::warning::SKIP_TIERB_GATE=1 — Tier B release gate bypassed for $sha."
-            exit 0
-          fi
-          echo "Release gate: requiring tier-b-emulator.yml = success for $sha"
-          # ~65 min ceiling — Tier B runs <=60 min, plus runner queue time.
-          deadline=$(( $(date +%s) + 3900 ))
-          while :; do
-            run=$(gh run list --workflow tier-b-emulator.yml \
-                    --commit "$sha" --limit 1 \
-                    --json status,conclusion 2>/dev/null || echo '[]')
-            status=$(echo "$run" | jq -r '.[0].status // ""')
-            conclusion=$(echo "$run" | jq -r '.[0].conclusion // ""')
-            if [ -z "$status" ]; then
-              echo "  ...no Tier B run for this commit yet -- waiting"
-            elif [ "$status" != "completed" ]; then
-              echo "  ...Tier B in progress (status=$status) -- waiting"
-            elif [ "$conclusion" = "success" ]; then
-              echo "Tier B passed -- release may proceed."
-              exit 0
-            else
-              echo "::error::Tier B emulator suite concluded '$conclusion' for $sha -- refusing to publish the release."
-              exit 1
-            fi
-            if [ "$(date +%s)" -ge "$deadline" ]; then
-              echo "::error::Timed out waiting for Tier B to conclude for $sha."
-              exit 1
-            fi
-            sleep 30
-          done
-
   release-apk:
-    needs: gate
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

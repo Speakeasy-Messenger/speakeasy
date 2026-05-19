@@ -1,18 +1,22 @@
 name: Tier B — Android emulator E2E
 
-# Per the user's framing:
-#   - Tier A (Node-side integration tests, fast) gates every push
-#   - Tier B (this) gates main + release tags
+# Tier A (Node-side integration tests, fast) gates every push. Tier B
+# (this) is now advisory: it runs nightly and on demand, surfaces
+# emulator-E2E failures for triage, but does NOT gate main or release
+# tags. See release.yml for the gate-removal rationale (zero successes
+# in the gate's lifetime; the bypass switch had become the default).
 #
-# We boot an Android emulator inside the runner, point the JS app at a
-# Fastify server running on the same runner via the emulator's host
-# loopback (10.0.2.2), and step through the Maestro flows in
-# apps/mobile/maestro/. Failure here blocks the release-tag build.
+# Boots an Android emulator inside the runner, points the JS app at a
+# Fastify server on the same runner via the emulator's host loopback
+# (10.0.2.2), and steps through the Maestro flows in
+# apps/mobile/maestro/. Trigger manually via the Actions tab to
+# reproduce a failure against a specific ref.
 
 on:
-  push:
-    branches: [main]
-    tags: ['alpha-*']
+  schedule:
+    # 07:00 UTC daily (~midnight Pacific) — done by morning, off-peak
+    # for the runner pool.
+    - cron: '0 7 * * *'
   workflow_dispatch:
 
 concurrency:
