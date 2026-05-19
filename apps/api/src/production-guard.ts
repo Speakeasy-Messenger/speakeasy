@@ -126,6 +126,13 @@ export function collectProductionConfigErrors(
     );
   }
 
+  if (env.METRICS_ENABLED === '1' && !env.METRICS_TOKEN) {
+    errors.push(
+      'METRICS_ENABLED=1 but METRICS_TOKEN is missing — /metrics is mounted ' +
+        'on the public listener and would refuse every scrape (503).',
+    );
+  }
+
   return errors;
 }
 

@@ -9,7 +9,7 @@ describe('redactToken', () => {
   });
 
   it('never echoes the full token', () => {
-    const token = 'dvt_live_abcdefghijklmnopqrstuvwxyz0123456789';
+    const token = 'dvt_live_abcdefghijklmnopqrstuvwxyz0123456789'; // gitleaks:allow — fake fixture
     const redacted = redactToken(token);
     expect(redacted).not.toContain('abcdefghij');
     expect(redacted).not.toBe(token);

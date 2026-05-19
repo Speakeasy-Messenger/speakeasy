@@ -75,6 +75,19 @@ describe('collectProductionConfigErrors', () => {
     ).toEqual([]);
   });
 
+  it('flags METRICS_ENABLED=1 without a METRICS_TOKEN', () => {
+    expect(
+      collectProductionConfigErrors({ ...validProdEnv(), METRICS_ENABLED: '1' }).join('\n'),
+    ).toMatch(/METRICS_TOKEN/);
+    expect(
+      collectProductionConfigErrors({
+        ...validProdEnv(),
+        METRICS_ENABLED: '1',
+        METRICS_TOKEN: 'm',
+      }),
+    ).toEqual([]);
+  });
+
   it('flags missing push, TURN and admin credentials', () => {
     const env = validProdEnv();
     delete env.FCM_PROJECT_ID;
