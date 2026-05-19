@@ -12,6 +12,7 @@ import type {
   WsClientMsg,
   WsServerMsg,
 } from '@speakeasy/shared';
+import { redactToken } from '../log/redact.js';
 import {
   Validator,
   VouchflowValidationError,
@@ -233,7 +234,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         await deps.presence.recordOnline(session.userId, deps.instanceId);
         send(socket, { type: 'authed', user_id: session.userId });
         deps.log.info(
-          { userId: session.userId, deviceToken: session.deviceToken },
+          { userId: session.userId, deviceToken: redactToken(session.deviceToken) },
           'ws authed',
         );
         // Drain any buffered messages addressed to this user. Spec §5.
@@ -296,7 +297,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           {
             err,
             userId: session?.userId,
-            deviceToken: session?.deviceToken,
+            deviceToken: redactToken(session?.deviceToken),
             code,
           },
           'ws auth/post-auth threw',

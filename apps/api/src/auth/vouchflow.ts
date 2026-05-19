@@ -5,6 +5,7 @@ import {
   VouchflowValidationError,
 } from '@speakeasy/vouchflow';
 import type { UserRepo } from '../db/users.js';
+import { redactToken } from '../log/redact.js';
 
 declare module 'fastify' {
   interface FastifyInstance {
@@ -87,7 +88,7 @@ export async function requireAuth(
     };
     if (v.anomalyFlags.length > 0) {
       request.log.warn(
-        { userId, deviceToken: v.deviceToken, anomalyFlags: v.anomalyFlags },
+        { userId, deviceToken: redactToken(v.deviceToken), anomalyFlags: v.anomalyFlags },
         'vouchflow anomaly flags present',
       );
     }
