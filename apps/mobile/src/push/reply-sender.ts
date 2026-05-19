@@ -41,16 +41,10 @@ export interface ReplySenderDeps {
   settleMs?: number;
 }
 
-/** Read the Vouchflow device token from the persisted identity store. */
-export async function loadPersistedDeviceToken(): Promise<string | undefined> {
-  try {
-    const raw = await AsyncStorage.getItem(IDENTITY_KEY);
-    if (!raw) return undefined;
-    return (JSON.parse(raw) as { deviceToken?: string }).deviceToken;
-  } catch {
-    return undefined;
-  }
-}
+// The Vouchflow device token is no longer read from here: it is a
+// bearer-like credential and lives only in the SDK's native secure
+// storage. The headless reply path gets it via `loadDeviceToken`, which
+// `push-handler.ts` wires to `getCachedDeviceToken()`.
 
 /** Read the local user's id from the persisted identity store. */
 export async function loadPersistedUserId(): Promise<string | undefined> {
