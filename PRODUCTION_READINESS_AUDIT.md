@@ -1,298 +1,336 @@
 # Production Readiness Audit
 
-Date: 2026-05-19  
+Date: 2026-05-19
 Repo: `/home/chloropine/projects/speakeasy`
+Commit audited: `94f62cc harden(android): enable R8 code shrinking for release builds (#41)`
 
 ## Verdict
 
-Speakeasy is not production-ready yet.
+Speakeasy is materially closer to production than it was during the prior audit, but I would still not call the full product production-ready.
 
-The repo is substantially beyond a prototype: it has real API routes, Postgres-backed repositories, Redis-backed cross-instance primitives, Fly deployment config, Android release automation, native crypto/storage modules, and emulator E2E coverage. The remaining readiness risk is not "missing app"; it is production hardening. The highest-risk gaps are fail-open production configuration, bearer-like device token handling, release gating, Android release hardening, and iOS push parity.
+For an Android-only limited production or tightly managed beta, the codebase is close after the upstream hardening pass, provided the production secrets are actually provisioned and the release/Tier B gates pass in CI. For a general public launch, the remaining blockers are iOS push parity, operational proof of the production environment, complete release verification, and doc/runbook accuracy.
 
-I would treat the current state as an alpha or internal/bounded Android test build, not a public production launch.
+The largest previous blockers were fixed:
 
-## Audit Scope
+- API production startup now fails closed for major unsafe fallback configuration.
+- Mobile no longer persists the Vouchflow device token in AsyncStorage.
+- Core token logging now redacts bearer-like tokens.
+- `/metrics` is bearer-token gated.
+- Android release signing is wired through production keystore secrets.
+- R8/minification is enabled for release builds.
+- Public-IP cleartext traffic was removed from Android network security config.
+- Release publishing now waits for Tier B emulator success.
+- Gitleaks secret scanning was added.
 
-Reviewed:
+## Current Readiness Snapshot
 
-- API runtime wiring under `apps/api/src/`
-- Mobile app runtime, identity, push, native Android/iOS setup under `apps/mobile/`
-- CI/release workflows under `.github/workflows/`
-- Deployment config under `infra/fly/`
-- Database migrations under `infra/migrations/` and API Drizzle config
-- Product/docs drift in `README.md`, `apps/mobile/README.md`, `spec.md`, and `HANDOFF.md`
-- Secret/config exposure patterns with source scans
-
-Local build/test verification was not completed because this checkout does not have installed dependencies; `turbo` was unavailable when the repo-level npm scripts were attempted.
-
-## Readiness Snapshot
-
-| Area | Status | Production concern |
+| Area | Status | Notes |
 | --- | --- | --- |
-| API runtime | Blocked | Production can silently fall back to in-memory repos, single-instance presence, no-op push, STUN-only calls, and relaxed Vouchflow confidence depending on env. |
-| Auth and device identity | Blocked | Vouchflow `deviceToken` is persisted in JS AsyncStorage and logged in multiple server/client paths. It acts like a bearer credential and is also used in DB key derivation. |
-| Android release | Blocked | Release build still signs with the debug keystore, ProGuard/minify is disabled, sandbox defaults remain easy to ship, and cleartext network config includes a public IP. |
-| iOS release | Blocked for iOS | Native modules now compile, but iOS still has zero app-side push handling, no notification decryption path, and no inline reply parity. |
-| CI and release automation | Partial | CI exists and release builds are automated, but release publishing is independent from the Tier B emulator gate despite comments saying it blocks release tags. |
-| API deployment | Partial | Fly deploy has health/version verification and release migrations, but runtime hardening and metrics exposure need tightening. |
-| Data migrations | Partial | There are two migration surfaces: root `node-pg-migrate` SQL migrations and API Drizzle migration commands. This needs one canonical production path. |
-| Observability | Partial | Health/version endpoints exist. Metrics exist when enabled, but `/metrics` mounts on the main listener and needs access control or internal-only exposure. |
-| Legal/app-store readiness | Partial | Privacy artifacts exist in places, but license is still undecided and app-store/security disclosures need a formal checklist. |
-| Documentation | Blocked for ops handoff | Several docs are stale enough to mislead an operator about native shells, mocks, in-memory behavior, and current release posture. |
+| Android limited production | Near-ready with caveats | Release signing, R8, production Vouchflow env, cleartext cleanup, and release gate are implemented. Still needs a clean CI run and real-device production smoke. |
+| iOS production | Blocked | iOS builds are CI-gated, but push handling, notification decrypt, rich display, inline reply, and real-device APNs verification remain unimplemented. |
+| API production runtime | Improved, needs env proof | Production guard exists. Remaining issue: Firebase Admin credential completeness is not fully guarded or documented. |
+| Auth/token storage | Improved | Device token is scrubbed from AsyncStorage and loaded from native secure storage. Direct JS in-memory reads remain scattered but are not the same persistence risk. |
+| Logging/observability | Improved | Core device-token logs are redacted and metrics is gated. Admin/event-log token preview behavior still needs tightening. |
+| CI/release gates | Improved, partial | Release waits for Tier B. Tier B still runs only a subset of Maestro flows and local verification was blocked by missing dependencies. |
+| Database migrations | Partial | Production uses `infra/migrations` via `node-pg-migrate`; Drizzle migration artifacts still exist separately. |
+| Docs/runbooks | Blocked for handoff | Several docs describe old alpha/mocked/native-missing behavior and omit new production guard secrets. |
+| Legal/app-store | Partial | Privacy/terms/open-source surfaces exist in the app, but repo license is still "To be decided" and app-store disclosure readiness was not verified. |
 
-## P0 Production Blockers
+## Resolved Since Prior Audit
 
-### 1. Add an API production configuration gate
+### API no longer silently boots unsafe production fallbacks
 
-Evidence:
+`apps/api/src/production-guard.ts` now collects production configuration violations, and `apps/api/src/server.ts` calls `assertProductionConfig()` in `main()` before app startup.
 
-- `VOUCHFLOW_USE_MOCK=1` activates `MockValidator.alwaysSucceeds()` in `apps/api/src/server.ts:111-115`.
-- Missing `DATABASE_URL` falls back to in-memory user, prekey, group, community, device, event-log, and message repos in `apps/api/src/server.ts:157-166` and `apps/api/src/server.ts:209-231`.
-- Missing `REDIS_URL` falls back to in-memory presence, rate limiting, ack routing, call buffering, ack buffering, and local user notification in `apps/api/src/server.ts:305-360`.
-- Missing `FCM_PROJECT_ID` falls back to `NoopPushProvider` in `apps/api/src/server.ts:363-373`.
-- Missing Cloudflare TURN env falls back to public STUN-only credentials in `apps/api/src/routes/turn.ts:129-142`.
-- Vouchflow sandbox base URL relaxes the confidence floor to `low` unless overridden in `apps/api/src/server.ts:127-139`.
+This addresses the previous risk that a production deploy could accidentally run with mock auth, in-memory repos, no Redis, no push, no TURN, low Vouchflow confidence, or exposed metrics.
 
-Recommendation:
+### Vouchflow device token is no longer persisted in AsyncStorage
 
-Add a startup guard such as `assertProductionConfig()` and call it before `buildServer()` completes when `NODE_ENV=production` or a production Fly app name is detected.
+`apps/mobile/src/store/identity.ts` now documents and enforces the intended boundary:
 
-It should fail startup if:
+- Persisted to AsyncStorage: `userId`, `deviceTokenIssuedAt`.
+- Not persisted to AsyncStorage: `deviceToken`.
+- Hydrated in memory from native secure storage via `getCachedDeviceToken()`.
+- Legacy cleartext `deviceToken` values are scrubbed during `hydrate()`.
 
-- `VOUCHFLOW_USE_MOCK=1`
-- `DATABASE_URL` is missing
-- `REDIS_URL` is missing
-- FCM/APNs credentials are incomplete
-- Cloudflare TURN credentials are missing for production calls
-- Vouchflow base URL points at sandbox for a production app
-- `VOUCHFLOW_MIN_CONFIDENCE` is below `medium`
-- any required admin/broadcast secrets are missing for enabled features
+`apps/mobile/src/native/cached-device-token.ts` provides the native cached-token reader for JS and headless flows.
 
-Keep in-memory and no-op fallbacks available for tests/dev, but make them impossible to ship accidentally.
+### Core token logs are redacted
 
-### 2. Stop persisting the Vouchflow device token in JS AsyncStorage
+`apps/api/src/log/redact.ts` adds `redactToken()`.
 
-Evidence:
+Core paths now use it:
 
-- `apps/mobile/src/store/identity.ts:11-16` documents persisting `deviceToken`.
-- `apps/mobile/src/store/identity.ts:57-66` includes `deviceToken` in the persisted shape and writes it with AsyncStorage.
-- `apps/mobile/src/store/identity.ts:87-105` persists and hydrates the token.
-- Android SQLCipher setup derives its DB key from the cached Vouchflow device token in `apps/mobile/android/app/src/main/java/xyz/speakeasyapp/app/db/SpeakeasyDb.kt`.
-- `apps/mobile/src/App.tsx` reuses the cached token for launch verify and API/WebSocket auth.
+- `apps/api/src/auth/vouchflow.ts`
+- `apps/api/src/ws/handler.ts`
+- `packages/vouchflow/src/validator.ts`
 
-Why this blocks production:
+### Metrics are protected
 
-The device token is used as an authentication credential and participates in local data protection. Storing it in JS AsyncStorage broadens the attack surface and undermines the native secure-storage boundary implied by the Vouchflow SDK.
+When `METRICS_ENABLED=1`, `/metrics` now requires:
 
-Recommendation:
+```text
+Authorization: Bearer <METRICS_TOKEN>
+```
 
-- Persist only non-secret identity metadata in JS state, such as `userId` and token freshness metadata if needed.
-- Read the current device token from native Vouchflow secure storage through a small native bridge when making authenticated requests.
-- Clear any existing AsyncStorage token during migration.
-- Add a regression test or runtime assertion that `speakeasy.identity.v1` never contains `deviceToken`.
+If `METRICS_TOKEN` is unset, the endpoint returns 503 instead of exposing metrics openly.
 
-### 3. Redact bearer-like tokens from logs
+### Android release hardening landed
 
-Evidence:
+Release build improvements:
 
-- `packages/vouchflow/src/validator.ts` logs the no-verification reputation payload, which can include `device_token`.
-- `apps/api/src/auth/vouchflow.ts` logs full `deviceToken` on anomaly flags.
-- `apps/api/src/ws/handler.ts` logs `deviceToken` on authenticated WebSocket events and on handler errors.
+- `enableProguardInReleaseBuilds = true`.
+- Release keystore supplied through CI secrets and Gradle properties.
+- CI rejects debug-signed release artifacts.
+- Release CI passes `-Pvouchflow.environment=production`.
+- Cleartext public IP `65.21.224.209` removed; only emulator loopback `10.0.2.2` remains.
 
-Recommendation:
+### Release publishing now waits for Tier B
 
-- Introduce a shared redaction helper for device tokens, push tokens, admin tokens, and TURN credentials.
-- Prefer stable hashes or short previews only when correlation is needed.
-- Add lint/test coverage for known sensitive field names in structured logs.
-- Treat existing logs as potentially sensitive and rotate/expire any production log sinks if these paths have run against real users.
+`.github/workflows/release.yml` includes a gate job that waits for `tier-b-emulator.yml` to pass for the same commit before the APK publishes.
 
-### 4. Harden the Android production build
+## Remaining Production Blockers
+
+### P0: iOS push parity blocks any iOS production launch
 
 Evidence:
 
-- Release builds still use `signingConfigs.debug` in `apps/mobile/android/app/build.gradle:319-329`.
-- ProGuard/minification is disabled in `apps/mobile/android/app/build.gradle:165-168`.
-- `VOUCHFLOW_ENVIRONMENT` defaults to `sandbox` in `apps/mobile/android/app/build.gradle:304-306`.
-- `apps/mobile/android/app/src/main/res/xml/network_security_config.xml:10-19` permits cleartext traffic to `65.21.224.209` and `10.0.2.2`.
-- Android backup rules intentionally exclude user-keyed state in `backup_rules.xml` and `data_extraction_rules.xml`, which is good, but `AndroidManifest.xml` still needs a final production decision around `allowBackup`.
+- `apps/mobile/ios/PARITY.md` says iOS push handling is still absent.
+- `apps/mobile/ios/PUSH-PARITY.md` says iOS has zero app-side push handling and needs an NSE/App Group/shared Signal store design.
+- `apps/api/src/push/push.fcm-apns.ts` now sets APNs `mutable-content`, but the iOS app side still lacks the Notification Service Extension and decrypt/inline-reply implementation.
 
 Recommendation:
 
-- Replace debug signing with a release keystore supplied through CI secrets.
-- Add a CI guard that release artifacts cannot be signed with the debug certificate.
-- Split debug/sandbox and production flavors so sandbox Vouchflow/API config cannot ship in a production artifact.
-- Remove the public-IP cleartext exception before production. Keep emulator-only config in a test/debug source set if needed.
-- Enable shrinking/minification only after validating React Native, libsignal, SQLCipher, Firebase, and Vouchflow keep rules.
-- Confirm backup policy with an install/uninstall/reinstall test on a production-signed build.
+Do not include iOS in production until this is implemented and real-device APNs sandbox/prod testing passes:
 
-### 5. Make release publishing depend on the real gate set
+1. App Group entitlement for app and NSE.
+2. Shared SQLCipher Signal store access.
+3. Notification Service Extension decrypt path.
+4. Cross-process idempotent decrypt cache.
+5. `UNNotificationCategory` inline reply.
+6. Rich display intent.
+7. Real-device APNs verification.
+
+Android-only launch language should be explicit if Android ships first.
+
+### P0: Production env docs and guard are incomplete for Firebase Admin
 
 Evidence:
 
-- `.github/workflows/ci.yml:24-37` runs install, build, typecheck, lint, and tests.
-- `.github/workflows/ci.yml:50-123` deploys API on main and verifies `/healthz` plus `/version` SHA.
-- `.github/workflows/release.yml:56-81` builds a release APK and checks type/test before publishing.
-- `.github/workflows/tier-b-emulator.yml:3-10` says Tier B blocks release-tag builds, but the release workflow has no dependency on that workflow.
-- `.github/workflows/tier-b-emulator.yml:149-194` runs a chained Android emulator suite, but this chain does not cover every Maestro YAML in `apps/mobile/maestro/`.
+- `apps/api/src/production-guard.ts` checks `FCM_PROJECT_ID`.
+- `apps/api/src/push/push.fcm-apns.ts` also reads `FCM_CLIENT_EMAIL` and `FCM_PRIVATE_KEY` when creating the Firebase Admin credential.
+- `infra/fly/README.md` does not yet document all secrets required by the production guard and push provider.
+
+Risk:
+
+A production app could satisfy `FCM_PROJECT_ID` but still fail push provider initialization because the service-account email or private key is missing/malformed.
 
 Recommendation:
 
-- Make release publication wait for CI, Android, iOS, and Tier B emulator gates on the exact tag/SHA.
-- If cross-workflow dependencies are awkward, publish releases as drafts and promote only after all required checks pass.
-- Add an explicit "required flows" manifest for Maestro so new flows cannot be silently excluded from Tier B.
-- Add empty-secret guards wherever secrets are required for release-like builds.
+Update `collectProductionConfigErrors()` to require the full Firebase Admin triplet:
 
-### 6. Finish iOS push parity before any iOS production launch
+- `FCM_PROJECT_ID`
+- `FCM_CLIENT_EMAIL`
+- `FCM_PRIVATE_KEY`
 
-Evidence:
+Then update `infra/fly/README.md` with the complete production secret list:
 
-- `apps/mobile/ios/PARITY.md:54-60` states that push handling is Android-only and iOS has zero app-side push handling.
-- `apps/mobile/ios/PARITY.md:77-83` ranks push notifications as the top iOS gap.
-- `apps/mobile/ios/PUSH-PARITY.md:12-22` says iOS currently shows only the plain alert and lacks decrypt/rich display/inline reply.
-- `apps/mobile/ios/PUSH-PARITY.md:90-101` identifies cross-process Signal ratchet corruption and real-device APNs verification as key risks.
+- `DATABASE_URL`
+- `REDIS_URL`
+- `VOUCHFLOW_READ_KEY`
+- `VOUCHFLOW_BASE_URL`
+- `FCM_PROJECT_ID`
+- `FCM_CLIENT_EMAIL`
+- `FCM_PRIVATE_KEY`
+- `CLOUDFLARE_TURN_KEY_ID`
+- `CLOUDFLARE_TURN_TOKEN`
+- `ADMIN_TOKEN`
+- `METRICS_TOKEN`
 
-Recommendation:
+### P0: Need a clean production-gate verification run
 
-- Do not launch iOS production until the Notification Service Extension, App Group Signal store access, decrypt path, notification category, inline reply, and real-device APNs verification are complete.
-- Keep Android-only production/beta language explicit if Android ships first.
+Local verification could not run because dependencies are absent in this checkout:
 
-## P1 Before Public Beta Or Limited Production
-
-### Replace placeholder lint gates with real linting
-
-Evidence:
-
-- `apps/api/package.json` has a placeholder `lint` script.
-- `apps/mobile/package.json` has a placeholder `lint` script.
-- Root CI calls `npm run lint`, but placeholders can make the gate look stronger than it is.
-
-Recommendation:
-
-Configure ESLint or the repo-standard linter for API, mobile, and packages. Fail CI on warnings that indicate runtime risk: unhandled promises, unsafe `any`, floating promises, unused env branches, and console logging of sensitive objects.
-
-### Choose one canonical migration workflow
-
-Evidence:
-
-- Root `package.json` runs SQL migrations through `node-pg-migrate` under `infra/migrations`.
-- `apps/api/package.json` exposes Drizzle migration/generate/push commands.
-- `infra/migrations/` and `apps/api/drizzle/` both contain migration artifacts.
+```text
+npm run typecheck -> sh: 1: turbo: not found
+npm run lint      -> sh: 1: turbo: not found
+npm test          -> sh: 1: turbo: not found
+```
 
 Recommendation:
 
-Pick one production migration source of truth and make CI check that schema definitions, generated SQL, and applied migrations are not drifting. Avoid `drizzle push` in production workflows.
-
-### Lock down metrics exposure
-
-Evidence:
-
-- `infra/fly/api.toml` enables `METRICS_ENABLED=1`.
-- `apps/api/src/server.ts:248-255` mounts `/metrics` on the main Fastify listener when enabled.
-
-Recommendation:
-
-Confirm Fly routing makes `/metrics` internal-only, or add authentication/network allowlisting. A public Prometheus endpoint can leak route names, counts, labels, process details, and traffic shape.
-
-### Add automated secret scanning
-
-Evidence:
-
-- No obvious server private key was found in source scans.
-- `apps/mobile/android/app/google-services.json` is tracked, which is normal for Firebase clients but still requires Google Cloud API restrictions.
-- `.env` files are ignored, and Android local properties are ignored.
-
-Recommendation:
-
-Add a CI secret scanner such as gitleaks or trufflehog. Also restrict Firebase API keys by package name/SHA and monitor for accidental Vouchflow/Firebase/Admin token commits.
-
-### Validate calls on real networks
-
-Evidence:
-
-- Cloudflare TURN support exists in `apps/api/src/routes/turn.ts:53-98`.
-- Production without Cloudflare TURN env falls back to STUN-only in `apps/api/src/routes/turn.ts:129-142`.
-- iOS CallKit is noted as declared but not end-to-end verified in `apps/mobile/ios/PARITY.md:69-83`.
-
-Recommendation:
-
-Before production call features are advertised, test Android/Android, Android/iOS, and iOS/iOS across home NAT, mobile carrier NAT, VPN, and blocked-UDP networks. Confirm TURN-over-TLS/443 works and credentials are short-lived.
-
-### Refresh operator-facing docs
-
-Evidence:
-
-- `README.md` still frames production DNS/TLS as coming soon in parts.
-- `apps/mobile/README.md` says native shells are not scaffolded and references old Vouchflow/HMAC stub flows.
-- `spec.md` contains stale carry-overs that conflict with current native and server implementation.
-- `HANDOFF.md` describes older alpha behavior including mocks, stubbed push, and missing Drizzle paths.
-
-Recommendation:
-
-Refresh the docs before any handoff or production launch. The docs should clearly state:
-
-- Which environment is production, sandbox, and local dev
-- Which credentials are required
-- Which release workflow publishes user-visible builds
-- Which smoke tests must pass before promotion
-- Which features are Android-only versus iOS-ready
-
-## P2 Hardening And Operational Polish
-
-- Add a production canary script that verifies enrollment, authenticated API calls, WebSocket auth, push registration, TURN credential minting, and `/version` SHA after deploy.
-- Add a runbook for Fly rollback, DB migration rollback policy, Redis outage behavior, push provider outage behavior, and Vouchflow outage behavior.
-- Add dependency audit gates after dependencies install reliably: `npm audit --audit-level=moderate` plus native dependency review for Android/iOS.
-- Add a privacy/security review for device attestation, push payload metadata, local SQLCipher key derivation, crash logs, diagnostics export, and support tooling.
-- Finalize licensing. `README.md` still says the license is to be decided, which blocks clean public production distribution.
-- Prepare app-store disclosures: privacy nutrition labels, data safety, cryptography/export answers, open-source notices, permissions rationale, and account deletion/support flows.
-
-## Recommended Remediation Order
-
-1. Add API production config fail-closed checks.
-2. Remove JS persistence of the Vouchflow device token and migrate existing AsyncStorage state.
-3. Redact sensitive tokens from all structured logs.
-4. Harden Android release signing, environment selection, and cleartext network config.
-5. Make release publishing wait for all required gates.
-6. Decide whether first public production is Android-only. If iOS is included, build and verify iOS push parity first.
-7. Normalize migrations to one production workflow.
-8. Replace placeholder lint scripts with real linting.
-9. Lock down `/metrics` exposure.
-10. Refresh README, mobile README, spec carry-overs, and handoff docs.
-11. Run full verification in a clean dependency-installed environment.
-
-## Production Verification Checklist
-
-Run this only after the P0 fixes are in place:
+Before claiming production readiness, run in a clean dependency-installed environment:
 
 ```sh
 npm ci
 npm run build
 npm run typecheck
 npm run lint
-npm run test
+npm test
 npm audit --audit-level=moderate
 ```
 
-Android:
+Then run the Android release workflow and Tier B gate on the exact release tag.
+
+## High-Priority Pre-Production Work
+
+### P1: Tier B does not cover every non-helper Maestro flow
+
+The repo has 17 Maestro YAMLs. The Tier B chain currently runs a hand-picked sequence: `11-push-background-handler` and flows `01` through `08`.
+
+Uncovered non-helper flows include:
+
+- `09-burn-conversation.yaml`
+- `10-block-and-unblock.yaml`
+- `11-push-handler-simple.yaml`
+- `11-push-notifications-background.yaml`
+- `11-settings-tree.yaml`
+- `12-avatar-store.yaml`
+
+Recommendation:
+
+Create a required-flow manifest or test runner that includes every non-helper flow. Mark helper flows by convention, such as leading `_`, and fail CI if a new required flow is added but not gated.
+
+### P1: Placeholder lint still weakens CI
+
+Root CI calls `npm run lint`, but API, mobile, crypto, and vouchflow package lint scripts still echo "no lint configured yet".
+
+Recommendation:
+
+Add a real lint gate before production. Prioritize rules that catch runtime and security issues:
+
+- React hooks correctness.
+- Floating promises.
+- Sensitive log fields.
+- Raw `console.*` outside allowlisted diagnostics/scripts.
+- Unsafe `any` in route dependencies.
+
+### P1: Admin diagnostics still expose more token material than necessary
+
+Core logs are now redacted, but `apps/api/src/routes/admin.ts` still records a 16-character device-token prefix in event-log payloads during device deletion. Admin device-list responses can also return full device and push tokens to any holder of `ADMIN_TOKEN`.
+
+Recommendation:
+
+- Use `redactToken()` in admin event-log payloads.
+- Return redacted device records by default.
+- Keep full token access behind an explicit, audited break-glass route only if truly needed.
+- Factor `ADMIN_TOKEN` auth into one pre-handler so future admin routes do not drift.
+
+### P1: Migrations need a single production source of truth
+
+Production deploy runs:
 
 ```sh
-cd apps/mobile/android
-./gradlew :app:assembleRelease --no-daemon -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY" -Pvouchflow.environment=production
+npm run db:migrate
 ```
 
-Required manual/device checks:
+That uses `node-pg-migrate` over `infra/migrations`. The API package also exposes Drizzle migration commands and has `apps/api/drizzle` artifacts.
 
-- Production-signed Android install, cold launch, enroll, restart, sign out, re-enroll.
-- Push registration, background push decrypt/display, inline reply, foreground message receipt.
-- 1:1 call setup over Wi-Fi, carrier network, VPN, and UDP-blocked network.
-- API deploy to staging or production with `NODE_ENV=production` and all required env vars present.
-- Fly release migration succeeds and rollback path is documented.
-- `/healthz` and `/version` externally verify the expected SHA.
-- `/metrics` is not publicly readable unless intentionally authorized.
-- No logs contain full device tokens, push tokens, admin tokens, or TURN credentials.
-- App reinstall does not restore user-keyed ghost state.
-- iOS real-device APNs/NSE/inline-reply test if iOS is in scope.
+Recommendation:
+
+Declare `infra/migrations` canonical and add drift checks, or migrate fully to Drizzle-generated migrations. Do not leave both as plausible production paths without enforcement.
+
+### P1: Docs and runbooks are stale
+
+Stale docs are now an operational risk:
+
+- `README.md` still describes Alpha 0.1 and says production DNS/TLS is coming.
+- `apps/mobile/README.md` says native shells are not scaffolded.
+- `HANDOFF.md` describes old mock/stub/in-memory behavior.
+- `spec.md` has stale carry-overs that conflict with the current implementation.
+- `apps/mobile/src/config.ts` has comments about the old public-IP sandbox even though the values are production URLs.
+
+Recommendation:
+
+Refresh docs before any production handoff. Include an explicit "production launch checklist" that matches the guard and release workflows.
+
+### P1: Real-device release smoke is still required
+
+The code has Android release hardening, but production readiness requires a real artifact test:
+
+- Install production-signed APK.
+- Confirm it is not debug-signed.
+- Confirm Vouchflow production environment is used.
+- Enroll, restart, sign out, re-enroll.
+- Send and receive direct/group messages.
+- Register push, background app, receive notification, inline reply.
+- Make a call across Wi-Fi, carrier NAT, VPN, and UDP-blocked network.
+- Verify reinstall does not restore ghost state.
+
+## Medium-Priority Hardening
+
+### P2: Tighten release gate to the exact tag/ref
+
+Release waits for a Tier B run by commit SHA. If the same commit has both `main` and tag-triggered Tier B runs, a prior green run for the SHA may satisfy the gate even if the tag-specific run fails later.
+
+Recommendation:
+
+Tighten the gate to the exact tag/ref or promote releases from a `workflow_run` after Tier B succeeds.
+
+### P2: Checksum-pin downloaded CI tools
+
+`secret-scan.yml` version-pins gitleaks, but it downloads a tarball and pipes it to `tar` without checksum verification.
+
+Recommendation:
+
+Verify the release artifact SHA256 before executing it.
+
+### P2: Keep Android backup behavior under release test
+
+`android:allowBackup="true"` remains set, with rules excluding user-keyed storage and AsyncStorage. This is defensible, but it should be tested on every production-signed release because backup behavior is easy to regress.
+
+Recommendation:
+
+Include uninstall/reinstall and device-transfer behavior in release smoke tests.
+
+### P2: Complete app-store/legal readiness
+
+Repo license is still "To be decided" in `README.md`. Privacy, terms, and open-source links exist in the app, and `PrivacyInfo.xcprivacy` exists for iOS, but this audit did not verify app-store disclosure completeness.
+
+Recommendation:
+
+Before public release:
+
+- Decide and commit a license.
+- Verify Apple privacy manifest.
+- Verify Google Play Data Safety answers.
+- Verify encryption/export-compliance answers.
+- Verify open-source notices and AGPL/libsignal obligations.
+- Verify account deletion/support copy.
+
+## Updated Production Readiness Checklist
+
+### Required before Android limited production
+
+- `npm ci`
+- `npm run build`
+- `npm run typecheck`
+- real `npm run lint`
+- `npm test`
+- `npm audit --audit-level=moderate`
+- gitleaks CI green
+- Tier B emulator green on release tag
+- Android release workflow green
+- Production-signed APK verified as not debug-signed
+- Production Vouchflow environment verified in artifact
+- Fly production env has all guard-required secrets
+- Firebase Admin credential triplet verified
+- `/healthz` and `/version` verify the expected SHA after deploy
+- `/metrics` returns 401 without token and 200 with `METRICS_TOKEN`
+- Push registration and delivery verified on real Android hardware
+- TURN credentials verified and calls tested across hostile networks
+
+### Required before iOS production
+
+- All Android limited-production requirements that apply to backend/shared code.
+- iOS app-store signing/provisioning workflow.
+- Notification Service Extension.
+- App Group shared Signal store.
+- APNs real-device test.
+- Inline reply from iOS notification.
+- iOS CallKit end-to-end test.
+- iOS app-store disclosure checklist.
 
 ## Bottom Line
 
-The production readiness path is straightforward but nontrivial. The highest leverage fix is to make production fail closed: once the API refuses to boot with dev/no-op/in-memory fallbacks, the remaining mobile and release work becomes easier to verify. The second most important fix is the device-token handling cleanup, because it is both an authentication risk and a local data-protection risk.
-
+The upstream hardening work addressed the previous audit's core production security risks. The current state is best described as: close to Android limited production after CI and real-device validation, not ready for full cross-platform production. The remaining blockers are no longer broad architectural gaps; they are specific launch-readiness gaps around iOS push, complete production env proof, release-gate coverage, linting, migrations, and stale operator docs.
