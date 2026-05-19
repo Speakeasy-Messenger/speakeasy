@@ -15,16 +15,14 @@ appId: xyz.speakeasyapp.app
     env:
       HANDLE: tester06
 
-# Copy user's own ID
-- copyTextFrom:
-    id: "conversations-userid"
-
 # NEW-CONVERSATION.md §3: FAB → Find Someone sheet → type → tap result.
+# Type our own (just-enrolled, known) handle for the self-DM rather
+# than copying it out of the header — see 02-self-dm.yaml.
 - tapOn:
     id: "conversations-fab"
 - tapOn:
     id: "find-sheet-input"
-- inputText: "${maestro.copiedText}"
+- inputText: "tester06"
 - tapOn:
     id: "find-sheet-result"
 

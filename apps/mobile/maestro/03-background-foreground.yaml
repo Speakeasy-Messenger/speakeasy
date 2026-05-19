@@ -20,10 +20,6 @@ appId: xyz.speakeasyapp.app
     env:
       HANDLE: tester03
 
-# Remember the user ID
-- copyTextFrom:
-    id: "conversations-userid"
-
 # Background the app (Maestro 2.x: `backgroundApp` was removed; press
 # Home to send the activity to the background instead).
 - pressKey: Home
