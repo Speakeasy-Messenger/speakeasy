@@ -29,6 +29,7 @@ import { Avatar } from '../components/Avatar.js';
 import { MentionPicker } from '../components/MentionPicker.js';
 import { MentionText } from '../components/MentionText.js';
 import { StatusSquare } from '../components/StatusSquare.js';
+import { MutedIcon } from '../components/icons/MutedIcon.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useUiState } from '../store/ui.js';
@@ -92,6 +93,7 @@ export function GroupChatScreen({
   const group = useGroups((s) => s.byId[groupId]);
   const messages = useConversations((s) => s.byId[groupId]?.messages ?? EMPTY_MESSAGES);
   const ttl = useConversations((s) => s.byId[groupId]?.ttl ?? 'week');
+  const muted = useConversations((s) => s.byId[groupId]?.muted ?? false);
   const ttlSecondsFor = useConversations((s) => s.ttlSecondsFor);
   const add = useConversations((s) => s.add);
   const setStage = useConversations((s) => s.setStage);
@@ -375,6 +377,7 @@ export function GroupChatScreen({
               {group?.name ?? groupId}
             </Text>
             <StatusSquare variant="sealed" />
+            {muted ? <MutedIcon size={14} color={themed.slate} /> : null}
           </View>
         }
         subtitle={`${memberCount} IN THE ROOM · LEAVES IN ${ttlLabel}`}

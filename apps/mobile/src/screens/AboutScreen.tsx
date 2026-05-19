@@ -21,7 +21,7 @@ interface Props {
 const PRIVACY_URL = 'https://speakeasyapp.xyz/privacy';
 const TERMS_URL = 'https://speakeasyapp.xyz/terms';
 const OPEN_SOURCE_URL = 'https://speakeasyapp.xyz/open-source';
-const SUPPORT_EMAIL = 'hello@speakeasy.app';
+const SUPPORT_EMAIL = 'info@speakeasyapp.xyz';
 
 // rc.82+: version reads from the native module (BuildConfig baked at
 // build time from the git tag). Imported via function calls so each

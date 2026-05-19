@@ -33,6 +33,7 @@ import { FrozenInputBar } from '../components/FrozenInputBar.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { PhoneIcon } from '../components/icons/CallIcons.js';
 import { AppBar } from '../components/AppBar.js';
+import { MutedIcon } from '../components/icons/MutedIcon.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Avatar } from '../components/Avatar.js';
@@ -119,6 +120,7 @@ export function ChatScreen({
   const conversationId = conversationIdForDirect(myUserId, peerId);
   const messages = useConversations((s) => s.byId[conversationId]?.messages ?? EMPTY_MESSAGES);
   const ttl = useConversations((s) => s.byId[conversationId]?.ttl ?? 'week');
+  const muted = useConversations((s) => s.byId[conversationId]?.muted ?? false);
   const ttlSecondsFor = useConversations((s) => s.ttlSecondsFor);
   const add = useConversations((s) => s.add);
   const setStage = useConversations((s) => s.setStage);
@@ -538,6 +540,7 @@ export function ChatScreen({
                 blocked path drops it (their online state isn't
                 visible to you anymore per BLOCK.md §5.1). */}
             {!isBlocked ? <StatusSquare variant="offline" /> : null}
+            {muted ? <MutedIcon size={14} color={themed.slate} /> : null}
           </View>
         }
         subtitle={
