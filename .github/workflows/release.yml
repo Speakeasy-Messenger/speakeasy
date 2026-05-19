@@ -7,8 +7,8 @@ name: Release APK
 # Tier B no longer gates releases. The gate was effectively never
 # green (zero successes across its lifetime) and the `SKIP_TIERB_GATE`
 # bypass became the default path — worst of both worlds. The Tier B
-# suite still runs nightly + on demand as an advisory signal (see
-# tier-b-emulator.yml). When it returns to reliable green, restoring
+# suite is manual-only now (see tier-b-emulator.yml — workflow_dispatch
+# from the Actions tab). When it returns to reliable green, restoring
 # the gate is a small change.
 #
 # Setup required (one-time):
