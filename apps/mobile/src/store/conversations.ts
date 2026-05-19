@@ -182,6 +182,22 @@ function emptyConversation(kind: ConversationKind): ConversationState {
   };
 }
 
+/**
+ * Append `msg` keeping `messages` ordered by `sentAt`.
+ *
+ * Live messages arrive in send order, so the append fast-path covers
+ * almost every call. The exception is an inline reply drained from the
+ * background queue: it can carry an earlier `sentAt` than messages that
+ * landed while the app was closed, and a blind append would render it
+ * below newer messages. Equal timestamps keep insertion order.
+ */
+function insertBySentAt(messages: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+  const last = messages[messages.length - 1];
+  if (!last || msg.sentAt >= last.sentAt) return [...messages, msg];
+  const at = messages.findIndex((m) => m.sentAt > msg.sentAt);
+  return [...messages.slice(0, at), msg, ...messages.slice(at)];
+}
+
 async function persist(byId: Record<string, ConversationState>): Promise<void> {
   try {
     await secureKv.set(STORAGE_KEY, JSON.stringify(byId));
@@ -257,7 +273,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           [conversationId]: {
             ...c,
             peerUserId,
-            messages: [...c.messages, msg],
+            messages: insertBySentAt(c.messages, msg),
           },
         },
       };

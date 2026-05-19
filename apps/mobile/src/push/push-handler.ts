@@ -32,7 +32,7 @@ import notifee, {
   type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePayload, newMessageId } from '@speakeasy/shared';
+import { decodePayload } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -463,7 +463,11 @@ async function displayMessagingNotification(args: {
   );
   // Durable copy of the stack so an inline reply can rebuild the full
   // thread even when the notifee event detail omits `style.messages`.
-  void persistNotifStack(args.conversationId, messages);
+  // Awaited, not fire-and-forget: a headless display task can be torn
+  // down the moment this function resolves, and an unfinished
+  // AsyncStorage write left the next reply with an empty stack — the
+  // notification then re-posted showing only the user's own reply.
+  await persistNotifStack(args.conversationId, messages);
   const latest = messages[messages.length - 1];
   await notifee.displayNotification({
     id: args.conversationId,
@@ -639,15 +643,19 @@ async function handleInlineReply(
   });
 
   try {
-    await sendReplyMessage(peerId, text, replyDeps());
+    const { messageId } = await sendReplyMessage(peerId, text, replyDeps());
     // Record the reply in the in-app conversation log. Queued (not
     // added straight to the store) because this may run headlessly
     // with an un-hydrated store; drained right away when the app is
     // already foreground, otherwise on the next foreground.
+    //
+    // `messageId` MUST be the id that went out on the wire — the peer's
+    // read receipt references it. Minting a fresh id here is what left
+    // inline replies showing no read receipt.
     await enqueuePendingReply({
       conversationId,
       peerId,
-      messageId: newMessageId(),
+      messageId,
       text,
       sentAt: Date.now(),
     });
