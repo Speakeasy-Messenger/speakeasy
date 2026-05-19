@@ -1,18 +1,18 @@
 name: Tier B — Android emulator E2E
 
-# Per the user's framing:
-#   - Tier A (Node-side integration tests, fast) gates every push
-#   - Tier B (this) gates main + release tags
+# Tier A (Node-side integration tests, fast) gates every push. Tier B
+# (this) is manual-only: it runs when you trigger it from the Actions
+# tab, period. No push triggers, no schedule — the suite has been
+# reliably red and a nightly cron would just be background noise.
+# See release.yml for the gate-removal rationale.
 #
-# We boot an Android emulator inside the runner, point the JS app at a
-# Fastify server running on the same runner via the emulator's host
-# loopback (10.0.2.2), and step through the Maestro flows in
-# apps/mobile/maestro/. Failure here blocks the release-tag build.
+# Boots an Android emulator inside the runner, points the JS app at a
+# Fastify server on the same runner via the emulator's host loopback
+# (10.0.2.2), and steps through the Maestro flows in
+# apps/mobile/maestro/. Use the workflow_dispatch UI to reproduce a
+# failure against a specific ref while you're iterating on a fix.
 
 on:
-  push:
-    branches: [main]
-    tags: ['alpha-*']
   workflow_dispatch:
 
 concurrency:
