@@ -1,20 +1,24 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Phase 5e alpha: allow cleartext HTTP only to the dev sandbox server's
-  public IP. Android 9+ blocks cleartext by default. Once Fly + DNS are
-  up, the app talks to https://sandbox.api.speakeasyapp.xyz (TLS) and
-  this whitelist gets removed.
+  The app talks to the production API over TLS only
+  (https://api.speakeasyapp.xyz — see apps/mobile/src/config.ts). Cleartext
+  HTTP is therefore denied for every internet host, which is also Android's
+  default since API 28.
 
-  All other hosts remain HTTPS-only.
+  The single exception is 10.0.2.2 — the Android emulator's loopback to its
+  host machine. The Tier B CI suite (.github/workflows/tier-b-emulator.yml)
+  runs a release APK inside an emulator and routes it to an api server on
+  the same runner over plain HTTP. 10.0.2.2 is a private address that is
+  unroutable from a physical device, so this exception is inert outside an
+  emulator.
+
+  Removed: the former cleartext exception for the dev box's public IP
+  (65.21.224.209). It dated from before Fly + DNS were up; shipping a
+  production app that permits plaintext traffic to a fixed public host is
+  a hazard, and nothing in the app targets that address any more.
 -->
 <network-security-config>
     <domain-config cleartextTrafficPermitted="true">
-        <domain includeSubdomains="false">65.21.224.209</domain>
-        <!-- 10.0.2.2 is the Android emulator's loopback to the host
-             machine. Used by Tier B CI to route requests from the
-             emulator-resident app to the api server running on the
-             same GitHub Actions runner. Reachable only from within
-             an emulator; harmless on a real device. -->
         <domain includeSubdomains="false">10.0.2.2</domain>
     </domain-config>
 </network-security-config>
