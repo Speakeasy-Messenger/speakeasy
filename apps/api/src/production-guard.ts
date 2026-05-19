@@ -95,11 +95,21 @@ export function collectProductionConfigErrors(
         'server cannot validate device attestations without them.',
     );
   }
-  if (baseUrl.toLowerCase().includes('sandbox')) {
+  // The current alpha intentionally runs its production server against
+  // sandbox Vouchflow: testers sideload debug-signed APKs, which cannot
+  // pass production Play Integrity / App Attest, so production Vouchflow
+  // would reject every one of them. ALLOW_VOUCHFLOW_SANDBOX=1 is the
+  // explicit operator opt-in acknowledging that deliberate config; the
+  // check still fires for anyone who lands on sandbox by accident.
+  if (
+    baseUrl.toLowerCase().includes('sandbox') &&
+    env.ALLOW_VOUCHFLOW_SANDBOX !== '1'
+  ) {
     errors.push(
       `VOUCHFLOW_BASE_URL points at sandbox (${baseUrl}) — the sandbox ` +
         'endpoint relaxes the attestation confidence floor to "low". ' +
-        'Production must use the production Vouchflow endpoint.',
+        'Use the production Vouchflow endpoint, or set ' +
+        'ALLOW_VOUCHFLOW_SANDBOX=1 to acknowledge a deliberate alpha config.',
     );
   }
 

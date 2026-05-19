@@ -66,6 +66,17 @@ describe('collectProductionConfigErrors', () => {
     expect(collectProductionConfigErrors(env).join('\n')).toMatch(/sandbox/);
   });
 
+  it('allows a sandbox Vouchflow base URL with ALLOW_VOUCHFLOW_SANDBOX=1', () => {
+    // The alpha deliberately runs against sandbox Vouchflow — sideloaded
+    // debug APKs cannot pass production attestation.
+    const env = {
+      ...validProdEnv(),
+      VOUCHFLOW_BASE_URL: 'https://sandbox.api.vouchflow.dev/v1',
+      ALLOW_VOUCHFLOW_SANDBOX: '1',
+    };
+    expect(collectProductionConfigErrors(env)).toEqual([]);
+  });
+
   it('flags a sub-medium confidence floor but allows medium / high', () => {
     expect(
       collectProductionConfigErrors({ ...validProdEnv(), VOUCHFLOW_MIN_CONFIDENCE: 'low' }).join('\n'),
