@@ -163,9 +163,12 @@ react {
 }
 
 /**
- * Set this to true to Run Proguard on Release builds to minify the Java bytecode.
+ * Run R8 (code shrinking + obfuscation) on release builds. Keep rules
+ * live in `proguard-rules.pro`. Resource shrinking is deliberately left
+ * off — string-addressed resources (e.g. the `ic_notification` icon
+ * named from JS) are unsafe for the resource shrinker to reason about.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
