@@ -44,11 +44,11 @@ import { signalProtocol, groupMessaging, getWsClient } from '../services.js';
 import { b64ToBytes, utf8FromBytes } from '../utils/bytes.js';
 import {
   sendReplyMessage,
-  loadPersistedDeviceToken,
   loadPersistedUserId,
   type ReplySenderDeps,
 } from './reply-sender.js';
 import { cachedAvatarUri } from './avatar-cache.js';
+import { getCachedDeviceToken } from '../native/cached-device-token.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -576,7 +576,9 @@ function replyDeps(): ReplySenderDeps {
   return {
     encrypt: (peer, plain) => signalProtocol.encrypt(peer, plain),
     getWsClient,
-    loadDeviceToken: loadPersistedDeviceToken,
+    // Read the device token from the Vouchflow SDK's native secure
+    // storage — it is no longer mirrored into JS AsyncStorage.
+    loadDeviceToken: getCachedDeviceToken,
   };
 }
 

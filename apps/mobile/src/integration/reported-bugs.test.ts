@@ -223,7 +223,7 @@ describe('reported bug #4 — identity should persist across app restarts', () =
     void useIdentity.getState().reset();
   });
 
-  it('hydrate() restores userId + deviceToken written by setUserId/setDeviceToken', async () => {
+  it('hydrate() restores userId across a cold start; the device token is sourced from native secure storage', async () => {
     // Simulate "user enrolled and got an id".
     useIdentity.getState().setUserId('alice-blue-fox');
     useIdentity.getState().setDeviceToken('dvt_alice');
@@ -236,7 +236,12 @@ describe('reported bug #4 — identity should persist across app restarts', () =
     await useIdentity.getState().hydrate();
 
     expect(useIdentity.getState().userId).toBe('alice-blue-fox');
-    expect(useIdentity.getState().deviceToken).toBe('dvt_alice');
+    // The device token is a bearer-like credential — never persisted to
+    // AsyncStorage. hydrate() reloads it from the Vouchflow SDK's native
+    // secure storage, which is absent in the test environment, so it
+    // stays undefined here (the real app repopulates it from native, or
+    // App.tsx drives a fresh verify).
+    expect(useIdentity.getState().deviceToken).toBeUndefined();
     expect(useIdentity.getState().hydrated).toBe(true);
   });
 
