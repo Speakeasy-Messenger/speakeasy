@@ -31,7 +31,7 @@ describe('sendReplyMessage', () => {
       settleMs: 0,
     };
 
-    await sendReplyMessage('bob', '  hi there  ', deps);
+    const result = await sendReplyMessage('bob', '  hi there  ', deps);
 
     expect(encrypt).toHaveBeenCalledWith('bob', expect.any(Uint8Array));
     expect(ws.connect).toHaveBeenCalledOnce();
@@ -44,6 +44,25 @@ describe('sendReplyMessage', () => {
       ciphertext: bytesToB64(new Uint8Array([1, 2, 3])),
     });
     expect(sent[0]!.message_id).toBeTruthy();
+  });
+
+  it('returns the wire message_id so the caller can match read receipts', async () => {
+    // The id on the returned object MUST equal the id sent on the wire.
+    // The in-app copy of the reply is recorded under it; the peer's read
+    // receipt references the wire id. A mismatch leaves inline replies
+    // permanently un-receipted (reported 2026-05-19).
+    const { ws, sent } = mockWs();
+    const deps: ReplySenderDeps = {
+      encrypt: vi.fn().mockResolvedValue(new Uint8Array([9])),
+      getWsClient: () => ws,
+      loadDeviceToken: async () => 'dvt_test',
+      settleMs: 0,
+    };
+
+    const { messageId } = await sendReplyMessage('bob', 'hi', deps);
+
+    expect(messageId).toBeTruthy();
+    expect(messageId).toBe(sent[0]!.message_id);
   });
 
   it('throws when no device token is stored', async () => {

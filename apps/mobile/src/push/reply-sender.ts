@@ -61,12 +61,17 @@ export async function loadPersistedUserId(): Promise<string | undefined> {
  * Encrypt `text` for `peerId` and send it as a direct message. Throws on
  * any failure (no token, encrypt error, WS auth timeout) so the caller
  * can surface a "couldn't send" state on the notification.
+ *
+ * Returns the `message_id` that went out on the wire. The caller MUST
+ * record the in-app copy of the reply under this same id — read receipts
+ * the peer sends back reference the wire id, so a locally-minted second
+ * id would leave inline replies permanently un-receipted.
  */
 export async function sendReplyMessage(
   peerId: string,
   text: string,
   deps: ReplySenderDeps,
-): Promise<void> {
+): Promise<{ messageId: string }> {
   const trimmed = text.trim();
   if (!trimmed) throw new Error('empty_reply');
 
@@ -79,12 +84,13 @@ export async function sendReplyMessage(
   const ws = deps.getWsClient(async () => deviceToken);
   ws.connect();
   await ws.waitForAuthed();
+  const messageId = newMessageId();
   ws.enqueueSend({
     type: 'message',
     to: peerId,
     ciphertext: bytesToB64(ciphertext),
     msg_type: 'direct',
-    message_id: newMessageId(),
+    message_id: messageId,
   });
   diag('push-reply', 'inline reply sent', { peerId });
 
@@ -92,4 +98,5 @@ export async function sendReplyMessage(
   // down. `enqueueSend` hands the frame to the socket synchronously
   // once authed; this grace covers the TCP flush.
   await new Promise((r) => setTimeout(r, deps.settleMs ?? 1500));
+  return { messageId };
 }

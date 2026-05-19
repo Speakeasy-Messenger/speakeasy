@@ -27,15 +27,22 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
   const myUserId = useIdentity((s) => s.userId);
   const themed = useColors();
 
-  // Every userId we'd want a notification avatar for.
+  // Every userId we'd want a notification avatar for: the local user,
+  // every conversation peer, and everyone we hold a profile for. The
+  // profile set matters because a peer's first-ever message arrives as
+  // a headless push before any conversation row exists — if we've seen
+  // them in a group or a profile lookup, their avatar is already warm
+  // and that first notification shows the real portrait, not the app
+  // icon.
   const userIds = useMemo(() => {
     const ids = new Set<string>();
     if (myUserId) ids.add(myUserId);
     for (const c of Object.values(conversations)) {
       if (c.peerUserId) ids.add(c.peerUserId);
     }
+    for (const id of Object.keys(profiles)) ids.add(id);
     return [...ids];
-  }, [conversations, myUserId]);
+  }, [conversations, profiles, myUserId]);
 
   const doneRef = useRef<Set<string>>(new Set());
   const [current, setCurrent] = useState<

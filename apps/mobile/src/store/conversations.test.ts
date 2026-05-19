@@ -32,6 +32,31 @@ describe('useConversations', () => {
     ]);
   });
 
+  it('add inserts an out-of-order message by sentAt', () => {
+    // An inline reply drained from the background queue can carry an
+    // earlier sentAt than messages that landed while the app was
+    // closed. It must splice into place, not tack onto the end.
+    useConversations.getState().add(CONV, { ...baseMsg('early'), sentAt: 1_000 });
+    useConversations.getState().add(CONV, { ...baseMsg('late'), sentAt: 3_000 });
+    useConversations.getState().add(CONV, { ...baseMsg('reply'), sentAt: 2_000 });
+    expect(useConversations.getState().byId[CONV]?.messages.map((m) => m.id)).toEqual([
+      'early',
+      'reply',
+      'late',
+    ]);
+  });
+
+  it('add keeps insertion order for equal sentAt', () => {
+    useConversations.getState().add(CONV, { ...baseMsg('a'), sentAt: 5_000 });
+    useConversations.getState().add(CONV, { ...baseMsg('b'), sentAt: 5_000 });
+    useConversations.getState().add(CONV, { ...baseMsg('c'), sentAt: 5_000 });
+    expect(useConversations.getState().byId[CONV]?.messages.map((m) => m.id)).toEqual([
+      'a',
+      'b',
+      'c',
+    ]);
+  });
+
   it('add dedupes by message id (server redelivery should not duplicate)', () => {
     // Server may redeliver a message whose ack was lost in a WS flap.
     // Without dedupe, each redelivery decrypts against an already-
