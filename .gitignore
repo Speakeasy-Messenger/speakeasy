@@ -70,3 +70,12 @@ backups/
 # Intermediate output of the app-icon generator. The committed icons
 # under apps/mobile/{ios,android}/... are the source of truth.
 generated/
+
+# Android signing keystores. The production release keystore must NEVER
+# be committed — it reaches release CI only via the ANDROID_KEYSTORE_BASE64
+# repo secret (see .github/workflows/release.yml). The debug keystore is
+# the one deliberate exception: its password is the public default and it
+# signs only local / PR / Tier-B builds.
+*.jks
+*.keystore
+!apps/mobile/android/app/debug.keystore

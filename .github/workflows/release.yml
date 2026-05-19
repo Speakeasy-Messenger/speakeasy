@@ -122,14 +122,52 @@ jobs:
         working-directory: apps/mobile/android
         env:
           VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          # Gradle reads ORG_GRADLE_PROJECT_* env vars as project
+          # properties — keeps the keystore credentials off the command
+          # line (and out of the process list) entirely.
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
           if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
             echo "::error::VOUCHFLOW_WRITE_KEY secret is not set."
             echo "::error::Configure it: gh secret set VOUCHFLOW_WRITE_KEY"
             exit 1
           fi
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot sign the release."
+            echo "::error::See PRODUCTION_READINESS_AUDIT.md P0 #4 for keystore setup."
+            exit 1
+          fi
+          # Decode the production keystore from the repo secret into the
+          # runner temp dir — never the workspace, never committed.
+          keystore="$RUNNER_TEMP/speakeasy-release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          # -Pvouchflow.environment=production: a release artifact must
+          # talk to production Vouchflow, not the sandbox default.
           ./gradlew :app:assembleRelease --no-daemon \
-            -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
+            -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY" \
+            -Pvouchflow.environment=production \
+            -PRELEASE_STORE_FILE="$keystore"
+
+      - name: Assert the release APK is not debug-signed
+        # Defence in depth behind the build.gradle keystore wiring: if the
+        # production keystore ever fails to apply, the build falls back to
+        # debug signing — this step catches that before anything publishes.
+        run: |
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          apksigner="$ANDROID_SDK_ROOT/build-tools/35.0.0/apksigner"
+          if [ ! -x "$apksigner" ]; then
+            apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | head -1)
+          fi
+          certs=$("$apksigner" verify --print-certs "$apk")
+          echo "$certs"
+          if echo "$certs" | grep -q "CN=Android Debug"; then
+            echo "::error::Release APK is signed with the Android debug certificate — the production keystore was not applied. Refusing to publish."
+            exit 1
+          fi
+          echo "Release APK is signed with a non-debug certificate."
 
       - name: Assert built APK carries the tag version
         # rc.82+: gradle derives versionName/versionCode from the git
