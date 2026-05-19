@@ -17,6 +17,7 @@ import {
 } from '../components/GetStartedCards.js';
 import { useOnboardingCards } from '../store/onboarding-cards.js';
 import { Handle } from '../components/Handle.js';
+import { MutedIcon } from '../components/icons/MutedIcon.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { Avatar } from '../components/Avatar.js';
@@ -47,6 +48,7 @@ interface DirectRow {
   sortKey: number;
   unread: number;
   lastActivityAt: number;
+  muted: boolean;
 }
 interface GroupRow {
   kind: 'group';
@@ -62,6 +64,7 @@ interface GroupRow {
   sortKey: number;
   unread: number;
   lastActivityAt: number;
+  muted: boolean;
 }
 type Row = DirectRow | GroupRow;
 
@@ -115,6 +118,7 @@ export function ConversationsScreen({
         sortKey: last?.sentAt ?? c.createdAt,
         unread: unreadCountFor(conversationId),
         lastActivityAt: last?.sentAt ?? c.createdAt,
+        muted: !!c.muted,
       };
     });
 
@@ -131,6 +135,7 @@ export function ConversationsScreen({
       sortKey: last?.sentAt ?? g.createdAt,
       unread: conv ? unreadCountFor(groupId) : 0,
       lastActivityAt: last?.sentAt ?? g.createdAt,
+      muted: !!conv?.muted,
     };
   });
 
@@ -339,19 +344,25 @@ export function ConversationsScreen({
                 <PortraitTile kind="room" id={item.groupId} size={36} />
               )}
               <View style={styles.rowBody}>
-                {item.kind === 'direct' ? (
-                  // <Handle> renders brass `@` + handle as separate
-                  // spans — same brand glyph treatment as the AppBar
-                  // and elsewhere. Single source for handle rendering.
-                  <Handle value={item.peerUserId} variant="body" />
-                ) : (
-                  <Text
-                    style={[styles.groupName, { color: themed.ink }]}
-                    numberOfLines={1}
-                  >
-                    {item.name}
-                  </Text>
-                )}
+                <View style={styles.rowTitleLine}>
+                  {item.kind === 'direct' ? (
+                    // <Handle> renders brass `@` + handle as separate
+                    // spans — same brand glyph treatment as the AppBar
+                    // and elsewhere. Single source for handle rendering.
+                    <Handle value={item.peerUserId} variant="body" />
+                  ) : (
+                    <Text
+                      style={[styles.groupName, { color: themed.ink }]}
+                      numberOfLines={1}
+                    >
+                      {item.name}
+                    </Text>
+                  )}
+                  {/* Muted conversations carry a quiet bell-slash mark. */}
+                  {item.muted ? (
+                    <MutedIcon size={14} color={themed.slate} />
+                  ) : null}
+                </View>
                 <Text
                   style={[styles.rowSubtitle, { color: themed.slate }]}
                   numberOfLines={1}
@@ -653,7 +664,9 @@ const styles = StyleSheet.create({
     borderBottomWidth: StyleSheet.hairlineWidth,
   },
   rowBody: { flex: 1, gap: space.xs, minWidth: 0 },
+  rowTitleLine: { flexDirection: 'row', alignItems: 'center', gap: space.xs },
   groupName: {
+    flexShrink: 1,
     fontFamily: font.medium,
     fontSize: 14,
     letterSpacing: -0.005 * 14,
