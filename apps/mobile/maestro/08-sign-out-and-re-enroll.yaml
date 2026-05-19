@@ -53,14 +53,14 @@ name: Sign-out + re-enroll round-trip (Tier B)
       HANDLE: tester08
 
 # 2. Baseline self-DM. If this fails, sign-out hasn't even started
-#    being tested — the regression is upstream.
-- copyTextFrom:
-    id: "conversations-userid"
+#    being tested — the regression is upstream. Type our own
+#    (just-enrolled, known) handle rather than copying it out of the
+#    header — see 02-self-dm.yaml.
 - tapOn:
     id: "conversations-fab"
 - tapOn:
     id: "find-sheet-input"
-- inputText: "${maestro.copiedText}"
+- inputText: "tester08"
 - tapOn:
     id: "find-sheet-result"
 - extendedWaitUntil:
@@ -123,14 +123,12 @@ name: Sign-out + re-enroll round-trip (Tier B)
 # 6. Post-re-enroll self-DM. If this works, the full sign-out + re-
 #    enroll path is healthy: identity store rotated, signal protocol
 #    store re-keyed, ws auth re-handshook, push-token register hook
-#    fired without crashing.
-- copyTextFrom:
-    id: "conversations-userid"
+#    fired without crashing. Re-enrolled handle is tester08b (step 5).
 - tapOn:
     id: "conversations-fab"
 - tapOn:
     id: "find-sheet-input"
-- inputText: "${maestro.copiedText}"
+- inputText: "tester08b"
 - tapOn:
     id: "find-sheet-result"
 - extendedWaitUntil:

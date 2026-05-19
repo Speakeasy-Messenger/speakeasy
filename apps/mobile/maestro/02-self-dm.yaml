@@ -13,21 +13,22 @@ name: Self-DM round-trip (Tier B)
     env:
       HANDLE: tester02
 
-# Copy our user ID — the conversations tab shows @<handle> in the
-# header. We'll use it as the peer for a self-DM.
-- copyTextFrom:
-    id: "conversations-userid"
-
 # NEW-CONVERSATION.md §3: FAB opens the Find Someone sheet
 # directly. The handle input is auto-focused, so we just type. Once
 # the lookup resolves, the result card appears with testID
 # `find-sheet-result` — tapping it opens the chat (no separate
 # "Start chat" button anymore).
+#
+# Type our own handle directly for the self-DM. We enrolled it just
+# above, so it is known — no need to copyTextFrom the header. (The
+# header's `conversations-userid` is a View wrapping the Handle, and
+# its rendered text is `@tester02` — the `@` is rejected by the
+# find-sheet's handle validator anyway.)
 - tapOn:
     id: "conversations-fab"
 - tapOn:
     id: "find-sheet-input"
-- inputText: "${maestro.copiedText}"
+- inputText: "tester02"
 - tapOn:
     id: "find-sheet-result"
 
