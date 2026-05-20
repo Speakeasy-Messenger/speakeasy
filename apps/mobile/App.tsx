@@ -26,6 +26,7 @@ import { ThemeProvider, useTheme } from './src/theme/ThemeProvider.js';
 import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
 import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
+import { consumeStoreResetFlag } from './src/native/db-state.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js'; // vouchflow kept — used by post-enrollment refresh effect
@@ -290,6 +291,25 @@ export default function App() {
     void requestStartupPermissions().catch((err) =>
       diag('app', 'startup permissions catch-up threw', { err: String(err) }),
     );
+  }, [hydrated, userId]);
+
+  // Check whether the native DB layer wiped the encrypted store on
+  // this launch (upgrade-time orphan cleanup, or the rare lost-key
+  // recovery). The flag is one-shot — consuming it clears it — so a
+  // dismissed banner doesn't reappear next launch. Only runs once we
+  // know there's an enrolled user, otherwise an unenrolled fresh
+  // install would show the banner with nothing to say it about.
+  useEffect(() => {
+    if (!hydrated || !userId) return;
+    void consumeStoreResetFlag()
+      .then((wasReset) => {
+        if (!wasReset) return;
+        diag('app', 'local store was reset by the native DB layer', { userId });
+        useUiState.getState().showStoreResetBanner();
+      })
+      .catch(() => {
+        /* best-effort — the banner is a UX nicety, not a correctness gate */
+      });
   }, [hydrated, userId]);
 
   // Phase 6 fix: route push-notification taps to the correct screen.

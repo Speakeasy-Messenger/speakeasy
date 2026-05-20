@@ -13,9 +13,9 @@
 //  The root secret is generated once and frozen for the life of the
 //  install — see DbKeyStore. It is NOT the Vouchflow device token.
 //  Earlier builds derived the passphrase straight from the token, which
-//  rotates on biometric reconfiguration and reinstall and silently
-//  orphaned the database. Decoupling the at-rest key from the
-//  attestation credential fixes that.
+//  rotates on biometric reconfiguration and Vouchflow re-attestation
+//  and silently orphaned the database. Decoupling the at-rest key from
+//  the attestation credential fixes that.
 //
 //  # Bootstrap invariant
 //
@@ -23,12 +23,24 @@
 //  because the key needs it, but because an un-enrolled app has no
 //  identity to store. The JS layer drives `vouchflow.verify` first.
 //
+//  # First-launch wipe (intentional)
+//
+//  The first launch with no DbKeyStore secret always seeds a fresh
+//  random secret. If a database file already exists on disk it was
+//  created by an older build (token-derived scheme) and we can't
+//  safely guess the key it was made with — the token may have rotated
+//  since enrollment. Earlier code tried to seed the secret with the
+//  current device token to preserve history through the migration,
+//  but that silently lost data the moment the token had moved, with
+//  no signal to the user. The honest move is to wipe the orphan
+//  deterministically and surface the reset to JS via consumeResetFlag.
+//
 //  # Recovery
 //
 //  If the file on disk can't be decrypted with the current passphrase
-//  (orphaned by the old token-derived scheme, or corrupt), open() logs
-//  it, deletes the file, and recreates an empty store so the app stays
-//  usable. Lost contents are unrecoverable.
+//  (genuine corruption, lost Keychain item), open() logs it, deletes
+//  the file, sets the reset flag, and recreates an empty store so the
+//  app stays usable. Lost contents are unrecoverable.
 //
 //  # CryptoKit HKDF
 //
@@ -68,6 +80,10 @@ final class SpeakeasyDb {
     private static let PASSPHRASE_BYTES = 32
     private static let ROOT_SECRET_BYTES = 32
 
+    /// UserDefaults key for the one-shot "the local store was reset"
+    /// flag. UI hint only, never a secret.
+    private static let RESET_FLAG_KEY = "xyz.speakeasyapp.db.storeWasReset"
+
     static let shared = SpeakeasyDb()
     private init() {}
 
@@ -96,6 +112,17 @@ final class SpeakeasyDb {
         return db
     }
 
+    /// Read-and-clear the "your local store was reset" flag. JS calls
+    /// this once at startup and surfaces a banner / diag entry when it
+    /// returns true. Returns false on a fresh install and on every
+    /// normal launch.
+    func consumeResetFlag() -> Bool {
+        let ud = UserDefaults.standard
+        let wasSet = ud.bool(forKey: SpeakeasyDb.RESET_FLAG_KEY)
+        if wasSet { ud.removeObject(forKey: SpeakeasyDb.RESET_FLAG_KEY) }
+        return wasSet
+    }
+
     /// Test-only: close the in-process handle so the next open() reopens fresh.
     func closeForTest() {
         lock.lock()
@@ -108,6 +135,10 @@ final class SpeakeasyDb {
 
     /// Permanently delete the encrypted DB and its db root secret. Used
     /// by account deletion so a re-enrollment starts from an empty store.
+    ///
+    /// Does NOT set the reset flag — this path is user-initiated; the UI
+    /// already shows its own confirmation. The flag is for *unexpected*
+    /// resets only.
     func wipe() {
         lock.lock()
         defer { lock.unlock() }
@@ -123,27 +154,38 @@ final class SpeakeasyDb {
 
     /// Resolve the db root secret, seeding DbKeyStore on first use.
     ///
-    /// If a legacy DB file already exists it was keyed by HKDF(token);
-    /// seed with the token so the derivation output is unchanged and the
-    /// user's history opens. A fresh install seeds with a random secret.
+    /// On a fresh install no DB file exists — seed with a random secret,
+    /// create an empty DB on first open, done. On the first launch after
+    /// upgrading from the old token-derived scheme a file exists but its
+    /// key is whatever token was current at enrollment, and we have no
+    /// reliable way to reproduce it (the token may have rotated). The
+    /// deterministic move is to wipe the orphan, seed fresh, and set the
+    /// reset flag so JS can surface the loss to the user.
     private func resolveRootSecret(dbPath: String, deviceToken: String) -> String {
         if let existing = DbKeyStore.load() { return existing }
-        let seed = FileManager.default.fileExists(atPath: dbPath)
-            ? deviceToken
-            : randomSecret()
+        if FileManager.default.fileExists(atPath: dbPath) {
+            NSLog("[SpeakeasyDb] first launch with no db root secret + existing speakeasy.db — wiping orphan and starting fresh")
+            deleteDbFiles(dbPath: dbPath)
+            setResetFlag()
+        }
+        let seed = randomSecret()
         DbKeyStore.store(seed)
         return seed
     }
 
     /// Open the database, recreating it empty if the file cannot be
-    /// decrypted with `passphrase`. Only a key failure triggers the
-    /// recreate — a genuine open failure (filesystem) is rethrown.
+    /// decrypted with `passphrase`. Hits only on genuine corruption /
+    /// lost Keychain item after the install — the upgrade case is
+    /// already handled in resolveRootSecret. Only a key failure
+    /// triggers the recreate; a genuine open failure (filesystem) is
+    /// rethrown.
     private func openOrRecover(dbPath: String, passphrase: Data) throws -> OpaquePointer {
         do {
             return try openKeyed(dbPath: dbPath, passphrase: passphrase)
         } catch SpeakeasyDbError.key(let msg) {
             NSLog("[SpeakeasyDb] speakeasy.db unreadable (\(msg)) — recreating empty store")
             deleteDbFiles(dbPath: dbPath)
+            setResetFlag()
             return try openKeyed(dbPath: dbPath, passphrase: passphrase)
         }
     }
@@ -177,6 +219,11 @@ final class SpeakeasyDb {
             throw SpeakeasyDbError.key("post-key canary failed: \(msg)")
         }
         return db!
+    }
+
+    /// Mark "the local store was reset" so JS can surface it next launch.
+    private func setResetFlag() {
+        UserDefaults.standard.set(true, forKey: SpeakeasyDb.RESET_FLAG_KEY)
     }
 
     /// Delete the DB file and its `-journal` / `-wal` / `-shm` sidecars.
