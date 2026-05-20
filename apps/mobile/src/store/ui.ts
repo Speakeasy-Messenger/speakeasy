@@ -25,6 +25,16 @@ interface UiState {
    */
   burningConversationId: string | undefined;
   setBurningConversationId: (id: string | undefined) => void;
+  /**
+   * One-shot "your local store was reset on this device" banner.
+   * App.tsx flips this on at startup if the native DB layer wiped
+   * the encrypted store (upgrade orphan, or rare Keystore-loss
+   * recovery). Dismissed via the X on the banner — does not persist
+   * across launches because the native flag is one-shot too.
+   */
+  storeResetBannerVisible: boolean;
+  showStoreResetBanner: () => void;
+  dismissStoreResetBanner: () => void;
 }
 
 export const useUiState = create<UiState>((set) => ({
@@ -34,4 +44,7 @@ export const useUiState = create<UiState>((set) => ({
   setPendingFindHandle: (handle) => set({ pendingFindHandle: handle }),
   burningConversationId: undefined,
   setBurningConversationId: (id) => set({ burningConversationId: id }),
+  storeResetBannerVisible: false,
+  showStoreResetBanner: () => set({ storeResetBannerVisible: true }),
+  dismissStoreResetBanner: () => set({ storeResetBannerVisible: false }),
 }));

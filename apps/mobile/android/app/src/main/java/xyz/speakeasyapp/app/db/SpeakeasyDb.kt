@@ -27,11 +27,12 @@ import javax.crypto.spec.SecretKeySpec
  * install — see [DbKeyStore]. It is **not** the Vouchflow device token.
  *
  * Earlier builds derived the passphrase straight from the device token.
- * That token rotates on biometric reconfiguration and reinstall, which
- * silently re-keyed the database and made every prior conversation
- * unreadable (`file is not a database (code 26)`). Decoupling the
- * at-rest key from the attestation credential fixes that: a fingerprint
- * change no longer costs the user their message history.
+ * That token rotates on biometric reconfiguration and Vouchflow
+ * re-attestation, which silently re-keyed the database and made every
+ * prior conversation unreadable (`file is not a database (code 26)`).
+ * Decoupling the at-rest key from the attestation credential fixes
+ * that: a fingerprint change no longer costs the user their message
+ * history.
  *
  * # Bootstrap invariant
  *
@@ -40,22 +41,26 @@ import javax.crypto.spec.SecretKeySpec
  * un-enrolled app has no identity to store. The JS layer must drive
  * `vouchflow.verify({context: 'signup'})` before any Signal-store call.
  *
+ * # First-launch wipe (intentional)
+ *
+ * The first launch with no [DbKeyStore] secret always seeds a **fresh
+ * random** secret. If a database file already exists on disk it was
+ * created by an older build (token-derived scheme) and we can't safely
+ * guess the key it was made with — the token may have rotated since
+ * enrollment. Earlier code tried to seed the secret with the current
+ * device token to preserve history through the migration, but that
+ * silently lost data the moment the token had moved, with no signal
+ * to the user. The honest move is to wipe the orphan deterministically
+ * and surface the reset to JS via [consumeResetFlag]. Every install
+ * pays this once at upgrade; nothing wipes the DB afterwards.
+ *
  * # Recovery
  *
  * If the file on disk cannot be decrypted with the current passphrase
- * (a DB orphaned by the old token-derived scheme, or genuine
- * corruption), [open] logs it, deletes the unreadable file, and
- * recreates an empty store so the app stays usable. The lost contents
- * are unrecoverable — the recovery is about not bricking the app, not
- * about getting the data back.
- *
- * # Migration
- *
- * The first [open] after upgrading from the token-derived scheme seeds
- * [DbKeyStore] with the current device token, so the derived passphrase
- * is byte-identical to the old key and the existing database opens
- * unchanged. The salt + info are versioned ("v1" / "speakeasy-db-v1")
- * so a forward `PRAGMA rekey` migration stays straightforward.
+ * (genuine corruption, lost Keystore key), [open] logs it, deletes the
+ * file, sets the reset flag, and recreates an empty store so the app
+ * stays usable. The lost contents are unrecoverable — recovery is
+ * about not bricking the app, not about getting the data back.
  */
 object SpeakeasyDb {
   private const val TAG = "SpeakeasyDb"
@@ -66,6 +71,11 @@ object SpeakeasyDb {
   private const val HMAC_ALG = "HmacSHA256"
   private const val HMAC_OUTPUT = 32
   private const val ROOT_SECRET_BYTES = 32
+
+  /** Plain SharedPreferences file (NOT the keystore-wrapped one) for
+   *  the single boolean below — a UI hint, not a secret. */
+  private const val STATE_PREFS = "speakeasy_db_state"
+  private const val RESET_FLAG_KEY = "store_was_reset"
 
   class NotEnrolledException :
       IllegalStateException(
@@ -92,11 +102,24 @@ object SpeakeasyDb {
       val dbFile = context.getDatabasePath(DB_FILENAME)
       dbFile.parentFile?.mkdirs()
       val passphrase = derivePassphrase(resolveRootSecret(context, dbFile, token))
-      val opened = openOrRecover(dbFile, passphrase)
+      val opened = openOrRecover(context, dbFile, passphrase)
       Schema.applyMigrations(opened)
       db = opened
       return opened
     }
+  }
+
+  /**
+   * Read-and-clear the "your local store was reset" flag. JS calls
+   * this once at startup and shows the user a banner / diag entry
+   * when it returns true. Returns false on a fresh install (no DB
+   * was ever there) and on every normal launch.
+   */
+  fun consumeResetFlag(context: Context): Boolean {
+    val prefs = context.getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+    val wasSet = prefs.getBoolean(RESET_FLAG_KEY, false)
+    if (wasSet) prefs.edit().remove(RESET_FLAG_KEY).commit()
+    return wasSet
   }
 
   /** Test-only: wipe in-process handle so the next `open()` reopens fresh. */
@@ -112,6 +135,10 @@ object SpeakeasyDb {
    * file plus its SQLite sidecars, and drop the db root secret. Used by
    * account deletion so a later re-enrollment starts from a genuinely
    * empty store instead of resurrecting the previous identity's keys.
+   *
+   * Does NOT set the reset flag — this path is user-initiated; the UI
+   * already shows its own confirmation. The flag is for *unexpected*
+   * resets only.
    */
   fun wipe(context: Context) {
     synchronized(this) {
@@ -125,26 +152,37 @@ object SpeakeasyDb {
   /**
    * Resolve the db root secret, seeding [DbKeyStore] on first use.
    *
-   * If a legacy DB file already exists, the secret is seeded with the
-   * current device token so the HKDF output matches the key that file
-   * was created with (token-derived scheme) and the user's history
-   * opens unchanged. A fresh install seeds with a random secret.
+   * On a fresh install no DB file exists — seed with a random secret,
+   * create an empty DB on first open, done. On the first launch after
+   * upgrading from the old token-derived scheme a file exists but its
+   * key is whatever token was current at the time of enrollment, and
+   * we have no reliable way to reproduce it (the token may have
+   * rotated). The deterministic move is to wipe the orphan, seed a
+   * fresh random secret, and set the reset flag so JS can surface
+   * the loss to the user.
    */
   private fun resolveRootSecret(context: Context, dbFile: File, deviceToken: String): String {
     DbKeyStore.load(context)?.let {
       return it
     }
-    val seed = if (dbFile.exists()) deviceToken else randomSecret()
+    if (dbFile.exists()) {
+      Log.w(TAG, "first launch with no db root secret + existing speakeasy.db — wiping orphan and starting fresh")
+      deleteDbFiles(dbFile)
+      setResetFlag(context)
+    }
+    val seed = randomSecret()
     DbKeyStore.store(context, seed)
     return seed
   }
 
   /**
    * Open the database, recreating it empty if the file cannot be
-   * decrypted with [passphrase]. SQLCipher verifies the key lazily, so
-   * a `SELECT` canary forces the check up front.
+   * decrypted with [passphrase]. Hits only on genuine corruption /
+   * lost Keystore key after the install — the upgrade case is
+   * already handled in [resolveRootSecret]. SQLCipher verifies the
+   * key lazily, so a `SELECT` canary forces the check up front.
    */
-  private fun openOrRecover(dbFile: File, passphrase: ByteArray): SQLiteDatabase {
+  private fun openOrRecover(context: Context, dbFile: File, passphrase: ByteArray): SQLiteDatabase {
     var opened: SQLiteDatabase? = null
     try {
       opened = SQLiteDatabase.openOrCreateDatabase(dbFile, passphrase, null, null, null)
@@ -155,6 +193,7 @@ object SpeakeasyDb {
       if (!isWrongKey(e)) throw e
       Log.w(TAG, "speakeasy.db unreadable with current key — recreating empty store", e)
       deleteDbFiles(dbFile)
+      setResetFlag(context)
       return SQLiteDatabase.openOrCreateDatabase(dbFile, passphrase, null, null, null)
     }
   }
@@ -163,6 +202,15 @@ object SpeakeasyDb {
   private fun isWrongKey(e: Throwable): Boolean {
     val msg = "${e.message.orEmpty()} ${e.cause?.message.orEmpty()}"
     return msg.contains("file is not a database") || msg.contains("code 26")
+  }
+
+  /** Mark "the local store was reset" so JS can surface it next launch. */
+  private fun setResetFlag(context: Context) {
+    context
+        .getSharedPreferences(STATE_PREFS, Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean(RESET_FLAG_KEY, true)
+        .commit()
   }
 
   /** Delete the DB file and its `-journal` / `-wal` / `-shm` sidecars. */

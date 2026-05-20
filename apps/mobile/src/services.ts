@@ -76,11 +76,19 @@ export function getWsClient(
       onAuthRejected: async ({ reason }) => {
         // The server forgot this device's (token → userId) binding.
         // Rebuild it before the client reconnects, otherwise the WS
-        // spins in `reconnecting` forever. Dynamic import avoids a
-        // static cycle with ensure-enrolled.ts (which imports `api`).
+        // spins in `reconnecting` forever. forceReenroll skips the
+        // REST probe inside ensureServerBinding — that probe is a
+        // false-positive sensor (returns 200 even when the WS-side
+        // binding is missing), and the WS just authoritatively told
+        // us the binding is gone. Dynamic import avoids a static
+        // cycle with ensure-enrolled.ts (which imports `api`).
         diag('ws', 'auth rejected — re-enrolling device', { reason });
         const { ensureServerBinding } = await import('./auth/ensure-enrolled.js');
-        const result = await ensureServerBinding({ signalProtocol, vouchflow });
+        const result = await ensureServerBinding({
+          signalProtocol,
+          vouchflow,
+          forceReenroll: true,
+        });
         diag('ws', 'auth-rejected re-enroll done', { result });
       },
     });

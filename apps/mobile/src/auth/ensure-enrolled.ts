@@ -19,10 +19,18 @@ function randomRegistrationId(): number {
  * loops forever in `reconnecting`.
  *
  * Strategy:
- *   1. Probe with `GET /v1/users/:id`. If 200, the binding is good.
- *   2. On 401 `not_enrolled`, silently re-enroll with the SAME handle
- *      + a fresh prekey bundle (same identity key — the native module
- *      persists it). This rebuilds the server-side row.
+ *   1. Unless `forceReenroll`, probe with `GET /v1/users/:id`. If 200,
+ *      we *might* be bound. Note that the REST endpoint validates the
+ *      attestation + checks the user exists, but does NOT verify the
+ *      `token → userId` binding the WS auth requires (see #2). So this
+ *      probe is a cheap optimistic check, not a guarantee.
+ *   2. On 401 `not_enrolled` (or `forceReenroll`), silently re-enroll
+ *      with the SAME handle + a fresh prekey bundle (same identity key
+ *      — the native module persists it). This rebuilds the server-side
+ *      row. We always force when called from the WS's 4003
+ *      not_enrolled close handler: by definition the WS just told us
+ *      the binding is broken, so probing the REST endpoint (which is
+ *      a false-positive sensor) would just leave the WS spinning.
  *   3. On 409 `taken` during re-enroll, leave the identity ALONE. The
  *      handle existing server-side is almost always the user's own row
  *      (a transient probe 401 sent us down the re-enroll path
@@ -34,34 +42,53 @@ function randomRegistrationId(): number {
  * action (DeleteAccountScreen). Idempotent. Safe to call once on every
  * app boot before the WS connect.
  */
-export async function ensureServerBinding(deps: {
+export interface EnsureServerBindingDeps {
   signalProtocol: SignalProtocolModule;
   vouchflow: VouchflowClient;
-}): Promise<'ok' | 'reenrolled' | 'noop'> {
+  /**
+   * Skip the REST probe and go straight to the re-enroll path. Used
+   * by the WS `onAuthRejected` callback: when the server closes the
+   * socket with 4003 `not_enrolled` the binding is definitively
+   * missing, and the probe would just return a false-positive 200.
+   */
+  forceReenroll?: boolean;
+}
+
+export async function ensureServerBinding(
+  deps: EnsureServerBindingDeps,
+): Promise<'ok' | 'reenrolled' | 'noop'> {
   const { userId, deviceToken } = useIdentity.getState();
   if (!userId || !deviceToken) return 'noop';
 
-  // Quick auth probe. Any successful 2xx tells us the server knows us.
-  try {
-    await api.fetchUser(deviceToken, userId);
-    diag('auth', 'server-binding probe OK', { userId });
-    return 'ok';
-  } catch (err) {
-    if (!(err instanceof ApiError) || err.status !== 401) {
-      // Network / 5xx / 404 — leave alone. 404 specifically means the
-      // user record is missing too; silent re-enroll will recreate it
-      // via the same path we'd take on a 401, so fall through.
-      if (!(err instanceof ApiError) || err.status !== 404) {
-        diag('auth', 'server-binding probe error (skipping reenroll)', {
-          status: (err as ApiError).status,
-          code: (err as ApiError).code,
-        });
-        return 'noop';
+  if (!deps.forceReenroll) {
+    // Quick optimistic probe. The endpoint doesn't actually verify
+    // the WS-side binding (see strategy note above), so a 200 only
+    // means "no obvious problem" — not "definitely bound."
+    try {
+      await api.fetchUser(deviceToken, userId);
+      diag('auth', 'server-binding probe OK', { userId });
+      return 'ok';
+    } catch (err) {
+      if (!(err instanceof ApiError) || err.status !== 401) {
+        // Network / 5xx / 404 — leave alone. 404 specifically means
+        // the user record is missing too; silent re-enroll will
+        // recreate it via the same path we'd take on a 401, so fall
+        // through.
+        if (!(err instanceof ApiError) || err.status !== 404) {
+          diag('auth', 'server-binding probe error (skipping reenroll)', {
+            status: (err as ApiError).status,
+            code: (err as ApiError).code,
+          });
+          return 'noop';
+        }
       }
     }
   }
 
-  diag('auth', 'server has forgotten this device — silent re-enroll', { userId });
+  diag('auth', 'server has forgotten this device — silent re-enroll', {
+    userId,
+    forced: deps.forceReenroll === true,
+  });
   try {
     const identityPublicKey = await deps.signalProtocol.generateIdentityKey();
     const registrationId = randomRegistrationId();

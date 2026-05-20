@@ -24,6 +24,7 @@ import { Avatar } from '../components/Avatar.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { useBlocks } from '../store/blocks.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
+import { StoreResetBanner } from '../components/StoreResetBanner.js';
 import { useColors } from '../theme/index.js';
 import { colors, fonts, space, text } from '../theme/index.js';
 import { font, motion, type } from '../theme/tokens.js';
@@ -255,6 +256,8 @@ export function ConversationsScreen({
           </Pressable>
         }
       />
+
+      <StoreResetBanner />
 
       <FlatList
         data={rows}
