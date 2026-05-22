@@ -2,7 +2,6 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   ActivityIndicator,
   Animated,
-  Modal,
   Pressable,
   StyleSheet,
   Text,
@@ -88,6 +87,8 @@ export function AcquireSheet({
   // needing to actually speak.
   const previewAmp = useRef(new Animated.Value(0)).current;
   useEffect(() => {
+    previewAmp.stopAnimation();
+    previewAmp.setValue(0);
     if (!visible) return undefined;
     const loop = Animated.loop(
       Animated.sequence([
@@ -105,7 +106,11 @@ export function AcquireSheet({
       ]),
     );
     loop.start();
-    return () => loop.stop();
+    return () => {
+      loop.stop();
+      previewAmp.stopAnimation();
+      previewAmp.setValue(0);
+    };
   }, [visible, previewAmp]);
 
   useEffect(() => {
@@ -149,14 +154,10 @@ export function AcquireSheet({
     }
   }
 
+  if (!visible) return <View testID="acquire-sheet-hidden" />;
+
   return (
-    <Modal
-      visible={visible}
-      transparent
-      animationType="slide"
-      onRequestClose={onClose}
-      statusBarTranslucent
-    >
+    <View style={styles.overlay} testID="acquire-sheet-overlay">
       <Pressable
         style={[styles.scrim, { backgroundColor: scrim.modal }]}
         onPress={busy ? undefined : onClose}
@@ -178,6 +179,7 @@ export function AcquireSheet({
                   styles.portraitWrap,
                   { backgroundColor: brand.surface },
                 ]}
+                key={desc.id}
                 testID="acquire-portrait"
               >
                 <AvatarRenderer
@@ -262,7 +264,7 @@ export function AcquireSheet({
           )}
         </View>
       </View>
-    </Modal>
+    </View>
   );
 }
 
@@ -277,6 +279,12 @@ const TEXT_MUTE = workspace.dark.textMute;
 const TEXT_FAINT = workspace.dark.textFaint;
 
 const styles = StyleSheet.create({
+  overlay: {
+    ...StyleSheet.absoluteFillObject,
+    justifyContent: 'flex-end',
+    zIndex: 20,
+    elevation: 20,
+  },
   scrim: { ...StyleSheet.absoluteFillObject },
   wrap: { flex: 1, justifyContent: 'flex-end' },
   sheet: {

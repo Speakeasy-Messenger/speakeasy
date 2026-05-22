@@ -117,6 +117,11 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
     void handlePick(animalId);
   }
 
+  function openAcquireSheet(animalId: string) {
+    if (busy || acquiring) return;
+    setAcquiring(animalId);
+  }
+
   return (
     <SafeAreaView
       style={[styles.root, { backgroundColor: themed.cream }]}
@@ -149,7 +154,7 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
                 // ownership state pollution caused paid avatars to
                 // silently bypass the sheet.
                 if (entry.tier !== 'free') {
-                  setAcquiring(entry.id);
+                  openAcquireSheet(entry.id);
                 } else {
                   void handlePick(entry.id);
                 }
@@ -166,10 +171,11 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
                 <LockedTile
                   key={entry.id}
                   entry={entry}
+                  busy={busy || acquiring !== null}
                   themed={themed}
                   onPress={() => {
                     diag('picker', 'tap locked rare', { id: entry.id });
-                    setAcquiring(entry.id);
+                    openAcquireSheet(entry.id);
                   }}
                 />
               ))}
@@ -189,10 +195,11 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
                 <LockedTile
                   key={entry.id}
                   entry={entry}
+                  busy={busy || acquiring !== null}
                   themed={themed}
                   onPress={() => {
                     diag('picker', 'tap locked legendary', { id: entry.id });
-                    setAcquiring(entry.id);
+                    openAcquireSheet(entry.id);
                   }}
                 />
               ))}
@@ -281,10 +288,12 @@ function OwnedTile({
 
 function LockedTile({
   entry,
+  busy,
   themed,
   onPress,
 }: {
   entry: AvatarDescriptor;
+  busy: boolean;
   themed: ReturnType<typeof useColors>;
   onPress: () => void;
 }): React.ReactElement {
@@ -292,12 +301,14 @@ function LockedTile({
     <Pressable
       onPress={onPress}
       hitSlop={2}
+      disabled={busy}
       style={[
         styles.cell,
         {
           backgroundColor: themed.pale,
           borderColor: themed.divider,
         },
+        busy && styles.disabledCell,
       ]}
       testID={`avatar-locked-${entry.id}`}
     >
@@ -377,6 +388,9 @@ const styles = StyleSheet.create({
     fontSize: 9,
     letterSpacing: 0.2,
     color: accent.foreground,
+  },
+  disabledCell: {
+    opacity: 0.7,
   },
   restoreWrap: {
     alignSelf: 'center',
