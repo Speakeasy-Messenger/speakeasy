@@ -82,7 +82,10 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
       doneRef.current.add(`${userId}:${animalId}`);
       setCurrent(undefined);
     };
-    // Small delay so the off-screen SVG has been drawn before capture.
+    // Wait for the SVG host view to actually paint before snapshotting.
+    // 200 ms was empirically too tight on cold start — some users saw
+    // the notification fall back to the app icon because `toDataURL`
+    // returned an empty bitmap on a not-yet-painted off-screen view.
     const t = setTimeout(() => {
       const svg = svgRef.current;
       if (!svg || cancelled) {
@@ -92,6 +95,11 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
       try {
         svg.toDataURL((base64: string) => {
           if (cancelled) return;
+          if (!base64) {
+            diag('avatar-cache', 'toDataURL returned empty — skipping', { userId });
+            finish();
+            return;
+          }
           void writeAvatarPng(userId, base64)
             .then(() => diag('avatar-cache', 'cached', { userId }))
             .catch((err) =>
@@ -103,7 +111,7 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
         diag('avatar-cache', 'toDataURL failed', { userId, err: String(err) });
         finish();
       }
-    }, 200);
+    }, 500);
     return () => {
       cancelled = true;
       clearTimeout(t);
@@ -114,17 +122,30 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
   const def = ANIMALS[current.animalId];
   if (!def) return null;
   return (
+    // Render in-tree at the very top-left with opacity 0 (rather than
+    // translated to -9999 px) so Android actually paints the SVG —
+    // off-screen RN views were intermittently being skipped by the
+    // platform compositor, leaving `toDataURL` with a blank bitmap.
     <View
-      style={{ position: 'absolute', left: -9999, top: -9999, opacity: 0 }}
+      style={{
+        position: 'absolute',
+        left: 0,
+        top: 0,
+        width: RASTER_SIZE,
+        height: RASTER_SIZE,
+        opacity: 0,
+      }}
       pointerEvents="none"
     >
-      {/* Mirror the in-app PortraitTile: a surface-fill square with the
-          animal inset to 78%, so the notification avatar carries the
-          same margin as avatars everywhere else in the app. The headless
+      {/* Surface-fill square with the animal inset to 60%, giving the
+          rasterized notification avatar a generous ring of margin.
+          MessagingStyle Person icons are cropped to a circle by Android;
+          the extra margin keeps the animal centred well inside the
+          mask instead of bleeding into the cropped corners. The headless
           push handler reads this PNG straight into the notification. */}
       <Svg ref={svgRef} width={RASTER_SIZE} height={RASTER_SIZE} viewBox="0 0 100 100">
         <Rect x={0} y={0} width={100} height={100} fill={themed.pale} />
-        <G transform="translate(11 11) scale(0.78)">
+        <G transform="translate(20 20) scale(0.60)">
           {def.Render({ eyeScale: eyeOpen, mouthScale: mouthIdle, amplitude: noAmp })}
         </G>
       </Svg>

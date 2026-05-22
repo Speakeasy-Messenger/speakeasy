@@ -257,4 +257,32 @@ describe('useConversations', () => {
     useConversations.getState().markDelivered('m1');
     expect(useConversations.getState().byId).toBe(afterFirst);
   });
+
+  it('buffers a delivered receipt that arrived before its message and applies it on add', () => {
+    // Inline replies sent from a notification banner are queued and drain
+    // into the store on next foreground — the server's buffered
+    // `delivered` ack can win that race. Without the in-memory holding
+    // pen the receipt is dropped and the bubble is stuck on a single ✓.
+    useConversations.getState().markDelivered('inline-1');
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('inline-1'), from: 'me', delivered: false });
+    const m = useConversations
+      .getState()
+      .byId[CONV]!.messages.find((x) => x.id === 'inline-1');
+    expect(m?.delivered).toBe(true);
+  });
+
+  it('buffers a read receipt that arrived before its message and applies it on add', () => {
+    const ts = 1_700_000_000_000;
+    useConversations.getState().markMessageRead('inline-2', ts);
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('inline-2'), from: 'me', delivered: false });
+    const m = useConversations
+      .getState()
+      .byId[CONV]!.messages.find((x) => x.id === 'inline-2');
+    expect(m?.readAt).toBe(ts);
+    expect(m?.delivered).toBe(true);
+  });
 });

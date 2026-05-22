@@ -121,6 +121,17 @@ interface ConversationsState {
   /** True once `hydrate()` has run (loaded from disk on startup). */
   hydrated: boolean;
   /**
+   * Receipts that arrived before their target message landed in the
+   * store. Keyed by message id (the wire id). Inline replies sent from
+   * a notification banner are added to the store on the next foreground
+   * (see push-handler.drainPendingReplies), which can lose a race with
+   * the WS replaying buffered `delivered`/`read` acks from the server.
+   * Without this catch, an inline reply was stuck on a single ✓ even
+   * though the peer had already read it. In-memory only — buffered acks
+   * are durable on the server side, so a process restart re-fires them.
+   */
+  _pendingReceipts: Record<string, { delivered?: boolean; readAt?: number }>;
+  /**
    * Open (or refresh) a 1:1 conversation with `peerUserId`. Idempotent —
    * doesn't reset messages or settings if the conversation already exists.
    * Returns the conversationId for navigation.
@@ -211,6 +222,7 @@ async function persist(byId: Record<string, ConversationState>): Promise<void> {
 export const useConversations = create<ConversationsState>((set, get) => ({
   byId: {},
   hydrated: false,
+  _pendingReceipts: {},
 
   openDirect: (myUserId, peerUserId) => {
     const id = conversationIdForDirect(myUserId, peerUserId);
@@ -267,15 +279,33 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       ) {
         peerUserId = msg.from;
       }
+      // Fold in any receipt that arrived before this message landed.
+      // Inline replies queued from a notification's RemoteInput drain
+      // into the store after the foreground app comes up; the server's
+      // buffered `delivered`/`read` acks for that wire id can arrive
+      // first, hit no message, and be parked here. Apply them now.
+      let merged = msg;
+      const pending = s._pendingReceipts[msg.id];
+      let nextPending = s._pendingReceipts;
+      if (pending) {
+        merged = {
+          ...msg,
+          delivered: pending.delivered || msg.delivered || !!pending.readAt,
+          ...(pending.readAt ? { readAt: pending.readAt } : {}),
+        };
+        const { [msg.id]: _drop, ...rest } = s._pendingReceipts;
+        nextPending = rest;
+      }
       return {
         byId: {
           ...s.byId,
           [conversationId]: {
             ...c,
             peerUserId,
-            messages: insertBySentAt(c.messages, msg),
+            messages: insertBySentAt(c.messages, merged),
           },
         },
+        _pendingReceipts: nextPending,
       };
     });
     void persist(get().byId);
@@ -325,7 +355,16 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         next[convId] = { ...conv, messages: updated };
         touched = true;
       }
-      if (!touched) return s;
+      if (!touched) {
+        // Park the receipt for an inline-reply message that hasn't
+        // drained into the store yet — see `_pendingReceipts` doc.
+        return {
+          _pendingReceipts: {
+            ...s._pendingReceipts,
+            [msgId]: { ...s._pendingReceipts[msgId], delivered: true },
+          },
+        };
+      }
       void persist(next);
       return { byId: next };
     }),
@@ -352,7 +391,18 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         next[convId] = { ...conv, messages: updated };
         touched = true;
       }
-      if (!touched) return s;
+      if (!touched) {
+        return {
+          _pendingReceipts: {
+            ...s._pendingReceipts,
+            [msgId]: {
+              ...s._pendingReceipts[msgId],
+              readAt,
+              delivered: true,
+            },
+          },
+        };
+      }
       void persist(next);
       return { byId: next };
     }),
