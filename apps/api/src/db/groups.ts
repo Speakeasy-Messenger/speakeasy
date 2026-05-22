@@ -42,6 +42,24 @@ export interface GroupRepo {
     groupId: string;
     userId: string;
   }): Promise<number | 'group_missing' | 'not_member' | 'cannot_remove_creator'>;
+  /** Creator-only metadata update, authorized by the routes layer. */
+  setName(args: {
+    groupId: string;
+    name: string;
+  }): Promise<GroupSummary | 'group_missing'>;
+  /**
+   * Voluntary leave. If the creator leaves, ownership passes to the
+   * oldest remaining member. If the last member leaves, the room is
+   * deleted.
+   */
+  leaveMember(args: {
+    groupId: string;
+    userId: string;
+  }): Promise<
+    | { members: number; createdBy: string | null; deleted: boolean }
+    | 'group_missing'
+    | 'not_member'
+  >;
   /** Existence + creator lookup. Undefined when the group is missing. */
   findById(groupId: string): Promise<GroupSummary | undefined>;
 }

@@ -3,6 +3,7 @@ import type { Redis } from 'ioredis';
 // @ts-expect-error - ioredis-mock has no types but is API-compatible with ioredis
 import RedisMock from 'ioredis-mock';
 import { createRedisCallOfferBuffer } from './call-offer-buffer.redis.js';
+import { raiseIoredisMockListenerLimit } from './redis-mock-listener-limit.test-util.js';
 
 /**
  * Unit tests for the Redis-backed call-offer buffer.
@@ -15,6 +16,7 @@ import { createRedisCallOfferBuffer } from './call-offer-buffer.redis.js';
  * tests.
  */
 function makeMockRedis(): Redis {
+  raiseIoredisMockListenerLimit();
   return new RedisMock() as unknown as Redis;
 }
 

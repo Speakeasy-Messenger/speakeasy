@@ -1,4 +1,5 @@
 import type { FastifyInstance, FastifyRequest, FastifyReply } from 'fastify';
+import type { DeviceRecord, DevicesRepo } from '../db/devices.js';
 import type { EventLogRepo } from '../db/event-log.js';
 
 /**
@@ -24,25 +25,63 @@ import type { EventLogRepo } from '../db/event-log.js';
 const MAX_LIMIT = 500;
 const DEFAULT_LIMIT = 50;
 
+function tokenPreview(token: string | undefined, visible = 8): string | null {
+  if (!token) return null;
+  const prefix = token.slice(0, visible);
+  return `${prefix}...`;
+}
+
+function requireAdmin(req: FastifyRequest, reply: FastifyReply): boolean {
+  const expected = process.env.ADMIN_TOKEN;
+  if (!expected) {
+    void reply.code(503).send({ error: 'admin_token_unset' });
+    return false;
+  }
+  const auth = req.headers.authorization;
+  if (!auth || !auth.startsWith('Bearer ')) {
+    void reply.code(401).send({ error: 'missing_bearer' });
+    return false;
+  }
+  const token = auth.slice('Bearer '.length).trim();
+  if (token !== expected) {
+    void reply.code(403).send({ error: 'bad_token' });
+    return false;
+  }
+  return true;
+}
+
+export interface RedactedDeviceRecord {
+  deviceTokenPreview: string;
+  pushTokenPreview: string | null;
+  hasPushToken: boolean;
+  platform?: 'ios' | 'android';
+  notificationPrivacy?: 'rich' | 'private';
+  lastPushError?: string;
+  enrolledAt: string;
+  lastSeen: string;
+}
+
+export function redactDeviceRecord(device: DeviceRecord): RedactedDeviceRecord {
+  return {
+    deviceTokenPreview: tokenPreview(device.deviceToken, 12)!,
+    pushTokenPreview: tokenPreview(device.pushToken),
+    hasPushToken: !!device.pushToken,
+    platform: device.platform,
+    notificationPrivacy: device.notificationPrivacy,
+    lastPushError: device.lastPushError,
+    enrolledAt: device.enrolledAt.toISOString(),
+    lastSeen: device.lastSeen.toISOString(),
+  };
+}
+
 export async function registerAdminRoutes(
   app: FastifyInstance,
-  deps: { eventLog: EventLogRepo; devices?: any; users?: any },
+  deps: { eventLog: EventLogRepo; devices?: DevicesRepo; users?: any },
 ): Promise<void> {
   app.get(
     '/v1/admin/events',
     async (req: FastifyRequest, reply: FastifyReply) => {
-      const expected = process.env.ADMIN_TOKEN;
-      if (!expected) {
-        return reply.code(503).send({ error: 'admin_token_unset' });
-      }
-      const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith('Bearer ')) {
-        return reply.code(401).send({ error: 'missing_bearer' });
-      }
-      const token = auth.slice('Bearer '.length).trim();
-      if (token !== expected) {
-        return reply.code(403).send({ error: 'bad_token' });
-      }
+      if (!requireAdmin(req, reply)) return;
       const q = req.query as { userId?: string; type?: string; limit?: string };
       const limit = Math.min(MAX_LIMIT, Math.max(1, Number(q.limit ?? DEFAULT_LIMIT)));
       if (!q.userId) {
@@ -59,25 +98,13 @@ export async function registerAdminRoutes(
   app.get(
     '/v1/admin/users/:userId/devices',
     async (req: FastifyRequest, reply: FastifyReply) => {
-      const expected = process.env.ADMIN_TOKEN;
-      if (!expected) {
-        return reply.code(503).send({ error: 'admin_token_unset' });
-      }
-      const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith('Bearer ')) {
-        return reply.code(401).send({ error: 'missing_bearer' });
-      }
-      const token = auth.slice('Bearer '.length).trim();
-      if (token !== expected) {
-        return reply.code(403).send({ error: 'bad_token' });
-      }
+      if (!requireAdmin(req, reply)) return;
       const params = req.params as { userId: string };
       if (!deps.devices) {
         return reply.code(501).send({ error: 'devices_repo_not_available' });
       }
-      
       const devices = await deps.devices.listForUser(params.userId);
-      return reply.send({ devices });
+      return reply.send({ devices: devices.map(redactDeviceRecord) });
     },
   );
 
@@ -86,33 +113,22 @@ export async function registerAdminRoutes(
   app.delete(
     '/v1/admin/users/:userId/devices/:deviceToken',
     async (req: FastifyRequest, reply: FastifyReply) => {
-      const expected = process.env.ADMIN_TOKEN;
-      if (!expected) {
-        return reply.code(503).send({ error: 'admin_token_unset' });
-      }
-      const auth = req.headers.authorization;
-      if (!auth || !auth.startsWith('Bearer ')) {
-        return reply.code(401).send({ error: 'missing_bearer' });
-      }
-      const token = auth.slice('Bearer '.length).trim();
-      if (token !== expected) {
-        return reply.code(403).send({ error: 'bad_token' });
-      }
+      if (!requireAdmin(req, reply)) return;
       const params = req.params as { userId: string; deviceToken: string };
       if (!deps.devices) {
         return reply.code(501).send({ error: 'devices_repo_not_available' });
       }
-      
+
       // Delete the device
       const result = await deps.devices.remove(params.deviceToken);
-      
+
       // Log the admin action
       await deps.eventLog.record({
         eventType: 'admin.device_deleted',
         userId: params.userId,
-        payload: { deviceToken: params.deviceToken.slice(0, 16) + '...' },
+        payload: { deviceTokenPreview: tokenPreview(params.deviceToken, 12) },
       });
-      
+
       return reply.send({ ok: true, result, message: 'device deleted - user can re-enroll' });
     },
   );

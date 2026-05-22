@@ -1,4 +1,4 @@
-import { eq, sql, and } from 'drizzle-orm';
+import { asc, eq, sql, and } from 'drizzle-orm';
 import { getDb } from './client.js';
 import { groups, groupMembers } from './schema.js';
 import { SMALL_GROUP_MAX_MEMBERS, type GroupRepo, type GroupSummary } from './groups.js';
@@ -174,6 +174,89 @@ export class DrizzleGroupRepo implements GroupRepo {
         .from(groupMembers)
         .where(eq(groupMembers.groupId, args.groupId));
       return Number(countRows[0]!.count);
+    });
+  }
+
+  async setName(args: {
+    groupId: string;
+    name: string;
+  }): Promise<GroupSummary | 'group_missing'> {
+    const db = getDb();
+    const rows = await db
+      .update(groups)
+      .set({ name: args.name })
+      .where(eq(groups.id, args.groupId))
+      .returning({
+        id: groups.id,
+        createdBy: groups.createdBy,
+        name: groups.name,
+      });
+    const row = rows[0];
+    return row
+      ? { id: row.id, createdBy: row.createdBy, name: row.name }
+      : 'group_missing';
+  }
+
+  async leaveMember(args: {
+    groupId: string;
+    userId: string;
+  }): Promise<
+    | { members: number; createdBy: string | null; deleted: boolean }
+    | 'group_missing'
+    | 'not_member'
+  > {
+    const db = getDb();
+    return db.transaction(async (tx) => {
+      const groupRows = await tx
+        .select({ id: groups.id, createdBy: groups.createdBy })
+        .from(groups)
+        .where(eq(groups.id, args.groupId))
+        .limit(1);
+      const group = groupRows[0];
+      if (!group) return 'group_missing';
+
+      const existing = await tx
+        .select({ userId: groupMembers.userId })
+        .from(groupMembers)
+        .where(
+          and(
+            eq(groupMembers.groupId, args.groupId),
+            eq(groupMembers.userId, args.userId),
+          ),
+        )
+        .limit(1);
+      if (existing.length === 0) return 'not_member';
+
+      await tx
+        .delete(groupMembers)
+        .where(
+          and(
+            eq(groupMembers.groupId, args.groupId),
+            eq(groupMembers.userId, args.userId),
+          ),
+        );
+
+      const remaining = await tx
+        .select({ userId: groupMembers.userId })
+        .from(groupMembers)
+        .where(eq(groupMembers.groupId, args.groupId))
+        .orderBy(asc(groupMembers.joinedAt), asc(groupMembers.userId));
+
+      if (remaining.length === 0) {
+        await tx.delete(groups).where(eq(groups.id, args.groupId));
+        return { members: 0, createdBy: null, deleted: true };
+      }
+
+      let createdBy = group.createdBy;
+      if (group.createdBy === args.userId) {
+        createdBy = remaining[0]!.userId;
+        await tx
+          .update(groups)
+          .set({ createdBy })
+          .where(eq(groups.id, args.groupId));
+      }
+
+      return { members: remaining.length, createdBy, deleted: false };
     });
   }
 

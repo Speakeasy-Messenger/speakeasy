@@ -6,8 +6,20 @@ import type { GroupRepo } from '../db/groups.js';
 interface AddMemberBody {
   user_id: string;
 }
+interface SetNameBody {
+  name: string;
+}
 interface IdParam {
   id: string;
+}
+
+const GROUP_NAME_MAX = 64;
+
+function normalizeGroupName(raw: unknown): string | undefined {
+  if (typeof raw !== 'string') return undefined;
+  const trimmed = raw.trim();
+  if (trimmed.length === 0 || trimmed.length > GROUP_NAME_MAX) return undefined;
+  return trimmed;
 }
 
 export async function registerGroupRoutes(
@@ -37,11 +49,7 @@ export async function registerGroupRoutes(
         typeof request.body === 'object' && request.body !== null
           ? (request.body as { name?: unknown }).name
           : undefined;
-      let name: string | undefined;
-      if (typeof rawName === 'string') {
-        const trimmed = rawName.trim();
-        if (trimmed.length > 0 && trimmed.length <= 64) name = trimmed;
-      }
+      const name = normalizeGroupName(rawName);
       try {
         await opts.repo.create({ groupId, createdBy: userId, name });
       } catch (err) {
@@ -49,6 +57,45 @@ export async function registerGroupRoutes(
         return reply.code(500).send({ error: 'internal' });
       }
       return reply.code(201).send({ group_id: groupId });
+    },
+  );
+
+  /**
+   * PUT /v1/groups/:id/name — creator updates the room name.
+   * Members fetch the authoritative name through GET /v1/groups/:id.
+   */
+  app.put<{ Params: IdParam; Body: SetNameBody }>(
+    '/v1/groups/:id/name',
+    {
+      preHandler: requireAuth,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['name'],
+          properties: { name: { type: 'string', minLength: 1, maxLength: GROUP_NAME_MAX } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const callerId = request.auth?.userId;
+      if (!callerId) return reply.code(403).send({ error: 'not_enrolled' });
+      const { id: groupId } = request.params;
+      const name = normalizeGroupName(request.body.name);
+      if (!name) return reply.code(400).send({ error: 'invalid_name' });
+      const summary = await opts.repo.findById(groupId);
+      if (!summary) return reply.code(404).send({ error: 'group_missing' });
+      if (summary.createdBy !== callerId) {
+        return reply.code(403).send({ error: 'not_creator' });
+      }
+      const updated = await opts.repo.setName({ groupId, name });
+      if (updated === 'group_missing') {
+        return reply.code(404).send({ error: 'group_missing' });
+      }
+      return reply.send({
+        id: updated.id,
+        created_by: updated.createdBy,
+        name: updated.name,
+      });
     },
   );
 
@@ -146,6 +193,33 @@ export async function registerGroupRoutes(
         return reply.code(409).send({ error: 'cannot_remove_creator' });
       }
       return reply.send({ members: result });
+    },
+  );
+
+  /**
+   * POST /v1/groups/:id/leave — caller voluntarily leaves the room.
+   * If the creator leaves, the creator role passes to the oldest
+   * remaining member. If no members remain, the room is deleted.
+   */
+  app.post<{ Params: IdParam }>(
+    '/v1/groups/:id/leave',
+    { preHandler: requireAuth },
+    async (request, reply) => {
+      const callerId = request.auth?.userId;
+      if (!callerId) return reply.code(403).send({ error: 'not_enrolled' });
+      const { id: groupId } = request.params;
+      const result = await opts.repo.leaveMember({ groupId, userId: callerId });
+      if (result === 'group_missing') {
+        return reply.code(404).send({ error: 'group_missing' });
+      }
+      if (result === 'not_member') {
+        return reply.code(403).send({ error: 'not_member' });
+      }
+      return reply.send({
+        members: result.members,
+        created_by: result.createdBy,
+        deleted: result.deleted,
+      });
     },
   );
 

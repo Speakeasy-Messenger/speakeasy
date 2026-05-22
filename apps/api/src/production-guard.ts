@@ -81,10 +81,17 @@ export function collectProductionConfigErrors(
     );
   }
 
-  if (!env.FCM_PROJECT_ID) {
+  if (!env.FCM_PROJECT_ID || !env.FCM_CLIENT_EMAIL || !env.FCM_PRIVATE_KEY) {
     errors.push(
-      'FCM_PROJECT_ID is missing — push notifications would be silently ' +
-        'dropped (NoopPushProvider).',
+      'FCM_PROJECT_ID / FCM_CLIENT_EMAIL / FCM_PRIVATE_KEY must all be set — ' +
+        'push notifications would fail Firebase Admin initialization or be ' +
+        'silently dropped (NoopPushProvider).',
+    );
+  }
+  if (env.FCM_PRIVATE_KEY && !env.FCM_PRIVATE_KEY.includes('PRIVATE KEY')) {
+    errors.push(
+      'FCM_PRIVATE_KEY does not look like a PEM private key — Firebase Admin ' +
+        'credential initialization is likely to fail.',
     );
   }
 

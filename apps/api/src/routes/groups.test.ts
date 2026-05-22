@@ -336,3 +336,93 @@ describe('DELETE /v1/groups/:id/members/:userId', () => {
     await app.close();
   });
 });
+
+describe('PUT /v1/groups/:id/name', () => {
+  it('creator can rename a group and members see the new name', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-rename', createdBy: 'alice', name: 'Old' });
+    await repo.addMember({ groupId: 'grp-rename', userId: 'bob', addedBy: 'alice' });
+    const rename = await app.inject({
+      method: 'PUT',
+      url: '/v1/groups/grp-rename/name',
+      headers: callerHeader('alice'),
+      payload: { name: 'New Room' },
+    });
+    expect(rename.statusCode).toBe(200);
+    expect(rename.json()).toMatchObject({ name: 'New Room', created_by: 'alice' });
+    const get = await app.inject({
+      method: 'GET',
+      url: '/v1/groups/grp-rename',
+      headers: callerHeader('bob'),
+    });
+    expect(get.json().name).toBe('New Room');
+    await app.close();
+  });
+
+  it('rejects non-creator and invalid names', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-rename2', createdBy: 'alice', name: 'Old' });
+    await repo.addMember({ groupId: 'grp-rename2', userId: 'bob', addedBy: 'alice' });
+    const nonCreator = await app.inject({
+      method: 'PUT',
+      url: '/v1/groups/grp-rename2/name',
+      headers: callerHeader('bob'),
+      payload: { name: 'Nope' },
+    });
+    expect(nonCreator.statusCode).toBe(403);
+    const invalid = await app.inject({
+      method: 'PUT',
+      url: '/v1/groups/grp-rename2/name',
+      headers: callerHeader('alice'),
+      payload: { name: ' '.repeat(4) },
+    });
+    expect(invalid.statusCode).toBe(400);
+    await app.close();
+  });
+});
+
+describe('POST /v1/groups/:id/leave', () => {
+  it('regular member can leave the group', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-leave', createdBy: 'alice' });
+    await repo.addMember({ groupId: 'grp-leave', userId: 'bob', addedBy: 'alice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/groups/grp-leave/leave',
+      headers: callerHeader('bob'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ members: 1, created_by: 'alice', deleted: false });
+    expect(await repo.isMember('grp-leave', 'bob')).toBe(false);
+    await app.close();
+  });
+
+  it('creator leave transfers ownership to a remaining member', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-transfer', createdBy: 'alice' });
+    await repo.addMember({ groupId: 'grp-transfer', userId: 'bob', addedBy: 'alice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/groups/grp-transfer/leave',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ members: 1, created_by: 'bob', deleted: false });
+    expect((await repo.findById('grp-transfer'))?.createdBy).toBe('bob');
+    await app.close();
+  });
+
+  it('last member leave deletes the group', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-empty', createdBy: 'alice' });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/groups/grp-empty/leave',
+      headers: callerHeader('alice'),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json()).toEqual({ members: 0, created_by: null, deleted: true });
+    expect(await repo.findById('grp-empty')).toBeUndefined();
+    await app.close();
+  });
+});

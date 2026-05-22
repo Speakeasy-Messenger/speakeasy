@@ -31,7 +31,8 @@
     "build": "tsc -p tsconfig.json && node -e \"require('node:fs').cpSync('src/wordlists','dist/wordlists',{recursive:true,filter:(s)=>s.endsWith('.txt')||!require('node:fs').statSync(s).isFile()})\"",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "test:watch": "vitest"
+    "test:watch": "vitest",
+    "lint": "node ../../scripts/lint-package.mjs @speakeasy/shared"
   },
   "dependencies": {
     "js-sha256": "^0.11.1",

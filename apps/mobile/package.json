@@ -10,7 +10,7 @@
     "build": "echo 'mobile build runs via xcodebuild / gradlew — see README'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
-    "lint": "echo 'no lint configured yet'"
+    "lint": "node ../../scripts/lint-package.mjs @speakeasy/mobile"
   },
   "dependencies": {
     "@notifee/react-native": "^9.1.8",

@@ -62,6 +62,38 @@ export class InMemoryGroupRepo implements GroupRepo {
     return g.members.size;
   }
 
+  async setName(args: {
+    groupId: string;
+    name: string;
+  }): Promise<GroupSummary | 'group_missing'> {
+    const g = this.groups.get(args.groupId);
+    if (!g) return 'group_missing';
+    g.name = args.name;
+    return { id: args.groupId, createdBy: g.createdBy, name: g.name };
+  }
+
+  async leaveMember(args: {
+    groupId: string;
+    userId: string;
+  }): Promise<
+    | { members: number; createdBy: string | null; deleted: boolean }
+    | 'group_missing'
+    | 'not_member'
+  > {
+    const g = this.groups.get(args.groupId);
+    if (!g) return 'group_missing';
+    if (!g.members.has(args.userId)) return 'not_member';
+    g.members.delete(args.userId);
+    if (g.members.size === 0) {
+      this.groups.delete(args.groupId);
+      return { members: 0, createdBy: null, deleted: true };
+    }
+    if (g.createdBy === args.userId) {
+      g.createdBy = Array.from(g.members)[0]!;
+    }
+    return { members: g.members.size, createdBy: g.createdBy, deleted: false };
+  }
+
   async findById(groupId: string): Promise<GroupSummary | undefined> {
     const g = this.groups.get(groupId);
     if (!g) return undefined;

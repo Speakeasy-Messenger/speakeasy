@@ -3,6 +3,15 @@ import type { AckEvent, AckListener, AckRouter } from './ack-router.js';
 
 const CHANNEL = 'speakeasy:ack';
 
+function raiseRedisListenerLimit(redis: Redis): void {
+  const emitter = redis as unknown as {
+    getMaxListeners?: () => number;
+    setMaxListeners?: (n: number) => void;
+  };
+  const current = emitter.getMaxListeners?.() ?? 10;
+  if (current < 50) emitter.setMaxListeners?.(50);
+}
+
 /**
  * Redis Pub/Sub-backed ack router. Uses TWO connections (a publisher and a
  * subscriber) per ioredis convention — a single connection in subscribe
@@ -15,7 +24,9 @@ export class RedisAckRouter implements AckRouter {
   constructor(
     private readonly publisher: Redis,
     private readonly subscriber: Redis,
-  ) {}
+  ) {
+    raiseRedisListenerLimit(this.subscriber);
+  }
 
   async announce(ev: AckEvent): Promise<void> {
     await this.publisher.publish(CHANNEL, JSON.stringify(ev));

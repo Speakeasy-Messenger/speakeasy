@@ -49,6 +49,7 @@ import {
 } from './reply-sender.js';
 import { cachedAvatarUri } from './avatar-cache.js';
 import { getCachedDeviceToken } from '../native/cached-device-token.js';
+import { shouldSuppressPushForMute } from './push-mute-policy.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -557,6 +558,15 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
  */
 async function displayPushNotification(data: FcmData): Promise<void> {
   const conversationId = data.conversation_id;
+  if (!useConversations.getState().hydrated) {
+    await useConversations.getState().hydrate();
+  }
+  if (shouldSuppressPushForMute(conversationId, useConversations.getState())) {
+    diag('push-bg', 'notification suppressed for muted conversation', {
+      conversationId,
+    });
+    return;
+  }
   if (
     conversationId &&
     data.notify_kind === 'message' &&

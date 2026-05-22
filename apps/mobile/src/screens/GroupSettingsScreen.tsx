@@ -65,14 +65,15 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
   const addMemberLocal = useGroups((s) => s.addMember);
   const removeMemberLocal = useGroups((s) => s.removeMember);
   const ttl = useConversations((s) => s.byId[groupId]?.ttl ?? 'day');
+  const muted = useConversations((s) => !!s.byId[groupId]?.muted);
   const setTtl = useConversations((s) => s.setTtl);
+  const setMuted = useConversations((s) => s.setMuted);
   const removeConvo = useConversations((s) => s.removeConversation);
 
   const [nameSheetOpen, setNameSheetOpen] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
   const [removeTarget, setRemoveTarget] = useState<string | undefined>();
   const [leaveOpen, setLeaveOpen] = useState(false);
-  const [notifyOn, setNotifyOn] = useState(true);
 
   const isCreator = !!myUserId && !!group?.createdBy && myUserId === group.createdBy;
   const otherMembers = (group?.members ?? []).filter((m) => m !== myUserId);
@@ -157,25 +158,39 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
     }
   }
 
-  function handleSaveName(next: string) {
+  async function handleSaveName(next: string) {
     setNameSheetOpen(false);
+    const previous = group?.name ?? '';
     setNameInStore(groupId, next);
-    // Wire endpoint: `POST /v1/rooms/<id>/name`. Doesn't exist yet,
-    // so the rename is local-only and won't reach peers until the
-    // server-side broadcast lands. Documented as a follow-up.
+    try {
+      const dt = await getDeviceToken();
+      const updated = await api.setGroupName(dt, groupId, next);
+      if (updated.name) setNameInStore(groupId, updated.name);
+    } catch (err) {
+      setNameInStore(groupId, previous);
+      const msg =
+        err instanceof ApiError
+          ? `Couldn't rename (${err.code ?? err.status})`
+          : `Couldn't rename. ${String(err)}`;
+      Alert.alert('Rename failed', msg);
+    }
   }
 
-  function handleLeave() {
+  async function handleLeave() {
     setLeaveOpen(false);
-    // Wire endpoint: `POST /v1/rooms/<id>/leave`. Server-side leave
-    // (with successor transfer + `@x left.` system message) isn't
-    // implemented yet. We drop the group from local state so the
-    // user gets the expected "I'm out of this room" UX; peers will
-    // continue to see the local user as a member until the real
-    // endpoint lands. Documented in the §10 follow-up list.
-    removeConvo(groupId);
-    removeGroupLocal(groupId);
-    onBack();
+    try {
+      const dt = await getDeviceToken();
+      await api.leaveGroup(dt, groupId);
+      removeConvo(groupId);
+      removeGroupLocal(groupId);
+      onBack();
+    } catch (err) {
+      const msg =
+        err instanceof ApiError
+          ? `Couldn't leave (${err.code ?? err.status})`
+          : `Couldn't leave. ${String(err)}`;
+      Alert.alert('Leave failed', msg);
+    }
   }
 
   return (
@@ -305,10 +320,10 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
               </Text>
             </View>
             <Switch
-              value={notifyOn}
-              onValueChange={setNotifyOn}
+              value={!muted}
+              onValueChange={(next) => setMuted(groupId, !next)}
               trackColor={{ false: themed.divider, true: themed.primary }}
-              thumbColor={notifyOn ? themed.cream : themed.slate}
+              thumbColor={!muted ? themed.cream : themed.slate}
             />
           </View>
         </View>
@@ -361,7 +376,7 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
         isCreator={isCreator}
         nextCreator={isCreator ? otherMembers[0] : undefined}
         onClose={() => setLeaveOpen(false)}
-        onConfirm={handleLeave}
+        onConfirm={() => void handleLeave()}
       />
     </SafeAreaView>
   );

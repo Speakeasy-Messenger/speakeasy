@@ -16,6 +16,36 @@ import type { EventLogRepo } from '../db/event-log.js';
  */
 const CIPHERTEXT_MAX_B64 = 3500;
 
+function ciphertextEligible(notice: PushDeliveryNotice): boolean {
+  return (
+    (notice.kind ?? 'message') === 'message' &&
+    !!notice.ciphertext &&
+    !!notice.senderId &&
+    notice.ciphertext.length <= CIPHERTEXT_MAX_B64
+  );
+}
+
+export function buildBasePushData(notice: PushDeliveryNotice): Record<string, string> {
+  return {
+    conversation_id: notice.conversationId,
+    msg_type: notice.msgType,
+    notify_kind: notice.kind ?? 'message',
+  };
+}
+
+export function buildIosPushData(
+  notice: PushDeliveryNotice,
+  privacy: 'rich' | 'private',
+): Record<string, string> {
+  const data = buildBasePushData(notice);
+  if (notice.messageId) data.message_id = notice.messageId;
+  if (notice.senderId) data.sender_id = notice.senderId;
+  if (ciphertextEligible(notice) && privacy === 'rich') {
+    data.ciphertext = notice.ciphertext!;
+  }
+  return data;
+}
+
 /**
  * Production push provider — FCM (Android) + APNs (iOS).
  *
@@ -93,11 +123,7 @@ export class FcmApnsPushProvider implements PushProvider {
     const kind = notice.kind ?? 'message';
     // Base data block — present on every platform. The mobile client
     // reads conversation_id + notify_kind for tap routing.
-    const baseData: Record<string, string> = {
-      conversation_id: notice.conversationId,
-      msg_type: notice.msgType,
-      notify_kind: kind,
-    };
+    const baseData = buildBasePushData(notice);
     // Bucket by (title, body, platform, privacy) so each bucket maps to
     // one FCM payload. Android is data-only (the headless handler
     // renders + may decrypt); iOS keeps a notification block.
@@ -146,11 +172,7 @@ export class FcmApnsPushProvider implements PushProvider {
     // a real message (not a call), the server knows the sender (not
     // sealed — the device needs the sender to address the decrypt),
     // and it fits FCM's data-payload cap.
-    const ciphertextEligible =
-      kind === 'message' &&
-      !!notice.ciphertext &&
-      !!notice.senderId &&
-      notice.ciphertext.length <= CIPHERTEXT_MAX_B64;
+    const canForwardCiphertext = ciphertextEligible(notice);
 
     // Track which tokens went into which send so we can correlate
     // per-response error codes back to the original FCM tokens in the
@@ -171,7 +193,7 @@ export class FcmApnsPushProvider implements PushProvider {
         if (notice.senderId) data.sender_id = notice.senderId;
         // Ciphertext only for 'rich' devices — 'private' devices opt
         // out of content preview, so they never receive it.
-        if (ciphertextEligible && privacy === 'rich') {
+        if (canForwardCiphertext && privacy === 'rich') {
           data.ciphertext = notice.ciphertext!;
         }
         const payload: admin.messaging.MulticastMessage = {
@@ -190,7 +212,7 @@ export class FcmApnsPushProvider implements PushProvider {
         // or wakes the app briefly).
         const payload: admin.messaging.MulticastMessage = {
           notification: { title, body },
-          data: baseData,
+          data: buildIosPushData(notice, privacy),
           apns: {
             payload: {
               aps: {

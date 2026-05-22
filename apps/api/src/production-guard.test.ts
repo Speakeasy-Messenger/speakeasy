@@ -13,6 +13,8 @@ function validProdEnv(): NodeJS.ProcessEnv {
     DATABASE_URL: 'postgres://db/speakeasy',
     REDIS_URL: 'redis://redis:6379',
     FCM_PROJECT_ID: 'speakeasy-prod',
+    FCM_CLIENT_EMAIL: 'firebase-adminsdk@speakeasy-prod.iam.gserviceaccount.com',
+    FCM_PRIVATE_KEY: '-----BEGIN PRIVATE KEY-----\\nabc\\n-----END PRIVATE KEY-----\\n',
     VOUCHFLOW_READ_KEY: 'vrk_live_xxx',
     VOUCHFLOW_BASE_URL: 'https://api.vouchflow.dev/v1',
     CLOUDFLARE_TURN_KEY_ID: 'cf-key',
@@ -102,12 +104,22 @@ describe('collectProductionConfigErrors', () => {
   it('flags missing push, TURN and admin credentials', () => {
     const env = validProdEnv();
     delete env.FCM_PROJECT_ID;
+    delete env.FCM_CLIENT_EMAIL;
+    delete env.FCM_PRIVATE_KEY;
     delete env.CLOUDFLARE_TURN_TOKEN;
     delete env.ADMIN_TOKEN;
     const joined = collectProductionConfigErrors(env).join('\n');
     expect(joined).toMatch(/FCM_PROJECT_ID/);
     expect(joined).toMatch(/CLOUDFLARE_TURN/);
     expect(joined).toMatch(/ADMIN_TOKEN/);
+  });
+
+  it('flags partial or malformed Firebase Admin credentials', () => {
+    const missingEmail = validProdEnv();
+    delete missingEmail.FCM_CLIENT_EMAIL;
+    expect(collectProductionConfigErrors(missingEmail).join('\n')).toMatch(/FCM_CLIENT_EMAIL/);
+    const malformedKey = { ...validProdEnv(), FCM_PRIVATE_KEY: 'not-a-pem' };
+    expect(collectProductionConfigErrors(malformedKey).join('\n')).toMatch(/PEM private key/);
   });
 });
 

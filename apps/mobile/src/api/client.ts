@@ -422,6 +422,72 @@ export class ApiClient {
     throw new ApiError(res.status, code);
   }
 
+  /** Creator-only room rename. Returns the authoritative server value. */
+  async setGroupName(
+    deviceToken: string,
+    groupId: string,
+    name: string,
+  ): Promise<{ id: string; created_by: string; name: string | null }> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}/name`,
+      {
+        method: 'PUT',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deviceToken}`,
+        },
+        body: JSON.stringify({ name }),
+      },
+    );
+    if (res.status === 200) {
+      return (await res.json()) as {
+        id: string;
+        created_by: string;
+        name: string | null;
+      };
+    }
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
+   * Leave a group. The server handles creator transfer or room deletion;
+   * the mobile client removes the local room after this succeeds.
+   */
+  async leaveGroup(
+    deviceToken: string,
+    groupId: string,
+  ): Promise<{ members: number; created_by: string | null; deleted: boolean }> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/groups/${encodeURIComponent(groupId)}/leave`,
+      {
+        method: 'POST',
+        headers: { authorization: `Bearer ${deviceToken}` },
+      },
+    );
+    if (res.status === 200) {
+      return (await res.json()) as {
+        members: number;
+        created_by: string | null;
+        deleted: boolean;
+      };
+    }
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
   /**
    * Fetch a peer's PreKey bundle so we can establish a Signal session.
    * Server consumes one OTPK on the way out; the response includes a

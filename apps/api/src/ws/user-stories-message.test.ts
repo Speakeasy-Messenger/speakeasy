@@ -17,6 +17,7 @@ import { RedisAckRouter } from './ack-router.redis.js';
 import { RedisUserNotifier } from './user-notifier.redis.js';
 import { createRedisCallOfferBuffer } from './call-offer-buffer.redis.js';
 import { RedisPresence } from '../presence/redis.js';
+import { raiseIoredisMockListenerLimit } from './redis-mock-listener-limit.test-util.js';
 
 /**
  * Tier B end-to-end tests for the user-visible message-path
@@ -38,6 +39,7 @@ import { RedisPresence } from '../presence/redis.js';
  */
 
 function makeMockRedis(): Redis {
+  raiseIoredisMockListenerLimit();
   return new RedisMock() as unknown as Redis;
 }
 

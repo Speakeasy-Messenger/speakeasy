@@ -28,6 +28,13 @@ base image keeps that migration mechanical.
 | ------------------------------- | -------------------------------------------- |
 | `VOUCHFLOW_READ_KEY`            | Vouchflow dashboard, read-scoped key         |
 | `VOUCHFLOW_BASE_URL`            | `https://api.vouchflow.dev/v1` (live)        |
+| `FCM_PROJECT_ID`                | Firebase project id                          |
+| `FCM_CLIENT_EMAIL`              | Firebase Admin service account email         |
+| `FCM_PRIVATE_KEY`               | Firebase Admin service account private key   |
+| `CLOUDFLARE_TURN_KEY_ID`        | Cloudflare Calls TURN key id                 |
+| `CLOUDFLARE_TURN_TOKEN`         | Cloudflare Calls TURN token                  |
+| `ADMIN_TOKEN`                   | Random high-entropy token for admin routes   |
+| `METRICS_TOKEN`                 | Required when `METRICS_ENABLED=1`            |
 | `INSTANCE_ID`                   | optional; per-machine via `flyctl machine env` |
 
 `DATABASE_URL` and `REDIS_URL` are populated by the `attach` commands above.

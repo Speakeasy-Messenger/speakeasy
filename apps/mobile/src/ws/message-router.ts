@@ -126,12 +126,12 @@ export interface MessageRouterDeps {
    * Optional so tests that don't care about push can omit it.
    */
   onAuthed?: () => void;
-  /** Optional structured logger; defaults to console. */
+  /** Optional structured logger. Omitted in production unless a caller wires one. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
 
 export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg) => void {
-  const log = deps.log ?? ((m, c) => console.log('[ws]', m, c ?? ''));
+  const log = deps.log ?? (() => {});
 
   // Per-sender SKDM in-flight tracker. The server delivers an SKDM
   // bootstrap envelope right before the first group message from a

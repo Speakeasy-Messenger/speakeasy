@@ -4,12 +4,12 @@ name: Release APK
 # Builds the release APK with the real Vouchflow API key (via repo
 # secret) and uploads it as an asset on the matching GitHub release.
 #
-# Tier B no longer gates releases. The gate was effectively never
-# green (zero successes across its lifetime) and the `SKIP_TIERB_GATE`
-# bypass became the default path — worst of both worlds. The Tier B
-# suite is manual-only now (see tier-b-emulator.yml — workflow_dispatch
-# from the Actions tab). When it returns to reliable green, restoring
-# the gate is a small change.
+# Release is gated by deterministic non-emulator checks: workspace
+# build, lint, typecheck, Vitest, production signing, and tag-version
+# assertions. Tier B / Maestro remains manual-only because GitHub
+# Actions emulator reliability was too poor to block releases without
+# creating indefinite false failures. If it comes back as a hard gate,
+# do it from stable hardware or after repeated green manual runs.
 #
 # Setup required (one-time):
 #   gh secret set VOUCHFLOW_WRITE_KEY --body "$VOUCHFLOW_WRITE_KEY"
@@ -69,8 +69,9 @@ jobs:
         # we sink ~5 min into the gradle leg.
         run: npm run build
 
-      - name: Typecheck + test
+      - name: Deterministic release gate
         run: |
+          npm run lint
           npm run typecheck
           npm run test
 

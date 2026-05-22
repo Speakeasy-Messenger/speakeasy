@@ -13,8 +13,11 @@ render a rich notification, and support inline reply from the banner.
 
 iOS has **zero app-side push handling** — the entire background
 pipeline in `apps/mobile/src/push/push-handler.ts` is wrapped in
-`if (Platform.OS === 'android')`. iOS shows whatever plain alert the
-server sends; no decryption, no MessagingStyle, no inline reply.
+`if (Platform.OS === 'android')`. The server now forwards sender,
+message id, and ciphertext metadata for rich iOS message pushes, but
+without the app-side Notification Service Extension iOS still shows the
+plain alert copy; no decryption, no MessagingStyle equivalent, no
+inline reply.
 
 Android, for contrast: server sends a data-only FCM message →
 `setBackgroundMessageHandler` decrypts the ciphertext on-device →
@@ -27,9 +30,10 @@ reply action.
 
 - `apps/api/src/push/push.fcm-apns.ts` exists; iOS device tokens are
   already registered (tagged `'ios'` in `push-notifications.ts:160`).
-- **Change needed:** iOS *message* pushes must be sent as
-  `mutable-content: 1` alerts carrying the ciphertext in the payload,
-  so the Notification Service Extension can intercept and decrypt.
+- **Landed server groundwork:** iOS *message* pushes are sent as
+  `mutable-content: 1` alerts carrying sender/message/ciphertext data
+  for rich devices, so the Notification Service Extension can intercept
+  and decrypt once app-side support exists.
 - Payload budget: APNs alerts cap at 4 KB — the ciphertext only fits
   for 'rich' messages (same constraint as Android's FCM data path;
   see `FcmData.ciphertext`).
@@ -79,13 +83,12 @@ reply action.
 1. App Group entitlement on the app target; relocate the SQLCipher
    store to the App Group container; confirm the app still builds and
    the store opens.
-2. Server: send iOS message pushes as `mutable-content` + ciphertext.
-3. New NSE target + its pod target; a minimal NSE that decrypts and
+2. New NSE target + its pod target; a minimal NSE that decrypts and
    rewrites the notification body.
-4. Cross-process idempotent decrypt — NSE vs in-app WS path.
-5. `UNNotificationCategory` + inline reply wired to `reply-sender.ts`.
-6. `INSendMessageIntent` rich display.
-7. Unwind the `push-handler.ts` `Platform.OS` gates; update `PARITY.md`.
+3. Cross-process idempotent decrypt — NSE vs in-app WS path.
+4. `UNNotificationCategory` + inline reply wired to `reply-sender.ts`.
+5. `INSendMessageIntent` rich display.
+6. Unwind the `push-handler.ts` `Platform.OS` gates; update `PARITY.md`.
 
 ## Risks / open questions
 

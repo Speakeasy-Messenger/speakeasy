@@ -4,6 +4,15 @@ import type { UserNotifier } from './user-notifier.js';
 
 const CHANNEL = 'speakeasy:user-notify';
 
+function raiseRedisListenerLimit(redis: Redis): void {
+  const emitter = redis as unknown as {
+    getMaxListeners?: () => number;
+    setMaxListeners?: (n: number) => void;
+  };
+  const current = emitter.getMaxListeners?.() ?? 10;
+  if (current < 50) emitter.setMaxListeners?.(50);
+}
+
 interface NotifyEnvelope {
   userId: string;
   frame: object;
@@ -36,6 +45,7 @@ export class RedisUserNotifier implements UserNotifier {
     private readonly subscriber: Redis,
     private readonly instanceId: string,
   ) {
+    raiseRedisListenerLimit(this.subscriber);
     this.ensureSubscribed();
   }
 
