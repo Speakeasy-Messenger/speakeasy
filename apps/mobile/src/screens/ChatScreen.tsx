@@ -860,12 +860,16 @@ const styles = StyleSheet.create({
     gap: space.sm,
     marginBottom: space.lg,
     paddingTop: space.md,
+    paddingBottom: space.sm,
+    paddingHorizontal: space.lg,
   },
   dot: { width: 6, height: 6 },
   taglineText: {
+    flexShrink: 1,
     fontFamily: type.meta.weight,
     fontSize: type.meta.size,
     letterSpacing: type.meta.size * type.meta.letterSpacingEm,
+    textAlign: 'center',
     textTransform: 'uppercase',
   },
   // Brand §6.5 InputBar: 14/20 padding, canvas bg, top hairline border.
