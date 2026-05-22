@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Cipher S — metallic adaptive icon foreground.
+
+  Three brass bars rendered with a diagonal gradient (highlight on the
+  top-left, shadow toward the bottom-right) plus a thin top-edge
+  highlight and a soft ambient shadow underneath. The effect is a
+  premium metallic sheen in the vein of Linear's launcher icon —
+  brass that looks struck, not flat. Bar geometry mirrors
+  src/brand/CipherS.tsx (Rect-by-Rect, viewport 100×100) so the in-app
+  mark and the launcher icon read as the same shape.
+
+  Vector drawable: scales to any density at install time, so we don't
+  have to maintain mipmap-mdpi/…/xxxhdpi PNGs for the foreground.
+  Pre-v26 devices keep using the bundled PNGs at mipmap/ic_launcher.png.
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    xmlns:aapt="http://schemas.android.com/aapt"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="100"
+    android:viewportHeight="100">
+
+  <!-- Bar 1: ambient shadow underneath, offset down + right 0.5 -->
+  <path
+      android:pathData="M5.5,20.7 L65.5,20.7 L65.5,34.7 L5.5,34.7 Z"
+      android:fillColor="#3A2A0E"
+      android:fillAlpha="0.45"/>
+
+  <!-- Bar 1: main, diagonal metallic gradient -->
+  <path android:pathData="M5,20 L65,20 L65,34 L5,34 Z">
+    <aapt:attr name="android:fillColor">
+      <gradient
+          android:type="linear"
+          android:startX="5" android:startY="20"
+          android:endX="65" android:endY="34">
+        <item android:offset="0.0" android:color="#FCE4A4"/>
+        <item android:offset="0.20" android:color="#F2C167"/>
+        <item android:offset="0.50" android:color="#E5A645"/>
+        <item android:offset="0.80" android:color="#B07E2C"/>
+        <item android:offset="1.0" android:color="#7E5A1C"/>
+      </gradient>
+    </aapt:attr>
+  </path>
+
+  <!-- Bar 1: top-edge highlight -->
+  <path
+      android:pathData="M5,20 L65,20 L65,21.6 L5,21.6 Z"
+      android:fillColor="#FFF4D0"
+      android:fillAlpha="0.55"/>
+
+  <!-- Bar 2: ambient shadow underneath -->
+  <path
+      android:pathData="M35.5,43.7 L95.5,43.7 L95.5,57.7 L35.5,57.7 Z"
+      android:fillColor="#3A2A0E"
+      android:fillAlpha="0.45"/>
+
+  <!-- Bar 2: main, diagonal metallic gradient -->
+  <path android:pathData="M35,43 L95,43 L95,57 L35,57 Z">
+    <aapt:attr name="android:fillColor">
+      <gradient
+          android:type="linear"
+          android:startX="35" android:startY="43"
+          android:endX="95" android:endY="57">
+        <item android:offset="0.0" android:color="#FCE4A4"/>
+        <item android:offset="0.20" android:color="#F2C167"/>
+        <item android:offset="0.50" android:color="#E5A645"/>
+        <item android:offset="0.80" android:color="#B07E2C"/>
+        <item android:offset="1.0" android:color="#7E5A1C"/>
+      </gradient>
+    </aapt:attr>
+  </path>
+
+  <!-- Bar 2: top-edge highlight -->
+  <path
+      android:pathData="M35,43 L95,43 L95,44.6 L35,44.6 Z"
+      android:fillColor="#FFF4D0"
+      android:fillAlpha="0.55"/>
+
+  <!-- Bar 3: ambient shadow underneath -->
+  <path
+      android:pathData="M5.5,66.7 L65.5,66.7 L65.5,80.7 L5.5,80.7 Z"
+      android:fillColor="#3A2A0E"
+      android:fillAlpha="0.45"/>
+
+  <!-- Bar 3: main, diagonal metallic gradient -->
+  <path android:pathData="M5,66 L65,66 L65,80 L5,80 Z">
+    <aapt:attr name="android:fillColor">
+      <gradient
+          android:type="linear"
+          android:startX="5" android:startY="66"
+          android:endX="65" android:endY="80">
+        <item android:offset="0.0" android:color="#FCE4A4"/>
+        <item android:offset="0.20" android:color="#F2C167"/>
+        <item android:offset="0.50" android:color="#E5A645"/>
+        <item android:offset="0.80" android:color="#B07E2C"/>
+        <item android:offset="1.0" android:color="#7E5A1C"/>
+      </gradient>
+    </aapt:attr>
+  </path>
+
+  <!-- Bar 3: top-edge highlight -->
+  <path
+      android:pathData="M5,66 L65,66 L65,67.6 L5,67.6 Z"
+      android:fillColor="#FFF4D0"
+      android:fillAlpha="0.55"/>
+</vector>

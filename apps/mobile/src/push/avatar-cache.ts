@@ -18,11 +18,23 @@ export function avatarCachePath(userId: string): string {
   return `${CACHE_DIR}/${safe}.png`;
 }
 
-/** `file://` URI for notifee, or undefined when not cached yet. */
+/**
+ * Avatar URI for notifee, or undefined when not cached yet.
+ *
+ * Returns a `data:image/png;base64,…` URI rather than a `file://` URI:
+ * notifee's image loader silently drops `file://` URIs that live in
+ * app-private storage (rc.117 alpha shipped with `file://` and every
+ * MessagingStyle notification fell back to the launcher icon). Data
+ * URIs are decoded directly by notifee's bitmap pipeline, no filesystem
+ * access required, so the avatar actually lands on the notification.
+ */
 export async function cachedAvatarUri(userId: string): Promise<string | undefined> {
   const path = avatarCachePath(userId);
   try {
-    return (await RNFS.exists(path)) ? `file://${path}` : undefined;
+    if (!(await RNFS.exists(path))) return undefined;
+    const base64 = await RNFS.readFile(path, 'base64');
+    if (!base64) return undefined;
+    return `data:image/png;base64,${base64}`;
   } catch {
     return undefined;
   }
