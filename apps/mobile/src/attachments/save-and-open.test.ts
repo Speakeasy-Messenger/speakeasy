@@ -3,11 +3,20 @@ import type { Attachment } from '@speakeasy/shared';
 import { Platform } from 'react-native';
 
 // Use vi.hoisted so the mock factories can reference these at hoist time
-const { mockExists, mockMkdir, mockWriteFile, mockScanFile } = vi.hoisted(() => ({
+const {
+  mockExists,
+  mockMkdir,
+  mockWriteFile,
+  mockScanFile,
+  mockOpenSavedFile,
+  mockAlert,
+} = vi.hoisted(() => ({
   mockExists: vi.fn<() => Promise<boolean>>(),
   mockMkdir: vi.fn<() => Promise<void>>(),
   mockWriteFile: vi.fn<(path: string, content: string, encoding: string) => Promise<void>>(),
   mockScanFile: vi.fn<(path: string) => Promise<void>>(),
+  mockOpenSavedFile: vi.fn<(path: string, mime: string) => Promise<void>>(),
+  mockAlert: vi.fn(),
 }));
 
 vi.mock('react-native-fs', () => ({
@@ -26,6 +35,18 @@ vi.mock('../diag/log.js', () => ({
   diag: vi.fn(),
 }));
 
+vi.mock('../native/file-opener.js', () => ({
+  openSavedFile: mockOpenSavedFile,
+}));
+
+vi.mock('react-native', async () => {
+  const actual = await vi.importActual<typeof import('react-native')>('react-native');
+  return {
+    ...actual,
+    Alert: { alert: mockAlert },
+  };
+});
+
 import { saveAndAnnounceFile } from './save-and-open.js';
 
 describe('saveAndAnnounceFile', () => {
@@ -41,6 +62,7 @@ describe('saveAndAnnounceFile', () => {
     mockExists.mockResolvedValue(true);
     mockWriteFile.mockResolvedValue(undefined);
     mockScanFile.mockResolvedValue(undefined);
+    mockOpenSavedFile.mockResolvedValue(undefined);
   });
 
   it('writes to ExternalDirectoryPath on Android (not DownloadDirectoryPath)', async () => {
@@ -81,6 +103,25 @@ describe('saveAndAnnounceFile', () => {
     await saveAndAnnounceFile(baseAttachment);
 
     expect(mockScanFile).toHaveBeenCalled();
+  });
+
+  it('opens the saved file instead of alerting with a path', async () => {
+    Platform.OS = 'android';
+    await saveAndAnnounceFile(baseAttachment);
+
+    expect(mockOpenSavedFile).toHaveBeenCalledWith('/data/external/notes.md', 'text/markdown');
+    expect(mockAlert).not.toHaveBeenCalled();
+  });
+
+  it('shows a fallback alert only when opening fails', async () => {
+    Platform.OS = 'android';
+    mockOpenSavedFile.mockRejectedValue(new Error('no viewer'));
+    await saveAndAnnounceFile(baseAttachment);
+
+    expect(mockAlert).toHaveBeenCalledWith(
+      'Saved',
+      expect.stringContaining('no app could be opened'),
+    );
   });
 
   it('does not call scanFile on iOS', async () => {

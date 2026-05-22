@@ -377,6 +377,9 @@ configurations.all {
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
+    // FileProvider for opening received attachments through content://
+    // URIs instead of exposing app-private file paths.
+    implementation("androidx.core:core:1.13.1")
 
     // RN's bundled <Image> renders only the first frame of GIFs by
     // default — Fresco's animated-gif backend has to be added

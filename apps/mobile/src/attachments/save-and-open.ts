@@ -2,20 +2,12 @@ import { Alert, Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import type { Attachment } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
+import { openSavedFile } from '../native/file-opener.js';
 
 /**
- * Tap-to-open for files received in chat.
- *
- * Android scoped storage (API 29+) blocks direct writes to the public
- * Downloads directory — RNFS.writeFile to DownloadDirectoryPath throws
- * ENOENT. The fix: write to the app's external files directory (always
- * writable, scoped-storage-safe) and then copy into the public
- * Downloads via MediaStore / DownloadManager. For the alpha, we write
- * to the app's external directory and tell the user to find the file
- * there; a future native module can add a proper content:// share.
- *
- * On iOS, the public Downloads dir doesn't exist; we write to the
- * app's Documents dir and tell the user to open the Files app.
+ * Tap-to-open for files received in chat. Writes the decoded attachment
+ * to app-owned storage first, then opens it through a native
+ * content-URI/share flow. The saved-path alert is a fallback only.
  */
 export async function saveAndAnnounceFile(attachment: Attachment): Promise<void> {
   const name = sanitizeFilename(attachment.name ?? `speakeasy-file-${Date.now()}`);
@@ -57,15 +49,20 @@ export async function saveAndAnnounceFile(attachment: Attachment): Promise<void>
     }
 
     diag('attach', 'file saved', { name, dest });
-
-    const where =
-      Platform.OS === 'android'
-        ? 'Android › data › Speakeasy › files'
-        : 'On My iPhone › Speakeasy';
-    Alert.alert(
-      'Saved',
-      `${name} was saved to ${where}. Open it from your Files app.`,
-    );
+    try {
+      await openSavedFile(dest, attachment.mime || '*/*');
+      diag('attach', 'file open launched', { name, dest, mime: attachment.mime });
+    } catch (err) {
+      diag('attach', 'file open failed', { err: String(err), name, dest });
+      const where =
+        Platform.OS === 'android'
+          ? 'Android › data › Speakeasy › files'
+          : 'On My iPhone › Speakeasy';
+      Alert.alert(
+        'Saved',
+        `${name} was saved to ${where}, but no app could be opened for it.`,
+      );
+    }
   } catch (err) {
     diag('attach', 'file save failed', { err: String(err) });
     Alert.alert('Could not save', String((err as Error)?.message ?? err));

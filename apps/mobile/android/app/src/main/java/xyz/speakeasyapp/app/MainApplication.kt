@@ -19,6 +19,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import xyz.speakeasyapp.app.channelkey.ChannelKeyPackage
+import xyz.speakeasyapp.app.fileopener.FileOpenerPackage
 import xyz.speakeasyapp.app.signal.SignalProtocolPackage
 import xyz.speakeasyapp.app.version.VersionPackage
 import xyz.speakeasyapp.app.vouchflow.VouchflowPackage
@@ -37,6 +38,7 @@ class MainApplication : Application(), ReactApplication {
               add(SignalProtocolPackage())
               add(ChannelKeyPackage())
               add(VersionPackage())
+              add(FileOpenerPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
