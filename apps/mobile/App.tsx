@@ -411,8 +411,8 @@ export default function App() {
 
   // Deep-link handler: when the user (or a peer) scans a Speakeasy QR
   // with their phone camera, the OS hands us a `speakeasy://add?handle=…`
-  // URL. We route to the NewChat screen with the handle prefilled so
-  // the recipient can confirm + start the chat in one tap.
+  // URL. Route straight to the add-contact flow for that handle so the
+  // user can confirm + start the chat without first seeing Home.
   //
   // Handles two cases:
   //   - Cold start: the URL came in via the launching intent. We pull
@@ -421,7 +421,7 @@ export default function App() {
   //   - Warm: the app is already running; `addEventListener('url')`
   //     fires synchronously when the OS hands us a new URL.
   useEffect(() => {
-    if (!hydrated || !userId) return;
+    if (!hydrated || !userId || !navReady) return;
     let cancelled = false;
     function handleUrl(url: string | null | undefined): void {
       if (!url) return;
@@ -434,13 +434,8 @@ export default function App() {
         diag('app', 'deep-link ignored (self handle)', { handle });
         return;
       }
-      // NEW-CONVERSATION.md §6.1: deep-link lands the user on the
-      // conversation list with the Find Someone sheet pre-filled.
-      // The list reads `pendingFindHandle` on mount/focus and pops
-      // the sheet — clearing the field as it consumes it.
-      diag('app', 'deep-link → Find sheet', { handle });
-      useUiState.getState().setPendingFindHandle(handle);
-      navRef.current?.navigate('Home');
+      diag('app', 'deep-link → AddContact', { handle });
+      navRef.current?.navigate('AddContact', { handle });
     }
     void Linking.getInitialURL().then((url) => {
       if (!cancelled) handleUrl(url);
@@ -450,7 +445,7 @@ export default function App() {
       cancelled = true;
       sub.remove();
     };
-  }, [hydrated, userId]);
+  }, [hydrated, userId, navReady]);
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.
   // Token comes from the identity store (set at signup). On `forceRefresh`

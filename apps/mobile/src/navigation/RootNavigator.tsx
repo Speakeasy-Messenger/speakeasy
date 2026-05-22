@@ -28,6 +28,7 @@ import { AvatarPickerScreen } from '../screens/AvatarPickerScreen.js';
 import { DeleteAccountScreen } from '../screens/DeleteAccountScreen.js';
 import { AboutScreen } from '../screens/AboutScreen.js';
 import { ShareHandleScreen } from '../screens/ShareHandleScreen.js';
+import { AddContactScreen } from '../screens/AddContactScreen.js';
 import { CallScreen } from '../screens/CallScreen.js';
 import { IncomingCallScreen } from '../screens/IncomingCallScreen.js';
 import { VideoCallScreen } from '../screens/VideoCallScreen.js';
@@ -50,6 +51,7 @@ export type RootStack = {
   Diagnostics: undefined;
   AvatarPreview: undefined;
   ShareHandle: undefined;
+  AddContact: { handle: string };
   BlockList: undefined;
   Settings: undefined;
   Privacy: undefined;
@@ -222,6 +224,16 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                 <ShareHandleScreen onBack={() => navigation.goBack()} />
               )}
             </Stack.Screen>
+            <Stack.Screen name="AddContact">
+              {({ navigation, route }: NativeStackScreenProps<RootStack, 'AddContact'>) => (
+                <AddContactScreen
+                  handle={route.params.handle}
+                  onClose={() => navigation.replace('Home')}
+                  onOpenChat={(peerId) => navigation.replace('Chat', { peerId })}
+                  onCreateRoom={() => navigation.replace('NewGroup')}
+                />
+              )}
+            </Stack.Screen>
             <Stack.Screen name="BlockList">
               {({ navigation }: NativeStackScreenProps<RootStack, 'BlockList'>) => (
                 <BlockListScreen onBack={() => navigation.goBack()} />
@@ -380,4 +392,3 @@ function CallSwitcher({
     <CallScreen orchestrator={orchestrator} onClosed={onClosed} />
   );
 }
-

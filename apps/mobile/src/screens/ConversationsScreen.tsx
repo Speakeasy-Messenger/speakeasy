@@ -169,8 +169,8 @@ export function ConversationsScreen({
   // §3). Handle search is the common case; "create a room →" lives
   // in the sheet's footer.
   const [sheetOpen, setSheetOpen] = useState(false);
-  // Deep-link lands here with a pending handle to look up — open the
-  // sheet pre-filled, then clear so a back-and-forward navigation
+  // Home-local entry points can leave a pending handle here — open
+  // the sheet pre-filled, then clear so back-and-forward navigation
   // doesn't re-pop it. NEW-CONVERSATION.md §6.1.
   const pendingFindHandle = useUiState((s) => s.pendingFindHandle);
   const [initialFindHandle, setInitialFindHandle] = useState<string | undefined>(

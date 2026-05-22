@@ -11,9 +11,9 @@ interface UiState {
   activeConversationId: string | undefined;
   setActiveConversation: (id: string | undefined) => void;
   /**
-   * Inbound `speakeasy://add?handle=<h>` deep links land here so
-   * the conversation list can pop the Find Someone sheet pre-
-   * filled when it next mounts. Cleared by the consumer.
+   * One-shot prefill for Home's Find Someone sheet. Deep links now
+   * route to AddContact directly; this remains for UI entry points
+   * that already live on Home and want to pop the sheet pre-filled.
    */
   pendingFindHandle: string | undefined;
   setPendingFindHandle: (handle: string | undefined) => void;
