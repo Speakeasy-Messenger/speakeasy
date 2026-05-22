@@ -81,6 +81,22 @@ describe('CachingVouchflowClient', () => {
     expect(verifySpy).toHaveBeenCalledTimes(2);
   });
 
+  it('keeps the default cache for nearly a month', async () => {
+    let now = 1_000;
+    const inner = new StubVouchflowClient({ deviceToken: 'dvt_abc' });
+    const verifySpy = vi.spyOn(inner, 'verify');
+    const c = new CachingVouchflowClient(inner, { now: () => now });
+
+    await c.verify({ context: 'login' });
+    now += 29 * 24 * 60 * 60_000;
+    await c.verify({ context: 'login' });
+    expect(verifySpy).toHaveBeenCalledTimes(1);
+
+    now += 2 * 24 * 60 * 60_000;
+    await c.verify({ context: 'login' });
+    expect(verifySpy).toHaveBeenCalledTimes(2);
+  });
+
   it('different verify opts share the cache (deviceToken is what matters)', async () => {
     const inner = new StubVouchflowClient({ deviceToken: 'dvt_abc' });
     const verifySpy = vi.spyOn(inner, 'verify');

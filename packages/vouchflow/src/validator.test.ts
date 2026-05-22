@@ -91,6 +91,28 @@ describe('VouchflowValidator', () => {
     await expect(v.validate('dvt_x')).rejects.toMatchObject({ reason: 'stale_verification' });
   });
 
+  it('accepts month-old verifications by default', async () => {
+    const r = rep();
+    r.last_verification!.completed_at = '2026-03-27T16:00:00Z'; // 29 days old
+    const v = new VouchflowValidator({
+      apiClient: fakeClient(r),
+      now: () => NOW,
+    });
+
+    await expect(v.validate('dvt_x')).resolves.toMatchObject({ deviceToken: 'dvt_x' });
+  });
+
+  it('rejects verifications older than the default month window', async () => {
+    const r = rep();
+    r.last_verification!.completed_at = '2026-03-25T16:00:00Z'; // 31 days old
+    const v = new VouchflowValidator({
+      apiClient: fakeClient(r),
+      now: () => NOW,
+    });
+
+    await expect(v.validate('dvt_x')).rejects.toMatchObject({ reason: 'stale_verification' });
+  });
+
   it('rejects high risk_score', async () => {
     const v = new VouchflowValidator({
       apiClient: fakeClient(rep({ risk_score: 90 })),

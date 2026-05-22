@@ -61,6 +61,10 @@ import { colors, fonts, space } from '../theme/index.js';
 import { font, motion, type } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
+import {
+  getCachedDeviceTokenOrThrow,
+  getDeviceTokenOrVerify,
+} from '../auth/verify-device.js';
 
 interface Props {
   /** The other user's adjective-adjective-noun id, for direct chats only. */
@@ -228,11 +232,7 @@ export function ChatScreen({
     if (isFeedbackHandle(peerId)) return;
     if (isSpeakerHandle(peerId)) return; // @speaker is a one-way broadcast
     const ws = getWsClient(async () => {
-      const cached = useIdentity.getState().deviceToken;
-      if (cached) return cached;
-      const r = await vouchflow.verify({ context: 'login' });
-      useIdentity.getState().setDeviceToken(r.deviceToken);
-      return r.deviceToken;
+      return getCachedDeviceTokenOrThrow();
     });
     // Previously this early-returned when ws wasn't authed yet. That
     // was the bug: if the WS isn't authed on first render (common on
@@ -384,10 +384,8 @@ export function ChatScreen({
     try {
       let deviceToken = useIdentity.getState().deviceToken;
       if (!deviceToken) {
-        diag('chat', 'send: no deviceToken, calling vouchflow.verify');
-        const r = await vouchflow.verify({ context: 'login' });
-        useIdentity.getState().setDeviceToken(r.deviceToken);
-        deviceToken = r.deviceToken;
+        diag('chat', 'send: no deviceToken, verification required');
+        deviceToken = await getDeviceTokenOrVerify(vouchflow, 'send_message');
       }
       // @feedback fork — POST plaintext to /v1/feedback (NOT E2E),
       // skip Signal session + WS dispatch. Attachments aren't

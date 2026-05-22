@@ -24,6 +24,10 @@ import { useProfiles } from './src/store/profiles.js';
 import { useOnboardingCards } from './src/store/onboarding-cards.js';
 import { ThemeProvider, useTheme } from './src/theme/ThemeProvider.js';
 import { ensureServerBinding } from './src/auth/ensure-enrolled.js';
+import {
+  getCachedDeviceTokenOrThrow,
+  verifyDeviceWithExplanation,
+} from './src/auth/verify-device.js';
 import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
 import { consumeStoreResetFlag } from './src/native/db-state.js';
@@ -139,6 +143,7 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
 
 export default function App() {
   const userId = useIdentity((s) => s.userId);
+  const deviceToken = useIdentity((s) => s.deviceToken);
   const hydrated = useIdentity((s) => s.hydrated);
   const navRef = useRef<NavigationContainerRef<RootStack>>(null);
   // Flips true on NavigationContainer's onReady. usePushNavigation must
@@ -270,16 +275,13 @@ export default function App() {
   // each surfaced as a different inline error. Bug report: "many
   // actions fail saying the device is not authenticated".
   //
-  // Strategy: call `vouchflow.verify({context: 'login'})` first.
-  // The CachingVouchflowClient + native SDK return the in-keystore
-  // token if it's fresh (no biometric prompt); otherwise they
-  // prompt biometric and re-attest. Then write the fresh token
-  // through to the identity store, then re-bind with the server
-  // (silent re-enroll if the server forgot us). On hard failure —
-  // verify itself rejected, e.g. device removed from Vouchflow's
-  // attestation universe — reset identity so the navigator falls
-  // back to Onboarding instead of leaving the user stranded on a
-  // dead Conversations screen.
+  // Strategy: only refresh when the cached token is missing/stale.
+  // If a real Vouchflow verify is needed, show an explanation first;
+  // the native passkey/biometric sheet opens only after the user taps
+  // Continue. Then write the fresh token through to the identity
+  // store and re-bind with the server (silent re-enroll if the server
+  // forgot us). Hard failures keep the identity intact; explicit
+  // delete-account is the only local identity wipe path.
   // Idempotent permission catch-up for already-onboarded users. New
   // installs see the dedicated PermissionsStep at end of onboarding;
   // existing installs (whose users were enrolled before the step
@@ -365,11 +367,10 @@ export default function App() {
       // biometric prompt every time the app resumed from a long
       // background, and (b) meant the status pip greyed for a
       // few seconds while we waited on Vouchflow + Play Integrity.
-      // The server's window is 24h by default (see VouchflowValidator
-      // DEFAULT_MAX_AGE_MS). Mobile re-verifies a comfortable margin
-      // before that — 22h — so a token that's still server-valid
-      // is NEVER pre-emptively refreshed at launch.
-      const FRESHNESS_MS = 22 * 60 * 60_000;
+      // Vouchflow re-verification is intentionally rare. Mobile treats
+      // a successful verification as fresh for 30 days; the server must
+      // be configured with a matching VOUCHFLOW_MAX_VERIFICATION_AGE_MS.
+      const FRESHNESS_MS = 30 * 24 * 60 * 60_000;
       const { deviceToken: cachedToken, deviceTokenIssuedAt: issuedAt } =
         useIdentity.getState();
       const ageMs = issuedAt ? Date.now() - issuedAt : Number.POSITIVE_INFINITY;
@@ -382,7 +383,7 @@ export default function App() {
         });
       } else {
         try {
-          const r = await vouchflow.verify({ context: 'login' });
+          const r = await verifyDeviceWithExplanation(vouchflow, 'launch_refresh');
           useIdentity.getState().setDeviceToken(r.deviceToken);
           diag('app', 'launch verify OK', { userId, prevAgeMs: ageMs });
           // Re-register push token after re-verification in case it
@@ -449,21 +450,26 @@ export default function App() {
 
   // Open WebSocket once enrolled. Close + reset when identity is cleared.
   // Token comes from the identity store (set at signup). On `forceRefresh`
-  // — passed by the WS client after a connection failed mid-auth — we
-  // re-attest via `vouchflow.verify()` so a stale/expired token
-  // self-heals on reconnect with no user action. Also falls back to
-  // verify if the store is somehow empty.
+  // — passed by the WS client after a connection failed mid-auth — ask
+  // the user before opening Vouchflow/passkey. Realtime can wait for
+  // explicit consent; background reconnect loops must not pop biometrics.
   useEffect(() => {
     if (!userId) return;
+    if (!deviceToken) {
+      diag('app', 'ws connect deferred — device verification required', { userId });
+      return;
+    }
     diag('app', 'mounting router for userId', { userId });
     const getToken = async (opts?: { forceRefresh?: boolean }) => {
       const cached = useIdentity.getState().deviceToken;
       if (cached && !opts?.forceRefresh) return cached;
-      diag('app', 'ws getToken: re-attesting', {
+      diag('app', 'ws getToken: verification required', {
         reason: opts?.forceRefresh ? 'auth-failed' : 'no-cached-token',
       });
-      const r = await vouchflow.verify({ context: 'login' });
-      useIdentity.getState().setDeviceToken(r.deviceToken);
+      const r = await verifyDeviceWithExplanation(
+        vouchflow,
+        opts?.forceRefresh ? 'websocket_auth_failed' : 'missing_token',
+      );
       void tryRegisterPushToken(r.deviceToken).catch(() => {
         /* best-effort */
       });
@@ -480,11 +486,10 @@ export default function App() {
     // hash of userId, but writing it explicitly avoids an extra round
     // trip every render. Best-effort, fire-and-forget.
     void (async () => {
-      const own = useProfiles.getState().byUserId[userId];
-      if (own?.selectedAvatarId) return;
-      const dt = await getToken().catch(() => undefined);
-      if (!dt) return;
       try {
+        const own = useProfiles.getState().byUserId[userId];
+        if (own?.selectedAvatarId) return;
+        const dt = getCachedDeviceTokenOrThrow();
         const fresh = await api.fetchUser(dt, userId);
         if (fresh.selected_avatar_id) {
           useProfiles.getState().set(userId, {
@@ -834,7 +839,7 @@ export default function App() {
       setCallOrchestrator(undefined);
       ws.close();
     };
-  }, [userId]);
+  }, [userId, deviceToken]);
 
   return (
     <SafeAreaProvider>

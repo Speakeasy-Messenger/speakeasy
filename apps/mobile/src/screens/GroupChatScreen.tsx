@@ -38,6 +38,7 @@ import { useGroups } from '../store/groups.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
 import { useIdentity } from '../store/identity.js';
 import { api, getWsClient, groupMessaging, signalProtocol, vouchflow } from '../services.js';
+import { getDeviceTokenOrVerify } from '../auth/verify-device.js';
 import { ApiError } from '../api/client.js';
 import { makeGroupOrchestrator } from '../crypto/group-orchestration.js';
 import { utf8ToBytes } from '../utils/bytes.js';
@@ -126,9 +127,7 @@ export function GroupChatScreen({
       try {
         let dt = useIdentity.getState().deviceToken;
         if (!dt) {
-          const r = await vouchflow.verify({ context: 'login' });
-          useIdentity.getState().setDeviceToken(r.deviceToken);
-          dt = r.deviceToken;
+          dt = await getDeviceTokenOrVerify(vouchflow, 'group_action');
         }
         const [groupRes, rosterRes] = await Promise.all([
           api.fetchGroup(dt, groupId),
@@ -291,9 +290,7 @@ export function GroupChatScreen({
       const getDeviceToken = async () => {
         const cached = useIdentity.getState().deviceToken;
         if (cached) return cached;
-        const r = await vouchflow.verify({ context: 'login' });
-        useIdentity.getState().setDeviceToken(r.deviceToken);
-        return r.deviceToken;
+        return getDeviceTokenOrVerify(vouchflow, 'send_message');
       };
       const ws = getWsClient(getDeviceToken);
       const orchestrator = makeGroupOrchestrator({

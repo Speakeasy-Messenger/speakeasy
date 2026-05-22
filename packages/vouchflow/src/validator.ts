@@ -9,7 +9,7 @@ import {
 
 export interface VouchflowValidatorOptions {
   apiClient: VouchflowApiClient;
-  /** Max age of `last_verification.completed_at`. Default 5 minutes. */
+  /** Max age of `last_verification.completed_at`. Default 30 days. */
   maxVerificationAgeMs?: number;
   /** Reject above this. Default 70. Set to 100 to disable. */
   maxRiskScore?: number;
@@ -31,13 +31,13 @@ export interface VouchflowValidatorOptions {
   now?: () => number;
 }
 
-// 24h. The original 5-minute window forced a re-verify (and a
+// 30 days. The original short window forced a re-verify (and a
 // possible biometric prompt) every time the app came back from a
 // long background, which is annoying and not meaningfully more
 // secure for a Speakeasy session. The user already authenticated
 // to the device at unlock; per-action re-attestation is overkill.
 // Server-deployed installs can override via VOUCHFLOW_MAX_VERIFICATION_AGE_MS.
-const DEFAULT_MAX_AGE_MS = 24 * 60 * 60_000;
+const DEFAULT_MAX_AGE_MS = 30 * 24 * 60 * 60_000;
 const DEFAULT_MAX_RISK = 70;
 
 /**

@@ -11,12 +11,12 @@ import type {
  * Wrapper that caches the most recent `verify()` result so back-to-back
  * calls (typical on WS reconnect storms) don't trigger a fresh biometric
  * prompt every time. Cache lifetime must stay strictly below the server's
- * `VOUCHFLOW_MAX_VERIFICATION_AGE_MS` (default 5 min — see Vouchflow
- * `VouchflowValidator`) so the cached deviceToken never expires server-side
- * before the cache does.
+ * `VOUCHFLOW_MAX_VERIFICATION_AGE_MS` on the server should be configured
+ * to accept this window. The client cache is intentionally long so normal
+ * reconnects and foreground/background cycles do not re-open the biometric
+ * sheet every few minutes.
  *
- * Default: 4 minutes — leaves a 1-minute safety margin against the server's
- * 5-minute freshness window.
+ * Default: 30 days.
  *
  * `requestFallback` and `submitFallbackOtp` are passed through directly —
  * they are not cached because they represent one-time server interactions.
@@ -38,7 +38,7 @@ export class CachingVouchflowClient implements VouchflowClient {
       return this.cached.result;
     }
     const result = await this.inner.verify(opts);
-    const ttl = this.opts.maxAgeMs ?? 4 * 60_000;
+    const ttl = this.opts.maxAgeMs ?? 30 * 24 * 60 * 60_000;
     this.cached = { result, expiresAt: this.now() + ttl };
     return result;
   }

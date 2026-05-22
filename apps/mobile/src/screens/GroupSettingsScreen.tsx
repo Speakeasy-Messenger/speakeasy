@@ -24,6 +24,7 @@ import { TTLSegmentedControl } from '../components/TTLSegmentedControl.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { ApiError } from '../api/client.js';
 import { api, vouchflow } from '../services.js';
+import { getDeviceTokenOrVerify } from '../auth/verify-device.js';
 import { diag } from '../diag/log.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
@@ -740,9 +741,7 @@ function ttlLabel(t: TtlOption): string {
 async function getDeviceToken(): Promise<string> {
   const cached = useIdentity.getState().deviceToken;
   if (cached) return cached;
-  const r = await vouchflow.verify({ context: 'login' });
-  useIdentity.getState().setDeviceToken(r.deviceToken);
-  return r.deviceToken;
+  return getDeviceTokenOrVerify(vouchflow, 'group_action');
 }
 
 const styles = StyleSheet.create({
