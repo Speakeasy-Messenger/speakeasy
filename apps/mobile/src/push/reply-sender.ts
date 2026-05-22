@@ -31,6 +31,7 @@ export interface ReplyWsClient {
   connect(): void;
   waitForAuthed(timeoutMs?: number): Promise<void>;
   enqueueSend(msg: WsClientMsg): void;
+  queueSend?(msg: WsClientMsg, timeoutMs?: number): Promise<void>;
 }
 
 export interface ReplySenderDeps {
@@ -85,13 +86,18 @@ export async function sendReplyMessage(
   ws.connect();
   await ws.waitForAuthed();
   const messageId = newMessageId();
-  ws.enqueueSend({
+  const frame: WsClientMsg = {
     type: 'message',
     to: peerId,
     ciphertext: bytesToB64(ciphertext),
     msg_type: 'direct',
     message_id: messageId,
-  });
+  };
+  if (ws.queueSend) {
+    await ws.queueSend(frame);
+  } else {
+    ws.enqueueSend(frame);
+  }
   diag('push-reply', 'inline reply sent', { peerId });
 
   // Let the socket flush before the headless task tears the JS context

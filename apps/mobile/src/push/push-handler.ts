@@ -220,6 +220,10 @@ export async function drainPendingReplies(): Promise<void> {
       kind: 'direct',
       sentAt: p.sentAt,
       stage: 'sent',
+      // Match ChatScreen's normal outbound bubble state: single check
+      // until the server forwards `delivered`, then read receipt can
+      // stamp the same wire id.
+      delivered: false,
     });
   }
   diag('push-reply', 'drained pending inline replies', { count: list.length });
@@ -367,7 +371,9 @@ function messagesFromNotification(notification: Notification | undefined): MsgSt
     return style.messages.map((m) => ({
       text: String(m.text ?? ''),
       timestamp: typeof m.timestamp === 'number' ? m.timestamp : Date.now(),
-      person: m.person ? { id: m.person.id, name: m.person.name } : undefined,
+      person: m.person
+        ? { id: m.person.id, name: m.person.name, icon: m.person.icon }
+        : undefined,
     }));
   }
   return [];
@@ -455,10 +461,21 @@ async function displayMessagingNotification(args: {
   const peerIcon = await cachedAvatarUri(args.peerHandle);
   const myUserId = await loadPersistedUserId();
   const selfIcon = myUserId ? await cachedAvatarUri(myUserId) : undefined;
-  const selfPerson = selfIcon ? { ...SELF_PERSON, icon: selfIcon } : SELF_PERSON;
+  const selfPerson = {
+    ...SELF_PERSON,
+    // If the local avatar cache is cold, prefer the app notification
+    // resource over Android's generic silhouette.
+    icon: selfIcon ?? 'ic_notification',
+  };
   const messages = args.messages.slice(-MAX_NOTIF_MESSAGES).map((m) =>
     m.person
-      ? { ...m, person: { ...m.person, ...(peerIcon ? { icon: peerIcon } : {}) } }
+      ? {
+          ...m,
+          person: {
+            ...m.person,
+            icon: peerIcon ?? m.person.icon ?? 'ic_notification',
+          },
+        }
       : m,
   );
   // Durable copy of the stack so an inline reply can rebuild the full
@@ -483,6 +500,7 @@ async function displayMessagingNotification(args: {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
+      ...(peerIcon ? { largeIcon: peerIcon } : {}),
       pressAction: { id: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,

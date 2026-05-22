@@ -8,6 +8,9 @@ function mockWs(): { ws: ReplyWsClient; sent: WsClientMsgLike[] } {
     connect: vi.fn(),
     waitForAuthed: vi.fn().mockResolvedValue(undefined),
     enqueueSend: vi.fn((m) => sent.push(m as WsClientMsgLike)),
+    queueSend: vi.fn(async (m) => {
+      sent.push(m as WsClientMsgLike);
+    }),
   };
   return { ws, sent };
 }
@@ -36,6 +39,7 @@ describe('sendReplyMessage', () => {
     expect(encrypt).toHaveBeenCalledWith('bob', expect.any(Uint8Array));
     expect(ws.connect).toHaveBeenCalledOnce();
     expect(ws.waitForAuthed).toHaveBeenCalledOnce();
+    expect(ws.queueSend).toHaveBeenCalledOnce();
     expect(sent).toHaveLength(1);
     expect(sent[0]).toMatchObject({
       type: 'message',
@@ -63,6 +67,41 @@ describe('sendReplyMessage', () => {
 
     expect(messageId).toBeTruthy();
     expect(messageId).toBe(sent[0]!.message_id);
+  });
+
+  it('waits for the queued send to flush before returning success', async () => {
+    const sent: WsClientMsgLike[] = [];
+    let flush: (() => void) | undefined;
+    const ws: ReplyWsClient = {
+      connect: vi.fn(),
+      waitForAuthed: vi.fn().mockResolvedValue(undefined),
+      enqueueSend: vi.fn(),
+      queueSend: vi.fn(
+        (m) =>
+          new Promise<void>((resolve) => {
+            sent.push(m as WsClientMsgLike);
+            flush = resolve;
+          }),
+      ),
+    };
+    const deps: ReplySenderDeps = {
+      encrypt: vi.fn().mockResolvedValue(new Uint8Array([9])),
+      getWsClient: () => ws,
+      loadDeviceToken: async () => 'dvt_test',
+      settleMs: 0,
+    };
+
+    let resolved = false;
+    const pending = sendReplyMessage('bob', 'hi', deps).then(() => {
+      resolved = true;
+    });
+    await vi.waitFor(() => expect(sent).toHaveLength(1));
+
+    expect(resolved).toBe(false);
+
+    flush?.();
+    await pending;
+    expect(resolved).toBe(true);
   });
 
   it('throws when no device token is stored', async () => {

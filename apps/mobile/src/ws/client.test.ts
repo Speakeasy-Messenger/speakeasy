@@ -311,6 +311,93 @@ describe('SpeakeasyWsClient', () => {
     expect(acks).toEqual([{ type: 'ack', message_id: 'msg-1' }]);
   });
 
+  it('queueSend resolves only after the frame is sent on an authed socket', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const sock = FakeSocket.instances[0]!;
+    sock.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    let resolved = false;
+    const queued = client
+      .queueSend({
+        type: 'message',
+        to: 'bob',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+        message_id: 'msg-1',
+      })
+      .then(() => {
+        resolved = true;
+      });
+
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+    expect(sock.sent.map((s) => JSON.parse(s)).some((m) => m.message_id === 'msg-1')).toBe(
+      false,
+    );
+
+    sock.message({ type: 'authed', user_id: 'me' });
+    await queued;
+    expect(resolved).toBe(true);
+    expect(sock.sent.map((s) => JSON.parse(s))).toContainEqual({
+      type: 'message',
+      to: 'bob',
+      ciphertext: 'AAA=',
+      msg_type: 'direct',
+      message_id: 'msg-1',
+    });
+  });
+
+  it('queueSend keeps a frame queued when send throws during a reconnect race', async () => {
+    const { client } = makeClient();
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    first.message({ type: 'authed', user_id: 'me' });
+
+    const originalSend = first.send.bind(first);
+    vi.spyOn(first, 'send').mockImplementationOnce(() => {
+      throw new Error('socket closing');
+    }).mockImplementation(originalSend);
+
+    let resolved = false;
+    const queued = client
+      .queueSend({
+        type: 'message',
+        to: 'bob',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+        message_id: 'msg-2',
+      })
+      .then(() => {
+        resolved = true;
+      });
+    await Promise.resolve();
+    expect(resolved).toBe(false);
+
+    first.close();
+    vi.advanceTimersByTime(100);
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    second.message({ type: 'authed', user_id: 'me' });
+
+    await queued;
+    expect(resolved).toBe(true);
+    expect(second.sent.map((s) => JSON.parse(s))).toContainEqual({
+      type: 'message',
+      to: 'bob',
+      ciphertext: 'AAA=',
+      msg_type: 'direct',
+      message_id: 'msg-2',
+    });
+  });
+
   it('re-attests (getToken forceRefresh) after a socket closes mid-authentication', async () => {
     const calls: Array<{ forceRefresh?: boolean } | undefined> = [];
     let n = 0;

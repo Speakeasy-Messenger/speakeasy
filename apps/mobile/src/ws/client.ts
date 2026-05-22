@@ -146,32 +146,76 @@ export class SpeakeasyWsClient {
    * frames that must survive a brief reconnect window. `send()` remains
    * available for callers that prefer explicit error handling.
    */
-  private readonly pendingSends: WsClientMsg[] = [];
+  private readonly pendingSends: Array<{
+    msg: WsClientMsg;
+    resolve?: () => void;
+  }> = [];
   enqueueSend(msg: WsClientMsg): void {
+    void this.queueSend(msg, 0).catch(() => {
+      /* fire-and-forget callers intentionally ignore queue lifetime */
+    });
+  }
+
+  /**
+   * Queue a message and resolve once it has actually been handed to the
+   * WebSocket. Unlike `enqueueSend`, callers can await this from short-lived
+   * background tasks so they don't report success while a frame is still only
+   * sitting in JS memory.
+   */
+  queueSend(msg: WsClientMsg, timeoutMs = 10_000): Promise<void> {
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    const clear = () => {
+      if (timeout) clearTimeout(timeout);
+      timeout = undefined;
+    };
+    const promise = new Promise<void>((resolve, reject) => {
+      if (timeoutMs > 0) {
+        timeout = setTimeout(() => {
+          const idx = this.pendingSends.findIndex((p) => p.msg === msg);
+          if (idx !== -1) this.pendingSends.splice(idx, 1);
+          reject(new Error(`ws.queueSend timeout after ${timeoutMs}ms (state=${this.state})`));
+        }, timeoutMs);
+      }
+      this.pendingSends.push({
+        msg,
+        resolve: () => {
+          clear();
+          resolve();
+        },
+      });
+    });
+    this.flushSends();
+    return promise;
+  }
+
+  private sendPending(entry: {
+    msg: WsClientMsg;
+    resolve?: () => void;
+  }): boolean {
     if (this.state === 'authed' && this.socket) {
       try {
-        this.socket.send(JSON.stringify(msg));
-        return;
+        this.socket.send(JSON.stringify(entry.msg));
+        entry.resolve?.();
+        return true;
       } catch {
-        // Mid-send close — fall through to queue
+        // Mid-send close — keep queued for the next authed transition.
+        return false;
       }
     }
-    this.pendingSends.push(msg);
-    this.flushSends();
+    return false;
   }
 
   private flushSends(): void {
     if (this.state !== 'authed' || !this.socket) return;
     while (this.pendingSends.length > 0) {
-      const msg = this.pendingSends[0];
-      try {
-        this.socket.send(JSON.stringify(msg));
+      const entry = this.pendingSends[0]!;
+      if (this.sendPending(entry)) {
         this.pendingSends.shift();
-      } catch {
-        // Mid-flush close — keep the message queued; the next
-        // 'authed' transition tries again.
-        return;
+        continue;
       }
+      // Mid-flush close — keep the message queued; the next
+      // 'authed' transition tries again.
+      return;
     }
   }
 
