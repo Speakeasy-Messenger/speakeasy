@@ -150,6 +150,8 @@ export function ChatScreen({
   const [attachOpen, setAttachOpen] = useState(false);
 
   const [input, setInput] = useState('');
+  const [draftContentHeight, setDraftContentHeight] = useState(0);
+  const [draftViewportHeight, setDraftViewportHeight] = useState(0);
   // Tap a photo/gif in the bubble → render this attachment fullscreen
   // in a Modal layered over the chat. Null = closed.
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
@@ -521,6 +523,10 @@ export function ChatScreen({
   }
 
   const hasInput = input.trim().length > 0;
+  const draftOverflowing =
+    hasInput &&
+    draftViewportHeight > 0 &&
+    draftContentHeight > draftViewportHeight + 2;
   const ttlLabel = formatTtl(ttl);
 
   return (
@@ -702,24 +708,40 @@ export function ChatScreen({
                 </Pressable>
               </>
             ) : null}
-            <TextInput
-              testID="chat-input"
-              style={[styles.input, { color: themed.ink }]}
-              value={input}
-              onChangeText={setInput}
-              placeholder="say something…"
-              placeholderTextColor={themed.slate}
-              onSubmitEditing={hasInput ? handleSend : undefined}
-              returnKeyType="send"
-              multiline
-              // Once the typed message exceeds `maxHeight` the input
-              // would otherwise clip the overflow with no way to reach
-              // it. Enabling internal scroll makes a long draft
-              // scrollable instead of hidden. (TextInput doesn't
-              // expose a JS-side `showsVerticalScrollIndicator` —
-              // the indicator appears natively while scrolling.)
-              scrollEnabled
-            />
+            <View style={styles.inputWrap}>
+              <TextInput
+                testID="chat-input"
+                style={[styles.input, { color: themed.ink }]}
+                value={input}
+                onChangeText={setInput}
+                onLayout={(e) => setDraftViewportHeight(e.nativeEvent.layout.height)}
+                onContentSizeChange={(e) =>
+                  setDraftContentHeight(e.nativeEvent.contentSize.height)
+                }
+                placeholder="say something…"
+                placeholderTextColor={themed.slate}
+                onSubmitEditing={hasInput ? handleSend : undefined}
+                returnKeyType="send"
+                multiline
+                // Once the typed message exceeds `maxHeight` the input
+                // would otherwise clip the overflow with no way to reach
+                // it. Enabling internal scroll makes a long draft
+                // scrollable instead of hidden. Android does not always
+                // show its native scroll indicator, so we render a small
+                // explicit cue below once overflow is detected.
+                scrollEnabled
+              />
+              {draftOverflowing ? (
+                <View
+                  pointerEvents="none"
+                  style={[
+                    styles.inputScrollCue,
+                    { backgroundColor: themed.slate },
+                  ]}
+                  testID="chat-input-scroll-cue"
+                />
+              ) : null}
+            </View>
             <Pressable
               onPress={cycleTtl}
               onLongPress={() => setPersistence(conversationId, true)}
@@ -896,14 +918,26 @@ const styles = StyleSheet.create({
   },
   // No pill, no fill — input sits flush on the canvas. `body` style for
   // both placeholder and content per §6.5.
-  input: {
+  inputWrap: {
     flex: 1,
+    position: 'relative',
+  },
+  input: {
     minHeight: 32,
     maxHeight: 120,
-    paddingHorizontal: space.sm,
+    paddingLeft: space.sm,
+    paddingRight: space.lg,
     paddingVertical: space.sm,
     fontFamily: font.regular,
     fontSize: type.body.size,
+  },
+  inputScrollCue: {
+    position: 'absolute',
+    right: 6,
+    top: 10,
+    bottom: 10,
+    width: 2,
+    opacity: 0.45,
   },
   // TTL knob — meta-style label, no border, no fill. Tap cycles the
   // option; long-press flips to persistence. Quiet by design — most
