@@ -1,5 +1,5 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, StyleSheet, Text, View } from 'react-native';
+import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
 import { RichMessageText } from './RichMessageText.js';
@@ -75,6 +75,19 @@ export interface DisappearingMessageBubbleProps {
    * that don't pass it just render without one.
    */
   timestamp?: number;
+  /**
+   * Outbound send failed for this bubble. When set, the bubble renders
+   * muted (lower opacity, no receipt glyph) with a "Tap to resend" cue
+   * underneath. Tapping the bubble fires `onTapResend`. Cleared on
+   * retry; receipts attach to the original bubble because the wire id
+   * is preserved across attempts. Only meaningful on sent bubbles.
+   */
+  sendFailure?: string;
+  /**
+   * Fires when the user taps a `sendFailure` bubble to resend it.
+   * Only wired by ChatScreen for sent bubbles.
+   */
+  onTapResend?: () => void;
 }
 
 interface StageTarget {
@@ -117,6 +130,8 @@ export function DisappearingMessageBubble({
   delivered,
   read,
   timestamp,
+  sendFailure,
+  onTapResend,
 }: DisappearingMessageBubbleProps) {
   const themed = useColors();
   const opacity = useRef(new Animated.Value(1)).current;
@@ -181,6 +196,7 @@ export function DisappearingMessageBubble({
   }, [stage, opacity, scale, blur, heightFactor, onStageAnimated]);
 
   const isSent = variant === 'sent';
+  const isFailed = isSent && !!sendFailure;
   const bubbleStyle = [
     styles.base,
     isSent ? styles.sent : styles.received,
@@ -189,6 +205,7 @@ export function DisappearingMessageBubble({
     // hardcoded to dark-mode surface, which made received bubbles
     // appear pitch-black on the cream light-mode canvas.
     isSent ? null : { backgroundColor: themed.receivedBubble },
+    isFailed ? styles.sentFailed : null,
     {
       opacity,
       transform: [{ scale }],
@@ -200,7 +217,7 @@ export function DisappearingMessageBubble({
     },
   ];
 
-  return (
+  const bubble = (
     <Animated.View
       style={bubbleStyle}
       // Expose the in-flight blur amount for callers that wire a real
@@ -232,8 +249,9 @@ export function DisappearingMessageBubble({
           read-receipt glyph. ✓ = buffered server-side; ✓✓ = acked /
           read. Both sit at the trailing edge, slightly faded so they
           never compete with the content. The row only renders when
-          there's something to show. */}
-      {timestamp !== undefined || (isSent && delivered !== undefined) ? (
+          there's something to show. Failed bubbles swap the receipt
+          for a small "!" — the resend affordance lives below. */}
+      {timestamp !== undefined || (isSent && delivered !== undefined) || isFailed ? (
         <View style={styles.metaRow}>
           {timestamp !== undefined ? (
             <Text
@@ -246,7 +264,11 @@ export function DisappearingMessageBubble({
               {formatMessageTime(timestamp)}
             </Text>
           ) : null}
-          {isSent && delivered !== undefined ? (
+          {isFailed ? (
+            <Text testID="bubble-failed-glyph" style={styles.failedGlyph}>
+              !
+            </Text>
+          ) : isSent && delivered !== undefined ? (
             <Text
               testID="bubble-receipt"
               style={[
@@ -265,6 +287,28 @@ export function DisappearingMessageBubble({
       ) : null}
     </Animated.View>
   );
+
+  // Failed bubbles get a resend cue below — meta-style small caps,
+  // slate so it reads as a hint and not a system error. The Pressable
+  // wraps the bubble + cue together so the entire failed message is
+  // tappable, not just the cue.
+  if (isFailed && onTapResend) {
+    return (
+      <Pressable
+        onPress={onTapResend}
+        accessibilityRole="button"
+        accessibilityLabel={`Couldn't send. Tap to resend: ${text}`}
+        style={styles.failedWrap}
+      >
+        {bubble}
+        <Text style={[styles.resendCue, { color: themed.slate }]}>
+          COULDN'T SEND · TAP TO RESEND
+        </Text>
+      </Pressable>
+    );
+  }
+
+  return bubble;
 }
 
 const styles = StyleSheet.create({
@@ -346,6 +390,45 @@ const styles = StyleSheet.create({
   // so the brass background reads cleanly. Received-bubble time falls
   // back to the themed `slate` (set inline at the render site).
   timeSent: { color: `${accent.foreground}99` },
+  // Send-failure treatment. The bubble keeps its brass identity but
+  // sits at ~60% opacity so it reads as "in-limbo" without leaving the
+  // palette (no red, no system-error chrome). The leading edge picks
+  // up a thin ink border — a quiet "this needs your attention" cue
+  // that mirrors the meta-row glyph rather than shouting.
+  sentFailed: {
+    opacity: 0.62,
+    borderLeftWidth: 2,
+    borderLeftColor: accent.foreground,
+  },
+  // Outer Pressable for a failed bubble — right-aligned so the bubble +
+  // resend cue track the sent-bubble trailing edge instead of jumping
+  // to the conversation's leading edge.
+  failedWrap: {
+    alignSelf: 'flex-end',
+    alignItems: 'flex-end',
+  },
+  // "!" replaces the receipt glyph on a failed bubble. Ink at 100% so
+  // it reads against the muted brass without borrowing the alarming
+  // weight of a red icon.
+  failedGlyph: {
+    fontFamily: font.medium,
+    fontSize: 11,
+    fontWeight: '700' as const,
+    color: accent.foreground,
+    letterSpacing: 0.5,
+    marginRight: -2,
+  },
+  // Resend cue beneath the bubble — meta-style small caps, slate so
+  // the affordance reads as a hint, not a system error. Matches the
+  // tagline microcopy used elsewhere on the chat screen.
+  resendCue: {
+    fontFamily: font.medium,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    textTransform: 'uppercase' as const,
+    marginTop: 4,
+    marginRight: 4,
+  },
 });
 
 /**

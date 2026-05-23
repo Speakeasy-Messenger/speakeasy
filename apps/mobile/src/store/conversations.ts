@@ -80,6 +80,18 @@ export interface ChatMessage {
    * reopening a chat re-sent `read` for the whole visible history.
    */
   readReceiptSent?: boolean;
+  /**
+   * For sent messages: set when the outbound send path failed (no WS,
+   * encrypt error, etc.). When present, the bubble renders muted with a
+   * "Tap to resend" cue and a tap on the bubble re-runs the send path
+   * using the same wire id, so the eventual `delivered`/`read` acks
+   * attach to the original bubble. Cleared on the next retry attempt.
+   *
+   * The previous behavior was to append a separate `[send failed: …]`
+   * bubble while the optimistic echo lingered with a single ✓ — the
+   * user couldn't tell which message failed or how to recover.
+   */
+  sendFailure?: string;
 }
 
 export interface ConversationState {
@@ -164,6 +176,13 @@ interface ConversationsState {
    * message, so ChatScreen does not re-emit it on remount / cold start.
    */
   markReadReceiptSent: (conversationId: string, msgId: string) => void;
+  /**
+   * Stamp / clear a send-failure marker on a sent message. Passing
+   * `undefined` clears the marker (used on retry-start so the bubble
+   * loses its muted "tap to resend" treatment while the new attempt
+   * is in flight).
+   */
+  setSendFailure: (conversationId: string, msgId: string, reason: string | undefined) => void;
   remove: (conversationId: string, msgId: string) => void;
   /** Drop the entire conversation entry. Used by group leave (the
    * room disappears from the user's local list) and by 1:1 delete. */
@@ -418,6 +437,27 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           return { ...m, readReceiptSent: true };
         }
         return m;
+      });
+      if (!touched) return s;
+      return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };
+    });
+    void persist(get().byId);
+  },
+
+  setSendFailure: (conversationId, msgId, reason) => {
+    set((s) => {
+      const c = s.byId[conversationId];
+      if (!c) return s;
+      let touched = false;
+      const messages = c.messages.map((m) => {
+        if (m.id !== msgId) return m;
+        if (m.sendFailure === reason) return m;
+        touched = true;
+        if (reason === undefined) {
+          const { sendFailure: _drop, ...rest } = m;
+          return rest;
+        }
+        return { ...m, sendFailure: reason };
       });
       if (!touched) return s;
       return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };

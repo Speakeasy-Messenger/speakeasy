@@ -141,6 +141,7 @@ export function ChatScreen({
   const markRead = useConversations((s) => s.markRead);
   const markDelivered = useConversations((s) => s.markDelivered);
   const markReadReceiptSent = useConversations((s) => s.markReadReceiptSent);
+  const setSendFailure = useConversations((s) => s.setSendFailure);
 
   // BLOCK.md §5: when the local user has blocked this peer, the
   // chat surface enters frozen mode (Peephole portrait, BLOCKED
@@ -377,10 +378,50 @@ export function ChatScreen({
       sentAt: Date.now(),
       stage: 'sent',
       // Single ✓ until the server's `delivered` WS frame flips this
-      // to true (then the bubble renders ✓✓). Failed sends below
-      // omit `delivered` entirely — error bubbles don't show a glyph.
+      // to true (then the bubble renders ✓✓). On send failure the
+      // store stamps `sendFailure`; the bubble renders muted with a
+      // "tap to resend" cue and resends under the same id.
       delivered: false,
     });
+    await dispatchOutbound({ id, text, attachments, mentions });
+  }
+
+  /**
+   * Resend a previously-failed bubble. Reuses the existing wire id so
+   * the eventual `delivered`/`read` acks attach to the original
+   * bubble (the server keys receipts by message_id). Clears the
+   * `sendFailure` marker so the bubble loses its muted "tap to
+   * resend" treatment while the new attempt is in flight.
+   */
+  async function retrySend(msg: {
+    id: string;
+    text?: string;
+    attachments?: Attachment[];
+    mentions?: string[];
+  }) {
+    diag('chat', 'send: retry', { msgId: msg.id, peerId });
+    setSendFailure(conversationId, msg.id, undefined);
+    await dispatchOutbound({
+      id: msg.id,
+      text: msg.text,
+      attachments: msg.attachments,
+      mentions: msg.mentions,
+    });
+  }
+
+  /**
+   * The encrypt + WS dispatch half of the send pipeline. Split out of
+   * `sendOutbound` so `retrySend` can rerun it against an existing
+   * bubble id. On any failure here the store stamps `sendFailure` on
+   * the bubble — no parallel "[send failed: …]" message is appended.
+   */
+  async function dispatchOutbound(args: {
+    id: string;
+    text?: string;
+    attachments?: Attachment[];
+    mentions?: string[];
+  }) {
+    const { id, text, attachments, mentions } = args;
     try {
       let deviceToken = useIdentity.getState().deviceToken;
       if (!deviceToken) {
@@ -449,6 +490,7 @@ export function ChatScreen({
       diag('chat', 'send FAILED', {
         peerId,
         isSelf: peerId === myUserId,
+        msgId: id,
         name: e.name,
         message: e.message,
         reason: e.reason,
@@ -470,47 +512,52 @@ export function ChatScreen({
             {
               text: 'Trust + send',
               style: 'destructive',
-              onPress: () => void resendAfterReset(opts),
+              onPress: () =>
+                void resendAfterReset({ id, text, attachments, mentions }),
             },
           ],
         );
         return;
       }
+      // Stamp the existing bubble as failed so it goes muted with a
+      // "tap to resend" cue underneath. We deliberately do NOT append
+      // a separate `[send failed: …]` message — that left the
+      // optimistic echo lingering with a single ✓ and the failure
+      // showing up as a disconnected system bubble.
       const reason =
         err instanceof SignalClientError
-          ? `[encrypt failed: ${err.reason}]`
+          ? `encrypt_failed:${err.reason ?? 'unknown'}`
           : err instanceof ApiError
-            ? `[send failed: ${err.code ?? err.status}]`
-            : `[send failed: ${e.name ?? 'Error'} — ${e.message ?? String(err)}]`;
-      add(conversationId, {
-        id: newMessageId(),
-        from: 'me',
-        text: reason,
-        kind: 'direct',
-        sentAt: Date.now(),
-        stage: 'sent',
-      });
+            ? `send_failed:${err.code ?? err.status ?? 'unknown'}`
+            : `send_failed:${e.name ?? 'Error'}`;
+      setSendFailure(conversationId, id, reason);
     }
   }
 
-  async function resendAfterReset(opts: { text?: string; attachments?: Attachment[] }) {
+  async function resendAfterReset(opts: {
+    id: string;
+    text?: string;
+    attachments?: Attachment[];
+    mentions?: string[];
+  }) {
     try {
       await signalProtocol.resetPeer(peerId);
       clearSessionCacheFor(peerId);
-      // Re-enter the normal send path. The optimistic echo for the
-      // FIRST attempt is still on screen; rather than de-dupe by id,
-      // we just send a fresh message — the user just opted to retry.
-      await sendOutbound(opts);
-    } catch (err) {
-      diag('chat', 'resend after reset FAILED', { err: String(err) });
-      add(conversationId, {
-        id: newMessageId(),
-        from: 'me',
-        text: `[reset failed: ${(err as Error).message ?? String(err)}]`,
-        kind: 'direct',
-        sentAt: Date.now(),
-        stage: 'sent',
+      // Retry against the original bubble's wire id so the eventual
+      // delivered/read acks attach to the bubble the user can already
+      // see — minting a fresh id here would leave receipts orphaned.
+      await retrySend({
+        id: opts.id,
+        text: opts.text,
+        attachments: opts.attachments,
+        mentions: opts.mentions,
       });
+    } catch (err) {
+      diag('chat', 'resend after reset FAILED', {
+        err: String(err),
+        msgId: opts.id,
+      });
+      setSendFailure(conversationId, opts.id, `reset_failed:${(err as Error).message ?? String(err)}`);
     }
   }
 
@@ -627,6 +674,18 @@ export function ChatScreen({
                 delivered={item.delivered}
                 read={!!item.readAt}
                 timestamp={item.sentAt}
+                sendFailure={item.sendFailure}
+                onTapResend={
+                  item.from === 'me' && item.sendFailure
+                    ? () =>
+                        void retrySend({
+                          id: item.id,
+                          text: item.text,
+                          attachments: item.attachments,
+                          mentions: item.mentions,
+                        })
+                    : undefined
+                }
                 onTapPhoto={(a) => setViewerAttachment(a)}
                 onTapFile={(a) => void saveAndAnnounceFile(a)}
                 onSeeMore={() => onOpenFullMessage?.(item.text)}

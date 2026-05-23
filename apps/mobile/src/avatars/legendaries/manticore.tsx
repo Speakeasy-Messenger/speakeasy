@@ -60,8 +60,16 @@ function ManeSpike({
   );
 }
 
+// Vertical centering offset. Without it the figure sits hugging the
+// top of the 100×100 viewBox (mane top at y=4, mane bottom at y=80 —
+// 4 units of padding above vs 20 below). Shifting the whole render
+// down by 8 balances the cushion: 12 above, 12 below, face anchored
+// near the viewbox center so the portrait reads as centered in the
+// avatar tile and notification icon mask.
+const VERTICAL_OFFSET = 8;
+
 export const Manticore: AnimalRender = ({ eyeScale, mouthScale }) => (
-  <G>
+  <G transform={`translate(0 ${VERTICAL_OFFSET})`}>
     <Path
       d="M 36,40 L 8,28 L 4,42 L 14,46 L 6,52 L 18,52 L 12,60 L 24,56 L 22,64 L 38,52 Z"
       fill={OXBLOOD}
