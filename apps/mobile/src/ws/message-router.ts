@@ -158,9 +158,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
   function decodeBubble(decryptResult: Uint8Array | Error): string {
     if (decryptResult instanceof Error) {
       const sce = decryptResult as SignalClientError;
+      // Underlying `sce.reason` is captured upstream in the diag log
+      // (search "signal decrypt FAILED"); the bubble copy stays human.
       return sce.reason === 'untrusted_identity'
         ? '[identity changed — verify with peer]'
-        : `[decrypt failed: ${sce.reason ?? sce.message}]`;
+        : `[couldn’t decrypt this message]`;
     }
     return utf8FromBytes(decryptResult);
   }

@@ -1,18 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VouchflowClient, VerifyResult } from '../native/vouchflow.js';
 import { useIdentity } from '../store/identity.js';
-
-const { mockAlert } = vi.hoisted(() => ({
-  mockAlert: vi.fn(),
-}));
-
-vi.mock('react-native', async () => {
-  const actual = await vi.importActual<typeof import('react-native')>('react-native');
-  return {
-    ...actual,
-    Alert: { alert: mockAlert },
-  };
-});
+import { useVerifySheet } from '../store/verify-sheet.js';
 
 import {
   DeviceVerificationCancelledError,
@@ -53,55 +42,49 @@ function client(): VouchflowClient {
   };
 }
 
-function tapButton(label: string): void {
-  const buttons = mockAlert.mock.calls.at(-1)?.[2] as Array<{
-    text: string;
-    onPress?: () => void;
-  }>;
-  buttons.find((b) => b.text === label)?.onPress?.();
-}
-
 describe('verifyDeviceWithExplanation', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
     useIdentity.setState({
       userId: 'alice',
       deviceToken: undefined,
       deviceTokenIssuedAt: undefined,
       hydrated: true,
     });
+    useVerifySheet.setState({ pending: undefined, nonce: 0 });
   });
 
-  it('shows an explanation before calling Vouchflow verify', async () => {
+  it('opens the verify sheet before calling Vouchflow verify', async () => {
     const vouchflow = client();
     const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
 
-    expect(mockAlert).toHaveBeenCalledWith(
-      'Verify this device',
-      expect.stringContaining('passkey prompt will open only after you tap Continue'),
-      expect.any(Array),
-    );
+    // Flush microtasks so the inner async IIFE schedules its request().
+    await Promise.resolve();
+    const sheetState = useVerifySheet.getState();
+    expect(sheetState.pending?.reason).toBe('send_message');
     expect(vouchflow.verify).not.toHaveBeenCalled();
 
-    tapButton('Continue');
+    sheetState.confirm();
     await expect(pending).resolves.toMatchObject({ deviceToken: 'dvt_new' });
     expect(vouchflow.verify).toHaveBeenCalledTimes(1);
     expect(useIdentity.getState().deviceToken).toBe('dvt_new');
+    expect(useVerifySheet.getState().pending).toBeUndefined();
   });
 
-  it('does not call verify when the user cancels', async () => {
+  it('does not call verify when the user cancels the sheet', async () => {
     const vouchflow = client();
     const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
 
-    tapButton('Not now');
+    await Promise.resolve();
+    useVerifySheet.getState().cancel();
     await expect(pending).rejects.toBeInstanceOf(DeviceVerificationCancelledError);
     expect(vouchflow.verify).not.toHaveBeenCalled();
+    expect(useVerifySheet.getState().pending).toBeUndefined();
   });
 });
 
 describe('getDeviceTokenOrVerify', () => {
   beforeEach(() => {
-    vi.clearAllMocks();
+    useVerifySheet.setState({ pending: undefined, nonce: 0 });
   });
 
   it('returns the cached token without prompting', async () => {
@@ -114,7 +97,7 @@ describe('getDeviceTokenOrVerify', () => {
     const vouchflow = client();
 
     await expect(getDeviceTokenOrVerify(vouchflow, 'send_message')).resolves.toBe('dvt_cached');
-    expect(mockAlert).not.toHaveBeenCalled();
+    expect(useVerifySheet.getState().pending).toBeUndefined();
     expect(vouchflow.verify).not.toHaveBeenCalled();
   });
 });

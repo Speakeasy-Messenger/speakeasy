@@ -238,6 +238,28 @@ function insertBySentAt(messages: ChatMessage[], msg: ChatMessage): ChatMessage[
   return [...messages.slice(0, at), msg, ...messages.slice(at)];
 }
 
+function attachmentsMatch(
+  a: ChatMessage['attachments'],
+  b: ChatMessage['attachments'],
+): boolean {
+  if (!a && !b) return true;
+  if (!a || !b) return false;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i]!;
+    const y = b[i]!;
+    if (
+      x.kind !== y.kind ||
+      x.mime !== y.mime ||
+      x.name !== y.name ||
+      x.data.length !== y.data.length
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
 async function persist(byId: Record<string, ConversationState>): Promise<void> {
   try {
     await secureKv.set(STORAGE_KEY, JSON.stringify(byId));
@@ -292,6 +314,23 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       // they live in disjoint id spaces so this dedupe never drops a
       // legitimately distinct message.
       if (c.messages.some((m) => m.id === msg.id)) return s;
+      // Content-level dedupe for distinct-msgId duplicates: a sender that
+      // retries during a flaky upload (or a server replay path that
+      // assigns a fresh id) lands two identical bubbles with different
+      // ULIDs. The msgId guard above misses these; this catches them
+      // when the text + sender + attachments match within a 2s window.
+      // Scoped to inbound (`from !== 'me'`) so a user's own deliberate
+      // double-tap of an outbound is never silently dropped.
+      if (msg.from !== 'me' && msg.from !== 'system') {
+        const isDuplicate = c.messages.some(
+          (m) =>
+            m.from === msg.from &&
+            m.text === msg.text &&
+            attachmentsMatch(m.attachments, msg.attachments) &&
+            Math.abs(m.sentAt - msg.sentAt) < 2000,
+        );
+        if (isDuplicate) return s;
+      }
       let peerUserId = c.peerUserId;
       // Capture the peer's userId on first inbound message for direct
       // conversations. Skip the system pseudo-sender — call-end logs

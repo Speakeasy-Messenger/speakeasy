@@ -6,6 +6,7 @@ import {
 } from '@react-navigation/native-stack';
 import { InAppBanner } from '../components/InAppBanner.js';
 import { Toast } from '../components/Toast.js';
+import { VerifyDeviceSheet } from '../components/VerifyDeviceSheet.js';
 import type { BannerData } from '../store/banner.js';
 import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
@@ -89,6 +90,7 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
     <NavigationContainer ref={navRef} onReady={onReady}>
       <InAppBanner onTap={onBannerTap} />
       <Toast />
+      <VerifyDeviceSheet />
       <Stack.Navigator
         screenOptions={{ headerShown: false, animation: 'fade', animationDuration: 400 }}
       >

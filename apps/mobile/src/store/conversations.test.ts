@@ -7,7 +7,10 @@ beforeEach(() => useConversations.getState().reset());
 const baseMsg = (id: string): ChatMessage => ({
   id,
   from: 'silent-golden-hawk',
-  text: 'hi',
+  // Per-id text so the inbound content-dedup guard (same sender + same
+  // text + same window) doesn't collapse distinct test messages into
+  // one. Real-world inbounds always carry distinct payloads.
+  text: `hi ${id}`,
   kind: 'direct',
   sentAt: 1_000,
   stage: 'sent',
@@ -57,6 +60,61 @@ describe('useConversations', () => {
     ]);
   });
 
+  it('add dedupes inbound content duplicates (different ids, same text within 2s)', () => {
+    // The sender's client retries on a flaky upload and ends up with two
+    // distinct ULIDs for what the user typed once. Both reach the server,
+    // both get delivered. Without this guard the chat shows the same
+    // bubble twice. Reproduced from a real diag log on 2026-05-23 —
+    // bananaman2 sent "Idk i think its just his husband" and rc.124's
+    // client rendered it twice.
+    useConversations.getState().add(CONV, {
+      ...baseMsg('m1'),
+      text: 'Idk i think its just his husband',
+      sentAt: 1_000_000,
+    });
+    useConversations.getState().add(CONV, {
+      ...baseMsg('m2'),
+      text: 'Idk i think its just his husband',
+      sentAt: 1_000_001,
+    });
+    expect(useConversations.getState().byId[CONV]?.messages).toHaveLength(1);
+    expect(useConversations.getState().byId[CONV]?.messages[0]!.id).toBe('m1');
+  });
+
+  it('add does not dedupe inbound content when sentAt is outside the 2s window', () => {
+    // Two genuine identical messages from the same sender, spaced apart
+    // — they're not duplicates. Keep both.
+    useConversations.getState().add(CONV, {
+      ...baseMsg('m1'),
+      text: 'lol',
+      sentAt: 1_000_000,
+    });
+    useConversations.getState().add(CONV, {
+      ...baseMsg('m2'),
+      text: 'lol',
+      sentAt: 1_005_000,
+    });
+    expect(useConversations.getState().byId[CONV]?.messages).toHaveLength(2);
+  });
+
+  it('add does not dedupe outbound own messages (from === "me")', () => {
+    // The optimistic-echo path uses `from: "me"`, and a user retapping
+    // send on the same text deliberately is still two messages.
+    useConversations.getState().add(CONV, {
+      ...baseMsg('m1'),
+      from: 'me',
+      text: 'sending twice on purpose',
+      sentAt: 1_000_000,
+    });
+    useConversations.getState().add(CONV, {
+      ...baseMsg('m2'),
+      from: 'me',
+      text: 'sending twice on purpose',
+      sentAt: 1_000_500,
+    });
+    expect(useConversations.getState().byId[CONV]?.messages).toHaveLength(2);
+  });
+
   it('add dedupes by message id (server redelivery should not duplicate)', () => {
     // Server may redeliver a message whose ack was lost in a WS flap.
     // Without dedupe, each redelivery decrypts against an already-
@@ -67,7 +125,7 @@ describe('useConversations', () => {
     useConversations.getState().add(CONV, { ...baseMsg('m1'), text: 'another redelivery' });
     const msgs = useConversations.getState().byId[CONV]!.messages;
     expect(msgs).toHaveLength(1);
-    expect(msgs[0]!.text).toBe('hi');
+    expect(msgs[0]!.text).toBe('hi m1');
   });
 
   it('setStage updates a single message', () => {

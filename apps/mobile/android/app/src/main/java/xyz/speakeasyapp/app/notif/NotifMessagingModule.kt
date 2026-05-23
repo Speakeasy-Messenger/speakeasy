@@ -7,6 +7,8 @@ import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
 import androidx.core.app.RemoteInput
+import androidx.core.content.pm.ShortcutInfoCompat
+import androidx.core.content.pm.ShortcutManagerCompat
 import androidx.core.graphics.drawable.IconCompat
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.bridge.Promise
@@ -123,6 +125,33 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
       )
 
+      // Publish a long-lived sharing shortcut for this conversation. With
+      // a MessagingStyle + matching shortcutId, Android 11+ promotes the
+      // notification to a Conversation, which renders the peer avatar in
+      // the launcher-icon slot on the LEFT (replacing the app launcher)
+      // instead of bolting a second avatar onto the right beside it. On
+      // pre-API-30 the shortcut is benign and the `setLargeIcon` fallback
+      // below paints the avatar.
+      val shortcutId = "conv-${conversationId}"
+      val shortcut = ShortcutInfoCompat.Builder(reactContext, shortcutId)
+        .setShortLabel("@$peerHandle")
+        .setLongLabel("@$peerHandle")
+        .setIntent(
+          Intent(reactContext, MainActivity::class.java).apply {
+            action = Intent.ACTION_VIEW
+            putExtra(EXTRA_CONVERSATION_ID, conversationId)
+            putExtra(EXTRA_NOTIFY_KIND, "message")
+            putExtra(EXTRA_MSG_TYPE, msgType)
+            putExtra(EXTRA_SENDER_ID, peerHandle)
+          },
+        )
+        .setLongLived(true)
+        .setPerson(peerPerson)
+        .apply { peerIcon?.let { setIcon(it) } }
+        .setCategories(setOf("xyz.speakeasyapp.app.category.MESSAGE"))
+        .build()
+      ShortcutManagerCompat.pushDynamicShortcut(reactContext, shortcut)
+
       val builder = NotificationCompat.Builder(reactContext, channelId)
         .setSmallIcon(R.drawable.ic_notification)
         .setContentTitle(title)
@@ -130,6 +159,7 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         .setStyle(style)
         .setContentIntent(tapPendingIntent)
         .setAutoCancel(true)
+        .setShortcutId(shortcutId)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
         .apply { peerBitmap?.let { setLargeIcon(it) } }
 
