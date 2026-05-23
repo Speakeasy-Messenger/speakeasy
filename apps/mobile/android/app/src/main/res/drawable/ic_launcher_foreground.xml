@@ -6,9 +6,14 @@
   top-left, shadow toward the bottom-right) plus a thin top-edge
   highlight and a soft ambient shadow underneath. The effect is a
   premium metallic sheen in the vein of Linear's launcher icon —
-  brass that looks struck, not flat. Bar geometry mirrors
-  src/brand/CipherS.tsx (Rect-by-Rect, viewport 100×100) so the in-app
-  mark and the launcher icon read as the same shape.
+  brass that looks struck, not flat.
+
+  Geometry mirrors src/brand/CipherS.tsx's LEFT-RIGHT-LEFT cipher
+  pattern, but scaled to ~70% of the viewport so the mark sits inside
+  the adaptive-icon safe zone (72/108 dp ≈ 16-84 in this 100×100
+  viewport). The previous spread (x:5-95) read right up to the icon's
+  edges and got clipped by Samsung's squircle mask; this version
+  leaves a comfortable ring of margin all around.
 
   Vector drawable: scales to any density at install time, so we don't
   have to maintain mipmap-mdpi/…/xxxhdpi PNGs for the foreground.
@@ -23,17 +28,17 @@
 
   <!-- Bar 1: ambient shadow underneath, offset down + right 0.5 -->
   <path
-      android:pathData="M5.5,20.7 L65.5,20.7 L65.5,34.7 L5.5,34.7 Z"
+      android:pathData="M16.5,26.7 L60.5,26.7 L60.5,37.7 L16.5,37.7 Z"
       android:fillColor="#3A2A0E"
       android:fillAlpha="0.45"/>
 
   <!-- Bar 1: main, diagonal metallic gradient -->
-  <path android:pathData="M5,20 L65,20 L65,34 L5,34 Z">
+  <path android:pathData="M16,26 L60,26 L60,37 L16,37 Z">
     <aapt:attr name="android:fillColor">
       <gradient
           android:type="linear"
-          android:startX="5" android:startY="20"
-          android:endX="65" android:endY="34">
+          android:startX="16" android:startY="26"
+          android:endX="60" android:endY="37">
         <item android:offset="0.0" android:color="#FCE4A4"/>
         <item android:offset="0.20" android:color="#F2C167"/>
         <item android:offset="0.50" android:color="#E5A645"/>
@@ -45,23 +50,23 @@
 
   <!-- Bar 1: top-edge highlight -->
   <path
-      android:pathData="M5,20 L65,20 L65,21.6 L5,21.6 Z"
+      android:pathData="M16,26 L60,26 L60,27.2 L16,27.2 Z"
       android:fillColor="#FFF4D0"
       android:fillAlpha="0.55"/>
 
   <!-- Bar 2: ambient shadow underneath -->
   <path
-      android:pathData="M35.5,43.7 L95.5,43.7 L95.5,57.7 L35.5,57.7 Z"
+      android:pathData="M40.5,44.7 L84.5,44.7 L84.5,55.7 L40.5,55.7 Z"
       android:fillColor="#3A2A0E"
       android:fillAlpha="0.45"/>
 
   <!-- Bar 2: main, diagonal metallic gradient -->
-  <path android:pathData="M35,43 L95,43 L95,57 L35,57 Z">
+  <path android:pathData="M40,44 L84,44 L84,55 L40,55 Z">
     <aapt:attr name="android:fillColor">
       <gradient
           android:type="linear"
-          android:startX="35" android:startY="43"
-          android:endX="95" android:endY="57">
+          android:startX="40" android:startY="44"
+          android:endX="84" android:endY="55">
         <item android:offset="0.0" android:color="#FCE4A4"/>
         <item android:offset="0.20" android:color="#F2C167"/>
         <item android:offset="0.50" android:color="#E5A645"/>
@@ -73,23 +78,23 @@
 
   <!-- Bar 2: top-edge highlight -->
   <path
-      android:pathData="M35,43 L95,43 L95,44.6 L35,44.6 Z"
+      android:pathData="M40,44 L84,44 L84,45.2 L40,45.2 Z"
       android:fillColor="#FFF4D0"
       android:fillAlpha="0.55"/>
 
   <!-- Bar 3: ambient shadow underneath -->
   <path
-      android:pathData="M5.5,66.7 L65.5,66.7 L65.5,80.7 L5.5,80.7 Z"
+      android:pathData="M16.5,62.7 L60.5,62.7 L60.5,73.7 L16.5,73.7 Z"
       android:fillColor="#3A2A0E"
       android:fillAlpha="0.45"/>
 
   <!-- Bar 3: main, diagonal metallic gradient -->
-  <path android:pathData="M5,66 L65,66 L65,80 L5,80 Z">
+  <path android:pathData="M16,62 L60,62 L60,73 L16,73 Z">
     <aapt:attr name="android:fillColor">
       <gradient
           android:type="linear"
-          android:startX="5" android:startY="66"
-          android:endX="65" android:endY="80">
+          android:startX="16" android:startY="62"
+          android:endX="60" android:endY="73">
         <item android:offset="0.0" android:color="#FCE4A4"/>
         <item android:offset="0.20" android:color="#F2C167"/>
         <item android:offset="0.50" android:color="#E5A645"/>
@@ -101,7 +106,7 @@
 
   <!-- Bar 3: top-edge highlight -->
   <path
-      android:pathData="M5,66 L65,66 L65,67.6 L5,67.6 Z"
+      android:pathData="M16,62 L60,62 L60,63.2 L16,63.2 Z"
       android:fillColor="#FFF4D0"
       android:fillAlpha="0.55"/>
 </vector>
