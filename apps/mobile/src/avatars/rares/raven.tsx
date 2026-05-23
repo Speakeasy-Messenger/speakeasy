@@ -55,22 +55,31 @@ function useHeadBob() {
 
 export const Raven: AnimalRender = ({ eyeScale, mouthScale }) => {
   const headProps = useHeadBob();
+  // Raven silhouette is ink (the bird is *black* — the name says so),
+  // not brass. The previous version rendered head + body + beak all in
+  // BRASS, which vanished against the light-mode cream tile and read
+  // as "no avatar" in pickers. Brass survives as a sheen highlight
+  // along the body's leading edge and as the golden eye + beak — both
+  // classic raven cues and consistent with the brand's brass-on-ink
+  // palette.
   return (
     <G>
-      <Path d="M 30,60 L 70,60 L 76,90 L 24,90 Z" fill={BRASS} opacity={0.85} />
-      <Polygon points="34,72 50,68 66,72 50,76" fill={INK} opacity={0.18} />
+      <Path d="M 30,60 L 70,60 L 76,90 L 24,90 Z" fill={INK} />
+      <Path d="M 30,60 L 70,60 L 72,68 L 28,68 Z" fill={BRASS} opacity={0.22} />
+      <Polygon points="34,72 50,68 66,72 50,76" fill={BONE} opacity={0.10} />
       <AnimatedG animatedProps={headProps}>
-        <Path d="M 28,38 Q 34,18 56,20 Q 72,22 72,42 L 70,58 L 30,58 Z" fill={BRASS} />
+        <Path d="M 28,38 Q 34,18 56,20 Q 72,22 72,42 L 70,58 L 30,58 Z" fill={INK} />
+        <Path d="M 30,40 Q 34,22 50,22 Q 58,22 60,32 L 56,40 Z" fill={BRASS} opacity={0.18} />
         <Polygon points="68,38 92,40 70,46" fill={BRASS} />
-        <Polygon points="68,42 92,40 86,44" fill={INK} opacity={0.3} />
+        <Polygon points="68,42 92,40 86,44" fill={INK} opacity={0.35} />
         <RNAnimatedG originX={56} originY={36} scaleY={eyeScale}>
-          <Ellipse cx={56} cy={36} rx={2.6} ry={2.6} fill={INK} />
-          <Ellipse cx={56.5} cy={35.4} rx={0.7} ry={0.7} fill={BONE} />
+          <Ellipse cx={56} cy={36} rx={2.6} ry={2.6} fill={BRASS} />
+          <Ellipse cx={56} cy={36} rx={1.2} ry={1.2} fill={INK} />
+          <Ellipse cx={56.5} cy={35.4} rx={0.5} ry={0.5} fill={BONE} />
         </RNAnimatedG>
         <RNAnimatedG originX={79} originY={43} scaleX={mouthScale}>
           <Polygon points="76,42 82,42 80,44" fill={INK} />
         </RNAnimatedG>
-        <Polygon points="36,28 44,22 42,32" fill={INK} opacity={0.18} />
       </AnimatedG>
     </G>
   );
