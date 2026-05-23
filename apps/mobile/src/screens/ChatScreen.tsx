@@ -623,6 +623,24 @@ export function ChatScreen({
                 ? 'NOT E2E'
                 : `E2E · LEAVES IN ${ttlLabel}`
         }
+        // Tapping `LEAVES IN <TTL>` cycles the conversation's TTL —
+        // previously this lived as a chip in the composer trailing
+        // slot, which crowded out the send button. The toggle now
+        // lives where the value is already shown, and the composer
+        // gets its expected send-button slot back. Long-press flips
+        // persistence on. Disabled on speaker / feedback / blocked
+        // surfaces where TTL is fixed by the channel.
+        onSubtitlePress={
+          isBlocked || isSpeakerHandle(peerId) || isFeedbackHandle(peerId)
+            ? undefined
+            : cycleTtl
+        }
+        onSubtitleLongPress={
+          isBlocked || isSpeakerHandle(peerId) || isFeedbackHandle(peerId)
+            ? undefined
+            : () => setPersistence(conversationId, true)
+        }
+        subtitleA11yLabel={`Message lifetime: ${ttlLabel}. Tap to change.`}
         // CALLS.md §01: tapping ☎ opens the call-type sheet, not an
         // immediate call. Hidden when blocked per BLOCK.md §5.1.
         trailing={
@@ -799,19 +817,27 @@ export function ChatScreen({
                 />
               ) : null}
             </View>
+            {/* Send button on the composer trailing edge — the spot
+                users expect it to be. The TTL toggle moved to the
+                AppBar's `LEAVES IN <TTL>` sub-line. The send glyph
+                stays dimmed and disabled until there's something to
+                send, rather than appearing/disappearing on each
+                keystroke. */}
             <Pressable
-              onPress={cycleTtl}
-              onLongPress={() => setPersistence(conversationId, true)}
+              testID="chat-send"
+              onPress={hasInput ? handleSend : undefined}
+              disabled={!hasInput}
               hitSlop={6}
-              style={styles.ttlChip}
+              style={styles.iconBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Send message"
+              accessibilityState={{ disabled: !hasInput }}
             >
-              <Text style={[styles.ttlText, { color: themed.slate }]}>{ttl.toUpperCase()}</Text>
+              <SendIcon
+                size={22}
+                color={hasInput ? themed.primary : themed.slate}
+              />
             </Pressable>
-            {hasInput ? (
-              <Pressable testID="chat-send" onPress={handleSend} hitSlop={6} style={styles.iconBtn}>
-                <SendIcon size={22} color={themed.primary} />
-              </Pressable>
-            ) : null}
           </View>
         </View>
         )}
@@ -995,17 +1021,5 @@ const styles = StyleSheet.create({
     bottom: 10,
     width: 2,
     opacity: 0.45,
-  },
-  // TTL knob — meta-style label, no border, no fill. Tap cycles the
-  // option; long-press flips to persistence. Quiet by design — most
-  // sessions use the default and shouldn't be drawn to it.
-  ttlChip: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 8,
-  },
-  ttlText: {
-    fontFamily: type.meta.weight,
-    fontSize: type.meta.size,
-    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
   },
 });

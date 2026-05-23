@@ -37,8 +37,19 @@ export interface AppBarProps {
   title?: React.ReactNode;
   /** Optional meta-style sub-line under the title. */
   subtitle?: string;
-  /** When set, the title + subtitle block is pressable. */
+  /** When set, the title row is pressable (e.g. open settings). */
   onTitlePress?: () => void;
+  /**
+   * When set, the subtitle row gets its own Pressable independent of
+   * `onTitlePress` — used by ChatScreen to put a TTL toggle on the
+   * `LEAVES IN <TTL>` sub-line so the composer trailing edge can host
+   * the send button instead of a chip.
+   */
+  onSubtitlePress?: () => void;
+  /** Optional long-press handler on the subtitle row. */
+  onSubtitleLongPress?: () => void;
+  /** a11y label for the subtitle row when `onSubtitlePress` is set. */
+  subtitleA11yLabel?: string;
   /** Trailing content (call button, settings glyph, action label). */
   trailing?: React.ReactNode;
   /**
@@ -56,26 +67,57 @@ export function AppBar({
   title,
   subtitle,
   onTitlePress,
+  onSubtitlePress,
+  onSubtitleLongPress,
+  subtitleA11yLabel,
   trailing,
   titleA11yLabel,
   testID,
 }: AppBarProps): React.JSX.Element {
   const theme = useTheme();
 
-  const titleBlock = (
-    <View style={styles.titleCol}>
-      {typeof title === 'string' ? (
-        <TextSubtitle numberOfLines={1}>{title}</TextSubtitle>
-      ) : (
-        title ?? null
-      )}
-      {subtitle ? (
-        <TextMeta tone="mute" numberOfLines={1}>
-          {subtitle}
-        </TextMeta>
-      ) : null}
-    </View>
+  const titleNode =
+    typeof title === 'string' ? (
+      <TextSubtitle numberOfLines={1}>{title}</TextSubtitle>
+    ) : (
+      title ?? null
+    );
+
+  const subtitleNode = subtitle ? (
+    <TextMeta tone="mute" numberOfLines={1}>
+      {subtitle}
+    </TextMeta>
+  ) : null;
+
+  const titleRow = onTitlePress ? (
+    <Pressable
+      onPress={onTitlePress}
+      hitSlop={4}
+      accessibilityRole="button"
+      accessibilityLabel={
+        titleA11yLabel ?? (typeof title === 'string' ? title : undefined)
+      }
+    >
+      {titleNode}
+    </Pressable>
+  ) : (
+    titleNode
   );
+
+  const subtitleRow =
+    subtitleNode && (onSubtitlePress || onSubtitleLongPress) ? (
+      <Pressable
+        onPress={onSubtitlePress}
+        onLongPress={onSubtitleLongPress}
+        hitSlop={4}
+        accessibilityRole="button"
+        accessibilityLabel={subtitleA11yLabel ?? subtitle}
+      >
+        {subtitleNode}
+      </Pressable>
+    ) : (
+      subtitleNode
+    );
 
   return (
     <View
@@ -98,21 +140,10 @@ export function AppBar({
         </Pressable>
       ) : null}
       {leading ? <View>{leading}</View> : null}
-      {onTitlePress ? (
-        <Pressable
-          onPress={onTitlePress}
-          hitSlop={4}
-          style={styles.titleCol}
-          accessibilityRole="button"
-          accessibilityLabel={
-            titleA11yLabel ?? (typeof title === 'string' ? title : undefined)
-          }
-        >
-          {titleBlock}
-        </Pressable>
-      ) : (
-        titleBlock
-      )}
+      <View style={styles.titleCol}>
+        {titleRow}
+        {subtitleRow}
+      </View>
       {trailing ? <View style={styles.trailing}>{trailing}</View> : null}
     </View>
   );

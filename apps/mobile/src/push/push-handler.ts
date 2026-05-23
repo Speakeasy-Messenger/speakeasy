@@ -462,6 +462,12 @@ async function displayMessagingNotification(args: {
   const peerIcon = await cachedAvatarUri(args.peerHandle);
   const myUserId = await loadPersistedUserId();
   const selfIcon = myUserId ? await cachedAvatarUri(myUserId) : undefined;
+  diag('push-bg', 'avatar uris resolved', {
+    conversationId: args.conversationId,
+    peerHandle: args.peerHandle,
+    peerIconResolved: !!peerIcon,
+    selfIconResolved: !!selfIcon,
+  });
   const selfPerson = {
     ...SELF_PERSON,
     // If the local avatar cache is cold, prefer the app notification
@@ -501,7 +507,7 @@ async function displayMessagingNotification(args: {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
-      ...(peerIcon ? { largeIcon: peerIcon } : {}),
+      ...(peerIcon ? { largeIcon: peerIcon, circularLargeIcon: true } : {}),
       pressAction: { id: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,
@@ -543,7 +549,7 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
-      ...(largeIcon ? { largeIcon } : {}),
+      ...(largeIcon ? { largeIcon, circularLargeIcon: true } : {}),
       pressAction: { id: 'default' },
     },
   });
