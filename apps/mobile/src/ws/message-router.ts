@@ -61,6 +61,15 @@ export interface MessageRouterDeps {
    */
   markMessageRead: (msgId: string, readAt: number) => void;
   /**
+   * Implicit read-up-to. The peer just sent us a message in this
+   * conversation; everything we sent before that point has by
+   * definition been seen by them, so any outbound bubble older than
+   * `readAt` gets stamped. Closes the gap when the peer's client
+   * doesn't emit `read` WS frames (older builds, peers reading via
+   * push only).
+   */
+  markReadUpTo: (conversationId: string, readAt: number) => void;
+  /**
    * Idempotent: ensure the local `useGroups` store has metadata for
    * `groupId` (name + members). Fires when a group message arrives
    * for a groupId we've never seen — e.g., a freshly-added member
@@ -376,6 +385,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 isSelf: senderId === deps.myUserId,
                 textPreview: bubble.slice(0, 24),
               });
+              const inboundSentAt = Date.now();
               try {
                 deps.addToConversation(conversationId, {
                   id: frame.message_id,
@@ -384,12 +394,21 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   attachments,
                   mentions,
                   kind: 'direct',
-                  sentAt: Date.now(),
+                  sentAt: inboundSentAt,
                   stage: 'sent',
                 });
                 diag('router', 'addToConversation OK', { convId: conversationId });
                 if (attachments && senderId !== deps.myUserId) {
                   deps.onInboundAttachments?.(attachments);
+                }
+                // Implicit read receipts: the peer just sent us a
+                // message, so they've necessarily seen everything we
+                // sent in this conversation up to this point. Stamp
+                // our prior outbound bubbles as read. Closes the gap
+                // when the peer's client doesn't emit `read` frames
+                // and outbound bubbles get stuck on a faded ✓✓.
+                if (senderId !== deps.myUserId) {
+                  deps.markReadUpTo(conversationId, inboundSentAt);
                 }
               } catch (err) {
                 diag('router', 'addToConversation THREW', {

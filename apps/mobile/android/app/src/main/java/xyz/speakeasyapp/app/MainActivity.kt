@@ -3,12 +3,14 @@ package xyz.speakeasyapp.app
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.content.Context
+import android.content.Intent
 import android.os.Build
 import android.os.Bundle
 import com.facebook.react.ReactActivity
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
+import xyz.speakeasyapp.app.notif.NotifMessagingModule
 
 class MainActivity : ReactActivity() {
 
@@ -43,6 +45,18 @@ class MainActivity : ReactActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(null)
     createNotificationChannels()
+    // Notification tap that launched the Activity from a quit state —
+    // stash the extras for JS to consume once the bundle is up.
+    NotifMessagingModule.stashTap(intent)
+  }
+
+  override fun onNewIntent(intent: Intent) {
+    super.onNewIntent(intent)
+    setIntent(intent)
+    // Notification tap while the Activity was already running (warm
+    // resume). JS polls `consumePendingTap` on the next AppState
+    // 'active' so the tap routes the same way as a cold start.
+    NotifMessagingModule.stashTap(intent)
   }
 
   /**

@@ -25,3 +25,20 @@ import { installErrorHandler } from './src/diag/install-error-handler';
 installErrorHandler();
 
 AppRegistry.registerComponent(appName, () => App);
+
+// Headless JS task fired by the native messaging notification's
+// inline-reply BroadcastReceiver (see
+// `xyz.speakeasyapp.app.notif.NotifMessagingReplyService`). Forwards
+// to the same JS reply handler the notifee fallback uses so the
+// encrypt + WS send pipeline isn't duplicated in Kotlin.
+AppRegistry.registerHeadlessTask('SpeakeasyInlineReply', () => async (data) => {
+  const { handleInlineReplyFromData } = await import(
+    './src/push/push-handler.js'
+  );
+  await handleInlineReplyFromData({
+    conversationId: data?.conversationId,
+    senderId: data?.senderId,
+    msgType: data?.msgType,
+    replyText: data?.replyText,
+  });
+});

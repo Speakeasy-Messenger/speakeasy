@@ -47,7 +47,9 @@ import {
   loadPersistedUserId,
   type ReplySenderDeps,
 } from './reply-sender.js';
-import { cachedAvatarUri } from './avatar-cache.js';
+import { avatarCachePath, cachedAvatarUri } from './avatar-cache.js';
+import RNFS from 'react-native-fs';
+import { NotifMessaging } from '../native/notif-messaging.js';
 import { getCachedDeviceToken } from '../native/cached-device-token.js';
 import { shouldSuppressPushForMute } from './push-mute-policy.js';
 
@@ -454,48 +456,80 @@ async function displayMessagingNotification(args: {
   withReply: boolean;
 }): Promise<void> {
   await ensureChannel();
-  // Stamp each Person with its cached avatar so the notification shows
-  // the real animal portrait (a Person with no icon renders Android's
-  // generic silhouette). Peer messages carry a `person`; self messages
-  // (sent replies) have none — MessagingStyle renders those as the
-  // top-level `style.person`, which carries the local user's avatar.
-  const peerIcon = await cachedAvatarUri(args.peerHandle);
   const myUserId = await loadPersistedUserId();
-  const selfIcon = myUserId ? await cachedAvatarUri(myUserId) : undefined;
-  diag('push-bg', 'avatar uris resolved', {
-    conversationId: args.conversationId,
-    peerHandle: args.peerHandle,
-    peerIconResolved: !!peerIcon,
-    selfIconResolved: !!selfIcon,
-  });
+  // Resolve avatar file paths (not URIs) — the native module loads the
+  // bitmaps directly via BitmapFactory.decodeFile, sidestepping the
+  // five failed attempts to coax notifee/Fresco into loading a
+  // runtime-cached PNG by URI (file://, data:, content://).
+  const peerAvatarPath = await resolveAvatarPath(args.peerHandle);
+  const selfAvatarPath = myUserId ? await resolveAvatarPath(myUserId) : undefined;
+  // Pre-trim the visible stack to MAX_NOTIF_MESSAGES so the persisted
+  // copy + the native call see the same set.
+  const messages = args.messages.slice(-MAX_NOTIF_MESSAGES);
+  // Durable copy of the stack so an inline reply can rebuild the full
+  // thread on resend. Awaited (not fire-and-forget): a headless task
+  // can be torn down the moment this function resolves, and an
+  // unfinished AsyncStorage write left the next reply with an empty
+  // stack.
+  await persistNotifStack(args.conversationId, messages);
+  const latest = messages[messages.length - 1];
+
+  if (NotifMessaging.available()) {
+    try {
+      const result = await NotifMessaging.display({
+        conversationId: args.conversationId,
+        channelId: CHANNEL_ID,
+        peerHandle: args.peerHandle,
+        peerAvatarPath: peerAvatarPath ?? null,
+        selfAvatarPath: selfAvatarPath ?? null,
+        withReply: args.withReply,
+        title: '@' + args.peerHandle,
+        body: latest?.text ?? 'New message',
+        msgType: args.msgType,
+        messages: messages.map((m) => ({
+          text: m.text,
+          timestamp: m.timestamp,
+          isFromPeer: !!m.person,
+        })),
+      });
+      diag('push-bg', 'native messaging notification posted', {
+        conversationId: args.conversationId,
+        peerBitmapLoaded: result?.peerBitmapLoaded ?? false,
+        selfBitmapLoaded: result?.selfBitmapLoaded ?? false,
+      });
+      return;
+    } catch (err) {
+      diag('push-bg', 'native display failed — falling back to notifee', {
+        conversationId: args.conversationId,
+        err: String(err),
+      });
+      // fall through to the notifee path below
+    }
+  }
+
+  // notifee fallback (iOS, dev builds without the native module).
+  // Person icons are still passed as URIs here — known to fall back
+  // to the launcher icon on Android, which is why the native path
+  // above is the primary one for the messaging notification.
+  const peerIconUri = await cachedAvatarUri(args.peerHandle);
+  const selfIconUri = myUserId ? await cachedAvatarUri(myUserId) : undefined;
   const selfPerson = {
     ...SELF_PERSON,
-    // If the local avatar cache is cold, prefer the app notification
-    // resource over Android's generic silhouette.
-    icon: selfIcon ?? 'ic_notification',
+    icon: selfIconUri ?? 'ic_notification',
   };
-  const messages = args.messages.slice(-MAX_NOTIF_MESSAGES).map((m) =>
+  const styledMessages = messages.map((m) =>
     m.person
       ? {
           ...m,
           person: {
             ...m.person,
-            icon: peerIcon ?? m.person.icon ?? 'ic_notification',
+            icon: peerIconUri ?? m.person.icon ?? 'ic_notification',
           },
         }
       : m,
   );
-  // Durable copy of the stack so an inline reply can rebuild the full
-  // thread even when the notifee event detail omits `style.messages`.
-  // Awaited, not fire-and-forget: a headless display task can be torn
-  // down the moment this function resolves, and an unfinished
-  // AsyncStorage write left the next reply with an empty stack — the
-  // notification then re-posted showing only the user's own reply.
-  await persistNotifStack(args.conversationId, messages);
-  const latest = messages[messages.length - 1];
   await notifee.displayNotification({
     id: args.conversationId,
-    // Fallbacks for surfaces that don't render MessagingStyle.
     title: '@' + args.peerHandle,
     body: latest?.text ?? 'New message',
     data: {
@@ -507,12 +541,12 @@ async function displayMessagingNotification(args: {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
-      ...(peerIcon ? { largeIcon: peerIcon, circularLargeIcon: true } : {}),
+      ...(peerIconUri ? { largeIcon: peerIconUri, circularLargeIcon: true } : {}),
       pressAction: { id: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,
         person: selfPerson,
-        messages,
+        messages: styledMessages,
       },
       actions: args.withReply
         ? [
@@ -525,6 +559,20 @@ async function displayMessagingNotification(args: {
         : undefined,
     },
   });
+}
+
+/**
+ * Returns the absolute filesystem path to a userId's cached avatar
+ * PNG, or undefined when not cached yet. Used by the native messaging
+ * module which decodes the file directly into a Bitmap.
+ */
+async function resolveAvatarPath(userId: string): Promise<string | undefined> {
+  const path = avatarCachePath(userId);
+  try {
+    return (await RNFS.exists(path)) ? path : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /** Plain single-line notification — private device / sealed / call. */
@@ -646,7 +694,40 @@ async function handleInlineReply(
     typeof notifData?.sender_id === 'string' ? notifData.sender_id : undefined;
   const msgType =
     typeof notifData?.msg_type === 'string' ? notifData.msg_type : 'direct';
-  const text = (input ?? '').trim();
+  await handleInlineReplyFromData({
+    conversationId,
+    senderId: peerId,
+    msgType,
+    replyText: input,
+    notification,
+  });
+}
+
+/**
+ * Headless-friendly variant of `handleInlineReply`. The native
+ * messaging notification's RemoteInput response flows through
+ * `NotifMessagingReplyReceiver` → `NotifMessagingReplyService` → a
+ * `SpeakeasyInlineReply` HeadlessJsTask (see `index.js`), which calls
+ * this with the raw reply data — no notifee `Notification` object
+ * involved.
+ */
+export async function handleInlineReplyFromData(args: {
+  conversationId: string | undefined;
+  senderId: string | undefined;
+  msgType: string | undefined;
+  replyText: string | undefined;
+  /**
+   * Notifee notification (when the reply came through notifee's
+   * onBackgroundEvent — iOS / legacy Android fallback). The prior
+   * stack is preferred from `loadNotifStack`; this is the secondary
+   * source if nothing was persisted.
+   */
+  notification?: Notification;
+}): Promise<void> {
+  const conversationId = args.conversationId;
+  const peerId = args.senderId;
+  const msgType = args.msgType ?? 'direct';
+  const text = (args.replyText ?? '').trim();
   if (!conversationId || !peerId || !text) return;
 
   // Prior stack comes from the replied-to notification itself — the
@@ -657,7 +738,8 @@ async function handleInlineReply(
   // and re-posted a self-only banner. Fall back to the event's own
   // style for the (rare) case where nothing was persisted.
   let prior = await loadNotifStack(conversationId);
-  if (prior.length === 0) prior = messagesFromNotification(notification);
+  if (prior.length === 0)
+    prior = messagesFromNotification(args.notification);
   if (prior.length === 0) {
     diag('push-reply', 'no prior messages on replied notification — stack may be lost', {
       conversationId,
@@ -847,11 +929,23 @@ export function usePushNavigation(
 
     // Cold start: the notifee notification that launched the app from a
     // quit state, plus any tap target the background event handler
-    // persisted before this hook mounted. Runs once per process.
+    // persisted before this hook mounted. Runs once per process. Also
+    // drains the native tap slot stashed by MainActivity when a
+    // SpeakeasyNotifMessaging notification was tapped.
     async function handleStartup() {
       if (startupHandledRef.current) return;
       startupHandledRef.current = true;
       try {
+        // Native messaging notification tap (takes precedence — these
+        // are the messaging notifications shipping from rc.124+).
+        const nativeTap = await NotifMessaging.consumePendingTap();
+        if (nativeTap && !cancelled) {
+          const p = toPersistedPush(nativeTap as unknown as FcmData);
+          if (p) {
+            await route(p, 'native-tap-cold');
+            return;
+          }
+        }
         const initial = await notifee.getInitialNotification();
         const data = initial?.notification?.data as FcmData | undefined;
         if (data && !cancelled) {
@@ -894,10 +988,20 @@ export function usePushNavigation(
 
     // A tap that landed while the app was backgrounded was persisted by
     // notifee.onBackgroundEvent — drain it when the app returns active.
+    // Same for native messaging notifications, whose tap target is
+    // stashed by MainActivity.onNewIntent.
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       void drainPendingReplies();
       void (async () => {
+        const nativeTap = await NotifMessaging.consumePendingTap();
+        if (nativeTap && !cancelled) {
+          const np = toPersistedPush(nativeTap as unknown as FcmData);
+          if (np) {
+            await route(np, 'native-tap-resume');
+            return;
+          }
+        }
         const deferred = await consumeRawPush();
         if (deferred && !cancelled) await route(deferred, 'resume-tap');
       })();

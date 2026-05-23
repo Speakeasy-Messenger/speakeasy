@@ -183,6 +183,16 @@ interface ConversationsState {
    * is in flight).
    */
   setSendFailure: (conversationId: string, msgId: string, reason: string | undefined) => void;
+  /**
+   * Implicit read receipts. When the peer sends a message in a 1:1
+   * conversation, they have necessarily seen everything we sent before
+   * that point — so any of our outbound bubbles in this conversation
+   * with `sentAt <= readAt` get stamped `readAt`. Closes the gap when
+   * the peer's client doesn't emit explicit `read` WS frames (older
+   * builds, peers that read via push only) and the bubble would
+   * otherwise be stuck on a faded ✓✓ (delivered) forever.
+   */
+  markReadUpTo: (conversationId: string, readAt: number) => void;
   remove: (conversationId: string, msgId: string) => void;
   /** Drop the entire conversation entry. Used by group leave (the
    * room disappears from the user's local list) and by 1:1 delete. */
@@ -458,6 +468,24 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           return rest;
         }
         return { ...m, sendFailure: reason };
+      });
+      if (!touched) return s;
+      return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };
+    });
+    void persist(get().byId);
+  },
+
+  markReadUpTo: (conversationId, readAt) => {
+    set((s) => {
+      const c = s.byId[conversationId];
+      if (!c) return s;
+      let touched = false;
+      const messages = c.messages.map((m) => {
+        if (m.from !== 'me') return m;
+        if (m.sentAt > readAt) return m;
+        if (m.readAt) return m;
+        touched = true;
+        return { ...m, readAt, delivered: true };
       });
       if (!touched) return s;
       return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };

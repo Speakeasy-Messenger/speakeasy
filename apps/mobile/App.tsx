@@ -654,6 +654,8 @@ export default function App() {
         useConversations.getState().markDelivered(msgId),
       markMessageRead: (msgId, readAt) =>
         useConversations.getState().markMessageRead(msgId, readAt),
+      markReadUpTo: (convId, readAt) =>
+        useConversations.getState().markReadUpTo(convId, readAt),
       ensureGroupHydrated: async (groupId) => {
         // Skip if already populated with members. We re-fetch every
         // hour at most via metadataFetchedAt — for now any non-empty

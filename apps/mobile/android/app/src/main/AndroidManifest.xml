@@ -130,5 +130,23 @@
       <meta-data
         android:name="com.google.firebase.messaging.notification_delegation_enabled"
         android:value="false" />
+
+      <!-- Native messaging notification — bypasses notifee for image
+           loading because notifee's bundled Fresco pipeline silently
+           drops every URI scheme we tried for runtime-cached avatar
+           PNGs. NotifMessagingModule posts the MessagingStyle
+           notification with bitmaps loaded directly via
+           BitmapFactory.decodeFile; inline reply flows through this
+           receiver + headless service back to the JS reply handler. -->
+      <receiver
+        android:name=".notif.NotifMessagingReplyReceiver"
+        android:exported="false">
+        <intent-filter>
+          <action android:name="xyz.speakeasyapp.app.NOTIF_REPLY" />
+        </intent-filter>
+      </receiver>
+      <service
+        android:name=".notif.NotifMessagingReplyService"
+        android:exported="false" />
     </application>
 </manifest>
