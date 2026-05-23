@@ -355,20 +355,24 @@ const styles = StyleSheet.create({
     marginRight: -2,
     letterSpacing: 0.5,
   },
-  // Mode-invariant ink (= `accent.foreground` = `#14091A`) at 55% / 85%
-  // opacity. Keeps the receipt legible against the brass sent-bubble
-  // in both dark and light modes — the bubble is brand-invariant per
-  // §6.3 ("brass + ink in dark, brass + ink in light"), so the receipt
-  // stays put too.
-  // Visual contrast tuned so the sent/delivered transition is
-  // unmistakable at-a-glance. Was 55% ↔ 85% opacity (too subtle —
-  // tested as "the receipt doesn't change"). Now 35% ↔ 100% with a
-  // weight bump on delivered so ✓ → ✓✓ reads as a real state shift.
+  // Three distinct receipt states — the canonical messenger triad:
+  //   sent       → single ✓, faded ink (server has it, peer doesn't yet)
+  //   delivered  → double ✓✓, faded ink (peer device has it, unread)
+  //   read       → double ✓✓, bold ink (peer opened the chat with it
+  //                in view)
+  //
+  // Previously delivered and read shared the bold style, so the
+  // delivered → read transition was invisible — the user couldn't
+  // tell whether the peer had merely received the message or had
+  // actually opened the conversation. Delivered now keeps the faded
+  // 35% ink (mirroring the sent style) so it reads as "in transit on
+  // the peer's side". Read keeps the full-weight bold ink as the
+  // payoff state.
+  //
+  // Mode-invariant ink (`accent.foreground` = `#14091A`) holds against
+  // the brass sent-bubble in both dark and light modes per brand §6.3.
   receiptSent: { color: `${accent.foreground}59` }, // 0x59 ≈ 35%
-  receiptDelivered: { color: accent.foreground, fontWeight: '700' as const },
-  // Read uses the same ink as delivered — the prior cream glyph read
-  // as a washed-out "white" against the brass bubble. Delivered and
-  // read now share a colour; the ✓✓ vs ✓ shape still carries the state.
+  receiptDelivered: { color: `${accent.foreground}59` }, // same fade — ✓✓ shape carries the state
   receiptRead: { color: accent.foreground, fontWeight: '700' as const },
   // Trailing meta row: holds the timestamp and (on sent bubbles) the
   // read-receipt glyph. Aligned to the bubble's trailing edge, small
