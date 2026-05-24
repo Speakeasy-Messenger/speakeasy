@@ -102,4 +102,14 @@ export class InMemoryDevicesRepo implements DevicesRepo {
       }
     }
   }
+
+  async setSupportedCallKinds(args: {
+    deviceToken: string;
+    kinds: readonly string[];
+  }): Promise<void> {
+    const device = this.devices.get(args.deviceToken);
+    if (device) {
+      device.supportedCallKinds = [...args.kinds];
+    }
+  }
 }

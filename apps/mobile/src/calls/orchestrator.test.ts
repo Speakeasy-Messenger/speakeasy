@@ -288,4 +288,86 @@ describe('CallOrchestrator', () => {
     await h.caller.startOutgoing('bob');
     await expect(h.caller.startOutgoing('carol')).rejects.toThrow(/busy/);
   });
+
+  /**
+   * KNOWN_CALL_KINDS guard (Phase 5j Private Call). The plan's
+   * "Wire `call_end` reasons" + "Regression test — `kind ?? 'audio'`
+   * fix" sections turned the pre-rc.130 silent-coerce into an explicit
+   * KNOWN_CALL_KINDS check. The brand-promise hole this closes: a
+   * sender at rc.130+ ships `kind:'private'` over the wire; a peer
+   * still on rc.129 silently coerces to `'audio'` and rings the call
+   * with raw microphone audio while the sender believes their voice
+   * is masked. Codex tension #1 from /plan-eng-review surfaced this;
+   * the fix is the server-side capability fan-out filter PLUS the
+   * receiver-side guard here as defense in depth.
+   *
+   * The matrix below enforces all six cases the plan named.
+   */
+  describe('handleIncomingOffer KNOWN_CALL_KINDS guard', () => {
+    /**
+     * Build a fake call_offer ciphertext for the matrix. Mirrors
+     * MockSignalProtocolClient.encrypt: JSON → bytes → prepend 0x02
+     * SignalMessage marker → base64. Pass any payload shape including
+     * non-typed-safe ones so we can exercise the unknown-kind rejection.
+     */
+    function makeOffer(payload: unknown): string {
+      const jsonBytes = Buffer.from(JSON.stringify(payload), 'utf8');
+      const out = new Uint8Array(jsonBytes.length + 1);
+      out[0] = 0x02;
+      out.set(jsonBytes, 1);
+      return Buffer.from(out).toString('base64');
+    }
+
+    async function deliver(h: OrchHarness, payload: unknown): Promise<void> {
+      await h.callee.handleFrame({
+        type: 'call_offer',
+        from: 'alice',
+        call_id: 'matrix-call',
+        ciphertext: makeOffer(payload),
+      });
+    }
+
+    it("accepts kind:'audio' (existing behavior preserved)", async () => {
+      const h = makeOrchHarness();
+      await deliver(h, { v: 1, sdp: 'x', candidates: [], kind: 'audio' });
+      expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
+      expect(h.callee.getActive()?.kind).toBe('audio');
+    });
+
+    it("accepts kind:'video' (existing)", async () => {
+      const h = makeOrchHarness();
+      await deliver(h, { v: 1, sdp: 'x', candidates: [], kind: 'video' });
+      expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
+      expect(h.callee.getActive()?.kind).toBe('video');
+    });
+
+    it('accepts undefined kind, coerces to audio (back-compat with pre-rc.34 clients)', async () => {
+      const h = makeOrchHarness();
+      await deliver(h, { v: 1, sdp: 'x', candidates: [] });
+      expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
+      expect(h.callee.getActive()?.kind).toBe('audio');
+    });
+
+    it("accepts kind:'private' (new — Phase 5j)", async () => {
+      const h = makeOrchHarness();
+      await deliver(h, { v: 1, sdp: 'x', candidates: [], kind: 'private' });
+      expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
+      expect(h.callee.getActive()?.kind).toBe('private');
+    });
+
+    it("rejects kind:'foo' — was previously silently coerced to 'audio' (brand-promise hole)", async () => {
+      const h = makeOrchHarness();
+      await deliver(h, { v: 1, sdp: 'x', candidates: [], kind: 'foo' });
+      // Silent abort: no active call established, no call_end sent.
+      expect(h.callee.getActive()).toBeUndefined();
+      expect(h.calleeOut).toHaveLength(0);
+    });
+
+    it('rejects kind:null with the same silent-abort path', async () => {
+      const h = makeOrchHarness();
+      await deliver(h, { v: 1, sdp: 'x', candidates: [], kind: null });
+      expect(h.callee.getActive()).toBeUndefined();
+      expect(h.calleeOut).toHaveLength(0);
+    });
+  });
 });

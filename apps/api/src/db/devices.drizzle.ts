@@ -35,6 +35,7 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       notificationPrivacy:
         (r.notificationPrivacy as NotificationPrivacy | null) ?? undefined,
       lastPushError: r.lastPushError ?? undefined,
+      supportedCallKinds: r.supportedCallKinds ?? undefined,
       enrolledAt: r.enrolledAt,
       lastSeen: r.lastSeen,
     }));
@@ -170,5 +171,17 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       .update(devices)
       .set({ pushToken: null, lastPushError: args.reason })
       .where(eq(devices.pushToken, args.pushToken));
+  }
+
+  async setSupportedCallKinds(args: {
+    deviceToken: string;
+    kinds: readonly string[];
+  }): Promise<void> {
+    const db = getDb();
+    await db
+      .update(devices)
+      // Mutable copy — drizzle types reject readonly string[].
+      .set({ supportedCallKinds: [...args.kinds] })
+      .where(eq(devices.deviceToken, args.deviceToken));
   }
 }

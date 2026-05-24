@@ -197,7 +197,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     }),
     onUserMinted,
   });
-  await registerUserRoutes(app, { repo });
+  // registerUserRoutes is deferred until after `devices` + `connections`
+  // are created (line ~228), so `GET /v1/users/:id` can return the
+  // `supported_call_kinds` UNION for Private Call preflight. See
+  // `aggregateCallKinds` in routes/users.ts.
   await registerAvailabilityRoute(app, {
     repo,
     rateLimit: rateLimit({
@@ -231,6 +234,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // @speaker broadcast route can deliver through the same relay + push.
   const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
   const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
+  // Deferred from above so we can pass devices + connections for
+  // Private Call's `supported_call_kinds` UNION aggregation.
+  await registerUserRoutes(app, { repo, devices, connections });
   await registerDeviceRoutes(app, { devices });
   await registerFeedbackRoute(app);
   await registerAdminRoutes(app, { eventLog, devices, users: repo });

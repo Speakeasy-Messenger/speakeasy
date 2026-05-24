@@ -1,6 +1,8 @@
 import type { FastifyBaseLogger } from 'fastify';
 import {
   conversationIdForDirect,
+  KNOWN_CALL_KINDS,
+  type CallKind,
   type WsClientMsg,
   type WsServerMsg,
 } from '@speakeasy/shared';
@@ -104,6 +106,20 @@ export async function routeCallFrame(
     return errVal('invalid_ciphertext', 'call signaling requires ciphertext');
   }
 
+  // -- normalize call kind on offer frames ----------------------------
+  // Sender hints `kind` plaintext so the server can fan-out only to
+  // capable peer devices (Codex tension #1 from /plan-eng-review).
+  // Validate against the known set; unknown values are coerced to
+  // 'audio' (back-compat with pre-rc.130 clients that never set the
+  // field). Defense in depth: receiver also runs KNOWN_CALL_KINDS.
+  let offerKind: CallKind = 'audio';
+  if (msg.type === 'call_offer') {
+    const declared = msg.kind;
+    if (declared && KNOWN_CALL_KINDS.has(declared as CallKind)) {
+      offerKind = declared as CallKind;
+    }
+  }
+
   // -- build outbound frame -------------------------------------------
   const frameToSend: WsServerMsg =
     msg.type === 'call_end'
@@ -113,12 +129,20 @@ export async function routeCallFrame(
           call_id: msg.call_id,
           reason: msg.reason,
         }
-      : {
-          type: msg.type,
-          from: senderUserId,
-          call_id: msg.call_id,
-          ciphertext: msg.ciphertext as string,
-        };
+      : msg.type === 'call_offer'
+        ? {
+            type: 'call_offer',
+            from: senderUserId,
+            call_id: msg.call_id,
+            ciphertext: msg.ciphertext as string,
+            kind: offerKind,
+          }
+        : {
+            type: msg.type,
+            from: senderUserId,
+            call_id: msg.call_id,
+            ciphertext: msg.ciphertext as string,
+          };
 
   // -- always-push for call_offer (rc.58) -----------------------------
   // The AppState→background→close-WS pattern has a race window of a
@@ -188,7 +212,17 @@ export async function routeCallFrame(
     // through the notifier even for same-instance keeps the path
     // uniform and matches the manual `for (peer of peerDevices)`
     // semantics for multi-device fan-out.
-    deps.userNotifier.notify(msg.to, frameToSend);
+    //
+    // Private Call: pass `requireCapability` so the notifier (local +
+    // cross-instance) skips peer devices whose declared
+    // `supported_call_kinds` doesn't include 'private'. Without this,
+    // an old device on the same account rings with raw audio, breaking
+    // the brand promise. (Codex tension #1 from /plan-eng-review.)
+    const notifyOpts =
+      msg.type === 'call_offer' && offerKind === 'private'
+        ? { requireCapability: offerKind }
+        : undefined;
+    deps.userNotifier.notify(msg.to, frameToSend, notifyOpts);
 
     // Clear any stale buffered offer if the caller hung up while the
     // callee was reconnecting (rare race). Without this, the next

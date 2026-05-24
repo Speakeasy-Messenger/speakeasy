@@ -1,3 +1,4 @@
+import type { CallKind } from '@speakeasy/shared';
 import type { Connections } from './connections.js';
 
 /**
@@ -16,14 +17,25 @@ import type { Connections } from './connections.js';
  * instance, the signal is dropped and they'll re-receive it next time
  * the trigger fires (acceptable for non-critical signals like prekey
  * replenishment).
+ *
+ * Phase 5j (Private Call): `notify` accepts an optional `requireCapability`
+ * — when set, fan-out (local and cross-instance) only reaches devices
+ * whose declared `supported_call_kinds` includes the named kind. Used by
+ * `call-router` so a `kind:'private'` offer never rings the peer's old
+ * device that can't honor it. Closes Codex tension #1.
  */
+export interface NotifyOptions {
+  /** Skip devices whose capability set doesn't include this kind. */
+  requireCapability?: CallKind;
+}
+
 export interface UserNotifier {
-  notify(userId: string, frame: object): void;
+  notify(userId: string, frame: object, opts?: NotifyOptions): void;
 }
 
 /** Drops every notify call. Used in route-only tests that don't init WS. */
 export class NoopUserNotifier implements UserNotifier {
-  notify(_userId: string, _frame: object): void {
+  notify(_userId: string, _frame: object, _opts?: NotifyOptions): void {
     /* no-op */
   }
 }
@@ -32,8 +44,10 @@ export class NoopUserNotifier implements UserNotifier {
 export class LocalUserNotifier implements UserNotifier {
   constructor(private readonly connections: Connections) {}
 
-  notify(userId: string, frame: object): void {
-    const devices = this.connections.getDevices(userId);
+  notify(userId: string, frame: object, opts?: NotifyOptions): void {
+    const devices = opts?.requireCapability
+      ? this.connections.getDevicesWithCapability(userId, opts.requireCapability)
+      : this.connections.getDevices(userId);
     if (devices.length === 0) return;
     const payload = JSON.stringify(frame);
     for (const socket of devices) {

@@ -3,6 +3,7 @@ import type {
   CallEndReason,
   CallIceCandidate,
   CallIcePayload,
+  CallKind,
   CallOfferPayload,
 } from '@speakeasy/shared';
 
@@ -30,7 +31,20 @@ export type CallEndedReason =
   | 'completed'
   | 'failed';
 
+/**
+ * What WebRTC's PeerConnection negotiates. 'private' is conspicuously
+ * absent here: Private Call IS an audio peer connection from WebRTC's
+ * perspective — the voice filter modifies the local audio track BEFORE
+ * it reaches the encoder, but the negotiated media kind is still audio.
+ * Use `mediaKindForCall(CallKind)` to map a user-facing call kind down
+ * to the WebRTC concept.
+ */
 export type CallMediaKind = 'audio' | 'video';
+
+/** Map a user-facing call kind to what WebRTC negotiates. */
+export function mediaKindForCall(kind: CallKind): CallMediaKind {
+  return kind === 'video' ? 'video' : 'audio';
+}
 
 export interface ActiveCall {
   callId: string;
@@ -49,12 +63,13 @@ export interface ActiveCall {
   /** Speakerphone routing toggle (vs earpiece). */
   speakerOn: boolean;
   /**
-   * Media negotiated for this call. Audio is the historical default;
-   * video adds a camera track and renders RTCViews instead of avatars.
-   * Set at startOutgoing time on the caller, and at handleIncomingOffer
-   * time on the callee from the offer payload's `kind` field.
+   * User-facing call kind. 'audio'/'video' are the historical defaults;
+   * 'private' (Phase 5j) renders the peer's animated animal with a
+   * voice-filtered audio stream. Set at startOutgoing time on the
+   * caller, and at handleIncomingOffer time on the callee from the
+   * offer payload's `kind` field.
    */
-  kind: CallMediaKind;
+  kind: CallKind;
 }
 
 /**

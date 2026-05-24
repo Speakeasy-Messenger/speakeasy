@@ -22,6 +22,14 @@ export interface DeviceRecord {
   platform?: 'ios' | 'android';
   notificationPrivacy?: NotificationPrivacy;
   lastPushError?: string;
+  /**
+   * Call modalities this device can answer. Default `['audio','video']`
+   * for clients pre-rc.130. Set on every WS auth from the client's
+   * declared `supported_call_kinds`. Used by `GET /v1/users/:id` to
+   * persist a UNION snapshot the server can return when the user is
+   * fully offline (live UNION goes via `connections.getCapabilitiesUnion`).
+   */
+  supportedCallKinds?: string[];
   enrolledAt: Date;
   lastSeen: Date;
 }
@@ -91,4 +99,17 @@ export interface DevicesRepo {
    * next registration knows it was reaped, not user-revoked.
    */
   clearPushToken(args: { pushToken: string; reason: string }): Promise<void>;
+
+  /**
+   * Persist the device's declared `supported_call_kinds` on WS auth.
+   * Always overwrites (so a client that loses Private capability —
+   * native module removed, runtime downgrade — shrinks the persisted
+   * set on the next connect). Live capability comes from
+   * `connections.getCapabilitiesUnion(userId)`; this row is the
+   * fallback for `GET /v1/users/:id` when the user is offline.
+   */
+  setSupportedCallKinds(args: {
+    deviceToken: string;
+    kinds: readonly string[];
+  }): Promise<void>;
 }

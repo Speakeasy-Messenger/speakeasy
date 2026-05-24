@@ -1,7 +1,9 @@
 import { FastifyInstance } from 'fastify';
-import { isUserId } from '@speakeasy/shared';
+import { isUserId, KNOWN_CALL_KINDS, type CallKind } from '@speakeasy/shared';
 import { requireAuth } from '../auth/vouchflow.js';
 import type { UserRepo } from '../db/users.js';
+import type { DevicesRepo } from '../db/devices.js';
+import type { Connections } from '../ws/connections.js';
 
 interface Params {
   id: string;
@@ -79,7 +81,18 @@ interface AvatarBody {
  */
 export async function registerUserRoutes(
   app: FastifyInstance,
-  opts: { repo: UserRepo },
+  opts: {
+    repo: UserRepo;
+    /**
+     * Optional Phase 5j dependencies. When present, `GET /v1/users/:id`
+     * returns `supported_call_kinds: string[]` — the UNION of live
+     * device capabilities (in-memory connections) with a fallback to
+     * persisted DB values when the user has no live sockets. Older
+     * tests that don't init WS pass neither and the field is omitted.
+     */
+    devices?: DevicesRepo;
+    connections?: Connections;
+  },
 ): Promise<void> {
   app.get<{ Params: Params }>(
     '/v1/users/:id',
@@ -91,11 +104,13 @@ export async function registerUserRoutes(
       }
       const u = await opts.repo.findById(id);
       if (!u) return reply.code(404).send({ error: 'not_found' });
+      const supportedCallKinds = await aggregateCallKinds(id, opts);
       return reply.send({
         id: u.id,
         public_key: u.publicKey.toString('base64'),
         created_at: u.createdAt.toISOString(),
         selected_avatar_id: u.selectedAvatarId ?? null,
+        ...(supportedCallKinds && { supported_call_kinds: supportedCallKinds }),
       });
     },
   );
@@ -176,4 +191,45 @@ export async function registerUserRoutes(
       return reply.code(200).send({ ok: true });
     },
   );
+}
+
+/**
+ * Phase 5j (Private Call) — `supported_call_kinds` aggregation for
+ * `GET /v1/users/:id`. Live in-memory connections win; persisted
+ * `devices.supported_call_kinds` is the fallback when the user has no
+ * live sockets. Returns `undefined` when neither dep is available
+ * (older test setups) so the response field is simply omitted.
+ *
+ * UNION semantics: a user with two devices reporting `['audio','video']`
+ * and `['audio','video','private']` advertises `['audio','video','private']`.
+ * Server-side fan-out (call-router) still filters per-device at send
+ * time, so UNION is safe to expose to the caller as "this peer can
+ * answer Private somewhere."
+ */
+async function aggregateCallKinds(
+  userId: string,
+  opts: { devices?: DevicesRepo; connections?: Connections },
+): Promise<string[] | undefined> {
+  if (!opts.connections && !opts.devices) return undefined;
+  // Live first.
+  if (opts.connections) {
+    const live = opts.connections.getCapabilitiesUnion(userId);
+    if (live.length > 0) return live;
+  }
+  // Fall back to persisted.
+  if (opts.devices) {
+    const rows = await opts.devices.listForUser(userId);
+    const union = new Set<CallKind>();
+    for (const row of rows) {
+      for (const k of row.supportedCallKinds ?? []) {
+        if (KNOWN_CALL_KINDS.has(k as CallKind)) union.add(k as CallKind);
+      }
+    }
+    if (union.size > 0) return [...union];
+  }
+  // No data at all (user exists but never connected since 0018 migration).
+  // Return empty array so the caller can distinguish "field is unknown"
+  // from "we know they support nothing" — empty array means we have a
+  // user row but no device-level info.
+  return [];
 }
