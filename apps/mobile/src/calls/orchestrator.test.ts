@@ -14,9 +14,12 @@ import type { CallPeer, CallPeerFactory } from './types.js';
 class MockPeer implements CallPeer {
   private iceListeners = new Set<(c: CallIceCandidate) => void>();
   private connListeners = new Set<(s: 'connecting' | 'connected' | 'failed' | 'closed') => void>();
+  private animationListeners = new Set<(payload: Uint8Array) => void>();
   micMuted = false;
   speakerOn = false;
   closed = false;
+  animationChannelOpen = false;
+  sentAnimationFrames: Uint8Array[] = [];
   constructor(public readonly role: 'caller' | 'callee') {}
 
   async createOffer(): Promise<CallOfferPayload> {
@@ -50,6 +53,21 @@ class MockPeer implements CallPeer {
   emitConnState(s: 'connecting' | 'connected' | 'failed' | 'closed'): void {
     for (const c of this.connListeners) c(s);
   }
+  openAnimationDataChannel(): void {
+    this.animationChannelOpen = true;
+  }
+  onAnimationFrame(cb: (payload: Uint8Array) => void): () => void {
+    this.animationListeners.add(cb);
+    return () => this.animationListeners.delete(cb);
+  }
+  sendAnimationFrame(payload: Uint8Array): void {
+    if (!this.animationChannelOpen) return;
+    this.sentAnimationFrames.push(payload);
+  }
+  /** Simulate an inbound frame arriving from the wire. */
+  emitAnimationFrame(payload: Uint8Array): void {
+    for (const cb of this.animationListeners) cb(payload);
+  }
 }
 
 interface OrchHarness {
@@ -66,7 +84,15 @@ interface OrchHarness {
   finishedCallee: any[];
 }
 
-function makeOrchHarness(opts: { ringTimeoutMs?: number } = {}): OrchHarness {
+function makeOrchHarness(
+  opts: {
+    ringTimeoutMs?: number;
+    /** Phase 5j Private Call — wired into both orchestrators when
+     *  set, so tests of the animation-frame round-trip can see
+     *  decoded inbound frames. */
+    onPeerAnimationFrame?: (peerUserId: string, frame: any) => void;
+  } = {},
+): OrchHarness {
   const callerOut: WsClientMsg[] = [];
   const calleeOut: WsClientMsg[] = [];
   const finishedCaller: any[] = [];
@@ -97,6 +123,7 @@ function makeOrchHarness(opts: { ringTimeoutMs?: number } = {}): OrchHarness {
     ensureSessionWithPeer: (async () => {}) as any,
     onStateChange: () => {},
     onCallFinished: (e) => finishedCaller.push(e),
+    onPeerAnimationFrame: opts.onPeerAnimationFrame,
     ringTimeoutMs: opts.ringTimeoutMs,
   });
   const callee = new CallOrchestrator({
@@ -109,6 +136,7 @@ function makeOrchHarness(opts: { ringTimeoutMs?: number } = {}): OrchHarness {
     ensureSessionWithPeer: (async () => {}) as any,
     onStateChange: () => {},
     onCallFinished: (e) => finishedCallee.push(e),
+    onPeerAnimationFrame: opts.onPeerAnimationFrame,
     ringTimeoutMs: opts.ringTimeoutMs,
   });
 
@@ -290,6 +318,78 @@ describe('CallOrchestrator', () => {
   });
 
   /**
+   * Private Call wire-reason translation (Phase 5j). The sender's
+   * filter dying sends `filter_failure` on the wire — locally, that's
+   * accurate (MY filter failed). The receiver receives the same wire
+   * value but its meaning flips: "the OTHER party's filter failed."
+   * The orchestrator translates wire `filter_failure` → local
+   * `peer_filter_failure` so CallScreen's inline failure UI shows the
+   * correct copy.
+   */
+  describe('Private Call wire-reason translation', () => {
+    it('endWithFilterFailure sends filter_failure and stores filter_failure locally', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+      expect(h.caller.getActive()?.stage).toBe('connected');
+
+      // The local side's filter dies mid-call.
+      h.caller.endWithFilterFailure();
+      // Caller side: local reason is 'filter_failure'.
+      expect(h.finishedCaller[0]?.reason).toBe('filter_failure');
+      // Wire frame went to bob with reason 'filter_failure'.
+      const callEnd = h.callerOut.find((f) => f.type === 'call_end');
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe(
+        'filter_failure',
+      );
+    });
+
+    it('callee receives wire filter_failure → stores peer_filter_failure locally', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+      expect(h.callee.getActive()?.stage).toBe('connected');
+
+      // Alice's filter dies; her endWithFilterFailure ships
+      // call_end{filter_failure} to bob over the wire.
+      h.caller.endWithFilterFailure();
+      await h.pump();
+      // Bob's local POV: alice's filter failed → peer_filter_failure.
+      expect(h.finishedCallee[0]?.reason).toBe('peer_filter_failure');
+    });
+
+    it('rejects malformed wire peer_filter_failure (only sender of failed filter ships filter_failure)', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+
+      // Synthesize a malformed inbound: alice claims peer_filter_failure
+      // (which by contract she'd never send — she'd send filter_failure
+      // if her filter died). The receiver should fall back to a generic
+      // hangup so the UI doesn't get stuck on a malformed code.
+      await h.callee.handleFrame({
+        type: 'call_end',
+        from: 'alice',
+        call_id: h.callee.getActive()!.callId,
+        reason: 'peer_filter_failure',
+      });
+      expect(h.finishedCallee[0]?.reason).toBe('hangup');
+    });
+  });
+
+  /**
    * KNOWN_CALL_KINDS guard (Phase 5j Private Call). The plan's
    * "Wire `call_end` reasons" + "Regression test — `kind ?? 'audio'`
    * fix" sections turned the pre-rc.130 silent-coerce into an explicit
@@ -368,6 +468,130 @@ describe('CallOrchestrator', () => {
       await deliver(h, { v: 1, sdp: 'x', candidates: [], kind: null });
       expect(h.callee.getActive()).toBeUndefined();
       expect(h.calleeOut).toHaveLength(0);
+    });
+  });
+
+  /**
+   * Phase 5j Private Call — animation data channel. The orchestrator
+   * sits between the audio-pipeline owner (native filter shim) and
+   * the peer's avatar Render, encoding/decoding the per-frame state
+   * and propagating to the receiver-side store via the
+   * onPeerAnimationFrame deps callback.
+   */
+  describe('animation data channel', () => {
+    it('caller opens the animation channel on a private outgoing call', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob', 'private');
+      expect(h.callerPeer().animationChannelOpen).toBe(true);
+    });
+
+    it('does NOT open the animation channel for kind:audio', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob', 'audio');
+      expect(h.callerPeer().animationChannelOpen).toBe(false);
+    });
+
+    it('sendAnimationFrame round-trips through the peer to onPeerAnimationFrame', async () => {
+      const peerAnimationFrames: Array<{ peerUserId: string; frame: any }> = [];
+      const h = makeOrchHarness({
+        onPeerAnimationFrame: (peerUserId, frame) => {
+          peerAnimationFrames.push({ peerUserId, frame });
+        },
+      });
+      await h.caller.startOutgoing('bob', 'private');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+
+      // Alice ships a frame; bob's mock peer relays it as if the wire
+      // delivered it. The orchestrator decodes and forwards.
+      const seq = h.caller.sendAnimationFrame({
+        amplitude: 0.5,
+        emotionState: 'excited',
+        pitchNorm: 0.7,
+        zcrNorm: 0.3,
+      });
+      expect(seq).toBe(1);
+      expect(h.callerPeer().sentAnimationFrames).toHaveLength(1);
+      h.calleePeer().emitAnimationFrame(h.callerPeer().sentAnimationFrames[0]!);
+
+      expect(peerAnimationFrames).toHaveLength(1);
+      expect(peerAnimationFrames[0]?.peerUserId).toBe('alice');
+      expect(peerAnimationFrames[0]?.frame.emotionState).toBe('excited');
+      expect(peerAnimationFrames[0]?.frame.amplitude).toBeCloseTo(0.5, 2);
+    });
+
+    it('drops out-of-order frames (fresh-or-drop semantics)', async () => {
+      const peerAnimationFrames: any[] = [];
+      const h = makeOrchHarness({
+        onPeerAnimationFrame: (_pid, frame) => peerAnimationFrames.push(frame),
+      });
+      await h.caller.startOutgoing('bob', 'private');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+
+      h.caller.sendAnimationFrame({
+        amplitude: 0.1,
+        emotionState: 'baseline',
+        pitchNorm: 0,
+        zcrNorm: 0,
+      });
+      h.caller.sendAnimationFrame({
+        amplitude: 0.5,
+        emotionState: 'excited',
+        pitchNorm: 0.7,
+        zcrNorm: 0.5,
+      });
+      const frames = h.callerPeer().sentAnimationFrames;
+      // Deliver in order: 1, 2 — both accepted.
+      h.calleePeer().emitAnimationFrame(frames[0]!);
+      h.calleePeer().emitAnimationFrame(frames[1]!);
+      // Re-deliver seq=1 (the stale one) — dropped.
+      h.calleePeer().emitAnimationFrame(frames[0]!);
+
+      expect(peerAnimationFrames).toHaveLength(2);
+      expect(peerAnimationFrames[0]?.amplitude).toBeCloseTo(0.1, 2);
+      expect(peerAnimationFrames[1]?.amplitude).toBeCloseTo(0.5, 2);
+    });
+
+    it('sendAnimationFrame returns -1 (no-op) when there is no active call', () => {
+      const h = makeOrchHarness();
+      expect(
+        h.caller.sendAnimationFrame({
+          amplitude: 0.5,
+          emotionState: 'excited',
+          pitchNorm: 0.5,
+          zcrNorm: 0.5,
+        }),
+      ).toBe(-1);
+    });
+
+    it('cleanup resets outboundAnimationSeq so the next call starts at 1', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob', 'private');
+      await h.pump();
+      const seq1 = h.caller.sendAnimationFrame({
+        amplitude: 0.1,
+        emotionState: 'baseline',
+        pitchNorm: 0,
+        zcrNorm: 0,
+      });
+      expect(seq1).toBe(1);
+      h.caller.hangup();
+      await h.pump();
+      // Fresh dial — the same orchestrator must restart the seq
+      // counter (cleanup() resets outboundAnimationSeq).
+      await h.caller.startOutgoing('bob', 'private');
+      const seq2 = h.caller.sendAnimationFrame({
+        amplitude: 0.1,
+        emotionState: 'baseline',
+        pitchNorm: 0,
+        zcrNorm: 0,
+      });
+      expect(seq2).toBe(1);
     });
   });
 });

@@ -49,7 +49,28 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
 
   const animalId =
     peerProfile?.selectedAvatarId ?? defaultAnimalForUser(active.peerUserId);
-  const isVideo = active.kind === 'video';
+
+  // Per-kind eyebrow + sub-line. Private extends the existing grammar
+  // ('VOICE CALL · INCOMING' → 'PRIVATE CALL · INCOMING') rather than
+  // inventing a new visual treatment — locked in /plan-design-review
+  // D3 (animal stays, eyebrow does the brand work). The animal IS the
+  // identity layer in Speakeasy; swapping it for a brass mask icon
+  // would read as an anonymous spam ring (rejected option B in D3).
+  let eyebrow: string;
+  let subLine: string;
+  switch (active.kind) {
+    case 'video':
+      eyebrow = 'VIDEO CALL · INCOMING';
+      subLine = 'wants to video-call';
+      break;
+    case 'private':
+      eyebrow = 'PRIVATE CALL · INCOMING';
+      subLine = 'wants to speak privately';
+      break;
+    default:
+      eyebrow = 'VOICE CALL · INCOMING';
+      subLine = 'wants to speak';
+  }
 
   return (
     <SafeAreaView
@@ -57,8 +78,11 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
       testID="incoming-call-screen"
     >
       <View style={styles.body}>
-        <Text style={[styles.eyebrow, { color: themed.primary }]}>
-          {isVideo ? 'VIDEO CALL · INCOMING' : 'VOICE CALL · INCOMING'}
+        <Text
+          style={[styles.eyebrow, { color: themed.primary }]}
+          testID="incoming-eyebrow"
+        >
+          {eyebrow}
         </Text>
         <View
           style={[
@@ -71,8 +95,8 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
         <View style={styles.handleRow}>
           <Handle value={active.peerUserId} variant="display" color={themed.ink} />
         </View>
-        <Text style={[styles.sub, { color: themed.slate }]}>
-          {isVideo ? 'wants to video-call' : 'wants to speak'}
+        <Text style={[styles.sub, { color: themed.slate }]} testID="incoming-sub">
+          {subLine}
         </Text>
       </View>
 

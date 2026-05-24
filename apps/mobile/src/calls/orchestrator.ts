@@ -9,6 +9,12 @@ import {
   type WsClientMsg,
   type WsServerMsg,
 } from '@speakeasy/shared';
+import {
+  decodeAnimationFrame,
+  encodeAnimationFrame,
+  isFresherSeq,
+  type AnimationFrame,
+} from './animation-channel.js';
 import type { ApiClient } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { ensureSessionWithPeer as EnsureSessionFn } from '../crypto/session.js';
@@ -68,6 +74,13 @@ export interface CallOrchestratorDeps {
    * record an entry in the local call history.
    */
   onCallFinished: (entry: CallHistoryEntry) => void;
+  /**
+   * Phase 5j Private Call — fired every time an `AnimationFrame`
+   * arrives from the peer's data channel (already decoded). The UI
+   * adapter pushes into `usePeerAnimation` to drive the peer avatar
+   * Render. Optional so the test harness doesn't have to wire it.
+   */
+  onPeerAnimationFrame?: (peerUserId: string, frame: AnimationFrame) => void;
   /** Now provider — injected for tests. */
   now?: () => number;
   /** Setter so tests can inject a deterministic timeout. */
@@ -106,6 +119,11 @@ export class CallOrchestrator {
   private ringTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
   private connStateUnsub?: () => void;
+  private animationFrameUnsub?: () => void;
+  /** Latest accepted inbound animation-frame seq, for dedup + reorder rejection. */
+  private latestAnimationSeq?: number;
+  /** Monotonic counter the sender stamps on outbound animation frames. */
+  private outboundAnimationSeq = 0;
 
   /**
    * Sequential queue for inbound call frames.
@@ -173,6 +191,14 @@ export class CallOrchestrator {
       });
       diag('call', 'peer created');
       this.attachPeer(peer);
+      // Phase 5j Private Call — open the animation data channel
+      // BEFORE the offer so the SDP includes the channel's m-section.
+      // Receiver discovers the channel via WebRTC's `ondatachannel`
+      // event and subscribes through its own `onAnimationFrame`.
+      // No-op for kind:'audio' / 'video' — those don't use it.
+      if (kind === 'private') {
+        peer.openAnimationDataChannel?.();
+      }
       const peerOffer = await peer.createOffer();
       const offer: CallOfferPayload = { ...peerOffer, kind };
       diag('call', 'offer created', { sdpLen: offer.sdp.length });
@@ -254,6 +280,64 @@ export class CallOrchestrator {
     const localReason: CallEndedReason =
       wireReason === 'cancel' ? 'cancel' : 'completed';
     this.endLocally(localReason);
+  }
+
+  /**
+   * Phase 5j Private Call — encode + ship one animation frame to the
+   * peer over the data channel. Called by the audio-pipeline owner
+   * (the native filter shim once it lands; for now wired by tests +
+   * any future JS-side simulator). No-op if the peer doesn't support
+   * data channels (covers MockPeer and older builds), if the channel
+   * isn't open yet (frame is dropped — fresh-or-drop semantics), or
+   * if there's no active call. Returns the seq it assigned (mod 2^16)
+   * so the caller can correlate dropped frames if they care.
+   */
+  sendAnimationFrame(frame: Omit<AnimationFrame, 'seq'>): number {
+    if (!this.active || !this.peer?.sendAnimationFrame) return -1;
+    this.outboundAnimationSeq = (this.outboundAnimationSeq + 1) & 0xffff;
+    const encoded = encodeAnimationFrame({
+      ...frame,
+      seq: this.outboundAnimationSeq,
+    });
+    try {
+      this.peer.sendAnimationFrame(encoded);
+    } catch (err) {
+      // Channel closed mid-send (call ending) — drop the frame.
+      diag('call', 'sendAnimationFrame failed', { err: String(err) });
+    }
+    return this.outboundAnimationSeq;
+  }
+
+  /**
+   * Brand-promise failure-closed teardown for Private Call. Called by
+   * the native filter shim when initialization fails, the model load
+   * crashes, the latency soft-fail threshold trips, or any other
+   * runtime issue would leave the local mic exposed. Sends
+   * `filter_failure` on the wire (the peer's orchestrator maps this
+   * to `peer_filter_failure` locally) and tears down the call with
+   * the matching local reason so the inline failure UI on CallScreen
+   * renders the correct copy.
+   *
+   * The plan's "Mid-call fallback policy" (Constraints section): no
+   * silent fall-back to plain audio. Calling `endLocally('hangup')`
+   * here would leak the user-believes-masked / actually-isn't gap
+   * the whole feature was designed to prevent.
+   */
+  endWithFilterFailure(): void {
+    if (!this.active) return;
+    try {
+      this.deps.send({
+        type: 'call_end',
+        to: this.active.peerUserId,
+        call_id: this.active.callId,
+        reason: 'filter_failure',
+      });
+    } catch (err) {
+      diag('call', 'filter_failure send failed (continuing local teardown)', {
+        err: String(err),
+      });
+    }
+    this.endLocally('filter_failure');
   }
 
   setMicMuted(muted: boolean): void {
@@ -514,16 +598,36 @@ export class CallOrchestrator {
     if (!this.active || this.active.callId !== callId || this.active.peerUserId !== fromUserId) {
       return;
     }
-    const local: CallEndedReason =
-      reason === 'cancel'
-        ? 'no_answer'
-        : reason === 'decline'
-          ? 'decline'
-          : reason === 'busy'
-            ? 'busy'
-            : this.active.stage === 'connected'
-              ? 'completed'
-              : 'hangup';
+    // Wire reason is the SENDER's POV. `filter_failure` over the wire
+    // means "the OTHER party's filter died" from my perspective — the
+    // local stored reason becomes `peer_filter_failure` so the inline
+    // failure UI shows the right copy ("ended due to a technical issue
+    // on the other end") instead of the local-failed copy. Wire
+    // `peer_filter_failure` should never arrive from a peer (they'd
+    // only ever observe their own filter dying as `filter_failure`),
+    // but if it does, treat it as a malformed-frame no-op.
+    let local: CallEndedReason;
+    switch (reason) {
+      case 'cancel':
+        local = 'no_answer';
+        break;
+      case 'decline':
+        local = 'decline';
+        break;
+      case 'busy':
+        local = 'busy';
+        break;
+      case 'filter_failure':
+        local = 'peer_filter_failure';
+        break;
+      case 'peer_filter_failure':
+        // Malformed: a peer shouldn't claim this. Fall through to
+        // generic hangup so the UI doesn't get stuck.
+        local = 'hangup';
+        break;
+      default:
+        local = this.active.stage === 'connected' ? 'completed' : 'hangup';
+    }
     this.endLocally(local);
   }
 
@@ -571,6 +675,20 @@ export class CallOrchestrator {
           this.active.stage === 'connected' ? 'completed' : 'hangup';
         this.endLocally(local);
       }
+    });
+    // Phase 5j Private Call — subscribe to inbound animation frames.
+    // Hooked on every peer (not just kind:'private') so the callee
+    // sees frames as soon as the caller opens the channel; voice and
+    // video calls simply never receive any. Filter at decode time
+    // (decodeAnimationFrame returns undefined for malformed/wrong-
+    // version frames, which a non-Private peer would never send).
+    this.animationFrameUnsub = peer.onAnimationFrame?.((payload) => {
+      const frame = decodeAnimationFrame(payload);
+      if (!frame) return;
+      if (!isFresherSeq(this.latestAnimationSeq, frame.seq)) return;
+      this.latestAnimationSeq = frame.seq;
+      if (!this.active) return;
+      this.deps.onPeerAnimationFrame?.(this.active.peerUserId, frame);
     });
   }
 
@@ -726,8 +844,12 @@ export class CallOrchestrator {
     this.clearRingTimeout();
     this.localIceUnsub?.();
     this.connStateUnsub?.();
+    this.animationFrameUnsub?.();
     this.localIceUnsub = undefined;
     this.connStateUnsub = undefined;
+    this.animationFrameUnsub = undefined;
+    this.latestAnimationSeq = undefined;
+    this.outboundAnimationSeq = 0;
     this.peer?.close();
     this.peer = undefined;
   }

@@ -14,11 +14,13 @@ import type {
   CallOfferPayload,
 } from '@speakeasy/shared';
 import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './types.js';
+import { ANIMATION_CHANNEL_LABEL } from './animation-channel.js';
 import {
   ensureCameraPermission,
   ensureMicPermission,
 } from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
+import { utf8ToBytes } from '../utils/bytes.js';
 
 /**
  * `react-native-webrtc`-backed `CallPeer` implementation. Audio-only;
@@ -52,6 +54,22 @@ class WebRtcCallPeer implements CallPeer {
   // every modern WebRTC stack populates `audioLevel` on getStats output.
   private audioLevelCb?: (levels: { local: number; remote: number }) => void;
   private audioLevelTimer?: ReturnType<typeof setInterval>;
+  /**
+   * Phase 5j Private Call — animation data channel. The caller
+   * creates this in `openAnimationDataChannel()` BEFORE createOffer
+   * so the SDP includes the channel's m-section; the callee discovers
+   * it via the `datachannel` event on its peer connection. Both
+   * sides converge on the canonical label so the channel pairs up
+   * regardless of negotiation order.
+   *
+   * Holds the `RTCDataChannel` once it's open. Undefined for non-
+   * Private calls (channel never opened) or before negotiation
+   * completes. `sendAnimationFrame` no-ops in either case — the
+   * dropped frame just means the receiver sees one extra mouth-idle
+   * tick (~33 ms), which is invisible.
+   */
+  private animationChannel?: any;
+  private animationFrameCb?: (payload: Uint8Array) => void;
 
   constructor(iceServers: IceServer[], private readonly mediaKind: CallMediaKind = 'audio') {
     this.pc = new RTCPeerConnection({
@@ -87,6 +105,16 @@ class WebRtcCallPeer implements CallPeer {
         sdpMid: ev.candidate.sdpMid ?? null,
         sdpMLineIndex: ev.candidate.sdpMLineIndex ?? null,
       });
+    });
+    // Phase 5j — receiver side picks up the caller's animation data
+    // channel here. The `datachannel` event fires once per channel
+    // the remote opens; we accept ours by label and ignore anything
+    // else (no other RTCDataChannels exist in Speakeasy today).
+    pcAny.addEventListener('datachannel', (ev: any) => {
+      const ch = ev?.channel;
+      if (!ch || ch.label !== ANIMATION_CHANNEL_LABEL) return;
+      this.bindAnimationChannel(ch);
+      diag('webrtc', 'animation data channel accepted (callee side)');
     });
     pcAny.addEventListener('connectionstatechange', () => {
       const s = this.pc.connectionState;
@@ -366,6 +394,15 @@ class WebRtcCallPeer implements CallPeer {
       this.audioLevelTimer = undefined;
     }
     this.audioLevelCb = undefined;
+    if (this.animationChannel) {
+      try {
+        this.animationChannel.close();
+      } catch {
+        /* channel may already be closed by the pc close below */
+      }
+      this.animationChannel = undefined;
+    }
+    this.animationFrameCb = undefined;
     try {
       if (this.localStream) {
         for (const t of this.localStream.getTracks()) {
@@ -380,6 +417,83 @@ class WebRtcCallPeer implements CallPeer {
       InCallManager.stop({});
       this.startedManager = false;
     }
+  }
+
+  // ---------- Private Call animation data channel ----------
+
+  openAnimationDataChannel(): void {
+    if (this.animationChannel) return;
+    // Locked settings: unreliable + unordered (fresh-or-drop). One
+    // dropped frame = brief mouth idle on the receiver; an ordered
+    // channel would block for 200+ ms recovering a frame the avatar
+    // has already moved past.
+    const ch = (this.pc as any).createDataChannel(ANIMATION_CHANNEL_LABEL, {
+      ordered: false,
+      maxRetransmits: 0,
+    });
+    this.bindAnimationChannel(ch);
+    diag('webrtc', 'animation data channel opened (caller side)');
+  }
+
+  onAnimationFrame(cb: (payload: Uint8Array) => void): () => void {
+    this.animationFrameCb = cb;
+    return () => {
+      if (this.animationFrameCb === cb) this.animationFrameCb = undefined;
+    };
+  }
+
+  sendAnimationFrame(payload: Uint8Array): void {
+    const ch = this.animationChannel;
+    if (!ch || ch.readyState !== 'open') return;
+    try {
+      ch.send(payload);
+    } catch {
+      // The native side may throw transiently while the channel
+      // tears down. Fresh-or-drop — let the next frame retry.
+    }
+  }
+
+  private bindAnimationChannel(ch: any): void {
+    this.animationChannel = ch;
+    ch.addEventListener?.('message', (ev: any) => {
+      const data = ev?.data;
+      if (!data) return;
+      // The RN-WebRTC datachannel `message` event carries `data` as
+      // either a string or an ArrayBuffer depending on what the
+      // sender shipped. Speakeasy always ships binary; normalize
+      // string inputs to Uint8Array via UTF-8 bytes just so a future
+      // wire-format experiment doesn't NPE here.
+      let bytes: Uint8Array;
+      if (typeof data === 'string') {
+        // Hermes ships without a global TextEncoder despite RN docs
+        // claiming otherwise (the no-hermes-banned-globals integration
+        // test catches this). Use the project's utf8ToBytes helper.
+        bytes = utf8ToBytes(data);
+      } else if (data instanceof Uint8Array) {
+        bytes = data;
+      } else if (data instanceof ArrayBuffer) {
+        bytes = new Uint8Array(data);
+      } else if (ArrayBuffer.isView(data)) {
+        bytes = new Uint8Array(
+          (data as ArrayBufferView).buffer,
+          (data as ArrayBufferView).byteOffset,
+          (data as ArrayBufferView).byteLength,
+        );
+      } else {
+        return;
+      }
+      this.animationFrameCb?.(bytes);
+    });
+    // The channel might not be `open` immediately — log when it
+    // transitions so a "first 100 ms of mouth idle" report has data.
+    ch.addEventListener?.('open', () => {
+      diag('webrtc', 'animation data channel open', {
+        label: ch.label,
+      });
+    });
+    ch.addEventListener?.('close', () => {
+      diag('webrtc', 'animation data channel closed');
+    });
   }
 
   private async ensureLocalStream(): Promise<void> {
