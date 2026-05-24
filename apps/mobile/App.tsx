@@ -31,6 +31,10 @@ import {
 import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
 import { consumeStoreResetFlag } from './src/native/db-state.js';
+import {
+  disposeFilter,
+  wrapTrackWithFilter,
+} from './src/native/voice-filter.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js'; // vouchflow kept — used by post-enrollment refresh effect
@@ -630,6 +634,16 @@ export default function App() {
         },
         getAllowIncomingCalls: () =>
           useSettings.getState().allowIncomingCalls,
+        // Phase 5j Private Call — wire the JS shim over the native
+        // voice-filter module. wrap installs the DSP into the
+        // process-wide holder; dispose clears it on call teardown.
+        // The shim itself does the failure-closed gating
+        // (isPrivateCallAvailable + FilterError taxonomy); the
+        // orchestrator just decides when to call.
+        voiceFilter: {
+          wrap: (callId) => wrapTrackWithFilter(callId),
+          dispose: () => disposeFilter(),
+        },
       });
       setCallOrchestrator(callOrch);
     } catch (err) {

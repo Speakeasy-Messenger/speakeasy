@@ -34,6 +34,7 @@ import type {
   IceServer,
 } from './types.js';
 import { mediaKindForCall } from './types.js';
+import { FilterError } from '../native/voice-filter.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
@@ -81,6 +82,25 @@ export interface CallOrchestratorDeps {
    * Render. Optional so the test harness doesn't have to wire it.
    */
   onPeerAnimationFrame?: (peerUserId: string, frame: AnimationFrame) => void;
+  /**
+   * Phase 5j Private Call — voice filter install/dispose. The JS
+   * shim at `apps/mobile/src/native/voice-filter.ts` is the
+   * production implementation; tests inject a no-op stub so the
+   * data-channel suite doesn't need the native module.
+   *
+   * `wrap(callId)` resolves when the DSP is installed and the next
+   * captured frame will be filtered. Rejects with `FilterError` on
+   * any failure (no native module, init error, immediate latency
+   * trip) — the orchestrator catches this and ends the call via
+   * `endWithFilterFailure` so the brand promise's failure-closed
+   * posture holds.
+   *
+   * `dispose()` is best-effort; the orchestrator doesn't await it.
+   */
+  voiceFilter?: {
+    wrap: (callId: string) => Promise<unknown>;
+    dispose: () => Promise<void>;
+  };
   /** Now provider — injected for tests. */
   now?: () => number;
   /** Setter so tests can inject a deterministic timeout. */
@@ -198,6 +218,14 @@ export class CallOrchestrator {
       // No-op for kind:'audio' / 'video' — those don't use it.
       if (kind === 'private') {
         peer.openAnimationDataChannel?.();
+        // Install the voice filter BEFORE createOffer triggers the
+        // peer's ensureLocalStream → getUserMedia → addTrack chain.
+        // The DSP runs inside the native audio device path (forked
+        // WebRtcAudioRecord on Android, SpeakeasyAudioDevice on iOS)
+        // and starts filtering as soon as the next capture frame
+        // arrives. wrapTrack returns the same track id back — the
+        // filter wraps SAMPLES, not the track handle.
+        await this.installFilterOrEndCall(callId);
       }
       const peerOffer = await peer.createOffer();
       const offer: CallOfferPayload = { ...peerOffer, kind };
@@ -224,6 +252,18 @@ export class CallOrchestrator {
     }
     if (!this.peer) throw new Error('no peer attached');
     try {
+      // Phase 5j Private Call — install the voice filter BEFORE
+      // createAnswer triggers ensureLocalStream → getUserMedia →
+      // addTrack on the callee side. Symmetric with startOutgoing on
+      // the caller side; both endpoints filter their own mic.
+      if (this.active.kind === 'private') {
+        await this.installFilterOrEndCall(this.active.callId);
+        if (!this.active) {
+          // installFilterOrEndCall ended the call — bail before
+          // createAnswer, the peer is already torn down.
+          throw new Error('filter_failure during accept');
+        }
+      }
       const answer = await this.peer.createAnswer();
       await this.sendEncrypted(
         this.active.peerUserId,
@@ -338,6 +378,49 @@ export class CallOrchestrator {
       });
     }
     this.endLocally('filter_failure');
+  }
+
+  /**
+   * Install the voice filter via `wrapTrackWithFilter` (the JS shim
+   * over the Android/iOS native module). On `FilterError`, call
+   * `endWithFilterFailure` to tear the call down and surface
+   * `filter_failure` on the wire so the peer renders the right
+   * inline message. Used by `startOutgoing` (kind:'private') and
+   * `accept` (this.active.kind:'private').
+   *
+   * The track-id argument is opaque to the filter: both native
+   * impls install the DSP into a process-wide holder and return
+   * the same id back (the filter wraps SAMPLES, not the track).
+   * We pass the call id as a label so diag logs can correlate.
+   */
+  private async installFilterOrEndCall(callId: string): Promise<void> {
+    // `voiceFilter` is optional on deps so tests of the data-channel
+    // / state-machine paths don't have to wire it. When absent we
+    // treat the install as a no-op success — the brand-promise
+    // failure-closed gate happens at services.ts wiring time
+    // (production deps always include the real wrap).
+    const filter = this.deps.voiceFilter;
+    if (!filter) {
+      diag('call', 'voice filter dep absent — skipping install', { callId });
+      return;
+    }
+    try {
+      await filter.wrap(callId);
+      diag('call', 'voice filter installed', { callId });
+    } catch (err) {
+      if (err instanceof FilterError) {
+        diag('call', 'voice filter install FAILED', {
+          callId,
+          code: err.code,
+        });
+      } else {
+        diag('call', 'voice filter install threw non-FilterError', {
+          callId,
+          err: String(err),
+        });
+      }
+      this.endWithFilterFailure();
+    }
   }
 
   setMicMuted(muted: boolean): void {
@@ -852,6 +935,12 @@ export class CallOrchestrator {
     this.outboundAnimationSeq = 0;
     this.peer?.close();
     this.peer = undefined;
+    // Phase 5j Private Call — clear the process-wide filter holder
+    // so the next captured frame after teardown is unfiltered (and
+    // the next call doesn't accidentally inherit a stale filter
+    // from a previous Private Call). Best-effort: dispose swallows
+    // its own errors; we don't gate cleanup on it.
+    void this.deps.voiceFilter?.dispose();
   }
 
   private armRingTimeout(): void {
