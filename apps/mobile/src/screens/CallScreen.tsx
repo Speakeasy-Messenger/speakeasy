@@ -17,6 +17,7 @@ import { useSettings } from '../store/settings.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, motion, type as typeScale } from '../theme/tokens.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
+import { useReducedMotion } from '../a11y/useReducedMotion.js';
 
 interface Props {
   orchestrator: CallOrchestrator;
@@ -463,7 +464,17 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
  */
 function BrandPulse(): React.ReactElement {
   const opacity = useRef(new Animated.Value(0.6)).current;
+  // Phase 5j Private Call — soft-honor reduce-motion (locked
+  // /plan-design-review D12): static brass mark, no pulse.
+  // Mouth amplitude + emotion-state changes still apply elsewhere;
+  // BrandPulse is decorative ambient motion that triggers
+  // vestibular issues for some users.
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
+    if (reducedMotion) {
+      opacity.setValue(1);
+      return undefined;
+    }
     const loop = Animated.loop(
       Animated.sequence([
         Animated.timing(opacity, {
@@ -482,7 +493,7 @@ function BrandPulse(): React.ReactElement {
     );
     loop.start();
     return () => loop.stop();
-  }, [opacity]);
+  }, [opacity, reducedMotion]);
   return (
     <Animated.View
       style={{ opacity }}
@@ -501,12 +512,17 @@ function BrandPulse(): React.ReactElement {
  * decorative — the call state's actual live data lives in the eyebrow
  * label one row down.
  */
-function RingingRings({ primary }: { primary: string }): React.ReactElement {
+function RingingRings({ primary }: { primary: string }): React.ReactElement | null {
   const ring1 = useRef(new Animated.Value(0)).current;
   const ring2 = useRef(new Animated.Value(0)).current;
   const ring3 = useRef(new Animated.Value(0)).current;
+  // Pure decorative sweeping motion — soft-honor reduce-motion by
+  // rendering nothing (locked /plan-design-review D12). The eyebrow
+  // + state caption still tell the user the call is in flight.
+  const reducedMotion = useReducedMotion();
 
   useEffect(() => {
+    if (reducedMotion) return undefined;
     const period = 1600;
     const stagger = period / 3;
     function animate(v: Animated.Value, delay: number) {
@@ -533,7 +549,9 @@ function RingingRings({ primary }: { primary: string }): React.ReactElement {
       l2.stop();
       l3.stop();
     };
-  }, [ring1, ring2, ring3]);
+  }, [ring1, ring2, ring3, reducedMotion]);
+
+  if (reducedMotion) return null;
 
   function ringStyle(v: Animated.Value) {
     return {
@@ -573,10 +591,16 @@ function SpeechRing({
 }: {
   amplitude: Animated.Value;
   primary: string;
-}): React.ReactElement {
+}): React.ReactElement | null {
   const scale = useRef(new Animated.Value(0.95)).current;
   const opacity = useRef(new Animated.Value(0)).current;
+  // Soft-honor reduce-motion: skip the speech ring entirely. The
+  // mouth amplitude on the avatar itself continues to drive from
+  // the same `amplitude` value, which is the LOAD-bearing visual
+  // ("avatar is speaking"); the ring is decorative atmosphere.
+  const reducedMotion = useReducedMotion();
   useEffect(() => {
+    if (reducedMotion) return undefined;
     let running = false;
     const id = amplitude.addListener(({ value }) => {
       if (value > 0.05 && !running) {
@@ -602,7 +626,8 @@ function SpeechRing({
       }
     });
     return () => amplitude.removeListener(id);
-  }, [amplitude, scale, opacity]);
+  }, [amplitude, scale, opacity, reducedMotion]);
+  if (reducedMotion) return null;
   return (
     <Animated.View
       pointerEvents="none"
