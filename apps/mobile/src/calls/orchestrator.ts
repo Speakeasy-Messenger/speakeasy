@@ -9,6 +9,12 @@ import {
   type WsClientMsg,
   type WsServerMsg,
 } from '@speakeasy/shared';
+import {
+  decodeAnimationFrame,
+  encodeAnimationFrame,
+  isFresherSeq,
+  type AnimationFrame,
+} from './animation-channel.js';
 import type { ApiClient } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { ensureSessionWithPeer as EnsureSessionFn } from '../crypto/session.js';
@@ -68,6 +74,13 @@ export interface CallOrchestratorDeps {
    * record an entry in the local call history.
    */
   onCallFinished: (entry: CallHistoryEntry) => void;
+  /**
+   * Phase 5j Private Call — fired every time an `AnimationFrame`
+   * arrives from the peer's data channel (already decoded). The UI
+   * adapter pushes into `usePeerAnimation` to drive the peer avatar
+   * Render. Optional so the test harness doesn't have to wire it.
+   */
+  onPeerAnimationFrame?: (peerUserId: string, frame: AnimationFrame) => void;
   /** Now provider — injected for tests. */
   now?: () => number;
   /** Setter so tests can inject a deterministic timeout. */
@@ -106,6 +119,11 @@ export class CallOrchestrator {
   private ringTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
   private connStateUnsub?: () => void;
+  private animationFrameUnsub?: () => void;
+  /** Latest accepted inbound animation-frame seq, for dedup + reorder rejection. */
+  private latestAnimationSeq?: number;
+  /** Monotonic counter the sender stamps on outbound animation frames. */
+  private outboundAnimationSeq = 0;
 
   /**
    * Sequential queue for inbound call frames.
@@ -173,6 +191,14 @@ export class CallOrchestrator {
       });
       diag('call', 'peer created');
       this.attachPeer(peer);
+      // Phase 5j Private Call — open the animation data channel
+      // BEFORE the offer so the SDP includes the channel's m-section.
+      // Receiver discovers the channel via WebRTC's `ondatachannel`
+      // event and subscribes through its own `onAnimationFrame`.
+      // No-op for kind:'audio' / 'video' — those don't use it.
+      if (kind === 'private') {
+        peer.openAnimationDataChannel?.();
+      }
       const peerOffer = await peer.createOffer();
       const offer: CallOfferPayload = { ...peerOffer, kind };
       diag('call', 'offer created', { sdpLen: offer.sdp.length });
@@ -254,6 +280,32 @@ export class CallOrchestrator {
     const localReason: CallEndedReason =
       wireReason === 'cancel' ? 'cancel' : 'completed';
     this.endLocally(localReason);
+  }
+
+  /**
+   * Phase 5j Private Call — encode + ship one animation frame to the
+   * peer over the data channel. Called by the audio-pipeline owner
+   * (the native filter shim once it lands; for now wired by tests +
+   * any future JS-side simulator). No-op if the peer doesn't support
+   * data channels (covers MockPeer and older builds), if the channel
+   * isn't open yet (frame is dropped — fresh-or-drop semantics), or
+   * if there's no active call. Returns the seq it assigned (mod 2^16)
+   * so the caller can correlate dropped frames if they care.
+   */
+  sendAnimationFrame(frame: Omit<AnimationFrame, 'seq'>): number {
+    if (!this.active || !this.peer?.sendAnimationFrame) return -1;
+    this.outboundAnimationSeq = (this.outboundAnimationSeq + 1) & 0xffff;
+    const encoded = encodeAnimationFrame({
+      ...frame,
+      seq: this.outboundAnimationSeq,
+    });
+    try {
+      this.peer.sendAnimationFrame(encoded);
+    } catch (err) {
+      // Channel closed mid-send (call ending) — drop the frame.
+      diag('call', 'sendAnimationFrame failed', { err: String(err) });
+    }
+    return this.outboundAnimationSeq;
   }
 
   /**
@@ -624,6 +676,20 @@ export class CallOrchestrator {
         this.endLocally(local);
       }
     });
+    // Phase 5j Private Call — subscribe to inbound animation frames.
+    // Hooked on every peer (not just kind:'private') so the callee
+    // sees frames as soon as the caller opens the channel; voice and
+    // video calls simply never receive any. Filter at decode time
+    // (decodeAnimationFrame returns undefined for malformed/wrong-
+    // version frames, which a non-Private peer would never send).
+    this.animationFrameUnsub = peer.onAnimationFrame?.((payload) => {
+      const frame = decodeAnimationFrame(payload);
+      if (!frame) return;
+      if (!isFresherSeq(this.latestAnimationSeq, frame.seq)) return;
+      this.latestAnimationSeq = frame.seq;
+      if (!this.active) return;
+      this.deps.onPeerAnimationFrame?.(this.active.peerUserId, frame);
+    });
   }
 
   private async sendEncrypted(
@@ -778,8 +844,12 @@ export class CallOrchestrator {
     this.clearRingTimeout();
     this.localIceUnsub?.();
     this.connStateUnsub?.();
+    this.animationFrameUnsub?.();
     this.localIceUnsub = undefined;
     this.connStateUnsub = undefined;
+    this.animationFrameUnsub = undefined;
+    this.latestAnimationSeq = undefined;
+    this.outboundAnimationSeq = 0;
     this.peer?.close();
     this.peer = undefined;
   }
