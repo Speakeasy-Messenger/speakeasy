@@ -34,6 +34,8 @@
 		A6228E42B6AF2AF39222A8C3 /* VouchflowModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 889C6AF3A8C90260ABFB30B7 /* VouchflowModule.m */; };
 		B5532321519E60E237FE61B9 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1882DB5A9CE9B8416D49950F /* Schema.swift */; };
 		D5A9FAAAB09116C6D298D776 /* SpeakeasySignalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BBF1CABFBA936E75A390758 /* SpeakeasySignalStore.swift */; };
+		95E4F09E9D584D3D8DE4E294 /* VoiceFilterModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */; };
+		F23DF6AFEDFDD9E5F81B9171 /* VoiceFilterModule.m in Sources */ = {isa = PBXBuildFile; fileRef = D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -84,6 +86,8 @@
 		D8FD18E4BC464D3EE592EE50 /* GroupMessagingModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupMessagingModule.swift; sourceTree = "<group>"; };
 		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
 		F83BF22B04FF8D13918A835F /* ChannelKeyModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = ChannelKeyModule.m; sourceTree = "<group>"; };
+		2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterModule.swift; sourceTree = "<group>"; };
+		D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = VoiceFilterModule.m; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -258,10 +262,21 @@
 				CEEEC8420421A5A610255760 /* Speakeasy-Bridging-Header.h */,
 				2B2AE14B9390CF9148FE2AD6 /* Signal */,
 				9A650483CF3D3208E701590E /* Version */,
+				5F97DB8AD427DF475B359896 /* VoiceFilter */,
 			);
 			name = SpeakeasyBridges;
 			path = SpeakeasyBridges;
 			sourceTree = SOURCE_ROOT;
+		};
+		5F97DB8AD427DF475B359896 /* VoiceFilter */ = {
+			isa = PBXGroup;
+			children = (
+				2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */,
+				D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */,
+			);
+			name = VoiceFilter;
+			path = VoiceFilter;
+			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
 
@@ -548,6 +563,8 @@
 				2670BA9F4C8A7FDD8EA4CC5D /* SqlCipherSignalProtocolStore.swift in Sources */,
 				8ECA24D7D6832AEC8E75E57F /* VersionModule.swift in Sources */,
 				8AA3B14638A0994F86541699 /* VersionModule.m in Sources */,
+				95E4F09E9D584D3D8DE4E294 /* VoiceFilterModule.swift in Sources */,
+				F23DF6AFEDFDD9E5F81B9171 /* VoiceFilterModule.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
