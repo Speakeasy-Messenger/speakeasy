@@ -428,4 +428,12 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Phase 5j Private Call (PR-B1): JUnit for the on-device voice-filter
+    // DSP unit tests. Kotlin-only, runs on the JVM (no instrumented test).
+    // Pinned to 4.13.2 because the only consumer is the DSP test suite —
+    // upgrading to JUnit 5 would mean also wiring an Android Studio
+    // plugin and adding the platform launcher; not worth it for one
+    // module.
+    testImplementation("junit:junit:4.13.2")
 }
