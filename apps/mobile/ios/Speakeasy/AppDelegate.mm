@@ -1,6 +1,13 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+// Phase 5j: must come BEFORE Speakeasy-Swift.h — the generated
+// bridging header declares
+//   @interface SpeakeasyAudioDevice (SWIFT_EXTENSION(Speakeasy))
+//   <RTCAudioDevice>
+// (the RTCAudioDevice conformance lives in a Swift extension on the
+// class); ObjC needs RTCAudioDevice in scope to compile that line.
+#import <WebRTC/WebRTC.h>
 // Auto-generated header exposing the Speakeasy app target's Swift @objc
 // declarations to ObjC. The "Speakeasy-Swift.h" name is derived from the
 // product module name (PRODUCT_NAME).
