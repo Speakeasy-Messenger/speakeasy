@@ -13,8 +13,13 @@
 //
 
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>
 
-@interface RCT_EXTERN_REMAP_MODULE(SpeakeasyVoiceFilter, VoiceFilterModule, NSObject)
+// Phase 5j PR-G — VoiceFilterModule extends RCTEventEmitter (not
+// NSObject) so it can emit `SpeakeasyVoiceFilterFeatures` to JS at
+// ~30 Hz while a Private Call is active. The third arg below must
+// match the Swift base class.
+@interface RCT_EXTERN_REMAP_MODULE(SpeakeasyVoiceFilter, VoiceFilterModule, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(wrapTrack:(NSString *)trackId
                   resolver:(RCTPromiseResolveBlock)resolve
