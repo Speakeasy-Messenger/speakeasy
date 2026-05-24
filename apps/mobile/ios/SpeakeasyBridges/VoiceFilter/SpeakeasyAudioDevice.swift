@@ -60,8 +60,15 @@ extension Notification.Name {
     Notification.Name("speakeasy.voiceFilter.routeLost")
 }
 
+/// `RTCAudioDevice` conformance lives in an extension below — keeping
+/// it off the primary declaration prevents the Swift→ObjC generated
+/// header (`Speakeasy-Swift.h`) from emitting a forward reference to
+/// the WebRTC-defined protocol, which Xcode's auto-import doesn't
+/// resolve when `import WebRTC` is only in this file. AppDelegate.mm
+/// receives this as a plain `id` and the ObjC runtime dispatches the
+/// protocol methods dynamically.
 @objc(SpeakeasyAudioDevice)
-final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
+final class SpeakeasyAudioDevice: NSObject {
 
   // MARK: - Audio params (read by native ADM)
 
@@ -488,3 +495,7 @@ final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
     if let p = captureScratch { p.deallocate() }
   }
 }
+
+// MARK: - RTCAudioDevice conformance (extension so the protocol
+// reference doesn't leak into Speakeasy-Swift.h)
+extension SpeakeasyAudioDevice: RTCAudioDevice {}
