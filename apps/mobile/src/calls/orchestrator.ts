@@ -256,6 +256,38 @@ export class CallOrchestrator {
     this.endLocally(localReason);
   }
 
+  /**
+   * Brand-promise failure-closed teardown for Private Call. Called by
+   * the native filter shim when initialization fails, the model load
+   * crashes, the latency soft-fail threshold trips, or any other
+   * runtime issue would leave the local mic exposed. Sends
+   * `filter_failure` on the wire (the peer's orchestrator maps this
+   * to `peer_filter_failure` locally) and tears down the call with
+   * the matching local reason so the inline failure UI on CallScreen
+   * renders the correct copy.
+   *
+   * The plan's "Mid-call fallback policy" (Constraints section): no
+   * silent fall-back to plain audio. Calling `endLocally('hangup')`
+   * here would leak the user-believes-masked / actually-isn't gap
+   * the whole feature was designed to prevent.
+   */
+  endWithFilterFailure(): void {
+    if (!this.active) return;
+    try {
+      this.deps.send({
+        type: 'call_end',
+        to: this.active.peerUserId,
+        call_id: this.active.callId,
+        reason: 'filter_failure',
+      });
+    } catch (err) {
+      diag('call', 'filter_failure send failed (continuing local teardown)', {
+        err: String(err),
+      });
+    }
+    this.endLocally('filter_failure');
+  }
+
   setMicMuted(muted: boolean): void {
     if (!this.active) return;
     this.peer?.setMicMuted(muted);
@@ -514,16 +546,36 @@ export class CallOrchestrator {
     if (!this.active || this.active.callId !== callId || this.active.peerUserId !== fromUserId) {
       return;
     }
-    const local: CallEndedReason =
-      reason === 'cancel'
-        ? 'no_answer'
-        : reason === 'decline'
-          ? 'decline'
-          : reason === 'busy'
-            ? 'busy'
-            : this.active.stage === 'connected'
-              ? 'completed'
-              : 'hangup';
+    // Wire reason is the SENDER's POV. `filter_failure` over the wire
+    // means "the OTHER party's filter died" from my perspective — the
+    // local stored reason becomes `peer_filter_failure` so the inline
+    // failure UI shows the right copy ("ended due to a technical issue
+    // on the other end") instead of the local-failed copy. Wire
+    // `peer_filter_failure` should never arrive from a peer (they'd
+    // only ever observe their own filter dying as `filter_failure`),
+    // but if it does, treat it as a malformed-frame no-op.
+    let local: CallEndedReason;
+    switch (reason) {
+      case 'cancel':
+        local = 'no_answer';
+        break;
+      case 'decline':
+        local = 'decline';
+        break;
+      case 'busy':
+        local = 'busy';
+        break;
+      case 'filter_failure':
+        local = 'peer_filter_failure';
+        break;
+      case 'peer_filter_failure':
+        // Malformed: a peer shouldn't claim this. Fall through to
+        // generic hangup so the UI doesn't get stuck.
+        local = 'hangup';
+        break;
+      default:
+        local = this.active.stage === 'connected' ? 'completed' : 'hangup';
+    }
     this.endLocally(local);
   }
 
