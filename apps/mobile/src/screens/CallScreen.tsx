@@ -12,6 +12,10 @@ import { PortraitTile } from '../components/PortraitTile.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useCalls } from '../store/calls.js';
 import { useIdentity } from '../store/identity.js';
+import {
+  selectPeerAnimation,
+  usePeerAnimation,
+} from '../store/peer-animation.js';
 import { useProfiles } from '../store/profiles.js';
 import { useSettings } from '../store/settings.js';
 import { space, useColors } from '../theme/index.js';
@@ -51,6 +55,16 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   const peerAnimalId =
     peerProfile?.selectedAvatarId ??
     (active ? defaultAnimalForUser(active.peerUserId) : 'fox');
+  // Phase 5j Private Call — pull the peer's latest decoded emotion
+  // state from the animation store (set by the orchestrator's
+  // onPeerAnimationFrame, fed by the WebRTC data channel). Only
+  // applies on kind='private'; for audio/video the store stays at
+  // 'baseline' and the avatar renders neutrally.
+  const peerAnimation = usePeerAnimation((s) =>
+    active ? selectPeerAnimation(s, active.peerUserId) : undefined,
+  );
+  const peerEmotionState =
+    active?.kind === 'private' ? peerAnimation?.emotionState : undefined;
   const ownAnimalId =
     ownProfile?.selectedAvatarId ??
     (myUserId ? defaultAnimalForUser(myUserId) : 'fox');
@@ -387,6 +401,7 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
           id={peerAnimalId}
           size={120}
           amplitude={remoteAmp}
+          emotionState={peerEmotionState}
         />
         <Handle value={active.peerUserId} variant="display" />
         <Text style={[styles.stageLabel, { color: themed.slate }]}>

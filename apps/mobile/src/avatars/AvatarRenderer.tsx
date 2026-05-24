@@ -1,6 +1,9 @@
 import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, View } from 'react-native';
 import { ANIMALS, AnimalSvg } from './components.js';
+import type { EmotionState } from '../calls/emotion-state-machine.js';
+import { renderParamsFor } from '../calls/emotion-state-machine.js';
+import { useReducedMotion } from '../a11y/useReducedMotion.js';
 
 /**
  * Animated avatar — breathing always on, eyes blinking on a randomized
@@ -38,6 +41,21 @@ interface Props {
    * 12 simultaneously-blinking tiles would feel cluttered.
    */
   skipBlink?: boolean;
+  /**
+   * Phase 5j Private Call — emotion state from
+   * `EmotionStateMachine.push()`. Drives `eyeScale` (multiplicative
+   * on the animal's baseline eye size), blink interval, and
+   * `amplitudeBoost` (scales the per-animal mouth-amplitude response).
+   * `'baseline'` (the default when undefined) returns neutral
+   * parameters — so non-Private-Call call-sites stay at the current
+   * behavior without any flag-checking.
+   *
+   * Transitions ease over 200ms in regular mode, instantly under
+   * `useReducedMotion` (the locked /plan-design-review D12 behavior
+   * that PR #57's reduce-motion soft-honor noted as deferred until
+   * the per-animal Render hookup landed — which is this).
+   */
+  emotionState?: EmotionState;
 }
 
 export function AvatarRenderer({
@@ -45,10 +63,49 @@ export function AvatarRenderer({
   size,
   amplitude,
   skipBlink,
+  emotionState,
 }: Props): React.ReactElement {
   const def = ANIMALS[animalId];
   const breath = useRef(new Animated.Value(0)).current;
   const blink = useRef(new Animated.Value(1)).current;
+  const reducedMotion = useReducedMotion();
+
+  // Phase 5j Private Call — emotion-driven Render params. Default
+  // 'baseline' returns neutral values, so unwiring is a no-op for
+  // every non-Private-Call mount site (chat row avatars, picker
+  // grid tiles, etc.).
+  const params = renderParamsFor(emotionState ?? 'baseline');
+  const emotionEyeScale = useRef(new Animated.Value(params.eyeScale)).current;
+  const emotionAmpBoost = useRef(new Animated.Value(params.amplitudeBoost)).current;
+  const blinkIntervalSecRef = useRef(params.blinkIntervalSec);
+  blinkIntervalSecRef.current = params.blinkIntervalSec;
+
+  // Ease emotion-driven params across state transitions. 200ms is
+  // long enough that the eye-size pop reads as "becoming alert"
+  // rather than a glitch, but short enough that natural prosody
+  // (which the hysteresis already filters) doesn't feel laggy.
+  // useReducedMotion → duration 0 (instant snap) so the brand-
+  // promise "the avatar is speaking" signal still flips, but the
+  // decorative sweep is suppressed.
+  useEffect(() => {
+    const duration = reducedMotion ? 0 : 200;
+    Animated.parallel([
+      Animated.timing(emotionEyeScale, {
+        toValue: params.eyeScale,
+        duration,
+        easing: Easing.out(Easing.quad),
+        // Eye scale composes with `blink` via Animated.multiply
+        // below — JS driver required to chain the two.
+        useNativeDriver: false,
+      }),
+      Animated.timing(emotionAmpBoost, {
+        toValue: params.amplitudeBoost,
+        duration,
+        easing: Easing.out(Easing.quad),
+        useNativeDriver: false,
+      }),
+    ]).start();
+  }, [params.eyeScale, params.amplitudeBoost, reducedMotion, emotionEyeScale, emotionAmpBoost]);
 
   // Breathing — continuous loop, native driver. The whole figure
   // scales by 1.5% on the Y axis; spec §3.1.
@@ -73,15 +130,23 @@ export function AvatarRenderer({
     return () => loop.stop();
   }, [breath]);
 
-  // Blink — random interval in [4000, 7000]ms, 50ms close + 50ms open.
-  // JS-driver because the target is an SVG transform prop, not a
-  // top-level View transform. Negligible at this rate.
+  // Blink — random interval centered on the emotion-driven
+  // `blinkIntervalSec` (baseline 5s, excited 3s, calm 8s). 50ms
+  // close + 50ms open. JS-driver because the target is an SVG
+  // transform prop, not a top-level View transform. Skipped when
+  // `skipBlink` is set (picker grid) OR when reduce-motion is on
+  // (the eyes hold open as a static neutral pose; the "speaking"
+  // brand signal lives on the mouth, which still animates).
   useEffect(() => {
-    if (skipBlink) return undefined;
+    if (skipBlink || reducedMotion) return undefined;
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     function schedule() {
-      const delay = 4000 + Math.random() * 3000;
+      // Center the delay on (blinkIntervalSec * 1000); ±1500ms jitter
+      // keeps the random feel of the previous fixed [4000, 7000]
+      // window for the baseline 5s default.
+      const center = blinkIntervalSecRef.current * 1000;
+      const delay = Math.max(500, center - 1500 + Math.random() * 3000);
       timeout = setTimeout(() => {
         if (cancelled) return;
         Animated.sequence([
@@ -107,7 +172,7 @@ export function AvatarRenderer({
       cancelled = true;
       if (timeout) clearTimeout(timeout);
     };
-  }, [blink, skipBlink]);
+  }, [blink, skipBlink, reducedMotion]);
 
   // Outer breathing wrapper. The inner SVG sees `eyeScale` + `mouthScale`
   // as Animated.Values (or interpolations) and pipes them into the
@@ -122,10 +187,18 @@ export function AvatarRenderer({
   // (lynx, raven, etc.) use it to drive their signature effect;
   // free animals ignore it.
   const source = useAmplitudeSource(amplitude);
-  const mouthScale = source.interpolate({
+  // Phase 5j — `boostedSource = source × emotionAmpBoost` so the
+  // per-animal signature effect inherits the emotion boost without
+  // each animal having to know about emotion state.
+  const boostedSource = Animated.multiply(source, emotionAmpBoost);
+  const mouthScale = boostedSource.interpolate({
     inputRange: [0, 1],
     outputRange: [1.0, def?.meta.audioResponse.scaleMax ?? 1],
   });
+  // Eye scale = blink × emotion (excited bumps eyes up by 15%, calm
+  // is neutral). Multiplying keeps the blink animation intact when
+  // emotion changes mid-blink — the value chain just scales.
+  const composedEyeScale = Animated.multiply(blink, emotionEyeScale);
 
   if (!def) {
     return <View style={{ width: size, height: size }} />;
@@ -136,9 +209,9 @@ export function AvatarRenderer({
       <AnimalSvg
         animalId={animalId}
         size={size}
-        eyeScale={blink}
+        eyeScale={composedEyeScale}
         mouthScale={mouthScale}
-        amplitude={source}
+        amplitude={boostedSource}
       />
     </Animated.View>
   );
