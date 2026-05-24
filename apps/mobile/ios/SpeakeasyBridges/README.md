@@ -10,6 +10,7 @@ Swift/ObjC counterparts of the five Android Kotlin bridges under
 | Signal Protocol  | `Signal/SignalProtocolModule.{swift,m}`            | `signal/SignalProtocolModule.kt`     | `NativeModules.SignalProtocol`|
 | Group Messaging  | `Signal/GroupMessagingModule.{swift,m}`            | `signal/GroupMessagingModule.kt`     | `NativeModules.GroupMessaging`|
 | Version          | `Version/VersionModule.{swift,m}`                  | `version/VersionModule.kt`           | `NativeModules.SpeakeasyVersion`|
+| Voice Filter     | `VoiceFilter/VoiceFilterModule.{swift,m}`          | `voicefilter/VoiceFilterModule.kt`   | `NativeModules.SpeakeasyVoiceFilter`|
 
 Plus the persistence + store layer (no direct JS interface — used by the
 modules above):
