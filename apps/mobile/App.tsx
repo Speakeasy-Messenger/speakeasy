@@ -40,6 +40,7 @@ import { makeReplenisher } from './src/crypto/replenish.js';
 import { CallOrchestrator, type CallHistoryEntry } from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
+import { usePeerAnimation } from './src/store/peer-animation.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // CallKeepBridge intentionally not imported here — see the deferred-
 // init comment in the post-enrollment effect. The bridge module still
@@ -613,6 +614,19 @@ export default function App() {
           // path also runs (dedupe by message id is already in
           // conversations.add).
           writeCallEndedBubble(userId, entry);
+          // Phase 5j Private Call — drop the peer's animation entry
+          // when the call ends. Without this the next call to the
+          // same peer would briefly render the last frame from the
+          // previous call before the new channel delivers anything.
+          usePeerAnimation.getState().clear(entry.peerUserId);
+        },
+        onPeerAnimationFrame: (peerUserId, frame) => {
+          usePeerAnimation.getState().set(peerUserId, {
+            amplitude: frame.amplitude,
+            emotionState: frame.emotionState,
+            pitchNorm: frame.pitchNorm,
+            zcrNorm: frame.zcrNorm,
+          });
         },
         getAllowIncomingCalls: () =>
           useSettings.getState().allowIncomingCalls,

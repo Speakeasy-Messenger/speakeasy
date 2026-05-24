@@ -126,6 +126,29 @@ export interface CallPeer {
    * camera. No-op for audio peers.
    */
   flipCamera?(): Promise<void>;
+  /**
+   * Phase 5j Private Call — open the unreliable, unordered side
+   * channel for the sender's per-frame `AnimationFrame` broadcast at
+   * 30 Hz. Settings locked to `{ ordered: false, maxRetransmits: 0 }`
+   * so a network blip drops one frame (brief mouth idle), NOT 200 ms
+   * of stale lip-sync. Caller calls this when both sides confirm
+   * `kind:'private'`; the receiver's underlying WebRTC fires its own
+   * `ondatachannel` event so the same `onAnimationFrame` subscription
+   * works on both sides.
+   *
+   * Optional because: existing audio/video calls don't use it, test
+   * peers can no-op this, and a peer impl that doesn't support data
+   * channels degrades gracefully to "no peer animation" rather than
+   * crashing the call.
+   */
+  openAnimationDataChannel?(): void;
+  /** Subscribe to incoming raw animation frame payloads — caller
+   *  passes each through `decodeAnimationFrame`. */
+  onAnimationFrame?(cb: (payload: Uint8Array) => void): () => void;
+  /** Send an animation frame to the peer. No-op if the channel
+   *  isn't open yet (channels can take ~100 ms to negotiate; dropping
+   *  the first few frames costs at most a brief mouth idle). */
+  sendAnimationFrame?(payload: Uint8Array): void;
 }
 
 /**
