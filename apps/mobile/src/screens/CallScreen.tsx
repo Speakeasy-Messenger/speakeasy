@@ -56,6 +56,30 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
 
   const [elapsed, setElapsed] = useState('');
 
+  /**
+   * Capture the call's last `endedReason` so the inline failure UI can
+   * survive the orchestrator clearing `active` to undefined (which
+   * happens ~immediately after the 'ended' stage fires). Without this
+   * the failure copy flashes for one frame, then snaps to the generic
+   * "Call ended" placeholder. See /plan-design-review D6 — failure-UI
+   * placement: inline on CallScreen, NOT a modal that auto-dismisses.
+   */
+  const [lastEndedReason, setLastEndedReason] = useState<
+    NonNullable<typeof active>['endedReason'] | undefined
+  >(undefined);
+  const wasPrivateCall = useRef(false);
+  useEffect(() => {
+    if (active?.kind === 'private') wasPrivateCall.current = true;
+    if (active?.stage === 'ended' && active.endedReason) {
+      setLastEndedReason(active.endedReason);
+    }
+    if (active && active.stage !== 'ended') {
+      // New call started — wipe stale failure state from a prior call.
+      setLastEndedReason(undefined);
+      wasPrivateCall.current = active.kind === 'private';
+    }
+  }, [active]);
+
   // Animated levels for the two mouths. We push the raw poll into
   // these via a 200ms timing animation — that's longer than the 80ms
   // poll cadence, so values cross-fade rather than step. The mouth
@@ -63,6 +87,28 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   // have to keep the [0, 1] amplitude smooth.
   const localAmp = useRef(new Animated.Value(0)).current;
   const remoteAmp = useRef(new Animated.Value(0)).current;
+
+  /**
+   * Tick once the Private Call init window (1s after entering
+   * outgoing_dialing) elapses, so the caption swaps from
+   * "Initializing private mode…" to the standard ringback line. The
+   * comparison `Date.now() - stageEnteredAt < 1000` is otherwise
+   * frozen at render time and never re-evaluates without a state
+   * change to trigger the re-render.
+   */
+  const [, forceTick] = useState(0);
+  useEffect(() => {
+    if (
+      active?.kind !== 'private' ||
+      active.stage !== 'outgoing_dialing'
+    ) {
+      return undefined;
+    }
+    const elapsed = Date.now() - active.stageEnteredAt;
+    if (elapsed >= 1000) return undefined;
+    const t = setTimeout(() => forceTick((n) => n + 1), 1000 - elapsed);
+    return () => clearTimeout(t);
+  }, [active?.kind, active?.stage, active?.stageEnteredAt]);
 
   // CALLS.md §06 — chat-history system bubble for call end.
   // Moved (rc.55) to the orchestrator's `onCallFinished` deps
@@ -118,13 +164,19 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
     return unsubscribe;
   }, [active?.stage, active?.micMuted, animateMouth, orchestrator, localAmp, remoteAmp]);
 
-  // Auto-dismiss after the orchestrator clears `active`.
+  // Auto-dismiss after the orchestrator clears `active` — EXCEPT when
+  // the call ended with a filter-failure variant. The brand promise is
+  // failure-closed: the user must explicitly tap "Back to chat" so the
+  // failure copy is unambiguously seen (no silent fallback to voice).
+  const isFilterFailure =
+    lastEndedReason === 'filter_failure' ||
+    lastEndedReason === 'peer_filter_failure';
   useEffect(() => {
-    if (!active) {
+    if (!active && !isFilterFailure) {
       const t = setTimeout(onClosed, 1200);
       return () => clearTimeout(t);
     }
-  }, [active, onClosed]);
+  }, [active, isFilterFailure, onClosed]);
 
   // CALLS.md §02 — outgoing pre-connect view shows a pulsing brass
   // brand mark in place of the peer portrait. The peer's animal
@@ -162,6 +214,55 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   }, [isOutgoingPreConnect]);
 
   if (!active) {
+    if (isFilterFailure) {
+      // Inline Private Call failure UI — /plan-design-review D6 + D7.
+      // Same chrome as outgoing pre-connect (cream background, static
+      // brass mark in place of BrandPulse), distinct copy depending on
+      // which side's filter failed, single 'Back to chat' button. No
+      // auto-dismiss — user reads then taps. Locked from
+      // /plan-design-review's locked decisions table.
+      const failureCopy =
+        lastEndedReason === 'peer_filter_failure'
+          ? 'Private Call ended due to a technical issue on the other end.'
+          : "Couldn't start Private Call on this device.";
+      return (
+        <SafeAreaView
+          style={[styles.root, { backgroundColor: themed.cream }]}
+          testID="call-screen-private-failure"
+        >
+          <View style={styles.outgoing}>
+            <View style={styles.outgoingDoorWrap}>
+              {/* Static brass mark — same diameter as BrandPulse's
+                  inner mark, no motion. The failure-closed posture is
+                  the brand promise; nothing pulses here because nothing
+                  is happening. */}
+              <CipherS size={56} color={themed.primary} />
+            </View>
+            <Text style={[styles.outgoingEyebrow, { color: themed.slate }]}>
+              PRIVATE CALL
+            </Text>
+            <Text
+              style={[styles.outgoingState, { color: themed.slate }]}
+              testID="private-failure-caption"
+            >
+              {failureCopy}
+            </Text>
+          </View>
+          <View style={styles.outgoingActions}>
+            <Pressable
+              testID="private-failure-back"
+              onPress={onClosed}
+              accessibilityLabel="Back to chat"
+              style={[styles.backBtn, { borderColor: themed.divider }]}
+            >
+              <Text style={[styles.backBtnText, { color: themed.ink }]}>
+                Back to chat
+              </Text>
+            </Pressable>
+          </View>
+        </SafeAreaView>
+      );
+    }
     return (
       <SafeAreaView
         style={[styles.root, { backgroundColor: themed.cream }]}
@@ -183,6 +284,31 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   };
 
   if (isOutgoingPreConnect) {
+    const isPrivate = active.kind === 'private';
+    // Private init window: first second after entering outgoing_dialing
+    // shows "Initializing private mode…" instead of the standard
+    // ringback caption. Cap mirrors the plan's 1s init budget.
+    // Locked /plan-design-review D4 + D9: reuse BrandPulse (existing
+    // motion.pulse, 750ms) + caption "Initializing private mode…".
+    const inPrivateInit =
+      isPrivate &&
+      active.stage === 'outgoing_dialing' &&
+      Date.now() - active.stageEnteredAt < 1000;
+    const eyebrowText = isPrivate ? 'PRIVATE CALL' : 'VOICE CALL';
+    let stateText: string;
+    if (inPrivateInit) {
+      stateText = 'Initializing private mode…';
+    } else if (isPrivate) {
+      stateText =
+        active.stage === 'outgoing_dialing'
+          ? 'reaching them privately'
+          : 'their phone is ringing';
+    } else {
+      stateText =
+        active.stage === 'outgoing_dialing'
+          ? 'reaching them'
+          : 'their phone is ringing';
+    }
     return (
       <SafeAreaView
         style={[styles.root, { backgroundColor: themed.cream }]}
@@ -194,22 +320,26 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
               rings expand outward and fade — the classic "we're
               trying to reach them" visual. Earlier alphas had only
               the Door pulse, which tested as too subtle to read as
-              an active call attempt. */}
+              an active call attempt.
+              Private init: skip the RingingRings (no peer ring yet),
+              keep just the BrandPulse to read as "something's
+              happening" without over-promising a ringback in flight. */}
           <View style={styles.outgoingDoorWrap}>
-            <RingingRings primary={themed.primary} />
+            {!inPrivateInit && <RingingRings primary={themed.primary} />}
             <BrandPulse />
           </View>
           <Text style={[styles.outgoingEyebrow, { color: themed.slate }]}>
-            VOICE CALL
+            {eyebrowText}
           </Text>
           <View style={styles.outgoingHandle}>
             <Handle value={active.peerUserId} variant="display" />
           </View>
-          <Text style={[styles.outgoingState, { color: themed.slate }]}>
-            {active.stage === 'outgoing_dialing'
-              ? 'reaching them'
-              : 'their phone is ringing'}
-            <Text style={{ color: themed.primary }}>.</Text>
+          <Text
+            style={[styles.outgoingState, { color: themed.slate }]}
+            testID="outgoing-state"
+          >
+            {stateText}
+            {!inPrivateInit && <Text style={{ color: themed.primary }}>.</Text>}
           </Text>
         </View>
         <View style={styles.outgoingActions}>
@@ -232,6 +362,19 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
       testID="call-screen"
     >
       <View style={styles.peer}>
+        {/* Private Call connected eyebrow — persistent "this voice is
+            masked" cue throughout the call. Reuses meta type from the
+            incoming ring eyebrow grammar (locked /plan-design-review
+            D5). Voice/video calls show no eyebrow here; only Private
+            needs the constant reminder. */}
+        {active.kind === 'private' && active.stage === 'connected' && (
+          <Text
+            style={[styles.connectedEyebrow, { color: themed.primary }]}
+            testID="private-connected-eyebrow"
+          >
+            PRIVATE CALL · CONNECTED
+          </Text>
+        )}
         {/* Brass speech-ring per CALLS.md §04: a 1px brass ring
             expands outward from the peer tile when their voice is
             audible. Driven by remoteAmp; opacity fades to 0 while
@@ -563,5 +706,29 @@ const styles = StyleSheet.create({
     letterSpacing: typeScale.subtitle.size * typeScale.subtitle.letterSpacingEm,
     textAlign: 'center',
     marginTop: '40%',
+  },
+  // Private Call connected eyebrow — same meta-type values as the
+  // ring-screen eyebrow ('VOICE CALL · INCOMING'), positioned above the
+  // peer portrait so it reads as continuous with the existing grammar.
+  connectedEyebrow: {
+    fontFamily: typeScale.meta.weight,
+    fontSize: 10,
+    letterSpacing: 0.22 * 10,
+    textTransform: 'uppercase',
+    marginBottom: space.sm,
+  },
+  // 'Back to chat' button on the inline Private Call failure screen.
+  // Same transparent + 1px-border treatment as the IncomingCallScreen
+  // Decline button so the action vocabulary stays consistent.
+  backBtn: {
+    paddingHorizontal: space.xl,
+    paddingVertical: space.md,
+    borderWidth: 1,
+    backgroundColor: 'transparent',
+  },
+  backBtnText: {
+    fontFamily: font.medium,
+    fontSize: 14,
+    letterSpacing: 0.5,
   },
 });

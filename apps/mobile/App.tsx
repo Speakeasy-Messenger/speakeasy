@@ -111,10 +111,39 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
   const cid = useConversations.getState().openDirect(myUserId, entry.peerUserId);
   const wasIncoming = !entry.isCaller;
   const everConnected = entry.durationSec > 0 || entry.reason === 'completed';
-  const noun = entry.kind === 'video' ? 'video call' : 'voice call';
-  const verbedIncoming = entry.kind === 'video' ? 'video-called' : 'called';
+  // Per-kind noun + verb. Private extends the same grammar as voice /
+  // video so the chat-history reads in one voice. The Private noun is
+  // "private call" (lowercase) to match "voice call" / "video call".
+  let noun: string;
+  let verbedIncoming: string;
+  let outgoingNoAnswer: string;
+  switch (entry.kind) {
+    case 'video':
+      noun = 'video call';
+      verbedIncoming = 'video-called';
+      outgoingNoAnswer = 'you video-called. no answer.';
+      break;
+    case 'private':
+      noun = 'private call';
+      verbedIncoming = 'private-called';
+      outgoingNoAnswer = 'you tried to start a private call. no answer.';
+      break;
+    default:
+      noun = 'voice call';
+      verbedIncoming = 'called';
+      outgoingNoAnswer = 'you called. no answer.';
+  }
   let text: string;
-  if (everConnected) {
+  // Filter-failure bubbles are distinct from social misses. The whole
+  // point of the new wire reasons (locked in Phase 5j) is that the
+  // user can tell "they declined me" from "their phone couldn't run
+  // the filter" — collapsing both to "no answer" would re-open the
+  // Codex tension #5 social-friction pain the plan was preventing.
+  if (entry.reason === 'filter_failure') {
+    text = "private call couldn't start on this device.";
+  } else if (entry.reason === 'peer_filter_failure') {
+    text = 'private call ended due to a technical issue on the other end.';
+  } else if (everConnected) {
     const sec = entry.durationSec;
     const mm = Math.floor(sec / 60);
     const ss = String(sec % 60).padStart(2, '0');
@@ -122,7 +151,7 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
   } else if (wasIncoming) {
     text = `@${entry.peerUserId} ${verbedIncoming}. you missed it.`;
   } else {
-    text = entry.kind === 'video' ? 'you video-called. no answer.' : 'you called. no answer.';
+    text = outgoingNoAnswer;
   }
   useConversations.getState().add(cid, {
     id: newMessageId(),

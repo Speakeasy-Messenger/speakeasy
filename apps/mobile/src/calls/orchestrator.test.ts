@@ -290,6 +290,78 @@ describe('CallOrchestrator', () => {
   });
 
   /**
+   * Private Call wire-reason translation (Phase 5j). The sender's
+   * filter dying sends `filter_failure` on the wire — locally, that's
+   * accurate (MY filter failed). The receiver receives the same wire
+   * value but its meaning flips: "the OTHER party's filter failed."
+   * The orchestrator translates wire `filter_failure` → local
+   * `peer_filter_failure` so CallScreen's inline failure UI shows the
+   * correct copy.
+   */
+  describe('Private Call wire-reason translation', () => {
+    it('endWithFilterFailure sends filter_failure and stores filter_failure locally', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+      expect(h.caller.getActive()?.stage).toBe('connected');
+
+      // The local side's filter dies mid-call.
+      h.caller.endWithFilterFailure();
+      // Caller side: local reason is 'filter_failure'.
+      expect(h.finishedCaller[0]?.reason).toBe('filter_failure');
+      // Wire frame went to bob with reason 'filter_failure'.
+      const callEnd = h.callerOut.find((f) => f.type === 'call_end');
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe(
+        'filter_failure',
+      );
+    });
+
+    it('callee receives wire filter_failure → stores peer_filter_failure locally', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+      expect(h.callee.getActive()?.stage).toBe('connected');
+
+      // Alice's filter dies; her endWithFilterFailure ships
+      // call_end{filter_failure} to bob over the wire.
+      h.caller.endWithFilterFailure();
+      await h.pump();
+      // Bob's local POV: alice's filter failed → peer_filter_failure.
+      expect(h.finishedCallee[0]?.reason).toBe('peer_filter_failure');
+    });
+
+    it('rejects malformed wire peer_filter_failure (only sender of failed filter ships filter_failure)', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+
+      // Synthesize a malformed inbound: alice claims peer_filter_failure
+      // (which by contract she'd never send — she'd send filter_failure
+      // if her filter died). The receiver should fall back to a generic
+      // hangup so the UI doesn't get stuck on a malformed code.
+      await h.callee.handleFrame({
+        type: 'call_end',
+        from: 'alice',
+        call_id: h.callee.getActive()!.callId,
+        reason: 'peer_filter_failure',
+      });
+      expect(h.finishedCallee[0]?.reason).toBe('hangup');
+    });
+  });
+
+  /**
    * KNOWN_CALL_KINDS guard (Phase 5j Private Call). The plan's
    * "Wire `call_end` reasons" + "Regression test — `kind ?? 'audio'`
    * fix" sections turned the pre-rc.130 silent-coerce into an explicit
