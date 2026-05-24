@@ -1,0 +1,501 @@
+//
+//  SpeakeasyAudioDevice.swift
+//  Speakeasy — Phase 5j Private Call voice filter
+//
+//  Custom WebRTC iOS audio device that runs the Phase 5j voice
+//  filter on captured audio BEFORE handing it to the native ADM.
+//  Installed via `WebRTCModuleOptions.audioDevice` in AppDelegate
+//  so every call (audio / video / private) routes through this
+//  device. The DSP toggle inside the device is driven by
+//  ActiveFilterHolder.
+//
+//  Architecture:
+//
+//      ┌──────────────────────────────────────────────────┐
+//      │  AVAudioEngine (we own the graph)                │
+//      │                                                  │
+//      │  inputNode  ──tap──▶  filterIfActive ───┐        │
+//      │                                          │        │
+//      │  sourceNode  ◀── delegate.getPlayoutData │        │
+//      │     │                                    │        │
+//      │     └──────────▶ outputNode               │        │
+//      └──────────────────────────────────────────│────────┘
+//                                                  ▼
+//                       delegate.deliverRecordedData (native ADM)
+//
+//  CallKit cohabitation: AVAudioSession is configured for voice
+//  chat mode (.playAndRecord + .voiceChat) — same options CallKit
+//  expects. We don't activate the session ourselves (CallKit owns
+//  activation); the engine starts inside the CallKit
+//  audioSessionDidActivate hook on the existing audio code path.
+//
+//  Route changes: AVAudioSession.routeChangeNotification triggers
+//  notifyAudioInputParametersChange / Output so the native ADM
+//  re-reads the sample rate / channel count. The engine is
+//  re-started for new-device-available / old-device-unavailable
+//  reasons. If the engine fails to restart, the filter holder
+//  trips (NotificationCenter posts `.speakeasyVoiceFilterRouteLost`
+//  for the orchestrator to observe; PR-E wires this into
+//  endWithFilterFailure).
+//
+//  On-device verification (PR-D test plan): build this PR onto a
+//  real iPhone, dial a Private Call, swap mic source mid-call
+//  (built-in → AirPods → speaker), observe that the filter
+//  survives or surfaces route_lost.
+//
+
+import AVFoundation
+import Foundation
+import WebRTC
+
+/// Posted when a CallKit-style route loss makes the audio engine
+/// non-recoverable. PR-E observes this via the JS shim's
+/// `latency_exceeded`-equivalent error path. (We re-use the
+/// `latency_exceeded` FilterErrorCode rather than introducing a
+/// new wire code so PR-E doesn't need to teach the orchestrator a
+/// new switch arm; "filter failed for any reason, end the call"
+/// is the brand-promise behavior either way.)
+extension Notification.Name {
+  static let speakeasyVoiceFilterRouteLost =
+    Notification.Name("speakeasy.voiceFilter.routeLost")
+}
+
+/// `RTCAudioDevice` conformance lives in an extension below — keeping
+/// it off the primary declaration prevents the Swift→ObjC generated
+/// header (`Speakeasy-Swift.h`) from emitting a forward reference to
+/// the WebRTC-defined protocol, which Xcode's auto-import doesn't
+/// resolve when `import WebRTC` is only in this file. AppDelegate.mm
+/// receives this as a plain `id` and the ObjC runtime dispatches the
+/// protocol methods dynamically.
+@objc(SpeakeasyAudioDevice)
+final class SpeakeasyAudioDevice: NSObject {
+
+  // MARK: - Audio params (read by native ADM)
+
+  @objc var deviceInputSampleRate: Double { AVAudioSession.sharedInstance().sampleRate }
+  @objc var deviceOutputSampleRate: Double { AVAudioSession.sharedInstance().sampleRate }
+  @objc var inputIOBufferDuration: TimeInterval {
+    AVAudioSession.sharedInstance().ioBufferDuration
+  }
+  @objc var outputIOBufferDuration: TimeInterval {
+    AVAudioSession.sharedInstance().ioBufferDuration
+  }
+  @objc var inputNumberOfChannels: Int {
+    Int(AVAudioSession.sharedInstance().inputNumberOfChannels)
+  }
+  @objc var outputNumberOfChannels: Int {
+    Int(AVAudioSession.sharedInstance().outputNumberOfChannels)
+  }
+  @objc var inputLatency: TimeInterval { AVAudioSession.sharedInstance().inputLatency }
+  @objc var outputLatency: TimeInterval { AVAudioSession.sharedInstance().outputLatency }
+
+  // MARK: - Lifecycle state
+
+  @objc private(set) var isInitialized: Bool = false
+  @objc private(set) var isPlayoutInitialized: Bool = false
+  @objc private(set) var isRecordingInitialized: Bool = false
+  @objc private(set) var isPlaying: Bool = false
+  @objc private(set) var isRecording: Bool = false
+
+  // MARK: - Internals
+
+  private weak var delegate: RTCAudioDeviceDelegate?
+  private let engine = AVAudioEngine()
+  private var sourceNode: AVAudioSourceNode?
+  private var inputTapInstalled = false
+  private var captureScratch: UnsafeMutablePointer<Int16>?
+  private var captureScratchCount: Int = 0
+
+  // MARK: - RTCAudioDevice
+
+  @objc func initialize(with delegate: RTCAudioDeviceDelegate) -> Bool {
+    self.delegate = delegate
+    do {
+      try configureAudioSession()
+    } catch {
+      NSLog("[Speakeasy] audio-session configure failed: %@", String(describing: error))
+      return false
+    }
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleRouteChange(_:)),
+      name: AVAudioSession.routeChangeNotification,
+      object: nil
+    )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleInterruption(_:)),
+      name: AVAudioSession.interruptionNotification,
+      object: nil
+    )
+    isInitialized = true
+    return true
+  }
+
+  @objc func terminateDevice() -> Bool {
+    NotificationCenter.default.removeObserver(self)
+    _ = stopPlayout()
+    _ = stopRecording()
+    tearDownEngine()
+    delegate = nil
+    isInitialized = false
+    return true
+  }
+
+  // MARK: - Playout
+
+  @objc func initializePlayout() -> Bool {
+    guard isInitialized else { return false }
+    isPlayoutInitialized = true
+    return true
+  }
+
+  @objc func startPlayout() -> Bool {
+    guard isPlayoutInitialized, let delegate else { return false }
+    if isPlaying { return true }
+    do {
+      try setupEngineIfNeeded(for: delegate)
+      if !engine.isRunning {
+        try engine.start()
+      }
+      isPlaying = true
+      return true
+    } catch {
+      NSLog("[Speakeasy] startPlayout failed: %@", String(describing: error))
+      return false
+    }
+  }
+
+  @objc func stopPlayout() -> Bool {
+    guard isPlaying else { return true }
+    isPlaying = false
+    if !isRecording {
+      tearDownEngine()
+    }
+    return true
+  }
+
+  // MARK: - Recording
+
+  @objc func initializeRecording() -> Bool {
+    guard isInitialized else { return false }
+    isRecordingInitialized = true
+    return true
+  }
+
+  @objc func startRecording() -> Bool {
+    guard isRecordingInitialized, let delegate else { return false }
+    if isRecording { return true }
+    do {
+      try setupEngineIfNeeded(for: delegate)
+      try installInputTapIfNeeded()
+      if !engine.isRunning {
+        try engine.start()
+      }
+      isRecording = true
+      return true
+    } catch {
+      NSLog("[Speakeasy] startRecording failed: %@", String(describing: error))
+      return false
+    }
+  }
+
+  @objc func stopRecording() -> Bool {
+    guard isRecording else { return true }
+    if inputTapInstalled {
+      engine.inputNode.removeTap(onBus: 0)
+      inputTapInstalled = false
+    }
+    isRecording = false
+    if !isPlaying {
+      tearDownEngine()
+    }
+    return true
+  }
+
+  // MARK: - Engine setup
+
+  private func configureAudioSession() throws {
+    // Match what RTCAudioSessionConfiguration applies for voice
+    // chat — same options CallKit expects so route activation
+    // through CXProvider's audioSessionDidActivate hook works.
+    let session = AVAudioSession.sharedInstance()
+    try session.setCategory(
+      .playAndRecord,
+      mode: .voiceChat,
+      options: [
+        // .allowBluetoothHFP replaced .allowBluetooth in iOS 8 (the
+        // old name is still defined but deprecated in iOS 26+);
+        // hands-free profile is what CallKit expects for voice chat.
+        .allowBluetoothHFP, .allowBluetoothA2DP, .duckOthers, .defaultToSpeaker,
+      ]
+    )
+    try session.setPreferredSampleRate(48_000)
+    try session.setPreferredIOBufferDuration(0.01) // 10ms — WebRTC's standard frame
+  }
+
+  private func setupEngineIfNeeded(for delegate: RTCAudioDeviceDelegate) throws {
+    if sourceNode != nil { return }
+
+    let outputFormat = engine.mainMixerNode.outputFormat(forBus: 0)
+    let playoutSampleRate = outputFormat.sampleRate
+    let playoutChannels = AVAudioChannelCount(min(outputFormat.channelCount, 2))
+
+    // Pull playout from native ADM via delegate.getPlayoutData.
+    // The render block writes interleaved PCM16; we wrap it as a
+    // Float32 buffer for AVAudioEngine.
+    let renderFormat = AVAudioFormat(
+      commonFormat: .pcmFormatFloat32,
+      sampleRate: playoutSampleRate,
+      channels: playoutChannels,
+      interleaved: false
+    )!
+
+    let source = AVAudioSourceNode(format: renderFormat) {
+      [weak self] _, timestamp, frameCount, audioBufferList -> OSStatus in
+      guard let self, let delegate = self.delegate else {
+        // No delegate — emit silence rather than glitch.
+        let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        for buf in abl {
+          if let mData = buf.mData {
+            memset(mData, 0, Int(buf.mDataByteSize))
+          }
+        }
+        return noErr
+      }
+      // Allocate a temporary AudioBufferList holding PCM16 interleaved
+      // samples sized to the native ADM's expectation. We can't use the
+      // Float32 ABL directly — the delegate expects PCM16.
+      let pcm16Bytes = Int(frameCount) * Int(playoutChannels) * MemoryLayout<Int16>.size
+      var pcm16Buffer = AudioBuffer(
+        mNumberChannels: UInt32(playoutChannels),
+        mDataByteSize: UInt32(pcm16Bytes),
+        mData: malloc(pcm16Bytes))
+      defer { free(pcm16Buffer.mData) }
+      memset(pcm16Buffer.mData, 0, pcm16Bytes)
+      var pcm16Abl = AudioBufferList(mNumberBuffers: 1, mBuffers: pcm16Buffer)
+
+      var flags = AudioUnitRenderActionFlags(rawValue: 0)
+      let status = delegate.getPlayoutData(
+        &flags, timestamp, /* inputBusNumber */ 0, frameCount, &pcm16Abl)
+      if status != noErr {
+        // Native ADM had nothing for us — silence.
+        let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        for buf in abl {
+          if let mData = buf.mData {
+            memset(mData, 0, Int(buf.mDataByteSize))
+          }
+        }
+        return noErr
+      }
+      // Convert PCM16 interleaved → Float32 deinterleaved into the
+      // AVAudioEngine output buffer list.
+      let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
+      let pcm16 = pcm16Buffer.mData!.assumingMemoryBound(to: Int16.self)
+      for ch in 0..<Int(playoutChannels) {
+        guard ch < abl.count, let dst = abl[ch].mData else { continue }
+        let f32 = dst.assumingMemoryBound(to: Float32.self)
+        for i in 0..<Int(frameCount) {
+          let s = pcm16[i * Int(playoutChannels) + ch]
+          f32[i] = Float32(s) / 32768.0
+        }
+      }
+      return noErr
+    }
+    engine.attach(source)
+    engine.connect(source, to: engine.mainMixerNode, format: renderFormat)
+    sourceNode = source
+  }
+
+  private func installInputTapIfNeeded() throws {
+    if inputTapInstalled { return }
+    guard delegate != nil else { return }
+
+    let inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    let sampleRate = inputFormat.sampleRate
+    let channelCount = min(Int(inputFormat.channelCount), 2)
+
+    // 10ms IO buffer at the negotiated rate. AVAudioEngine may
+    // request 4800-sample buffers; the audio device collapses them
+    // into 10ms chunks for the native ADM.
+    let bufferSize = AVAudioFrameCount(sampleRate * 0.01)
+
+    engine.inputNode.installTap(
+      onBus: 0, bufferSize: bufferSize, format: inputFormat
+    ) { [weak self] buffer, time in
+      guard let self else { return }
+      self.handleCapturedBuffer(buffer, time: time, sampleRate: sampleRate, channels: channelCount)
+    }
+    inputTapInstalled = true
+  }
+
+  /// Convert the Float32 deinterleaved capture buffer to PCM16
+  /// interleaved, run the filter if active, then hand off to
+  /// `delegate.deliverRecordedData`.
+  private func handleCapturedBuffer(
+    _ buffer: AVAudioPCMBuffer,
+    time: AVAudioTime,
+    sampleRate: Double,
+    channels: Int
+  ) {
+    let frameCount = Int(buffer.frameLength)
+    guard frameCount > 0, let floatChannels = buffer.floatChannelData else { return }
+
+    // Ensure scratch is sized for this frame.
+    let neededInts = frameCount * channels
+    if captureScratchCount < neededInts {
+      if let p = captureScratch { p.deallocate() }
+      captureScratch = UnsafeMutablePointer<Int16>.allocate(capacity: neededInts)
+      captureScratchCount = neededInts
+    }
+    guard let scratch = captureScratch else { return }
+
+    // Float32 deinterleaved → PCM16 interleaved.
+    for i in 0..<frameCount {
+      for ch in 0..<channels {
+        let f = floatChannels[ch][i]
+        let clamped = max(-1.0, min(1.0, f))
+        scratch[i * channels + ch] = Int16(clamped * 32767.0)
+      }
+    }
+
+    // If filter is active, run it. On false → zero the buffer
+    // (failure-closed) and post route-lost so PR-E ends the call.
+    if let filter = ActiveFilterHolder.shared.get() {
+      let ok = filter.process(
+        samples: scratch,
+        frameCount: frameCount,
+        channelCount: channels,
+        sampleRateHz: sampleRate)
+      if !ok {
+        memset(scratch, 0, neededInts * MemoryLayout<Int16>.size)
+        NotificationCenter.default.post(
+          name: .speakeasyVoiceFilterRouteLost, object: self)
+      }
+    }
+
+    // Hand to native ADM via the delegate. We build an
+    // AudioBufferList around the scratch.
+    var ioFlags = AudioUnitRenderActionFlags(rawValue: 0)
+    var ts = time.audioTimeStamp
+    var inputAbl = AudioBufferList(
+      mNumberBuffers: 1,
+      mBuffers: AudioBuffer(
+        mNumberChannels: UInt32(channels),
+        mDataByteSize: UInt32(neededInts * MemoryLayout<Int16>.size),
+        mData: UnsafeMutableRawPointer(scratch)
+      ))
+
+    _ = delegate?.deliverRecordedData(
+      &ioFlags, &ts, /* inputBusNumber */ 0,
+      AVAudioFrameCount(frameCount),
+      &inputAbl,
+      nil, // renderContext
+      nil  // renderBlock (we already have the data filled)
+    )
+  }
+
+  private func tearDownEngine() {
+    if engine.isRunning {
+      engine.stop()
+    }
+    if let source = sourceNode {
+      engine.disconnectNodeOutput(source)
+      engine.detach(source)
+      sourceNode = nil
+    }
+    if let p = captureScratch {
+      p.deallocate()
+      captureScratch = nil
+      captureScratchCount = 0
+    }
+  }
+
+  // MARK: - Route changes
+
+  @objc private func handleRouteChange(_ notification: Notification) {
+    guard let info = notification.userInfo,
+      let raw = info[AVAudioSessionRouteChangeReasonKey] as? UInt,
+      let reason = AVAudioSession.RouteChangeReason(rawValue: raw)
+    else { return }
+
+    switch reason {
+    case .newDeviceAvailable, .oldDeviceUnavailable, .categoryChange,
+      .override, .routeConfigurationChange:
+      // Restart the engine on the ADM thread so the audio params
+      // are re-published before the next frame fires.
+      delegate?.dispatchAsync { [weak self] in
+        guard let self else { return }
+        let wasRecording = self.isRecording
+        let wasPlaying = self.isPlaying
+        if self.engine.isRunning { self.engine.stop() }
+        if self.inputTapInstalled {
+          self.engine.inputNode.removeTap(onBus: 0)
+          self.inputTapInstalled = false
+        }
+        self.sourceNode = nil
+        do {
+          if let delegate = self.delegate {
+            try self.setupEngineIfNeeded(for: delegate)
+            if wasRecording {
+              try self.installInputTapIfNeeded()
+            }
+            if wasRecording || wasPlaying {
+              try self.engine.start()
+            }
+          }
+          // Notify native ADM that input/output params may have
+          // changed so it re-reads our properties.
+          self.delegate?.notifyAudioInputParametersChange()
+          self.delegate?.notifyAudioOutputParametersChange()
+        } catch {
+          NSLog("[Speakeasy] route-change restart failed: %@", String(describing: error))
+          NotificationCenter.default.post(
+            name: .speakeasyVoiceFilterRouteLost, object: self)
+        }
+      }
+    case .wakeFromSleep, .unknown, .noSuitableRouteForCategory:
+      break
+    @unknown default:
+      break
+    }
+  }
+
+  @objc private func handleInterruption(_ notification: Notification) {
+    guard let info = notification.userInfo,
+      let raw = info[AVAudioSessionInterruptionTypeKey] as? UInt,
+      let type = AVAudioSession.InterruptionType(rawValue: raw)
+    else { return }
+    switch type {
+    case .began:
+      delegate?.notifyAudioInputInterrupted()
+      delegate?.notifyAudioOutputInterrupted()
+    case .ended:
+      delegate?.dispatchAsync { [weak self] in
+        guard let self else { return }
+        if !self.engine.isRunning && (self.isRecording || self.isPlaying) {
+          try? self.engine.start()
+        }
+      }
+    @unknown default:
+      break
+    }
+  }
+
+  // MARK: - dispatchAsync / dispatchSync helpers
+  //
+  // The RTCAudioDeviceDelegate API surface provides dispatchAsync /
+  // dispatchSync that we use ABOVE to marshal restart work onto the
+  // ADM thread. The DEVICE side of the protocol doesn't need to
+  // expose any custom queues — `engine` does its own thread
+  // management for AVAudioSourceNode + inputTap callbacks.
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+    if let p = captureScratch { p.deallocate() }
+  }
+}
+
+// MARK: - RTCAudioDevice conformance (extension so the protocol
+// reference doesn't leak into Speakeasy-Swift.h)
+extension SpeakeasyAudioDevice: RTCAudioDevice {}
