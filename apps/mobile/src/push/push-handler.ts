@@ -32,7 +32,7 @@ import notifee, {
   type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePayload } from '@speakeasy/shared';
+import { decodePayload, isFeedbackHandle, isSpeakerHandle } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -582,7 +582,15 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
   // plain-banner message should still read as "from <peer>", not the
   // app logo. Sealed messages carry no `sender_id` (the server strips
   // it upstream), so they keep the logo — the privacy-correct outcome.
-  const largeIcon = data.sender_id
+  // System handles (@speaker, @feedback) are channels, not people:
+  // they shouldn't wear a deterministically-hashed animal avatar
+  // (rc.127 shipped a release-announcement banner with a cat from
+  // `defaultAnimalForUser("speaker")`). Skip largeIcon so those
+  // notifications read as the Speakeasy brand.
+  const senderIsSystem =
+    !!data.sender_id &&
+    (isSpeakerHandle(data.sender_id) || isFeedbackHandle(data.sender_id));
+  const largeIcon = data.sender_id && !senderIsSystem
     ? await cachedAvatarUri(data.sender_id)
     : undefined;
   await notifee.displayNotification({
