@@ -19,3 +19,10 @@
 // internals) without needing `import SQLCipher` in each Swift file —
 // the pod doesn't ship a Swift modulemap.
 #import <sqlite3.h>
+
+// Phase 5j: SpeakeasyAudioDevice conforms to RTCAudioDevice from
+// the JitsiWebRTC pod. The auto-generated Speakeasy-Swift.h needs
+// to know the protocol declaration to compile cleanly; pulling
+// WebRTC.h in here makes the protocol visible without each Swift
+// file needing its own `import WebRTC`.
+#import <WebRTC/WebRTC.h>
