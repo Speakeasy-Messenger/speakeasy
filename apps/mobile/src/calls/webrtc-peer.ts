@@ -20,6 +20,7 @@ import {
   ensureMicPermission,
 } from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
+import { utf8ToBytes } from '../utils/bytes.js';
 
 /**
  * `react-native-webrtc`-backed `CallPeer` implementation. Audio-only;
@@ -464,7 +465,10 @@ class WebRtcCallPeer implements CallPeer {
       // wire-format experiment doesn't NPE here.
       let bytes: Uint8Array;
       if (typeof data === 'string') {
-        bytes = new TextEncoder().encode(data);
+        // Hermes ships without a global TextEncoder despite RN docs
+        // claiming otherwise (the no-hermes-banned-globals integration
+        // test catches this). Use the project's utf8ToBytes helper.
+        bytes = utf8ToBytes(data);
       } else if (data instanceof Uint8Array) {
         bytes = data;
       } else if (data instanceof ArrayBuffer) {
