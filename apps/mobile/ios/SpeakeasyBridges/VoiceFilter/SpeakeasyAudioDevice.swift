@@ -216,7 +216,12 @@ final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
     try session.setCategory(
       .playAndRecord,
       mode: .voiceChat,
-      options: [.allowBluetooth, .allowBluetoothA2DP, .duckOthers, .defaultToSpeaker]
+      options: [
+        // .allowBluetoothHFP replaced .allowBluetooth in iOS 8 (the
+        // old name is still defined but deprecated in iOS 26+);
+        // hands-free profile is what CallKit expects for voice chat.
+        .allowBluetoothHFP, .allowBluetoothA2DP, .duckOthers, .defaultToSpeaker,
+      ]
     )
     try session.setPreferredSampleRate(48_000)
     try session.setPreferredIOBufferDuration(0.01) // 10ms — WebRTC's standard frame
@@ -263,7 +268,7 @@ final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
       memset(pcm16Buffer.mData, 0, pcm16Bytes)
       var pcm16Abl = AudioBufferList(mNumberBuffers: 1, mBuffers: pcm16Buffer)
 
-      var flags: AudioUnitRenderActionFlags = 0
+      var flags = AudioUnitRenderActionFlags(rawValue: 0)
       let status = delegate.getPlayoutData(
         &flags, timestamp, /* inputBusNumber */ 0, frameCount, &pcm16Abl)
       if status != noErr {
@@ -297,7 +302,7 @@ final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
 
   private func installInputTapIfNeeded() throws {
     if inputTapInstalled { return }
-    guard let delegate else { return }
+    guard delegate != nil else { return }
 
     let inputFormat = engine.inputNode.outputFormat(forBus: 0)
     let sampleRate = inputFormat.sampleRate
@@ -364,7 +369,7 @@ final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
 
     // Hand to native ADM via the delegate. We build an
     // AudioBufferList around the scratch.
-    var ioFlags: AudioUnitRenderActionFlags = 0
+    var ioFlags = AudioUnitRenderActionFlags(rawValue: 0)
     var ts = time.audioTimeStamp
     var inputAbl = AudioBufferList(
       mNumberBuffers: 1,
@@ -374,7 +379,7 @@ final class SpeakeasyAudioDevice: NSObject, RTCAudioDevice {
         mData: UnsafeMutableRawPointer(scratch)
       ))
 
-    delegate?.deliverRecordedData(
+    _ = delegate?.deliverRecordedData(
       &ioFlags, &ts, /* inputBusNumber */ 0,
       AVAudioFrameCount(frameCount),
       &inputAbl,
