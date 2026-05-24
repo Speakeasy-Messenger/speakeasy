@@ -5,9 +5,11 @@ import {
   conversationIdForDirect,
   conversationIdForGroup,
   isMessageId,
+  KNOWN_CALL_KINDS,
   newMessageId,
 } from '@speakeasy/shared';
 import type {
+  CallKind,
   ConversationKind,
   WsClientMsg,
   WsServerMsg,
@@ -226,10 +228,31 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         }
         session = { userId, deviceToken: v.deviceToken };
         clearTimeout(authTimer);
-        await deps.connections.add(session.userId, session.deviceToken, socket);
+        // Validate + normalize the client's declared call-kind capabilities.
+        // Unknown strings are dropped (defense in depth). Absent field
+        // means the client is pre-rc.130; default to ['audio','video']
+        // which matches the historical capability set.
+        const declaredKinds = Array.isArray(msg.supported_call_kinds)
+          ? msg.supported_call_kinds
+          : undefined;
+        const capabilities: CallKind[] = declaredKinds
+          ? (declaredKinds.filter((k): k is CallKind =>
+              typeof k === 'string' && KNOWN_CALL_KINDS.has(k as CallKind),
+            ) as CallKind[])
+          : ['audio', 'video'];
+        await deps.connections.add(
+          session.userId,
+          session.deviceToken,
+          socket,
+          capabilities,
+        );
         await deps.devices.upsertOnSeen({
           userId: session.userId,
           deviceToken: session.deviceToken,
+        });
+        await deps.devices.setSupportedCallKinds({
+          deviceToken: session.deviceToken,
+          kinds: capabilities,
         });
         await deps.presence.recordOnline(session.userId, deps.instanceId);
         send(socket, { type: 'authed', user_id: session.userId });

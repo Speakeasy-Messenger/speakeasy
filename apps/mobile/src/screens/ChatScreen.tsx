@@ -76,7 +76,7 @@ interface Props {
    * test rendering ChatScreen in isolation), the call entry point is
    * hidden.
    */
-  onStartCall?: (peerId: string, kind: 'audio' | 'video') => void;
+  onStartCall?: (peerId: string, kind: 'audio' | 'video' | 'private') => void;
   /** Open the conversation-settings screen — fired from the AppBar
    * title-block tap. When omitted, the title block becomes inert. */
   onOpenSettings?: () => void;
@@ -867,9 +867,11 @@ export function ChatScreen({
       />
       <CallTypeSheet
         visible={callTypeOpen}
+        peerUserId={peerId}
         onClose={() => setCallTypeOpen(false)}
         onPickVoice={() => onStartCall?.(peerId, 'audio')}
         onPickVideo={() => onStartCall?.(peerId, 'video')}
+        onPickPrivate={() => onStartCall?.(peerId, 'private')}
       />
       <AttachmentSheet
         visible={attachOpen}

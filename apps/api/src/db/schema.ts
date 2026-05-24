@@ -185,6 +185,18 @@ export const devices = pgTable(
     notificationPrivacy: text('notification_privacy'),
     /** Last reason getToken() or push-token registration failed. NULL when token is registered. */
     lastPushError: text('last_push_error'),
+    /**
+     * Per-device list of call kinds this device can answer (migration
+     * 0018). Server's call-router reads the LIVE in-memory version via
+     * `connections.getCapabilitiesUnion` for fan-out filtering; the
+     * persisted column is the fallback for cold-cache `GET /v1/users/:id`
+     * responses. NOT NULL; defaults to `['audio','video']` (the pre-rc.130
+     * historical capability set).
+     */
+    supportedCallKinds: text('supported_call_kinds')
+      .array()
+      .notNull()
+      .default(sql`ARRAY['audio', 'video']`),
     enrolledAt: timestamp('enrolled_at', { withTimezone: true }).notNull().defaultNow(),
     lastSeen: timestamp('last_seen', { withTimezone: true }).notNull().defaultNow(),
   },

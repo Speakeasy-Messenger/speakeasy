@@ -1,6 +1,7 @@
 import type { Redis } from 'ioredis';
+import type { CallKind } from '@speakeasy/shared';
 import type { Connections } from './connections.js';
-import type { UserNotifier } from './user-notifier.js';
+import type { NotifyOptions, UserNotifier } from './user-notifier.js';
 
 const CHANNEL = 'speakeasy:user-notify';
 
@@ -18,6 +19,12 @@ interface NotifyEnvelope {
   frame: object;
   /** Originating instance — receivers ignore their own publishes. */
   instanceId: string;
+  /**
+   * Capability requirement propagated cross-instance — peer instances
+   * apply the same filter against their own local connections so an
+   * old device on another fly machine doesn't ring with raw audio.
+   */
+  requireCapability?: CallKind;
 }
 
 /**
@@ -49,15 +56,20 @@ export class RedisUserNotifier implements UserNotifier {
     this.ensureSubscribed();
   }
 
-  notify(userId: string, frame: object): void {
+  notify(userId: string, frame: object, opts?: NotifyOptions): void {
     // 1. Local — same as LocalUserNotifier.
-    this.deliverLocally(userId, frame);
+    this.deliverLocally(userId, frame, opts);
     // 2. Cross-instance — fire-and-forget; if Redis is down the local
     //    delivery still happened, and the next trigger will retry.
     void this.publisher
       .publish(
         CHANNEL,
-        JSON.stringify({ userId, frame, instanceId: this.instanceId } satisfies NotifyEnvelope),
+        JSON.stringify({
+          userId,
+          frame,
+          instanceId: this.instanceId,
+          requireCapability: opts?.requireCapability,
+        } satisfies NotifyEnvelope),
       )
       .catch(() => {
         /* silent — see comment above */
@@ -72,8 +84,14 @@ export class RedisUserNotifier implements UserNotifier {
 
   // ---- internals ----
 
-  private deliverLocally(userId: string, frame: object): void {
-    const devices = this.connections.getDevices(userId);
+  private deliverLocally(
+    userId: string,
+    frame: object,
+    opts?: NotifyOptions,
+  ): void {
+    const devices = opts?.requireCapability
+      ? this.connections.getDevicesWithCapability(userId, opts.requireCapability)
+      : this.connections.getDevices(userId);
     if (devices.length === 0) return;
     const payload = JSON.stringify(frame);
     for (const socket of devices) {
@@ -99,7 +117,10 @@ export class RedisUserNotifier implements UserNotifier {
       }
       // Ignore self-publishes — we already delivered locally in notify().
       if (env.instanceId === this.instanceId) return;
-      this.deliverLocally(env.userId, env.frame);
+      const opts = env.requireCapability
+        ? { requireCapability: env.requireCapability }
+        : undefined;
+      this.deliverLocally(env.userId, env.frame, opts);
     });
   }
 }

@@ -1,4 +1,4 @@
-import type { WsServerMsg, WsClientMsg } from '@speakeasy/shared';
+import type { CallKind, WsServerMsg, WsClientMsg } from '@speakeasy/shared';
 
 export type WsState =
   | 'idle'
@@ -53,6 +53,15 @@ export interface SpeakeasyWsClientOptions {
    * auth-rejection streak.
    */
   onAuthRejected?: (info: WsCloseInfo) => void | Promise<void>;
+  /**
+   * Phase 5j Private Call — sync read of this device's currently
+   * available call modes. Called on every WS auth so a downgrade (e.g.
+   * filter binary removed at runtime) shrinks the advertised set on
+   * the next reconnect. Optional: pre-Phase-5j wirings omit this and
+   * the server defaults to `['audio', 'video']`. Implementations
+   * typically return `['audio', 'video', ...(isPrivateCallAvailable() ? ['private'] : [])]`.
+   */
+  getSupportedCallKinds?: () => readonly CallKind[];
   /** Now provider — injected for deterministic tests. */
   now?: () => number;
 }
@@ -341,7 +350,23 @@ export class SpeakeasyWsClient {
       const token = await this.opts.getToken(
         this.lastAuthFailed ? { forceRefresh: true } : undefined,
       );
-      this.socket?.send(JSON.stringify({ type: 'auth', token }));
+      // Phase 5j Private Call: declare this device's call-kind
+      // capabilities so the server (a) UNION-aggregates them for
+      // sender-side preflight (`GET /v1/users/:id`) and (b) only
+      // fans out a `kind:'private'` offer to capable peer devices.
+      // `getSupportedCallKinds` is dynamically computed (depends on
+      // native SpeakeasyVoiceFilter readiness) so a downgrade —
+      // e.g., a remote-killed filter binary — shrinks the set on the
+      // next reconnect. Optional opt: older app builds omit the
+      // callback and the server defaults to ['audio','video'].
+      const supportedCallKinds = this.opts.getSupportedCallKinds?.();
+      this.socket?.send(
+        JSON.stringify({
+          type: 'auth',
+          token,
+          ...(supportedCallKinds && { supported_call_kinds: supportedCallKinds }),
+        }),
+      );
     } catch (err) {
       // Bad token / no token: drop the socket; reconnect loop will retry.
       this.socket?.close(4005, 'token_fetch_failed');

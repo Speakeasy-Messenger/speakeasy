@@ -1,8 +1,10 @@
 import {
+  KNOWN_CALL_KINDS,
   newCallId,
   type CallAnswerPayload,
   type CallEndReason,
   type CallIcePayload,
+  type CallKind,
   type CallOfferPayload,
   type WsClientMsg,
   type WsServerMsg,
@@ -25,6 +27,7 @@ import type {
   CallStage,
   IceServer,
 } from './types.js';
+import { mediaKindForCall } from './types.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
@@ -80,9 +83,9 @@ export interface CallHistoryEntry {
   /** Connected-to-ended duration in seconds; 0 if call never connected. */
   durationSec: number;
   reason: CallEndedReason;
-  /** Audio or video — the chat-history system bubble distinguishes
-   *  "voice call · 0:42." from "video call · 0:42." */
-  kind: 'audio' | 'video';
+  /** User-facing call kind — the chat-history system bubble distinguishes
+   *  "voice call · 0:42." / "video call · 0:42." / "private call · 0:42." */
+  kind: CallKind;
 }
 
 /**
@@ -136,7 +139,7 @@ export class CallOrchestrator {
    */
   async startOutgoing(
     peerUserId: string,
-    kind: 'audio' | 'video' = 'audio',
+    kind: CallKind = 'audio',
   ): Promise<string> {
     if (this.active) {
       throw new Error('busy: another call is already active');
@@ -152,8 +155,8 @@ export class CallOrchestrator {
       stage: 'outgoing_dialing',
       stageEnteredAt: this.now(),
       micMuted: false,
-      // Video calls default to speaker on — earpiece doesn't make sense
-      // when the user is looking at the screen. Audio stays on earpiece.
+      // Video defaults to speaker (user is looking at the screen);
+      // audio + private both default to earpiece (held to the ear).
       speakerOn: kind === 'video',
       kind,
     });
@@ -165,14 +168,18 @@ export class CallOrchestrator {
       const peer = await this.deps.peerFactory.create({
         iceServers,
         role: 'caller',
-        mediaKind: kind,
+        // 'private' → 'audio' at WebRTC layer (see mediaKindForCall).
+        mediaKind: mediaKindForCall(kind),
       });
       diag('call', 'peer created');
       this.attachPeer(peer);
       const peerOffer = await peer.createOffer();
       const offer: CallOfferPayload = { ...peerOffer, kind };
       diag('call', 'offer created', { sdpLen: offer.sdp.length });
-      await this.sendEncrypted(peerUserId, callId, 'call_offer', offer);
+      // Plaintext `kind` hint on the WS frame lets the server fan out
+      // only to peer devices whose capability set includes this kind
+      // (see apps/api/src/ws/call-router.ts + connections.ts).
+      await this.sendEncrypted(peerUserId, callId, 'call_offer', offer, kind);
       diag('call', 'offer sent', { peerUserId, callId });
       this.transition('outgoing_ringing');
       this.armRingTimeout();
@@ -382,7 +389,28 @@ export class CallOrchestrator {
     }
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallOfferPayload;
-      const kind = payload.kind ?? 'audio';
+      // Resolve + validate the call kind. Absent ⇒ 'audio' (back-compat
+      // with pre-rc.34 clients that never set the field). Unknown ⇒
+      // silently abort: the brand promise hole this closes is a future
+      // unknown-kind sender (e.g., 'private' before rc.130) reaching an
+      // old client and being coerced to 'audio' (raw voice on the wire
+      // when the sender thinks they're masked). Codex tension #1 from
+      // /plan-eng-review. Caller will see no answer + drop on its 45s
+      // ring timeout — same outcome as an offline peer.
+      const rawKind = payload.kind;
+      let kind: CallKind;
+      if (rawKind === undefined) {
+        kind = 'audio';
+      } else if (KNOWN_CALL_KINDS.has(rawKind as CallKind)) {
+        kind = rawKind as CallKind;
+      } else {
+        diag('call', 'incoming offer rejected: unknown_call_kind', {
+          fromUserId,
+          callId,
+          kind: rawKind,
+        });
+        return;
+      }
       diag('call', 'handleIncomingOffer: decrypted', {
         fromUserId,
         callId,
@@ -392,7 +420,10 @@ export class CallOrchestrator {
       const peer = await this.deps.peerFactory.create({
         iceServers,
         role: 'callee',
-        mediaKind: kind,
+        // 'private' maps to 'audio' at the WebRTC layer — the filter
+        // wraps the local mic track before it hits the encoder, but
+        // peerConnection still negotiates audio-only media.
+        mediaKind: mediaKindForCall(kind),
       });
       this.attachPeer(peer);
       await peer.setRemoteOffer(payload);
@@ -548,6 +579,12 @@ export class CallOrchestrator {
     callId: string,
     type: 'call_offer' | 'call_answer' | 'call_ice',
     payload: CallOfferPayload | CallAnswerPayload | CallIcePayload,
+    /**
+     * Only set on `call_offer` — the plaintext `kind` hint the server
+     * reads to fan out to capable peer devices only. Encrypted SDP
+     * carries the same value inside `payload.kind` for the receiver.
+     */
+    offerKind?: CallKind,
   ): Promise<void> {
     diag('call', 'sendEncrypted: enter', { type, peerUserId, callId });
     const deviceToken = await this.deps.getDeviceToken();
@@ -565,12 +602,22 @@ export class CallOrchestrator {
       peerUserId,
       ctLen: ciphertext.length,
     });
-    this.deps.send({
-      type,
-      to: peerUserId,
-      call_id: callId,
-      ciphertext: bytesToB64(ciphertext),
-    });
+    if (type === 'call_offer') {
+      this.deps.send({
+        type,
+        to: peerUserId,
+        call_id: callId,
+        ciphertext: bytesToB64(ciphertext),
+        ...(offerKind && { kind: offerKind }),
+      });
+    } else {
+      this.deps.send({
+        type,
+        to: peerUserId,
+        call_id: callId,
+        ciphertext: bytesToB64(ciphertext),
+      });
+    }
     diag('call', 'sendEncrypted: ws.send returned', { type, peerUserId, callId });
   }
 
@@ -615,7 +662,7 @@ export class CallOrchestrator {
    * answer-window. Idempotent — a second call to ensureMicPermission
    * after the user has decided is a no-op.
    */
-  private async warmUpPermissions(kind: 'audio' | 'video'): Promise<void> {
+  private async warmUpPermissions(kind: CallKind): Promise<void> {
     try {
       const mic = await ensureMicPermission();
       diag('call', 'warmup mic', { result: mic });

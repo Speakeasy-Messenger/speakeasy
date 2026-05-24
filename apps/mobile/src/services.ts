@@ -91,6 +91,24 @@ export function getWsClient(
         });
         diag('ws', 'auth-rejected re-enroll done', { result });
       },
+      // Phase 5j Private Call: report which call kinds this device
+      // can answer on every reconnect. The native filter readiness
+      // gates 'private' on/off so a downgrade (filter binary removed)
+      // shrinks the set immediately. Lazy import dodges the JS-side
+      // crash if voice-filter.ts's NativeModules read throws under a
+      // test runtime — same defensive pattern as ensure-enrolled.
+      getSupportedCallKinds: () => {
+        // Inline require: the native module lookup happens at module
+        // load and would otherwise crash test envs that import this
+        // file before mocking NativeModules.
+        // eslint-disable-next-line @typescript-eslint/no-require-imports
+        const { isPrivateCallAvailable } = require('./native/voice-filter.js') as {
+          isPrivateCallAvailable: () => boolean;
+        };
+        return isPrivateCallAvailable()
+          ? (['audio', 'video', 'private'] as const)
+          : (['audio', 'video'] as const);
+      },
     });
   }
   return _ws;

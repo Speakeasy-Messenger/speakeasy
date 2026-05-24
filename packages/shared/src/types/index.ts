@@ -65,7 +65,14 @@ export interface Message {
 // ------------ WebSocket envelope schemas (spec §9) ------------
 
 export type WsClientMsg =
-  | { type: 'auth'; token: string }
+  /**
+   * `supported_call_kinds` lets a sender's mobile preflight which call
+   * modes a peer can actually answer (see `/v1/users/:id` aggregation).
+   * Older clients omit the field; server treats absence as
+   * `['audio', 'video']` for back-compat. Private-Call-capable clients
+   * send `['audio', 'video', 'private']`.
+   */
+  | { type: 'auth'; token: string; supported_call_kinds?: CallKind[] }
   | {
       type: 'message';
       to: string;
@@ -126,7 +133,22 @@ export type WsClientMsg =
    */
   | { type: 'skdm'; to: string; group_id: string; ciphertext: string }
   // ----- Voice call signaling (1:1 only — see Call* types below) -----
-  | { type: 'call_offer'; to: UserId; call_id: CallId; ciphertext: string }
+  /**
+   * `kind` is a plaintext hint (the encrypted SDP carries the same value)
+   * so the server can fan-out the offer ONLY to the peer's devices that
+   * advertised the required capability in their WS auth. Without this
+   * hint the server would have to fan out everywhere; the receiver-side
+   * `KNOWN_CALL_KINDS` guard catches that case as defense in depth, but
+   * the brand cost is real (an old device rings, then drops). Absent
+   * `kind` ⇒ treat as `'audio'` for back-compat (pre-rc.34 clients).
+   */
+  | {
+      type: 'call_offer';
+      to: UserId;
+      call_id: CallId;
+      ciphertext: string;
+      kind?: CallKind;
+    }
   | { type: 'call_answer'; to: UserId; call_id: CallId; ciphertext: string }
   | { type: 'call_ice'; to: UserId; call_id: CallId; ciphertext: string }
   | { type: 'call_end'; to: UserId; call_id: CallId; reason: CallEndReason };
@@ -218,7 +240,17 @@ export type WsServerMsg =
       reason: 'member_removed' | 'moderator_triggered';
     }
   // ----- Voice call signaling (1:1 only) -----
-  | { type: 'call_offer'; from: UserId; call_id: CallId; ciphertext: string }
+  /** Counterpart to client `call_offer` — plaintext `kind` rides on the
+   * wire so the receiver's CallScreen can branch BEFORE the ciphertext
+   * decrypt finishes (lets the inbound ring screen pick the right
+   * eyebrow + state copy without an extra render). Absent ⇒ 'audio'. */
+  | {
+      type: 'call_offer';
+      from: UserId;
+      call_id: CallId;
+      ciphertext: string;
+      kind?: CallKind;
+    }
   | { type: 'call_answer'; from: UserId; call_id: CallId; ciphertext: string }
   | { type: 'call_ice'; from: UserId; call_id: CallId; ciphertext: string }
   | { type: 'call_end'; from: UserId; call_id: CallId; reason: CallEndReason };
@@ -236,7 +268,35 @@ export type CallEndReason =
   | 'hangup' // active call ended by either party
   | 'decline' // callee rejected the offer
   | 'cancel' // caller cancelled before callee answered
-  | 'busy'; // callee already in a call
+  | 'busy' // callee already in a call
+  /**
+   * Private Call — the LOCAL filter failed (init failure, model load
+   * crash, sustained latency breach, mid-call runtime kill). Sent from
+   * the side whose filter died. The brand promise is preserved by
+   * failure-closed: no silent fall-back to plain audio.
+   */
+  | 'filter_failure'
+  /**
+   * Private Call — the PEER's filter died. The remote end shows
+   * "Private Call ended due to a technical issue on the other end",
+   * distinct from a social `decline`. Closes Codex tension #5.
+   */
+  | 'peer_filter_failure';
+
+/**
+ * Call modality. `'private'` is the brand-promise mode that filters the
+ * sender's voice and drives the peer's animated animal avatar instead of
+ * a camera feed. See `lunchbox-main-design-20260524-014323.md`.
+ *
+ * Unknown values MUST be rejected at the receiver (`KNOWN_KINDS`); the
+ * pre-rc.34 silent-coerce-to-audio path was a brand-promise hole — a
+ * malicious or stale-client sender could pass `'private'` and the receiver
+ * would happily ring with raw audio.
+ */
+export type CallKind = 'audio' | 'video' | 'private';
+
+/** Runtime guard set. Receivers reject offers whose kind isn't in here. */
+export const KNOWN_CALL_KINDS = new Set<CallKind>(['audio', 'video', 'private']);
 
 /**
  * Plaintext shape of the JSON inside `call_offer.ciphertext`. Encrypted
@@ -254,9 +314,11 @@ export interface CallOfferPayload {
   /**
    * Media kind. Older clients (rc.34 and earlier) won't set this; absent
    * is interpreted as 'audio' for backwards compat — voice-only is the
-   * historical default and never set this field.
+   * historical default and never set this field. Newer clients (rc.130+)
+   * MAY set 'private'; the receiver rejects anything not in
+   * `KNOWN_CALL_KINDS`.
    */
-  kind?: 'audio' | 'video';
+  kind?: CallKind;
 }
 
 export interface CallAnswerPayload {
