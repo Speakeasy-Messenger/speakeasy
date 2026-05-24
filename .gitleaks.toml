@@ -20,4 +20,12 @@ paths = [
   # by being kept out of the repository — tracking it is the documented,
   # normal practice for Firebase clients.
   '''apps/mobile/android/app/google-services\.json''',
+  # Production-guard tests use a literal
+  #   `-----BEGIN PRIVATE KEY-----\nabc\n-----END PRIVATE KEY-----`
+  # fixture to verify the guard accepts a syntactically-valid FCM
+  # private key. It is not a secret — the payload between markers is
+  # the string `abc` — but gitleaks' `private-key` rule matches on the
+  # PEM markers alone. The fixture is part of the test documentation;
+  # suppress this file from the scan.
+  '''apps/api/src/production-guard\.test\.ts''',
 ]
