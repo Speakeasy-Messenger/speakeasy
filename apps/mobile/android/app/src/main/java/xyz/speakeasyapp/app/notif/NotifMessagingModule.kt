@@ -2,13 +2,7 @@ package xyz.speakeasyapp.app.notif
 
 import android.app.PendingIntent
 import android.content.Intent
-import android.graphics.Bitmap
 import android.graphics.BitmapFactory
-import android.graphics.BitmapShader
-import android.graphics.Canvas
-import android.graphics.Paint
-import android.graphics.RectF
-import android.graphics.Shader
 import androidx.core.app.NotificationCompat
 import androidx.core.app.NotificationManagerCompat
 import androidx.core.app.Person
@@ -81,8 +75,16 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         try { BitmapFactory.decodeFile(it) } catch (_: Throwable) { null }
       }
 
-      val peerIcon = peerBitmap?.let { IconCompat.createWithBitmap(it) }
-      val selfIcon = selfBitmap?.let { IconCompat.createWithBitmap(it) }
+      // Adaptive bitmaps let Android apply the system launcher mask
+      // (squircle on Samsung, circle on AOSP) the same way it does
+      // for the launcher icon — so the avatar reads as a rounded
+      // tile instead of a flat square. The previous Canvas-side
+      // round-corners pass painted transparent corners that blended
+      // invisibly against the dark notification surface; this hands
+      // the rounding off to the system, which knows the user's
+      // active mask shape and how to backdrop it.
+      val peerIcon = peerBitmap?.let { IconCompat.createWithAdaptiveBitmap(it) }
+      val selfIcon = selfBitmap?.let { IconCompat.createWithAdaptiveBitmap(it) }
 
       val selfPerson = Person.Builder()
         .setName("You")
@@ -167,12 +169,13 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         .setAutoCancel(true)
         .setShortcutId(shortcutId)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-        // NotificationCompat.Builder.setLargeIcon only takes a raw
-        // Bitmap and renders it square; pre-round the bitmap so the
-        // notification's left-side avatar reads like the rest of the
-        // launcher chrome (the adaptive launcher icon was squircled,
-        // not square) instead of a flat photo tile.
-        .apply { peerBitmap?.let { setLargeIcon(roundedSquircleBitmap(it)) } }
+        // Use the platform `Icon` overload of setLargeIcon with an
+        // adaptive bitmap so Android applies the launcher mask
+        // (squircle on Samsung One UI). Passing a raw Bitmap to the
+        // other overload rendered the avatar flat-square — Samsung
+        // and the AOSP shade only mask icons that arrive as adaptive
+        // `Icon`s.
+        .apply { peerIcon?.let { setLargeIcon(it.toIcon(reactContext)) } }
 
       if (withReply) {
         val remoteInput = RemoteInput.Builder(REPLY_RESULT_KEY)
@@ -214,39 +217,6 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
     } catch (e: Throwable) {
       promise.reject("display_failed", e.message ?: "unknown", e)
     }
-  }
-
-  /**
-   * Returns a square-cropped copy of `src` with squircle-style rounded
-   * corners (~22% of the side length, matching the adaptive launcher
-   * icon's mask). NotificationCompat.Builder's only `setLargeIcon`
-   * overload takes a raw Bitmap and renders it square, so we have to
-   * bake the rounded corners into the bitmap itself — there's no
-   * `circularLargeIcon` flag on the Compat builder and no IconCompat
-   * overload of setLargeIcon that propagates through MessagingStyle.
-   */
-  private fun roundedSquircleBitmap(src: Bitmap, cornerFraction: Float = 0.22f): Bitmap {
-    val size = minOf(src.width, src.height)
-    val cropped = if (src.width == size && src.height == size) {
-      src
-    } else {
-      val xOff = (src.width - size) / 2
-      val yOff = (src.height - size) / 2
-      Bitmap.createBitmap(src, xOff, yOff, size, size)
-    }
-    val output = Bitmap.createBitmap(size, size, Bitmap.Config.ARGB_8888)
-    val canvas = Canvas(output)
-    val paint = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-      shader = BitmapShader(cropped, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP)
-    }
-    val radius = size * cornerFraction
-    canvas.drawRoundRect(
-      RectF(0f, 0f, size.toFloat(), size.toFloat()),
-      radius,
-      radius,
-      paint,
-    )
-    return output
   }
 
   @ReactMethod
