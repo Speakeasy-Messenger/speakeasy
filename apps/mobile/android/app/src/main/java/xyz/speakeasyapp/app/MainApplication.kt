@@ -23,6 +23,7 @@ import xyz.speakeasyapp.app.fileopener.FileOpenerPackage
 import xyz.speakeasyapp.app.notif.NotifMessagingPackage
 import xyz.speakeasyapp.app.signal.SignalProtocolPackage
 import xyz.speakeasyapp.app.version.VersionPackage
+import xyz.speakeasyapp.app.voicefilter.VoiceFilterPackage
 import xyz.speakeasyapp.app.vouchflow.VouchflowPackage
 import dev.vouchflow.sdk.Vouchflow
 import dev.vouchflow.sdk.VouchflowConfig
@@ -41,6 +42,7 @@ class MainApplication : Application(), ReactApplication {
               add(VersionPackage())
               add(FileOpenerPackage())
               add(NotifMessagingPackage())
+              add(VoiceFilterPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"
