@@ -105,6 +105,11 @@ final class SpeakeasyAudioDevice: NSObject {
   private var inputTapInstalled = false
   private var captureScratch: UnsafeMutablePointer<Int16>?
   private var captureScratchCount: Int = 0
+  /// Phase 5j PR-G — rolling 33ms (1600-sample at 48kHz) feature
+  /// window. Accumulates mono Float samples post-filter; emits a
+  /// `.speakeasyVoiceFilterFeatures` notification when full.
+  private var featureAccum = [Float](repeating: 0, count: kFeatureWindowSamples)
+  private var featureWriteIdx: Int = 0
 
   // MARK: - RTCAudioDevice
 
@@ -371,6 +376,14 @@ final class SpeakeasyAudioDevice: NSObject {
         memset(scratch, 0, neededInts * MemoryLayout<Int16>.size)
         NotificationCenter.default.post(
           name: .speakeasyVoiceFilterRouteLost, object: self)
+      } else {
+        // Phase 5j PR-G — accumulate filtered mono samples into the
+        // feature window. VoiceFilterDsp collapses stereo→mono and
+        // writes the same mono value to both channels, so reading
+        // `scratch[i * channels]` works regardless of channel count.
+        accumulateFeatureSamples(
+          scratch: scratch, frameCount: frameCount, channels: channels,
+          sampleRate: sampleRate)
       }
     }
 
@@ -393,6 +406,48 @@ final class SpeakeasyAudioDevice: NSObject {
       nil, // renderContext
       nil  // renderBlock (we already have the data filled)
     )
+  }
+
+  /// Append mono samples (post-filter, PCM16) into the rolling
+  /// 33ms feature window. When full: compute RMS / pitchHz / ZCR
+  /// and post `.speakeasyVoiceFilterFeatures`. VoiceFilterModule
+  /// observes that notification and re-emits to JS as
+  /// `SpeakeasyVoiceFilterFeatures` for the orchestrator to pack
+  /// into an AnimationFrame.
+  private func accumulateFeatureSamples(
+    scratch: UnsafeMutablePointer<Int16>,
+    frameCount: Int,
+    channels: Int,
+    sampleRate: Double
+  ) {
+    for i in 0..<frameCount {
+      // VoiceFilterDsp mirrors L==R for stereo, so this is mono
+      // regardless of channel count.
+      let s = Float(scratch[i * channels]) / 32768.0
+      featureAccum[featureWriteIdx] = s
+      featureWriteIdx += 1
+      if featureWriteIdx >= kFeatureWindowSamples {
+        emitFeatureWindow(sampleRate: sampleRate)
+        featureWriteIdx = 0
+      }
+    }
+  }
+
+  private func emitFeatureWindow(sampleRate: Double) {
+    let raw = featureAccum.withUnsafeBufferPointer { buf -> RawFeatureWindow in
+      guard let base = buf.baseAddress else { return RawFeatureWindow() }
+      return computeRawFeatures(
+        base, count: kFeatureWindowSamples, sampleRate: sampleRate)
+    }
+    NotificationCenter.default.post(
+      name: .speakeasyVoiceFilterFeatures,
+      object: self,
+      userInfo: [
+        "loudness": raw.loudness,
+        "pitchHz": raw.pitchHz,
+        "zcr": raw.zcr,
+        "sampleRate": sampleRate,
+      ])
   }
 
   private func tearDownEngine() {

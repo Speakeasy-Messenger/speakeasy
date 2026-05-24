@@ -135,10 +135,26 @@ export class AudioFeatureExtractor {
   /**
    * Process one window of PCM samples; return smoothed normalized
    * features. Call at ~30 Hz (one window per FEATURE_WINDOW_MS).
+   *
+   * Equivalent to `pushRawFeatures(extractRawFeatures(samples, sr))`;
+   * exposed as the "I have raw PCM" entry point for tests and any
+   * future JS-side audio source. The Phase 5j Private Call native
+   * filter emits pre-computed raw features over the RN bridge and
+   * uses `pushRawFeatures` directly — avoids shipping 1600 floats
+   * per window over the bridge 30x/sec.
    */
   push(samples: Float32Array): NormalizedFeatures {
-    const raw = extractRawFeatures(samples, this.sampleRate);
+    return this.pushRawFeatures(extractRawFeatures(samples, this.sampleRate));
+  }
 
+  /**
+   * Smoothed normalized features from already-extracted raw features.
+   * Used by the native-emission path (Android forked WebRtcAudioRecord
+   * + iOS SpeakeasyAudioDevice compute RMS / pitch / ZCR inline and
+   * emit them over the RN bridge; this method applies the JS-side
+   * calibration + follower smoothing).
+   */
+  pushRawFeatures(raw: RawFeatures): NormalizedFeatures {
     // ZCR calibration: accumulate baseline from the first
     // ZCR_CALIBRATION_WINDOWS windows of audible signal. Skip silent
     // windows (loudness near zero) so the baseline doesn't drift
@@ -181,6 +197,8 @@ export class AudioFeatureExtractor {
       zcrNorm: this.zcrNormFollower.push(zcrNormInstant),
     };
   }
+
+
 
   /** True once the per-call ZCR baseline has been established. */
   get isCalibrated(): boolean {
