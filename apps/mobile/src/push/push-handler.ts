@@ -32,7 +32,7 @@ import notifee, {
   type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePayload, isFeedbackHandle, isSpeakerHandle } from '@speakeasy/shared';
+import { decodePayload } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -541,7 +541,9 @@ async function displayMessagingNotification(args: {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
-      ...(peerIconUri ? { largeIcon: peerIconUri, circularLargeIcon: true } : {}),
+      // No largeIcon — see displayGenericNotification for the
+      // rationale. The peer portrait reaches the user via Person.icon
+      // inside MessagingStyle, not via a right-side largeIcon tile.
       pressAction: { id: 'default' },
       style: {
         type: AndroidStyle.MESSAGING,
@@ -578,21 +580,13 @@ async function resolveAvatarPath(userId: string): Promise<string | undefined> {
 /** Plain single-line notification — private device / sealed / call. */
 async function displayGenericNotification(data: FcmData): Promise<void> {
   await ensureChannel();
-  // Show the counterparty's avatar as the large icon — a call or a
-  // plain-banner message should still read as "from <peer>", not the
-  // app logo. Sealed messages carry no `sender_id` (the server strips
-  // it upstream), so they keep the logo — the privacy-correct outcome.
-  // System handles (@speaker, @feedback) are channels, not people:
-  // they shouldn't wear a deterministically-hashed animal avatar
-  // (rc.127 shipped a release-announcement banner with a cat from
-  // `defaultAnimalForUser("speaker")`). Skip largeIcon so those
-  // notifications read as the Speakeasy brand.
-  const senderIsSystem =
-    !!data.sender_id &&
-    (isSpeakerHandle(data.sender_id) || isFeedbackHandle(data.sender_id));
-  const largeIcon = data.sender_id && !senderIsSystem
-    ? await cachedAvatarUri(data.sender_id)
-    : undefined;
+  // No `largeIcon`. On Samsung One UI and stock Android a largeIcon
+  // paints a second icon on the right side of the notification — not
+  // a pattern any messenger app uses, and the user shipped a clear
+  // "stop" on this. The peer identity rides on the notification's
+  // title text. (Messaging-style notifications get the peer portrait
+  // on the LEFT instead, via the native module's shortcut-based
+  // Conversation promotion — see NotifMessagingModule.)
   await notifee.displayNotification({
     id: data.conversation_id,
     title: data.title ?? 'speakeasy',
@@ -605,7 +599,6 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
     android: {
       channelId: CHANNEL_ID,
       smallIcon: 'ic_notification',
-      ...(largeIcon ? { largeIcon, circularLargeIcon: true } : {}),
       pressAction: { id: 'default' },
     },
   });

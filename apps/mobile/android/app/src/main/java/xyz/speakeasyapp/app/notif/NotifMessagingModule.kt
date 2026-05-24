@@ -169,13 +169,14 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         .setAutoCancel(true)
         .setShortcutId(shortcutId)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
-        // Use the platform `Icon` overload of setLargeIcon with an
-        // adaptive bitmap so Android applies the launcher mask
-        // (squircle on Samsung One UI). Passing a raw Bitmap to the
-        // other overload rendered the avatar flat-square — Samsung
-        // and the AOSP shade only mask icons that arrive as adaptive
-        // `Icon`s.
-        .apply { peerIcon?.let { setLargeIcon(it.toIcon(reactContext)) } }
+      // Intentionally NOT calling `setLargeIcon`. On Samsung One UI
+      // and Pixel, a largeIcon paints a second avatar on the right
+      // side of the notification — no real messenger does that. The
+      // peer's portrait reaches the user via Android's Conversation
+      // notification promotion (`shortcutId` + the dynamic
+      // ShortcutInfoCompat carrying the peer Person), which replaces
+      // the app icon on the LEFT with that Person.icon. One avatar,
+      // correct slot.
 
       if (withReply) {
         val remoteInput = RemoteInput.Builder(REPLY_RESULT_KEY)
