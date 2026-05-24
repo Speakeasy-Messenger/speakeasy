@@ -6,6 +6,24 @@
 // product module name (PRODUCT_NAME).
 #import "Speakeasy-Swift.h"
 
+// Phase 5j Private Call: hook SpeakeasyAudioDevice into
+// react-native-webrtc so EVERY call (audio / video / private)
+// routes through our AVAudioEngine pipeline. The voice filter
+// inside the device is toggled per-call via ActiveFilterHolder
+// (set by VoiceFilterModule.wrapTrack / dispose). Without this
+// install, react-native-webrtc constructs the stock C++ ADM and
+// the JS shim's wrapTrack has no effect.
+//
+// WebRTCModuleOptions's header isn't exposed in the pod's umbrella
+// module — react-native-webrtc.podspec doesn't set
+// public_header_files. Forward-declare the minimal interface we
+// need; the actual class is resolved dynamically at runtime by
+// ObjC's class lookup.
+@interface WebRTCModuleOptions : NSObject
++ (instancetype)sharedInstance;
+@property(nonatomic, strong, nullable) id audioDevice;
+@end
+
 // --- Crash capture --------------------------------------------------
 // iOS counterpart of Android's MainApplication.kt `installCrashWriter`.
 // `NSSetUncaughtExceptionHandler` catches uncaught NSExceptions —
@@ -75,6 +93,14 @@ static void SpeakeasyWriteCrash(NSException *exception)
   if (vouchflowErr) {
     NSLog(@"Vouchflow.configure failed: %@", vouchflowErr.localizedDescription);
   }
+
+  // Phase 5j Private Call: install our custom RTCAudioDevice BEFORE
+  // the React Native bridge initializes (which constructs the
+  // WebRTCModule, which reads WebRTCModuleOptions). Once set,
+  // every PeerConnectionFactory created by react-native-webrtc
+  // uses our SpeakeasyAudioDevice for capture + playback.
+  WebRTCModuleOptions *rtcOptions = [WebRTCModuleOptions sharedInstance];
+  rtcOptions.audioDevice = [[SpeakeasyAudioDevice alloc] init];
 
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
 }

@@ -36,6 +36,12 @@
 		D5A9FAAAB09116C6D298D776 /* SpeakeasySignalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BBF1CABFBA936E75A390758 /* SpeakeasySignalStore.swift */; };
 		95E4F09E9D584D3D8DE4E294 /* VoiceFilterModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */; };
 		F23DF6AFEDFDD9E5F81B9171 /* VoiceFilterModule.m in Sources */ = {isa = PBXBuildFile; fileRef = D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */; };
+		F4D7268090E0A841F6DC5099 /* SampleFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */; };
+		C56315D3497A6AB8F688066E /* ActiveFilterHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */; };
+		0A37A6A614665075BDA7E7AB /* LatencyGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */; };
+		7FA586E986EF1256F4495056 /* GranularPitchShifter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */; };
+		F1E25D7EDEB45A3C40F8DA57 /* VoiceFilterDsp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */; };
+		9D2B093E3DEA6048750CC6A5 /* SpeakeasyAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -88,6 +94,12 @@
 		F83BF22B04FF8D13918A835F /* ChannelKeyModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = ChannelKeyModule.m; sourceTree = "<group>"; };
 		2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterModule.swift; sourceTree = "<group>"; };
 		D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = VoiceFilterModule.m; sourceTree = "<group>"; };
+		6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleFilter.swift; sourceTree = "<group>"; };
+		79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ActiveFilterHolder.swift; sourceTree = "<group>"; };
+		6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LatencyGuard.swift; sourceTree = "<group>"; };
+		47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GranularPitchShifter.swift; sourceTree = "<group>"; };
+		349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterDsp.swift; sourceTree = "<group>"; };
+		0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyAudioDevice.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -273,9 +285,24 @@
 			children = (
 				2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */,
 				D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */,
+				6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */,
+				79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */,
+				0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */,
+				2E422B0DB989E917559C6660 /* dsp */,
 			);
 			name = VoiceFilter;
 			path = VoiceFilter;
+			sourceTree = "<group>";
+		};
+		2E422B0DB989E917559C6660 /* dsp */ = {
+			isa = PBXGroup;
+			children = (
+				6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */,
+				47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */,
+				349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */,
+			);
+			name = dsp;
+			path = dsp;
 			sourceTree = "<group>";
 		};
 /* End PBXGroup section */
@@ -565,6 +592,12 @@
 				8AA3B14638A0994F86541699 /* VersionModule.m in Sources */,
 				95E4F09E9D584D3D8DE4E294 /* VoiceFilterModule.swift in Sources */,
 				F23DF6AFEDFDD9E5F81B9171 /* VoiceFilterModule.m in Sources */,
+				F4D7268090E0A841F6DC5099 /* SampleFilter.swift in Sources */,
+				C56315D3497A6AB8F688066E /* ActiveFilterHolder.swift in Sources */,
+				0A37A6A614665075BDA7E7AB /* LatencyGuard.swift in Sources */,
+				7FA586E986EF1256F4495056 /* GranularPitchShifter.swift in Sources */,
+				F1E25D7EDEB45A3C40F8DA57 /* VoiceFilterDsp.swift in Sources */,
+				9D2B093E3DEA6048750CC6A5 /* SpeakeasyAudioDevice.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
