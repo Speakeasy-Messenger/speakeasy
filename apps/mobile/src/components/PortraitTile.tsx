@@ -4,6 +4,7 @@ import { useColors } from '../theme/index.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { AvatarErrorBoundary } from '../avatars/AvatarErrorBoundary.js';
 import { RoomMark } from '../avatars/RoomMark.js';
+import type { EmotionState } from '../calls/emotion-state-machine.js';
 
 /**
  * Single source for "user thumbnail" rendering.
@@ -33,6 +34,14 @@ interface AnimalProps {
   skipBlink?: boolean;
   /** Audio amplitude in [0, 1] when in a call context. Idle by default. */
   amplitude?: Animated.Value | number;
+  /**
+   * Phase 5j Private Call — emotion classification from the
+   * peer's audio. Drives eye scale / blink interval / mouth
+   * amplitude boost on the avatar. Optional; default 'baseline'
+   * keeps current behavior at every non-call mount site (list
+   * rows, picker grids, etc.).
+   */
+  emotionState?: EmotionState;
 }
 
 interface RoomProps {
@@ -68,6 +77,7 @@ export function PortraitTile(props: Props): React.ReactElement {
             size={inner}
             skipBlink={props.skipBlink}
             amplitude={props.amplitude}
+            emotionState={props.emotionState}
           />
         </AvatarErrorBoundary>
       ) : (
