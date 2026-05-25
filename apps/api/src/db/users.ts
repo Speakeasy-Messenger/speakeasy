@@ -52,6 +52,38 @@ export interface UserRepo {
   findById(userId: string): Promise<UserSummary | undefined>;
 
   /**
+   * Rotate the device-token binding for an existing user. Used by
+   * `POST /v1/devices/rebind` when a re-installed device needs to
+   * reclaim its account: enroll's tryCreate returns false (409
+   * taken), but the user still owns the handle because their Signal
+   * identity key matches the one persisted on enrollment.
+   *
+   * Outcomes:
+   *   - `no_such_user` — userId isn't enrolled (404).
+   *   - `identity_mismatch` — the `expectedPublicKey` the caller
+   *     proves they have doesn't match what we persisted. Refuse
+   *     the rebind: the caller doesn't own this account (401).
+   *   - `ok` — atomically swap the device-token and replace the
+   *     prekey bundle. The next WS auth from the new token resolves
+   *     to this userId.
+   *
+   * The prekey bundle is rewritten because the local Signal store
+   * regenerates the pre-keys on reinstall — sending the old bundle
+   * after a rebind would route every fresh DM through a prekey the
+   * client no longer has a private half for.
+   *
+   * Safety: this method ONLY trusts `expectedPublicKey` matching
+   * the stored identity key. Vouchflow's biometric proof gates the
+   * route, not this method.
+   */
+  rebindDevice(args: {
+    userId: string;
+    newDeviceToken: string;
+    expectedPublicKey: Buffer;
+    bundle: PreKeyBundleInput;
+  }): Promise<'ok' | 'no_such_user' | 'identity_mismatch'>;
+
+  /**
    * Resolve `deviceToken → userId`. Used by `requireAuth` when the
    * Vouchflow validator's `ValidatedAttestation.userId` is undefined
    * (real Vouchflow doesn't track our internal Speakeasy id; we own

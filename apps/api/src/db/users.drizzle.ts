@@ -42,6 +42,45 @@ export class DrizzleUserRepo implements UserRepo {
     });
   }
 
+  async rebindDevice(args: {
+    userId: string;
+    newDeviceToken: string;
+    expectedPublicKey: Buffer;
+    bundle: PreKeyBundleInput;
+  }): Promise<'ok' | 'no_such_user' | 'identity_mismatch'> {
+    const db = getDb();
+    return db.transaction(async (tx) => {
+      const rows = await tx
+        .select({ publicKey: users.publicKey })
+        .from(users)
+        .where(eq(users.id, args.userId))
+        .limit(1);
+      const row = rows[0];
+      if (!row) return 'no_such_user';
+      if (!row.publicKey.equals(args.expectedPublicKey)) {
+        return 'identity_mismatch';
+      }
+      await tx
+        .update(users)
+        .set({ deviceToken: args.newDeviceToken })
+        .where(eq(users.id, args.userId));
+      // Prekey bundle: replace wholesale so a fresh-install client
+      // never hands out a prekey it doesn't have the private half
+      // for. Drop the old bundle (and its consumed-prekey rows by
+      // FK cascade) and re-insert.
+      await tx.delete(prekeyBundles).where(eq(prekeyBundles.userId, args.userId));
+      await tx.insert(prekeyBundles).values({
+        userId: args.userId,
+        registrationId: args.bundle.registrationId,
+        signedPrekeyId: args.bundle.signedPreKeyId,
+        signedPrekey: Buffer.from(args.bundle.signedPreKey, 'base64'),
+        signedPrekeySig: Buffer.from(args.bundle.signedPreKeySig, 'base64'),
+        prekeys: sql`${JSON.stringify(args.bundle.preKeys)}::jsonb`,
+      });
+      return 'ok';
+    });
+  }
+
   async findById(userId: string): Promise<UserSummary | undefined> {
     const db = getDb();
     const rows = await db
