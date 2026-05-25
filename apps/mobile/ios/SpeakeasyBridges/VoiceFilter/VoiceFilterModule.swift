@@ -22,22 +22,87 @@
 //  on filter-process failure so unfiltered audio never reaches the
 //  encoder.
 //
+//  Phase 5j PR-G — feature event emission. SpeakeasyAudioDevice
+//  posts `Notification.Name.speakeasyVoiceFilterFeatures` whenever
+//  it has a fresh 33ms feature window (loudness, pitchHz, zcr).
+//  This module observes that notification and re-emits it as the
+//  RN event `SpeakeasyVoiceFilterFeatures`, which the JS-side
+//  `attachFeatureEventListener` consumes to pack into an
+//  AnimationFrame over the WebRTC data channel.
+//
 
 import Foundation
 import React
 
 @objc(VoiceFilterModule)
-final class VoiceFilterModule: NSObject {
+final class VoiceFilterModule: RCTEventEmitter {
 
-  @objc static func requiresMainQueueSetup() -> Bool { return false }
+  /// Single event name; constants live in JS as well so the two
+  /// sides stay in sync via grep, not a generated header.
+  private static let kFeaturesEvent = "SpeakeasyVoiceFilterFeatures"
 
-  @objc func constantsToExport() -> [AnyHashable: Any]! {
+  // MARK: - RCTBridgeModule
+
+  override static func requiresMainQueueSetup() -> Bool { return false }
+
+  override func constantsToExport() -> [AnyHashable: Any]! {
     #if DEBUG
       return ["isAvailable": true]
     #else
       return ["isAvailable": false]
     #endif
   }
+
+  // MARK: - RCTEventEmitter
+
+  override func supportedEvents() -> [String] {
+    return [Self.kFeaturesEvent]
+  }
+
+  /// Whether JS has at least one listener registered. Tracking
+  /// this lets us avoid the post-notification → bridge-call cost
+  /// when nobody is listening (the Private Call isn't active, or
+  /// the receiver hasn't subscribed yet).
+  private var hasListeners = false
+
+  override func startObserving() {
+    hasListeners = true
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(handleFeaturesNotification(_:)),
+      name: .speakeasyVoiceFilterFeatures,
+      object: nil
+    )
+  }
+
+  override func stopObserving() {
+    hasListeners = false
+    NotificationCenter.default.removeObserver(
+      self,
+      name: .speakeasyVoiceFilterFeatures,
+      object: nil
+    )
+  }
+
+  @objc private func handleFeaturesNotification(_ notification: Notification) {
+    guard hasListeners,
+      let info = notification.userInfo,
+      let loudness = info["loudness"] as? Double,
+      let pitchHz = info["pitchHz"] as? Double,
+      let zcr = info["zcr"] as? Double,
+      let sampleRate = info["sampleRate"] as? Double
+    else { return }
+    sendEvent(
+      withName: Self.kFeaturesEvent,
+      body: [
+        "loudness": loudness,
+        "pitchHz": pitchHz,
+        "zcr": zcr,
+        "sampleRate": sampleRate,
+      ])
+  }
+
+  // MARK: - JS-callable methods
 
   /// Default pitch + formant shift in semitones. Negative sounds
   /// "deeper" / more disguised; locked v1 plan pick. Matches the
@@ -71,4 +136,12 @@ final class VoiceFilterModule: NSObject {
     ActiveFilterHolder.shared.set(nil)
     resolve(nil)
   }
+}
+
+extension Notification.Name {
+  /// Posted by SpeakeasyAudioDevice after the SampleFilter runs on
+  /// a fresh 33ms feature window. userInfo: ["loudness": Double,
+  /// "pitchHz": Double, "zcr": Double, "sampleRate": Double].
+  static let speakeasyVoiceFilterFeatures =
+    Notification.Name("speakeasy.voiceFilter.features")
 }

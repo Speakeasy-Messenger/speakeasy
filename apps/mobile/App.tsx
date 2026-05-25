@@ -35,6 +35,7 @@ import {
   disposeFilter,
   wrapTrackWithFilter,
 } from './src/native/voice-filter.js';
+import { attachFeatureEventListener } from './src/calls/feature-event-listener.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
 import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js'; // vouchflow kept — used by post-enrollment refresh effect
@@ -646,6 +647,14 @@ export default function App() {
         },
       });
       setCallOrchestrator(callOrch);
+      // Phase 5j PR-G — pipe the native filter's per-window feature
+      // events into the orchestrator's animation data channel. No-op
+      // when the native module isn't available (test/web). The
+      // returned unsubscribe runs on the next CallOrchestrator init
+      // cycle (e.g., logout → re-enrollment); the subscription
+      // itself is idle while no Private Call is active, so leaking
+      // a stale subscription is harmless.
+      attachFeatureEventListener(callOrch);
     } catch (err) {
       diag('app', 'CallOrchestrator init FAILED — calls disabled', {
         err: String(err),
