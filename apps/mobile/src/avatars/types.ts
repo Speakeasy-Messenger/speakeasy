@@ -17,6 +17,7 @@ import type React from 'react';
 // react-native's Animated namespace. Imported as a type for the value
 // handles passed to the per-animal render functions.
 import type { Animated as RNAnimated } from 'react-native';
+import type { EmotionState } from '../calls/emotion-state-machine.js';
 
 /** Stable identifier persisted in the user's profile + sent on
  *  conversation handshake to peers. Don't rename without a migration.
@@ -100,6 +101,20 @@ export type AnimalRenderProps = {
    * Animated.Value (zero when no audio source is wired).
    */
   amplitude: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  /**
+   * Phase 5j Private Call — current decoded emotion from
+   * `EmotionStateMachine`. Drives per-animal *signature* tells
+   * (raven feather ruffle, fox ear perk, hawk head tilt). Universal
+   * channels — eye scale, blink interval, amplitude boost — are
+   * applied by `AvatarRenderer` upstream; this prop is only for
+   * animal-shape-specific motion that can't be expressed as a
+   * generic scale/blink.
+   *
+   * Optional + defaults to `'baseline'` so non-private call sites
+   * (chat row avatars, picker tiles, idle previews) render the
+   * neutral pose without any flag-checking.
+   */
+  emotionState?: EmotionState;
 };
 
 export type AnimalRender = (props: AnimalRenderProps) => React.ReactElement;
