@@ -46,11 +46,12 @@ final class VoiceFilterModule: RCTEventEmitter {
   override static func requiresMainQueueSetup() -> Bool { return false }
 
   override func constantsToExport() -> [AnyHashable: Any]! {
-    #if DEBUG
-      return ["isAvailable": true]
-    #else
-      return ["isAvailable": false]
-    #endif
+    // Phase 5j Private Call — exposed to RC testers in 0.7.0-rc.3+.
+    // Was gated to `#if DEBUG` only; the founder flipped the flag
+    // for this RC so a release-signed build can exercise the full
+    // Private Call path on real hardware before the next production
+    // cut. Matches the Android-side flip in VoiceFilterModule.kt.
+    return ["isAvailable": true]
   }
 
   // MARK: - RCTEventEmitter
@@ -113,16 +114,13 @@ final class VoiceFilterModule: RCTEventEmitter {
   func wrapTrack(_ trackId: String,
                  resolver resolve: @escaping RCTPromiseResolveBlock,
                  rejecter reject: @escaping RCTPromiseRejectBlock) {
-    #if DEBUG
-      // Same shape as Android: install the DSP into the holder;
-      // return the original track id back since the filter wraps
-      // the SAMPLES, not the track handle.
-      let dsp = VoiceFilterDsp(semitones: Self.defaultShiftSemitones)
-      ActiveFilterHolder.shared.set(dsp)
-      resolve(["filteredTrackId": trackId])
-    #else
-      reject("runtime_unavailable", "voice filter not built into release", nil)
-    #endif
+    // Phase 5j 0.7.0-rc.3+ — gate flipped open for RC testers.
+    // Same shape as Android: install the DSP into the holder; return
+    // the original track id back since the filter wraps the SAMPLES,
+    // not the track handle.
+    let dsp = VoiceFilterDsp(semitones: Self.defaultShiftSemitones)
+    ActiveFilterHolder.shared.set(dsp)
+    resolve(["filteredTrackId": trackId])
   }
 
   @objc(dispose:rejecter:)

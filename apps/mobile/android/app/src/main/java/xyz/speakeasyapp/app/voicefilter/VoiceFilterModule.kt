@@ -48,18 +48,16 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
   override fun getName(): String = NAME
 
   override fun getConstants(): Map<String, Any> = mapOf(
-      // Dev/debug builds only until the founder flips the flag for
-      // release. Release builds stay invisible end-to-end (the JS
-      // shim's `isPrivateCallAvailable()` checks this constant).
-      "isAvailable" to BuildConfig.DEBUG,
+      // Phase 5j Private Call — exposed to RC testers in 0.7.0-rc.3+.
+      // Was gated to `BuildConfig.DEBUG` only; the founder flipped
+      // the flag for this RC so a release-signed APK can exercise
+      // the full Private Call path on real hardware before the next
+      // production cut. See PR-G2 commit message for the rationale.
+      "isAvailable" to true,
   )
 
   @ReactMethod
   fun wrapTrack(trackId: String, promise: Promise) {
-    if (!BuildConfig.DEBUG) {
-      promise.reject("runtime_unavailable", "voice filter not built into release")
-      return
-    }
     // The JS shim doesn't actually need a new track id — the filter
     // wraps the same track's samples in place via the ADM fork. We
     // return the original id so the orchestrator's call to
