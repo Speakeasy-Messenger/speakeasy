@@ -5,6 +5,7 @@ import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import xyz.speakeasyapp.app.BuildConfig
 import xyz.speakeasyapp.app.voicefilter.dsp.VoiceFilterDsp
 
@@ -34,6 +35,15 @@ import xyz.speakeasyapp.app.voicefilter.dsp.VoiceFilterDsp
  */
 class VoiceFilterModule(reactContext: ReactApplicationContext) :
     ReactContextBaseJavaModule(reactContext) {
+
+  init {
+    // Phase 5j PR-G — make this module the singleton sink for the
+    // forked WebRtcAudioRecord's feature events. The module is
+    // created once by ReactPackage; the static holder lets the
+    // audio-record thread fire events without needing a ref to the
+    // ReactContext.
+    instance = this
+  }
 
   override fun getName(): String = NAME
 
@@ -75,8 +85,39 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
     promise.resolve(null)
   }
 
+  /**
+   * Emit a single raw feature window to JS. Called from the forked
+   * [org.webrtc.audio.WebRtcAudioRecord]'s AudioRecordThread after
+   * the SampleFilter has run and [FeatureWindow] has filled. Posts
+   * a `SpeakeasyVoiceFilterFeatures` device event the JS-side
+   * `attachFeatureEventListener` consumes (and gates on the
+   * orchestrator's active call kind so non-Private events are
+   * dropped at the JS side, not here).
+   *
+   * Best-effort: if the bridge isn't ready or the catalyst is gone
+   * we swallow rather than crashing the audio thread.
+   */
+  fun emitFeatures(loudness: Double, pitchHz: Double, zcr: Double, sampleRate: Double) {
+    try {
+      val ctx = reactApplicationContext
+      if (!ctx.hasActiveReactInstance()) return
+      val params = Arguments.createMap().apply {
+        putDouble("loudness", loudness)
+        putDouble("pitchHz", pitchHz)
+        putDouble("zcr", zcr)
+        putDouble("sampleRate", sampleRate)
+      }
+      ctx.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+          .emit(EVENT_FEATURES, params)
+    } catch (_: Throwable) {
+      // Swallow — the audio-record thread must never throw or the
+      // mic loop dies and the call goes silent.
+    }
+  }
+
   companion object {
     const val NAME = "SpeakeasyVoiceFilter"
+    const val EVENT_FEATURES = "SpeakeasyVoiceFilterFeatures"
 
     /**
      * Default pitch + formant shift in semitones. Negative sounds
@@ -85,5 +126,15 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
      * peer) if the founder wants A/B testing.
      */
     private const val DEFAULT_SHIFT_SEMITONES = -2f
+
+    /**
+     * Static handle so the forked WebRtcAudioRecord (running on
+     * the audio thread, no ReactContext access) can fire feature
+     * events through the singleton VoiceFilterModule instance.
+     * Assigned in the module's init {}; nulled by [setFilter]'s
+     * disposal path is unnecessary because the module lives for
+     * the app's lifetime.
+     */
+    @Volatile @JvmStatic var instance: VoiceFilterModule? = null
   }
 }

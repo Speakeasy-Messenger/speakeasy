@@ -42,6 +42,7 @@
 		7FA586E986EF1256F4495056 /* GranularPitchShifter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */; };
 		F1E25D7EDEB45A3C40F8DA57 /* VoiceFilterDsp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */; };
 		9D2B093E3DEA6048750CC6A5 /* SpeakeasyAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */; };
+		039730D28D76856A4B272F09 /* FeatureWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF18248BF73728FE0759C4A /* FeatureWindow.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -100,6 +101,7 @@
 		47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GranularPitchShifter.swift; sourceTree = "<group>"; };
 		349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterDsp.swift; sourceTree = "<group>"; };
 		0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyAudioDevice.swift; sourceTree = "<group>"; };
+		DCF18248BF73728FE0759C4A /* FeatureWindow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FeatureWindow.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -288,6 +290,7 @@
 				6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */,
 				79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */,
 				0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */,
+				DCF18248BF73728FE0759C4A /* FeatureWindow.swift */,
 				2E422B0DB989E917559C6660 /* dsp */,
 			);
 			name = VoiceFilter;
@@ -598,6 +601,7 @@
 				7FA586E986EF1256F4495056 /* GranularPitchShifter.swift in Sources */,
 				F1E25D7EDEB45A3C40F8DA57 /* VoiceFilterDsp.swift in Sources */,
 				9D2B093E3DEA6048750CC6A5 /* SpeakeasyAudioDevice.swift in Sources */,
+				039730D28D76856A4B272F09 /* FeatureWindow.swift in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};

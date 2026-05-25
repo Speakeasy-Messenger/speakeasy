@@ -8,6 +8,12 @@
 // (the RTCAudioDevice conformance lives in a Swift extension on the
 // class); ObjC needs RTCAudioDevice in scope to compile that line.
 #import <WebRTC/WebRTC.h>
+// Phase 5j PR-G — VoiceFilterModule extends RCTEventEmitter (so it
+// can emit `SpeakeasyVoiceFilterFeatures` to JS at ~30 Hz). The
+// generated Speakeasy-Swift.h declares that superclass, which the
+// ObjC compiler can't resolve unless RCTEventEmitter.h is in scope
+// BEFORE the Speakeasy-Swift.h import.
+#import <React/RCTEventEmitter.h>
 // Auto-generated header exposing the Speakeasy app target's Swift @objc
 // declarations to ObjC. The "Speakeasy-Swift.h" name is derived from the
 // product module name (PRODUCT_NAME).

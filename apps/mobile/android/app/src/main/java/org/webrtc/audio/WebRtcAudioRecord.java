@@ -44,7 +44,9 @@ import org.webrtc.audio.JavaAudioDeviceModule.AudioRecordStartErrorCode;
 import org.webrtc.audio.JavaAudioDeviceModule.AudioRecordStateCallback;
 import org.webrtc.audio.JavaAudioDeviceModule.SamplesReadyCallback;
 import xyz.speakeasyapp.app.voicefilter.ActiveFilterHolder;
+import xyz.speakeasyapp.app.voicefilter.FeatureWindow;
 import xyz.speakeasyapp.app.voicefilter.SampleFilter;
+import xyz.speakeasyapp.app.voicefilter.VoiceFilterModule;
 
 // SPEAKEASY FORK NOTE — see apps/mobile/android/app/src/main/java/org/webrtc/audio/README.md
 // This file is a verbatim copy of upstream WebRTC M124's WebRtcAudioRecord.java
@@ -117,6 +119,12 @@ class WebRtcAudioRecord {
   private final @Nullable SamplesReadyCallback audioSamplesReadyCallback;
   private final boolean isAcousticEchoCancelerSupported;
   private final boolean isNoiseSuppressorSupported;
+  // SPEAKEASY FORK PR-G — rolling 33ms feature window for the
+  // Private Call avatar-emotion stream. Mono PCM16 samples are
+  // pushed in after the SampleFilter runs; each full window calls
+  // VoiceFilterModule.emitFeatures which fires
+  // SpeakeasyVoiceFilterFeatures over the RN bridge.
+  private final FeatureWindow speakeasyFeatureWindow = new FeatureWindow();
 
   /**
    * Audio thread which keeps calling ByteBuffer.read() waiting for audio
@@ -161,10 +169,11 @@ class WebRtcAudioRecord {
               final int savedPos = byteBuffer.position();
               final int savedLim = byteBuffer.limit();
               byteBuffer.position(0).limit(bytesRead);
+              final int sampleRateHz = audioRecord.getSampleRate();
+              final int channelCount = audioRecord.getChannelCount();
               boolean ok;
               try {
-                ok = f.process(byteBuffer, audioRecord.getSampleRate(),
-                    audioRecord.getChannelCount());
+                ok = f.process(byteBuffer, sampleRateHz, channelCount);
               } catch (RuntimeException e) {
                 Logging.e(TAG, "Speakeasy filter threw; failing closed", e);
                 ok = false;
@@ -173,6 +182,13 @@ class WebRtcAudioRecord {
               if (!ok) {
                 byteBuffer.clear();
                 byteBuffer.put(emptyBytes);
+              } else {
+                // SPEAKEASY FORK — feature window accumulator (PR-G).
+                // After filtering, decode PCM16 → mono Float and push
+                // into the FeatureWindow; on each full 33ms window the
+                // window calls back into VoiceFilterModule.emitFeatures
+                // which fires `SpeakeasyVoiceFilterFeatures` to JS.
+                pushFeatureSamples(bytesRead, channelCount, sampleRateHz);
               }
             }
           }
@@ -555,6 +571,43 @@ class WebRtcAudioRecord {
     }
     Logging.w(TAG, "SetNoiseSuppressorEnabled(" + enabled + ")");
     return effects.toggleNS(enabled);
+  }
+
+  /**
+   * SPEAKEASY FORK PR-G — decode the just-filtered PCM16 bytes in
+   * `byteBuffer` to mono Float and push into the feature window.
+   * On each full 33ms window the FeatureWindow callback fires
+   * VoiceFilterModule.emitFeatures, which posts an RN event to JS.
+   * VoiceFilterDsp collapses stereo→mono and writes the same mono
+   * value to both channels, so reading every `channelCount`th
+   * sample is safe regardless of mono vs stereo capture.
+   */
+  private void pushFeatureSamples(int bytesRead, int channelCount, int sampleRateHz) {
+    final VoiceFilterModule mod = VoiceFilterModule.getInstance();
+    if (mod == null) {
+      // No bridge available — skip the window-fill work entirely so
+      // we don't burn CPU computing features no one will see.
+      return;
+    }
+    final int bytesPerSample = 2 * channelCount;
+    final int frameCount = bytesRead / bytesPerSample;
+    final int savedPos = byteBuffer.position();
+    final int savedLim = byteBuffer.limit();
+    byteBuffer.position(0).limit(bytesRead);
+    final java.nio.ShortBuffer shortBuf =
+        byteBuffer.order(java.nio.ByteOrder.LITTLE_ENDIAN).asShortBuffer();
+    final double sampleRateD = (double) sampleRateHz;
+    for (int i = 0; i < frameCount; i++) {
+      // Mono sample at sample-index i, channel 0; works for both
+      // mono (channelCount=1) and stereo with mirrored L==R.
+      final short s = shortBuf.get(i * channelCount);
+      final float fs = s / 32768.0f;
+      speakeasyFeatureWindow.push(fs, sampleRateD, (loudness, pitchHz, zcr) -> {
+        mod.emitFeatures(loudness, pitchHz, zcr, sampleRateD);
+        return kotlin.Unit.INSTANCE;
+      });
+    }
+    byteBuffer.position(savedPos).limit(savedLim);
   }
 
   // Releases the native AudioRecord resources.
