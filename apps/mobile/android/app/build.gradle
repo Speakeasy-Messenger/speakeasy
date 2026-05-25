@@ -167,8 +167,23 @@ react {
  * live in `proguard-rules.pro`. Resource shrinking is deliberately left
  * off — string-addressed resources (e.g. the `ic_notification` icon
  * named from JS) are unsafe for the resource shrinker to reason about.
+ *
+ * Phase 5j: temporarily off. The Speakeasy fork at
+ * `app/src/main/java/org/webrtc/audio/*` collides with the same FQCNs
+ * in the upstream `org.jitsi:webrtc:124.0.0` jar; debug builds resolve
+ * via dex ordering (project sources land in earlier dex files than
+ * library deps), but R8 minification refuses to merge the duplicate
+ * classes and fails with "Compilation failed to complete, origin:
+ * .../webrtc-124.0.0-runtime.jar:org/webrtc/audio/JavaAudioDeviceModule
+ * $AudioTrackErrorCallback.class". The proper fix is a Gradle
+ * artifact transform that strips `org/webrtc/audio/*` from the upstream
+ * jar before R8 sees it (see `apps/mobile/android/app/src/main/java/
+ * org/webrtc/audio/README.md` for the fork rationale). Tracking as
+ * a follow-up — disabling minify is the unblock so RC builds can ship
+ * a real APK; the runtime behavior is the same as the verified debug
+ * builds, just larger + un-obfuscated.
  */
-def enableProguardInReleaseBuilds = true
+def enableProguardInReleaseBuilds = false
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
