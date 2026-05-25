@@ -45,9 +45,18 @@ export function CallTypeSheet({
   const peerSupportsPrivate = useCallCapabilities((s) =>
     s.supports(peerUserId, 'private'),
   );
-  // Both halves must be true. isPrivateCallAvailable is a sync read of
-  // the native module's constant, so it's cheap to call on every render.
-  const showPrivate = peerSupportsPrivate && isPrivateCallAvailable();
+  // RC-4 ONLY: bypass the peer-supports check so the Private row
+  // appears even when the callee is on a pre-rc.3 build that didn't
+  // advertise `'private'` in its `supported_call_kinds`. Tightens
+  // back to `peerSupportsPrivate && ...` for any production cut.
+  // Real end-to-end testing still requires the peer on rc.3 because
+  // the server-side fan-out filter (call-router.ts) also gates on
+  // capability — a Private offer to a non-rc.3 peer routes to zero
+  // devices and the caller rings out at the 45s timeout. This
+  // bypass exists so the founder can visually verify the row +
+  // local filter install path before scheduling peer upgrades.
+  void peerSupportsPrivate; // intentionally unused under the bypass
+  const showPrivate = isPrivateCallAvailable();
 
   return (
     <Modal
