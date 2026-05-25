@@ -29,6 +29,18 @@ interface Props {
 }
 
 /**
+ * Hero avatar size for Private calls — large enough to read as
+ * "this is the call subject" instead of a chat-row thumbnail.
+ * Voice/video calls keep the small portrait + SpeechRing affordance.
+ * Sized to leave breathing room under the connected-eyebrow
+ * (~24px) + above the handle (~28px) + state label (~20px) +
+ * controls row on the smallest supported screen (iPhone SE
+ * 1334×750 logical 320×568, ~568px tall) — 280px clears with
+ * ~80px margin once the SafeAreaView insets are accounted for.
+ */
+const PRIVATE_HERO_SIZE = 280;
+
+/**
  * In-call screen — shows the peer + self animal portraits, the
  * ringing/connected state, and the three live controls (mute /
  * speaker / hang up). Renders for both outgoing and incoming
@@ -376,7 +388,12 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
       style={[styles.root, { backgroundColor: themed.cream }]}
       testID="call-screen"
     >
-      <View style={styles.peer}>
+      <View
+        style={[
+          styles.peer,
+          active.kind === 'private' ? styles.peerHero : null,
+        ]}
+      >
         {/* Private Call connected eyebrow — persistent "this voice is
             masked" cue throughout the call. Reuses meta type from the
             incoming ring eyebrow grammar (locked /plan-design-review
@@ -390,16 +407,19 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
             PRIVATE CALL · CONNECTED
           </Text>
         )}
-        {/* Brass speech-ring per CALLS.md §04: a 1px brass ring
-            expands outward from the peer tile when their voice is
-            audible. Driven by remoteAmp; opacity fades to 0 while
-            scale runs to 1.18 over 1s, so loud speech leaves a
-            trail of expanding rings. */}
-        <SpeechRing amplitude={remoteAmp} primary={themed.primary} />
+        {/* Brass speech-ring per CALLS.md §04 — only for audio/video
+            calls. Private calls render the peer's avatar as a hero
+            element (280px); the mouth amplitude + emotion state on
+            the avatar itself carries the "they're speaking" signal,
+            and a 132px ring around a 280px avatar would look like an
+            unrelated decoration. */}
+        {active.kind !== 'private' && (
+          <SpeechRing amplitude={remoteAmp} primary={themed.primary} />
+        )}
         <PortraitTile
           kind="animal"
           id={peerAnimalId}
-          size={120}
+          size={active.kind === 'private' ? PRIVATE_HERO_SIZE : 120}
           amplitude={remoteAmp}
           emotionState={peerEmotionState}
         />
@@ -669,6 +689,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     gap: space.md,
     marginTop: '20%',
+  },
+  // Hero treatment for Private calls — the avatar is the call's
+  // primary subject (the "your animal speaks for you" promise),
+  // so it sits closer to the top of the safe-area and the
+  // surrounding metadata gives it more visual prominence.
+  peerHero: {
+    marginTop: space.lg,
+    gap: space.lg,
   },
   // Outgoing pre-connect (CALLS.md §02) — Door mark + eyebrow +
   // handle + state caption stacked centered.
