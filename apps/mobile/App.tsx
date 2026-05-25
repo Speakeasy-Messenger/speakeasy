@@ -635,11 +635,33 @@ export default function App() {
           usePeerAnimation.getState().clear(entry.peerUserId);
         },
         onPeerAnimationFrame: (peerUserId, frame) => {
+          // Continuous channels (amplitude / mouthShape / pitchTrend
+          // / etc.) update every frame. The event + eventAt fields
+          // MUST be sticky: they only change when a new event
+          // (frame.event !== 'none') arrives. If we reset eventAt
+          // to 0 on every subsequent 'none' frame (~33 ms later,
+          // since the sender's cooldown is 60 windows), useEventOverlay
+          // would re-run with cleared deps and abort the in-flight
+          // ~1.5 s animation about one frame after it started.
+          // Holding the previous event + eventAt across 'none'
+          // frames lets the animation run to completion; the next
+          // real event lands with a fresh `Date.now()` and the
+          // hook re-fires.
+          const prev = usePeerAnimation.getState().byPeerId[peerUserId];
+          const isNewEvent = frame.event !== 'none';
           usePeerAnimation.getState().set(peerUserId, {
             amplitude: frame.amplitude,
-            emotionState: frame.emotionState,
             pitchNorm: frame.pitchNorm,
             zcrNorm: frame.zcrNorm,
+            mouthShape: frame.mouthShape,
+            pitchTrend: frame.pitchTrend,
+            expressiveness: frame.expressiveness,
+            activity: frame.activity,
+            event: isNewEvent ? frame.event : prev?.event ?? 'none',
+            // Stamp with the local clock — the overlay's lifetime
+            // ticks against receive time, so sender/receiver clock
+            // drift doesn't shorten or extend it.
+            eventAt: isNewEvent ? Date.now() : prev?.eventAt ?? 0,
           });
         },
         getAllowIncomingCalls: () =>

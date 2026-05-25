@@ -4,7 +4,7 @@ import { useColors } from '../theme/index.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { AvatarErrorBoundary } from '../avatars/AvatarErrorBoundary.js';
 import { RoomMark } from '../avatars/RoomMark.js';
-import type { EmotionState } from '../calls/emotion-state-machine.js';
+import type { ProsodyState } from '../avatars/types.js';
 
 /**
  * Single source for "user thumbnail" rendering.
@@ -35,13 +35,13 @@ interface AnimalProps {
   /** Audio amplitude in [0, 1] when in a call context. Idle by default. */
   amplitude?: Animated.Value | number;
   /**
-   * Phase 5j Private Call — emotion classification from the
-   * peer's audio. Drives eye scale / blink interval / mouth
-   * amplitude boost on the avatar. Optional; default 'baseline'
-   * keeps current behavior at every non-call mount site (list
-   * rows, picker grids, etc.).
+   * Phase 5j Private Call (rc.11) — peer's latest prosody snapshot
+   * decoded from the WebRTC data channel. The avatar's continuous
+   * channels (head tilt, ear flicks, gesture amplitude, signature
+   * pose) follow this. Optional; default neutral keeps current
+   * behavior at every non-call mount site.
    */
-  emotionState?: EmotionState;
+  prosody?: ProsodyState;
 }
 
 interface RoomProps {
@@ -77,7 +77,7 @@ export function PortraitTile(props: Props): React.ReactElement {
             size={inner}
             skipBlink={props.skipBlink}
             amplitude={props.amplitude}
-            emotionState={props.emotionState}
+            prosody={props.prosody}
           />
         </AvatarErrorBoundary>
       ) : (

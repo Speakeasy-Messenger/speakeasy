@@ -47,6 +47,41 @@ const FOLLOWER_RELEASE_MS = 200;
  *  chunks are averaged to establish the per-call baseline. */
 const ZCR_CALIBRATION_WINDOWS = Math.ceil(500 / FEATURE_WINDOW_MS);
 
+/** Sliding-window length (in feature windows) for the pitch-trend
+ *  signal. 6 × 33 ms ≈ 200 ms — long enough to filter out single-
+ *  syllable pitch wobble, short enough that "going up at the end of
+ *  a question" reads as a trend by the time the sentence ends. */
+const PITCH_TREND_WINDOWS = 6;
+
+/** Sliding-window length (in feature windows) for the expressiveness
+ *  (pitch variance) and activity (voiced-transition rate) signals.
+ *  30 × 33 ms ≈ 1 s — gives roughly one prosodic phrase. */
+const PROSODY_WINDOWS = 30;
+
+/** RMS below which we treat the input as silence for the purpose of
+ *  voicedness tracking. Avoids spurious transitions from numerical
+ *  noise during quiet periods. Matches the pitch detector's noise
+ *  gate (see `estimatePitchHz`). */
+const VOICED_RMS_GATE = 0.02;
+
+/**
+ * Discrete acoustic events the sender's detector signals to the
+ * receiver via a one-shot animation overlay. Continuous channels
+ * (mouthShape / pitchTrend / etc.) drive the avatar's *steady-state*
+ * motion; events drive the *dramatic beats* — the moments where
+ * humans most strongly want expression confirmation.
+ *
+ * Detection is heuristic for now (see `AcousticEventDetector`); the
+ * wire format is decoupled so a future on-device classifier can fill
+ * the same enum without protocol churn.
+ */
+export type AcousticEvent =
+  | 'none'
+  | 'laugh'
+  | 'sigh'
+  | 'gasp'
+  | 'hmm';
+
 export interface RawFeatures {
   /** RMS in [0, 1] — instantaneous loudness over this window. */
   loudness: number;
@@ -74,6 +109,37 @@ export interface NormalizedFeatures {
    * the calibration window (no signal). Smoothed.
    */
   zcrNorm: number;
+  /**
+   * [0, 1] — derived mouth-pose proxy. 0 = closed/silent, 1 = open
+   * vowel. Distinct from `loudness` because a loud unvoiced
+   * fricative ("sssss") returns a LOWER value than a loud voiced
+   * vowel at the same RMS — the mouth opens for vowels, not for
+   * sibilants. This gives the mouth animation actual shape variety
+   * rather than scaling on amplitude alone. Smoothed.
+   */
+  mouthShape: number;
+  /**
+   * [-1, 1] — pitch trend over the last ~200 ms. Positive = pitch
+   * is rising (curious, questioning, animated); negative = pitch is
+   * falling (declarative, settled, tired). 0 during silence or
+   * stable pitch. Smoothed.
+   */
+  pitchTrend: number;
+  /**
+   * [0, 1] — coefficient of variation on voiced-pitch readings over
+   * the last ~1 s. 0 = monotone; 1 = highly varied (singsong /
+   * animated). The avatar uses this as a gesture-amplitude
+   * multiplier — your animal moves *more* when your voice is alive,
+   * and goes still when you're flat. Smoothed.
+   */
+  expressiveness: number;
+  /**
+   * [0, 1] — voiced-segment transition rate over the last ~1 s,
+   * normalized to "lots of phonemic activity vs. holding a long
+   * note." Drives the "fidget" channel on animals that have one
+   * (ear flicks, feather settles, tail twitches). Smoothed.
+   */
+  activity: number;
 }
 
 /**
@@ -121,12 +187,37 @@ export class AudioFeatureExtractor {
     FOLLOWER_RELEASE_MS,
     FEATURE_WINDOW_MS,
   );
+  private readonly mouthShapeFollower = new Follower(
+    FOLLOWER_ATTACK_MS,
+    FOLLOWER_RELEASE_MS,
+    FEATURE_WINDOW_MS,
+  );
+  // The trend / variance / activity followers run on a longer time
+  // scale than the per-syllable channels — these signals are about
+  // *phrasing*, not phoneme detail. 150 ms attack / 350 ms release
+  // hides single-syllable wobble while still tracking when the
+  // speaker actually shifts register.
+  private readonly pitchTrendFollower = new Follower(150, 350, FEATURE_WINDOW_MS);
+  private readonly expressivenessFollower = new Follower(150, 350, FEATURE_WINDOW_MS);
+  private readonly activityFollower = new Follower(150, 350, FEATURE_WINDOW_MS);
   /** Rolling sum of ZCR readings during the calibration window. */
   private zcrCalibSum = 0;
   /** How many windows have contributed to the baseline so far. */
   private zcrCalibCount = 0;
   /** Established baseline once calibration completes; undefined until then. */
   private zcrBaseline: number | undefined;
+  /** Rolling buffer of raw pitchHz readings used for both trend (last
+   *  PITCH_TREND_WINDOWS) and variance (last PROSODY_WINDOWS). Values
+   *  of 0 mark unvoiced/silent windows and are excluded from variance
+   *  + trend calculations so a long pause doesn't read as "monotone." */
+  private readonly pitchHistory: number[] = [];
+  /** Whether the previous window was voiced (pitch present + above
+   *  the loudness gate). Used to count voiced/unvoiced transitions
+   *  for the activity signal. */
+  private prevVoiced = false;
+  /** Rolling window of voiced/unvoiced TRANSITION flags (true for the
+   *  windows where voicedness flipped). Length capped at PROSODY_WINDOWS. */
+  private readonly voicedTransitionHistory: boolean[] = [];
 
   constructor(opts: { sampleRate?: number } = {}) {
     this.sampleRate = opts.sampleRate ?? 48_000;
@@ -184,18 +275,114 @@ export class AudioFeatureExtractor {
     }
 
     // ZCR normalization: pre-calibration → return 0.5 (neutral —
-    // emotion state machine won't trigger on either side); after
+    // downstream gestures won't trigger on either side); after
     // calibration → scale so baseline maps to 0.5.
     const zcrNormInstant =
       this.zcrBaseline === undefined
         ? 0.5
         : clamp(raw.zcr / (2 * this.zcrBaseline), 0, 1);
 
+    // Derived per-window signals. All pre-smoothing; the followers
+    // below produce the values the avatar sees.
+    const voicedNow = raw.pitchHz > 0 && raw.loudness > VOICED_RMS_GATE;
+    const mouthShapeInstant = computeMouthShapeInstant(
+      raw.loudness,
+      voicedNow,
+    );
+    const pitchTrendInstant = this.trackPitchTrend(raw.pitchHz);
+    const expressivenessInstant = this.trackExpressiveness();
+    const activityInstant = this.trackActivity(voicedNow);
+    this.prevVoiced = voicedNow;
+
     return {
       loudness: this.loudnessFollower.push(raw.loudness),
       pitchNorm: this.pitchNormFollower.push(pitchNormInstant),
       zcrNorm: this.zcrNormFollower.push(zcrNormInstant),
+      mouthShape: this.mouthShapeFollower.push(mouthShapeInstant),
+      pitchTrend: this.pitchTrendFollower.push(pitchTrendInstant),
+      expressiveness: this.expressivenessFollower.push(expressivenessInstant),
+      activity: this.activityFollower.push(activityInstant),
     };
+  }
+
+  /**
+   * First-difference pitch trend over the last PITCH_TREND_WINDOWS
+   * voiced readings. Excludes 0-pitch readings (silence/unvoiced)
+   * from the regression so a quiet stretch in the middle of a
+   * sentence doesn't flatten the signal. Returns [-1, 1]: positive
+   * = pitch climbing, negative = falling, 0 = stable or no signal.
+   *
+   * Implementation: ratio of (newer half mean − older half mean)
+   * to overall mean. Robust to absolute pitch (a tenor and a bass
+   * scaling the same melody get the same trend) and cheap (no
+   * regression-fit) at the slight cost of granularity.
+   */
+  private trackPitchTrend(pitchHz: number): number {
+    this.pitchHistory.push(pitchHz);
+    if (this.pitchHistory.length > PROSODY_WINDOWS) {
+      this.pitchHistory.shift();
+    }
+    const tail = this.pitchHistory.slice(-PITCH_TREND_WINDOWS);
+    const voiced = tail.filter((p) => p > 0);
+    if (voiced.length < 4) return 0; // not enough voiced material
+    const mid = Math.floor(voiced.length / 2);
+    const older = voiced.slice(0, mid);
+    const newer = voiced.slice(mid);
+    const meanOlder = mean(older);
+    const meanNewer = mean(newer);
+    const overall = mean(voiced);
+    if (overall <= 0) return 0;
+    const trend = (meanNewer - meanOlder) / overall;
+    // The natural range of (meanNewer - meanOlder) / overall in
+    // normal speech is roughly ±0.15. Scale by ~6 so a typical
+    // question-rise saturates near +1 and a falling cadence near -1.
+    return clamp(trend * 6, -1, 1);
+  }
+
+  /**
+   * Robust expressiveness — uses median + median-absolute-deviation
+   * rather than mean + standard deviation. Reasoning: the
+   * autocorrelation pitch detector occasionally jumps an octave on
+   * mixed-voice or noisy input. With mean+stddev, a single 2× pitch
+   * spike inflates the variance dramatically and `expressiveness`
+   * flashes near 1.0 on what should be flat speech. Median is
+   * insensitive to single outliers; MAD/median is the natural
+   * robust analogue of CoV. Excludes 0-pitch readings. 0 when fewer
+   * than ~6 voiced windows have accumulated.
+   */
+  private trackExpressiveness(): number {
+    const voiced = this.pitchHistory.filter((p) => p > 0);
+    if (voiced.length < 6) return 0;
+    const med = median(voiced);
+    if (med <= 0) return 0;
+    const deviations = voiced.map((p) => Math.abs(p - med));
+    const mad = median(deviations);
+    const robustCv = mad / med;
+    // MAD-based CoV runs lower than the stddev-based version for
+    // a given signal (MAD ≈ 0.6745 × stddev on a Gaussian).
+    // Bumped the saturation scale from ×5 to ×7 so well-animated
+    // speech still maps to ~1.0 with the new metric.
+    return clamp(robustCv * 7, 0, 1);
+  }
+
+  /**
+   * Voiced/unvoiced transition rate over the prosody window. One
+   * transition every other window is roughly "syllable-paced
+   * speech"; a long held note has zero transitions; a rapid stream
+   * of consonants + vowels has many.
+   */
+  private trackActivity(voicedNow: boolean): number {
+    const transition = voicedNow !== this.prevVoiced;
+    this.voicedTransitionHistory.push(transition);
+    if (this.voicedTransitionHistory.length > PROSODY_WINDOWS) {
+      this.voicedTransitionHistory.shift();
+    }
+    const transitions = this.voicedTransitionHistory.filter(
+      (t) => t,
+    ).length;
+    // PROSODY_WINDOWS ≈ 1 s. Cap at 10 transitions/sec — beyond
+    // that is glitchy, not "fast speech."
+    return clamp(transitions / 10, 0, 1);
   }
 
 
@@ -326,11 +513,49 @@ function clamp(value: number, lo: number, hi: number): number {
   return value;
 }
 
+function mean(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  let sum = 0;
+  for (const x of xs) sum += x;
+  return sum / xs.length;
+}
+
+function median(xs: number[]): number {
+  if (xs.length === 0) return 0;
+  const sorted = [...xs].sort((a, b) => a - b);
+  const mid = Math.floor(sorted.length / 2);
+  return sorted.length % 2 === 0
+    ? ((sorted[mid - 1] ?? 0) + (sorted[mid] ?? 0)) / 2
+    : sorted[mid] ?? 0;
+}
+
+/**
+ * Pre-smoothing mouth-pose proxy. The mouth opens for VOICED loud
+ * audio (vowels) and stays more closed for unvoiced loud audio
+ * (fricatives), so a sibilant doesn't flap the avatar's mouth like
+ * a vowel does. Silence collapses to 0 (closed mouth at rest).
+ *
+ * This is a derived signal — no extra DSP cost beyond what
+ * `loudness` and `pitchHz` already provided.
+ */
+function computeMouthShapeInstant(
+  loudness: number,
+  voiced: boolean,
+): number {
+  if (loudness < VOICED_RMS_GATE) return 0;
+  // Loud vowels open the mouth fully; loud fricatives only partway.
+  // The 1.2 × multiplier for voiced lets a moderately loud vowel
+  // saturate to full openness, matching the visual intent ("the
+  // avatar really opens its mouth on vowels").
+  const scaled = voiced ? loudness * 1.2 : loudness * 0.6;
+  return clamp(scaled, 0, 1);
+}
+
 /**
  * Asymmetric one-pole follower. Tracks the input signal with a fast
  * attack and slower release — the same envelope the existing
- * AudioLevelMeter uses, so the emotion-driven `eyeScale` and
- * `amplitude` parameters smooth into the same rhythm as the mouth.
+ * AudioLevelMeter uses, so the prosody channels smooth into the
+ * same rhythm as the mouth.
  */
 class Follower {
   private state = 0;

@@ -7,36 +7,48 @@ import {
   isFresherSeq,
   type AnimationFrame,
 } from './animation-channel.js';
+import type { AcousticEvent } from './audio-feature-extractor.js';
 
 const sample: AnimationFrame = {
   seq: 12345,
   amplitude: 0.5,
-  emotionState: 'excited',
   pitchNorm: 0.75,
   zcrNorm: 0.25,
+  mouthShape: 0.66,
+  pitchTrend: 0.4,
+  expressiveness: 0.8,
+  activity: 0.3,
+  event: 'none',
 };
 
 describe('encodeAnimationFrame / decodeAnimationFrame', () => {
-  it('encodes to exactly 6 bytes (matches the plan budget)', () => {
-    expect(encodeAnimationFrame(sample).length).toBe(6);
+  it('encodes to exactly 10 bytes (v2 wire-size budget)', () => {
+    expect(encodeAnimationFrame(sample).length).toBe(10);
   });
 
   it('round-trips a representative frame', () => {
     const decoded = decodeAnimationFrame(encodeAnimationFrame(sample));
     expect(decoded?.seq).toBe(12345);
-    expect(decoded?.emotionState).toBe('excited');
-    // Quantization to 1/255: ±1/510 tolerance per signal.
+    expect(decoded?.event).toBe('none');
+    // Quantization to 1/255: ±1/510 tolerance per unsigned signal.
     expect(decoded?.amplitude).toBeCloseTo(0.5, 2);
     expect(decoded?.pitchNorm).toBeCloseTo(0.75, 2);
     expect(decoded?.zcrNorm).toBeCloseTo(0.25, 2);
+    expect(decoded?.mouthShape).toBeCloseTo(0.66, 2);
+    expect(decoded?.expressiveness).toBeCloseTo(0.8, 2);
+    expect(decoded?.activity).toBeCloseTo(0.3, 2);
+    // pitchTrend is signed in [-1, 1] mapped onto a single byte —
+    // 1/127.5 quantization, so ±~0.008 tolerance.
+    expect(decoded?.pitchTrend).toBeCloseTo(0.4, 1);
   });
 
-  it('round-trips each emotion state value', () => {
-    for (const state of ['baseline', 'excited', 'calm'] as const) {
+  it('round-trips each acoustic event code', () => {
+    const events: AcousticEvent[] = ['none', 'laugh', 'sigh', 'gasp', 'hmm'];
+    for (const event of events) {
       const decoded = decodeAnimationFrame(
-        encodeAnimationFrame({ ...sample, emotionState: state }),
+        encodeAnimationFrame({ ...sample, event }),
       );
-      expect(decoded?.emotionState).toBe(state);
+      expect(decoded?.event).toBe(event);
     }
   });
 
@@ -56,23 +68,57 @@ describe('encodeAnimationFrame / decodeAnimationFrame', () => {
     expect(decoded?.seq).toBe(0);
   });
 
-  it('clamps amplitude/pitch/zcr to [0,1] at the byte boundary', () => {
+  it('clamps unsigned channels to [0,1] at the byte boundary', () => {
     const decoded = decodeAnimationFrame(
       encodeAnimationFrame({
         ...sample,
         amplitude: 2.5,
         pitchNorm: -0.5,
         zcrNorm: 1.5,
+        mouthShape: 3.0,
+        expressiveness: -0.1,
+        activity: 99,
       }),
     );
     expect(decoded?.amplitude).toBe(1);
     expect(decoded?.pitchNorm).toBe(0);
     expect(decoded?.zcrNorm).toBe(1);
+    expect(decoded?.mouthShape).toBe(1);
+    expect(decoded?.expressiveness).toBe(0);
+    expect(decoded?.activity).toBe(1);
+  });
+
+  it('clamps pitchTrend to [-1, 1] at the byte boundary', () => {
+    const decodedHigh = decodeAnimationFrame(
+      encodeAnimationFrame({ ...sample, pitchTrend: 5 }),
+    );
+    expect(decodedHigh?.pitchTrend).toBeCloseTo(1, 2);
+    const decodedLow = decodeAnimationFrame(
+      encodeAnimationFrame({ ...sample, pitchTrend: -3 }),
+    );
+    // -1 maps to byte 0; byte 0 decoded → (0 - 127.5) / 127.5 = -1.
+    expect(decodedLow?.pitchTrend).toBeCloseTo(-1, 2);
+  });
+
+  it('round-trips a signed pitchTrend of 0 (centered byte 128)', () => {
+    const decoded = decodeAnimationFrame(
+      encodeAnimationFrame({ ...sample, pitchTrend: 0 }),
+    );
+    // Symmetric encoding: 0 → 127 or 128 byte, decoded → very close to 0.
+    expect(decoded?.pitchTrend).toBeCloseTo(0, 1);
+  });
+
+  it('round-trips a signed pitchTrend of -0.5', () => {
+    const decoded = decodeAnimationFrame(
+      encodeAnimationFrame({ ...sample, pitchTrend: -0.5 }),
+    );
+    expect(decoded?.pitchTrend).toBeCloseTo(-0.5, 1);
   });
 
   it('returns undefined for the wrong length', () => {
     expect(decodeAnimationFrame(new Uint8Array(5))).toBeUndefined();
-    expect(decodeAnimationFrame(new Uint8Array(7))).toBeUndefined();
+    expect(decodeAnimationFrame(new Uint8Array(9))).toBeUndefined();
+    expect(decodeAnimationFrame(new Uint8Array(11))).toBeUndefined();
   });
 
   it('returns undefined for an unknown wire version (forward-compat)', () => {
@@ -82,15 +128,24 @@ describe('encodeAnimationFrame / decodeAnimationFrame', () => {
     expect(decodeAnimationFrame(encoded)).toBeUndefined();
   });
 
-  it('returns undefined for an unknown emotion enum code', () => {
+  it('returns undefined for an unknown event enum code', () => {
     const encoded = encodeAnimationFrame(sample);
-    // Wipe the emotion nibble to 0 (sentinel for unknown).
-    encoded[0] = (encoded[0]! & 0xf0) | 0x0;
+    // Set the event nibble to 0xF (unknown event sentinel — no
+    // matching case in decodeAcousticEvent).
+    encoded[0] = (encoded[0]! & 0xf0) | 0xf;
     expect(decodeAnimationFrame(encoded)).toBeUndefined();
   });
 
+  it('returns undefined for v1 (legacy) frames so they degrade silently', () => {
+    // Fabricate a v1-shaped 6-byte payload: version 1 in high
+    // nibble, anything in low nibble. v2 receiver must drop these.
+    const legacy = new Uint8Array(6);
+    legacy[0] = (1 << 4) | 1; // v1, emotion=baseline
+    expect(decodeAnimationFrame(legacy)).toBeUndefined();
+  });
+
   it('wire version is the constant the senders ship', () => {
-    expect(ANIMATION_FRAME_VERSION).toBe(1);
+    expect(ANIMATION_FRAME_VERSION).toBe(2);
   });
 
   it('exposes the canonical channel label both sides negotiate on', () => {

@@ -9,7 +9,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ellipse, G, Path, Polygon } from 'react-native-svg';
 import type { AnimalRender } from '../types.js';
-import { useEmotionDrive } from '../emotion-drive.js';
 
 const AnimatedG = Animated.createAnimatedComponent(G);
 const RNAnimatedG = RNAnimated.createAnimatedComponent(G);
@@ -55,26 +54,29 @@ function useHeadBob() {
 }
 
 // Raven feather ruffle — 3 INK triangle tufts perched along the crown.
-// At rest they're hidden under the head silhouette. Phase 5j Private
-// Call: when the speaker hits `excited` the tufts fade in and lift
-// upward by 2-3px (slightly different per tuft so it reads as a real
-// ruffle, not a single rigid translation). On `baseline` and `calm`
-// they return to flush + invisible.
+// At rest they're hidden under the head silhouette. rc.11: the tufts
+// track the `activity` channel (voiced-transition rate) — fast,
+// syllabic speech ruffles the feathers; a held note or silence lets
+// them settle. Continuous version of the rc.6-9 binary excited-state
+// trigger; the avatar now ruffles gradually with the speaker's
+// articulation rate rather than stepping into a discrete state.
 const FEATHER_TUFTS: Array<{ pts: string; dy: number }> = [
   { pts: '36,20 40,16 42,22', dy: 4 },
   { pts: '46,18 50,12 54,18', dy: 5 },
   { pts: '56,20 60,16 62,22', dy: 3 },
 ];
 
-export const Raven: AnimalRender = ({ eyeScale, mouthScale, emotionState }) => {
+export const Raven: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const headProps = useHeadBob();
-  const ruffle = useEmotionDrive(emotionState, (s) =>
-    s === 'excited' ? 1 : 0,
-  );
-  const tuftOpacity = ruffle.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.85],
-  });
+  // activity ∈ [0, 1]. Tufts max out at 0.85 opacity / -dy translate
+  // when activity is saturated.
+  const activitySrc = prosody?.activity;
+  const tuftOpacity = activitySrc
+    ? activitySrc.interpolate({
+        inputRange: [0, 1],
+        outputRange: [0, 0.85],
+      })
+    : 0;
   // Raven silhouette is ink (the bird is *black* — the name says so),
   // not brass. The previous version rendered head + body + beak all in
   // BRASS, which vanished against the light-mode cream tile and read
@@ -89,10 +91,12 @@ export const Raven: AnimalRender = ({ eyeScale, mouthScale, emotionState }) => {
       <Polygon points="34,72 50,68 66,72 50,76" fill={BONE} opacity={0.10} />
       <AnimatedG animatedProps={headProps}>
         {FEATHER_TUFTS.map((tuft, i) => {
-          const translateY = ruffle.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, -tuft.dy],
-          });
+          const translateY = activitySrc
+            ? activitySrc.interpolate({
+                inputRange: [0, 1],
+                outputRange: [0, -tuft.dy],
+              })
+            : 0;
           return (
             <RNAnimatedG key={i} translateY={translateY} opacity={tuftOpacity}>
               <Polygon points={tuft.pts} fill={INK} />
