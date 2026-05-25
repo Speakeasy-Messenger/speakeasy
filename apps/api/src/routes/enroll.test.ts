@@ -181,3 +181,143 @@ describe('POST /v1/enroll', () => {
     await app.close();
   });
 });
+
+describe('POST /v1/devices/rebind', () => {
+  // Helper: seed a user via the enroll endpoint, then return both the
+  // repo (so the test can verify post-rebind state) and the original
+  // payload so the test can compare publicKeys.
+  async function seedEnrolled(repo: InMemoryUserRepo, opts: { publicKeyB64?: string } = {}) {
+    const app = await makeApp({ userRepo: repo });
+    const payload = basePayload({
+      publicKey: opts.publicKeyB64 ?? Buffer.from('pk').toString('base64'),
+    });
+    const enrollRes = await app.inject({
+      method: 'POST',
+      url: '/v1/enroll',
+      payload,
+    });
+    expect(enrollRes.statusCode).toBe(201);
+    await app.close();
+    return payload;
+  }
+
+  it('rotates the device-token on matching publicKey', async () => {
+    const repo = new InMemoryUserRepo();
+    const original = await seedEnrolled(repo);
+
+    // Same identity key, fresh device token (simulates a reinstall
+    // that preserved the SQLCipher-encrypted Signal store).
+    const app = await makeApp({ userRepo: repo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/devices/rebind',
+      payload: { ...original, token: 'dvt_new_001' },
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().user_id).toBe(validHandle);
+
+    // The new token resolves to the user; the old one no longer does.
+    expect(await repo.findUserIdByDeviceToken('dvt_new_001')).toBe(validHandle);
+    expect(await repo.findUserIdByDeviceToken('dvt_demo_001')).toBeUndefined();
+    await app.close();
+  });
+
+  it('rejects rebind with 401 identity_mismatch when publicKey differs', async () => {
+    const repo = new InMemoryUserRepo();
+    await seedEnrolled(repo, { publicKeyB64: Buffer.from('original-pk').toString('base64') });
+
+    const app = await makeApp({ userRepo: repo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/devices/rebind',
+      payload: {
+        token: 'dvt_attacker',
+        user_id: validHandle,
+        // Wrong publicKey — the presenter doesn't actually own the
+        // Signal identity for this handle. Refuse.
+        publicKey: Buffer.from('attacker-pk').toString('base64'),
+        preKeyBundle: bundle(),
+      },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe('identity_mismatch');
+
+    // The original binding is unchanged.
+    expect(await repo.findUserIdByDeviceToken('dvt_demo_001')).toBe(validHandle);
+    expect(await repo.findUserIdByDeviceToken('dvt_attacker')).toBeUndefined();
+    await app.close();
+  });
+
+  it('returns 404 no_such_user when the handle was never enrolled', async () => {
+    const app = await makeApp({ userRepo: new InMemoryUserRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/devices/rebind',
+      payload: basePayload({ user_id: 'ghost' }),
+    });
+    expect(res.statusCode).toBe(404);
+    expect(res.json().error).toBe('no_such_user');
+    await app.close();
+  });
+
+  it('returns 401 from vouchflow when the new token is rejected', async () => {
+    const repo = new InMemoryUserRepo();
+    const original = await seedEnrolled(repo);
+
+    // Validator that fails on the new token but accepted the original
+    // (the seeding used a different MockValidator instance — that's
+    // fine, we just need this one to reject the rebind attempt).
+    const app = await makeApp({
+      userRepo: repo,
+      validator: MockValidator.alwaysFailsWith('low_confidence'),
+    });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/devices/rebind',
+      payload: { ...original, token: 'dvt_new_002' },
+    });
+    expect(res.statusCode).toBe(401);
+    expect(res.json().error).toBe('low_confidence');
+    // No rotation happened.
+    expect(await repo.findUserIdByDeviceToken('dvt_demo_001')).toBe(validHandle);
+    await app.close();
+  });
+
+  it('rejects malformed handle with 400 invalid_user_id', async () => {
+    const app = await makeApp({ userRepo: new InMemoryUserRepo() });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/devices/rebind',
+      payload: basePayload({ user_id: 'ALICE!' }),
+    });
+    expect(res.statusCode).toBe(400);
+    expect(res.json().error).toBe('invalid_user_id');
+    await app.close();
+  });
+
+  it('replaces the prekey bundle on a successful rebind', async () => {
+    const repo = new InMemoryUserRepo();
+    const original = await seedEnrolled(repo);
+
+    const freshBundle = {
+      registrationId: 999,
+      signedPreKeyId: 999,
+      signedPreKey: Buffer.from('fresh-spk').toString('base64'),
+      signedPreKeySig: Buffer.from('fresh-spk-sig').toString('base64'),
+      preKeys: [{ id: 999, key: Buffer.from('fresh-otk').toString('base64') }],
+    };
+    const app = await makeApp({ userRepo: repo });
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/devices/rebind',
+      payload: { ...original, token: 'dvt_new_003', preKeyBundle: freshBundle },
+    });
+    expect(res.statusCode).toBe(200);
+
+    // InMemoryUserRepo exposes the stored bundle via the `users` map.
+    const stored = repo.users.get(validHandle);
+    expect(stored?.bundle.registrationId).toBe(999);
+    expect(stored?.bundle.preKeys[0]?.id).toBe(999);
+    await app.close();
+  });
+});

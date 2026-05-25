@@ -103,6 +103,42 @@ export class ApiClient {
   }
 
   /**
+   * Rotate the server-side device-token binding for an EXISTING
+   * handle. Called when `enroll` returns `409 taken`: the handle's
+   * already on the server but bound to a stale device token (typical
+   * after a reinstall / Vouchflow token rotation). The server
+   * verifies the presenter still holds the same Signal identity key
+   * (`publicKey` matches what's persisted) before rotating.
+   *
+   * Failure modes the caller MUST handle:
+   *   - `ApiError(401, 'identity_mismatch')` — local Signal identity
+   *     differs from what the server has on file. The user lost
+   *     their SQLCipher store; recovery requires a different handle.
+   *   - `ApiError(404, 'no_such_user')` — handle isn't enrolled at
+   *     all. Fall back to `enroll` (creates the user fresh).
+   *   - `ApiError(401, '<vouchflow_reason>')` — biometric proof
+   *     rejected. Same surfaces as enroll's Vouchflow errors.
+   */
+  async rebindDevice(body: EnrollRequest): Promise<EnrollResponse> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/devices/rebind`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(body),
+    });
+    if (res.status === 200) {
+      return (await res.json()) as EnrollResponse;
+    }
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
    * Fetch group metadata (creator). Member-only; outsiders get 403.
    *
    * Phase 2 brand overhaul: dropped the `avatar_b64` field. Groups

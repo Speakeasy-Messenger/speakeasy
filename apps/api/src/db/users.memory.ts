@@ -42,6 +42,24 @@ export class InMemoryUserRepo implements UserRepo {
     };
   }
 
+  async rebindDevice(args: {
+    userId: string;
+    newDeviceToken: string;
+    expectedPublicKey: Buffer;
+    bundle: PreKeyBundleInput;
+  }): Promise<'ok' | 'no_such_user' | 'identity_mismatch'> {
+    const u = this.users.get(args.userId);
+    if (!u) return 'no_such_user';
+    if (!u.publicKey.equals(args.expectedPublicKey)) {
+      return 'identity_mismatch';
+    }
+    this.byDeviceToken.delete(u.deviceToken);
+    u.deviceToken = args.newDeviceToken;
+    u.bundle = args.bundle;
+    this.byDeviceToken.set(args.newDeviceToken, args.userId);
+    return 'ok';
+  }
+
   async findUserIdByDeviceToken(deviceToken: string): Promise<string | undefined> {
     return this.byDeviceToken.get(deviceToken);
   }

@@ -89,15 +89,20 @@ export async function ensureServerBinding(
     userId,
     forced: deps.forceReenroll === true,
   });
-  try {
-    const identityPublicKey = await deps.signalProtocol.generateIdentityKey();
-    const registrationId = randomRegistrationId();
-    const ownBundle = await deps.signalProtocol.generatePreKeyBundle({
-      registrationId,
-      signedPreKeyId: 1,
-      oneTimePreKeyCount: PREKEY_BATCH_SIZE,
-    });
+  // Hoisted outside the try so the 409-rebind path in the catch can
+  // reuse the freshly-generated identity key + bundle. The catch
+  // arm calls `api.rebindDevice` with these values to reclaim the
+  // existing handle without regenerating keys (regenerating would
+  // race the rebind's identity-match check).
+  const identityPublicKey = await deps.signalProtocol.generateIdentityKey();
+  const registrationId = randomRegistrationId();
+  const ownBundle = await deps.signalProtocol.generatePreKeyBundle({
+    registrationId,
+    signedPreKeyId: 1,
+    oneTimePreKeyCount: PREKEY_BATCH_SIZE,
+  });
 
+  try {
     await api.enroll({
       token: deviceToken,
       user_id: userId,
@@ -114,15 +119,58 @@ export async function ensureServerBinding(
     return 'reenrolled';
   } catch (err) {
     if (err instanceof ApiError && err.status === 409 && err.code === 'taken') {
-      // The handle already exists server-side — almost always the
-      // user's OWN row (a transient probe 401 sent us down the
-      // re-enroll path needlessly). NEVER destroy the identity over
-      // this: keep it; the next probe / WS auth succeeds once the
-      // token is fresh again.
-      diag('auth', 're-enroll hit 409 taken — keeping identity intact', {
+      // The handle exists server-side but the device-token binding
+      // is stale (typical after a reinstall / Vouchflow rotation).
+      // Try the rebind path: server verifies our identity publicKey
+      // still matches what's on file, and if so, atomically swaps
+      // the token. If our local Signal identity DIFFERS (a wiped
+      // SQLCipher store) the server returns 401 identity_mismatch
+      // and we surface the same `noop` keep-identity behavior the
+      // prior code path used.
+      diag('auth', 're-enroll hit 409 taken — trying device rebind', {
         userId,
       });
-      return 'noop';
+      try {
+        // Use the same identityPublicKey we just generated for the
+        // failed enroll attempt above; if we got here the local
+        // Signal store opened successfully so this key matches the
+        // one persisted on the original enrollment.
+        await api.rebindDevice({
+          token: deviceToken,
+          user_id: userId,
+          publicKey: identityPublicKey,
+          preKeyBundle: {
+            registrationId: ownBundle.registrationId,
+            signedPreKeyId: ownBundle.signedPreKeyId,
+            signedPreKey: ownBundle.signedPreKey,
+            signedPreKeySig: ownBundle.signedPreKeySig,
+            preKeys: ownBundle.preKeys,
+          },
+        });
+        diag('auth', 'device rebind OK after 409 taken', { userId });
+        return 'reenrolled';
+      } catch (rebindErr) {
+        if (rebindErr instanceof ApiError && rebindErr.status === 401
+            && rebindErr.code === 'identity_mismatch') {
+          // The local Signal identity does NOT match what the server
+          // has for this handle. Either the user wiped data and is
+          // trying to recover (handle isn't recoverable without the
+          // original key), or someone else briefly held this handle.
+          // Keep the local identity intact — destroying it wouldn't
+          // help — and surface the original "keep identity intact"
+          // behavior so the UI doesn't loop.
+          diag('auth', 'device rebind rejected — identity_mismatch (handle unrecoverable on this device)', {
+            userId,
+          });
+          return 'noop';
+        }
+        diag('auth', 'device rebind FAILED (non-fatal)', {
+          err: String(rebindErr),
+          status: (rebindErr as ApiError | undefined)?.status,
+          code: (rebindErr as ApiError | undefined)?.code,
+        });
+        return 'noop';
+      }
     }
     diag('auth', 'silent re-enroll FAILED (non-fatal)', {
       err: String(err),
