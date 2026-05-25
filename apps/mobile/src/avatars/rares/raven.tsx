@@ -9,7 +9,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ellipse, G, Path, Polygon } from 'react-native-svg';
 import type { AnimalRender } from '../types.js';
-import { useEmotionDrive } from '../emotion-drive.js';
 
 const AnimatedG = Animated.createAnimatedComponent(G);
 const RNAnimatedG = RNAnimated.createAnimatedComponent(G);
@@ -54,27 +53,8 @@ function useHeadBob() {
   });
 }
 
-// Raven feather ruffle — 3 INK triangle tufts perched along the crown.
-// At rest they're hidden under the head silhouette. Phase 5j Private
-// Call: when the speaker hits `excited` the tufts fade in and lift
-// upward by 2-3px (slightly different per tuft so it reads as a real
-// ruffle, not a single rigid translation). On `baseline` and `calm`
-// they return to flush + invisible.
-const FEATHER_TUFTS: Array<{ pts: string; dy: number }> = [
-  { pts: '36,20 40,16 42,22', dy: 4 },
-  { pts: '46,18 50,12 54,18', dy: 5 },
-  { pts: '56,20 60,16 62,22', dy: 3 },
-];
-
-export const Raven: AnimalRender = ({ eyeScale, mouthScale, emotionState }) => {
+export const Raven: AnimalRender = ({ eyeScale, mouthScale }) => {
   const headProps = useHeadBob();
-  const ruffle = useEmotionDrive(emotionState, (s) =>
-    s === 'excited' ? 1 : 0,
-  );
-  const tuftOpacity = ruffle.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, 0.85],
-  });
   // Raven silhouette is ink (the bird is *black* — the name says so),
   // not brass. The previous version rendered head + body + beak all in
   // BRASS, which vanished against the light-mode cream tile and read
@@ -88,17 +68,6 @@ export const Raven: AnimalRender = ({ eyeScale, mouthScale, emotionState }) => {
       <Path d="M 30,60 L 70,60 L 72,68 L 28,68 Z" fill={BRASS} opacity={0.22} />
       <Polygon points="34,72 50,68 66,72 50,76" fill={BONE} opacity={0.10} />
       <AnimatedG animatedProps={headProps}>
-        {FEATHER_TUFTS.map((tuft, i) => {
-          const translateY = ruffle.interpolate({
-            inputRange: [0, 1],
-            outputRange: [0, -tuft.dy],
-          });
-          return (
-            <RNAnimatedG key={i} translateY={translateY} opacity={tuftOpacity}>
-              <Polygon points={tuft.pts} fill={INK} />
-            </RNAnimatedG>
-          );
-        })}
         <Path d="M 28,38 Q 34,18 56,20 Q 72,22 72,42 L 70,58 L 30,58 Z" fill={INK} />
         <Path d="M 30,40 Q 34,22 50,22 Q 58,22 60,32 L 56,40 Z" fill={BRASS} opacity={0.18} />
         <Polygon points="68,38 92,40 70,46" fill={BRASS} />
