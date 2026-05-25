@@ -51,7 +51,7 @@ import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // init comment in the post-enrollment effect. The bridge module still
 // ships in the bundle for the future lazy-start callsite (orchestrator
 // or CallScreen mount).
-import { diag } from './src/diag/log.js';
+import { diag, loadPersistedDiag, persistDiagNow } from './src/diag/log.js';
 import { requestStartupPermissions } from './src/permissions/startup.js';
 import { tryRegisterPushToken } from './src/push/register.js';
 import { parseAdd } from './src/utils/handle-link.js';
@@ -82,6 +82,15 @@ const _origHandler = (globalThis as ErrorUtilsGlobal).ErrorUtils?.getGlobalHandl
 registerForegroundMessageHandler();
 
 // Kick off FCM token provisioning now, in parallel with onboarding.
+// rc.10 — kick off the previous-session diag load as early as
+// possible (BEFORE any diag() call in the import chain below
+// could schedule a persist). `loadPersistedDiag` sets an in-flight
+// gate inside log.ts that holds back persist writes until the load
+// completes, so doing this synchronously at module-eval time stops
+// a too-early throttled persist from clobbering the previous
+// session's buffer before we've had a chance to read it.
+void loadPersistedDiag();
+
 // The first getToken() on a fresh install is slow; starting it here
 // lets it finish before registration needs it, instead of racing a
 // short first session.
@@ -861,6 +870,15 @@ export default function App() {
             /* best-effort */
           });
       } else if (next === 'background' || next === 'inactive') {
+        // rc.10 — flush the diag buffer to AsyncStorage NOW, before
+        // the OS gets a chance to kill the process. Without this,
+        // anything written to diag in the last 5 seconds (within
+        // the throttle window) is lost on a background-kill — which
+        // is the exact gap that left bananaman5's call-period
+        // events invisible after a presumed crash on rc.6 / rc.8.
+        // Best-effort: a failure here doesn't block the rest of the
+        // background handler.
+        void persistDiagNow();
         // Close the WS proactively so the server routes incoming
         // messages through push instead of the (still-alive)
         // WebSocket. Without this, Android can keep the TCP socket
