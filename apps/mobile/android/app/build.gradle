@@ -168,22 +168,12 @@ react {
  * off — string-addressed resources (e.g. the `ic_notification` icon
  * named from JS) are unsafe for the resource shrinker to reason about.
  *
- * Phase 5j: temporarily off. The Speakeasy fork at
- * `app/src/main/java/org/webrtc/audio/*` collides with the same FQCNs
- * in the upstream `org.jitsi:webrtc:124.0.0` jar; debug builds resolve
- * via dex ordering (project sources land in earlier dex files than
- * library deps), but R8 minification refuses to merge the duplicate
- * classes and fails with "Compilation failed to complete, origin:
- * .../webrtc-124.0.0-runtime.jar:org/webrtc/audio/JavaAudioDeviceModule
- * $AudioTrackErrorCallback.class". The proper fix is a Gradle
- * artifact transform that strips `org/webrtc/audio/*` from the upstream
- * jar before R8 sees it (see `apps/mobile/android/app/src/main/java/
- * org/webrtc/audio/README.md` for the fork rationale). Tracking as
- * a follow-up — disabling minify is the unblock so RC builds can ship
- * a real APK; the runtime behavior is the same as the verified debug
- * builds, just larger + un-obfuscated.
+ * The duplicate `org/webrtc/audio/*` classes (Speakeasy fork vs
+ * upstream jar) used to fail R8 here; the artifact transform below
+ * strips them from the upstream jar before D8/R8 see it, so R8 stays
+ * enabled for release.
  */
-def enableProguardInReleaseBuilds = false
+def enableProguardInReleaseBuilds = true
 
 /**
  * The preferred build flavor of JavaScriptCore (JSC)
@@ -389,6 +379,127 @@ configurations.all {
     }
 }
 
+// =====================================================================
+// Phase 5j Private Call — strip duplicate `org/webrtc/audio/*` classes
+// from the upstream WebRTC jar.
+//
+// The Speakeasy fork at `app/src/main/java/org/webrtc/audio/*.java`
+// (landed in #58) defines the SAME FQCNs as the upstream
+// `org.jitsi:webrtc:124.0.0` jar — necessary because the C++ side of
+// libwebrtc calls into Java by class name (`org/webrtc/audio/
+// WebRtcAudioRecord`), so our fork can't live in a different package.
+//
+// Debug builds shadow the upstream classes via Android multidex
+// ordering (project sources go into earlier `classes<N>.dex` files;
+// PathClassLoader returns the project version first). Release builds
+// run `:app:mergeDexRelease`, which D8 refuses to do when the same
+// FQCN appears in two dex inputs. The fix below produces a stripped
+// copy of the upstream jar (with `org/webrtc/audio/*.class` removed),
+// excludes the original from the runtime classpath, and adds the
+// stripped one in its place — net effect: react-native-webrtc still
+// sees every WebRTC class it needs (PeerConnection, RTCAudioDevice,
+// etc.) via the stripped jar, while `org/webrtc/audio/*` resolves
+// only to our project-source fork. No more duplicate-class D8/R8
+// failure.
+//
+// See `app/src/main/java/org/webrtc/audio/README.md` for the fork
+// rationale.
+// =====================================================================
+
+def strippedWebrtcJar = layout.buildDirectory.file('stripped-webrtc/webrtc-no-audio.jar').get().asFile
+
+// Detached configuration so we can resolve the upstream WebRTC AAR
+// without circular dependencies on our own classpaths. We ask for
+// the raw AAR and unpack `classes.jar` from it manually — going
+// through AGP's AAR-to-jar transform creates an attribute mismatch
+// the standalone artifact-transform approach couldn't punch through.
+configurations {
+    speakeasyWebrtcUpstream {
+        canBeConsumed = false
+        canBeResolved = true
+        attributes {
+            attribute(Attribute.of('artifactType', String), 'aar')
+        }
+    }
+}
+
+dependencies {
+    speakeasyWebrtcUpstream("org.jitsi:webrtc:124.+")
+}
+
+task speakeasyStripUpstreamWebrtcAudio {
+    description "Strip org/webrtc/audio/*.class from the upstream WebRTC AAR's classes.jar so our Speakeasy fork doesn't collide at D8 dex-merge time."
+    inputs.files(configurations.speakeasyWebrtcUpstream)
+    outputs.file(strippedWebrtcJar)
+    doLast {
+        def aar = configurations.speakeasyWebrtcUpstream.files.find {
+            it.name.startsWith('webrtc-') && it.name.endsWith('.aar')
+        }
+        if (aar == null) {
+            throw new GradleException("Could not find upstream webrtc-*.aar in the speakeasyWebrtcUpstream configuration. Files: ${configurations.speakeasyWebrtcUpstream.files*.name}")
+        }
+        // The real WebRTC classes (~925KB jar) live inside the AAR at
+        // `libs/libwebrtc.jar`; the AAR's `classes.jar` is an almost-
+        // empty stub (just the Jitsi BuildConfig). Extract the real
+        // jar, then strip `org/webrtc/audio/*.class` while re-zipping.
+        strippedWebrtcJar.parentFile.mkdirs()
+        new java.util.zip.ZipFile(aar).withCloseable { aarZip ->
+            def libsEntry = aarZip.getEntry('libs/libwebrtc.jar')
+            if (libsEntry == null) {
+                throw new GradleException("Upstream webrtc AAR does not contain libs/libwebrtc.jar — AAR layout may have changed; investigate before re-running.")
+            }
+            def tempJar = new File(strippedWebrtcJar.parentFile, 'raw-libwebrtc.jar')
+            tempJar.bytes = aarZip.getInputStream(libsEntry).bytes
+            // Only strip the classes our project-source fork ACTUALLY
+            // re-defines (8 top-level files + their inner classes). The
+            // AudioDeviceModule interface, all the *Callback / *Code
+            // enums declared at the top-level of upstream, and any
+            // future upstream additions remain available — our fork
+            // imports them. The prefix pattern catches inner classes
+            // (e.g., `WebRtcAudioRecord$AudioRecordThread.class`).
+            def speakeasyForkedClassPrefixes = [
+                'org/webrtc/audio/JavaAudioDeviceModule',
+                'org/webrtc/audio/LowLatencyAudioBufferManager',
+                'org/webrtc/audio/VolumeLogger',
+                'org/webrtc/audio/WebRtcAudioEffects',
+                'org/webrtc/audio/WebRtcAudioManager',
+                'org/webrtc/audio/WebRtcAudioRecord',
+                'org/webrtc/audio/WebRtcAudioTrack',
+                'org/webrtc/audio/WebRtcAudioUtils',
+            ]
+            new java.util.zip.ZipFile(tempJar).withCloseable { zip ->
+                new java.util.zip.ZipOutputStream(new java.io.FileOutputStream(strippedWebrtcJar)).withCloseable { out ->
+                    def entries = zip.entries()
+                    while (entries.hasMoreElements()) {
+                        def entry = entries.nextElement()
+                        boolean forked = speakeasyForkedClassPrefixes.any { prefix ->
+                            entry.name == "${prefix}.class" || entry.name.startsWith("${prefix}\$")
+                        }
+                        if (forked) continue
+                        out.putNextEntry(new java.util.zip.ZipEntry(entry.name))
+                        out << zip.getInputStream(entry).bytes
+                        out.closeEntry()
+                    }
+                }
+            }
+            tempJar.delete()
+        }
+        logger.lifecycle("[Speakeasy] stripped WebRTC audio classes -> ${strippedWebrtcJar}")
+    }
+}
+
+// The `builtBy` on the file-collection dependency below wires the
+// strip task into every consumer task automatically.
+
+// Strip the upstream jar from every configuration except our own
+// detached `speakeasyWebrtcUpstream` (which needs the raw AAR to
+// extract `classes.jar`). The exclusion must apply to every
+// AGP-resolved compile / runtime / dex configuration so the dex
+// merger never sees the duplicate `org/webrtc/audio/*` classes.
+configurations.matching { it.name != 'speakeasyWebrtcUpstream' }.all { config ->
+    config.exclude group: 'org.jitsi', module: 'webrtc'
+}
+
 dependencies {
     // The version of react-native is set by the React Native Gradle Plugin
     implementation("com.facebook.react:react-android")
@@ -443,6 +554,14 @@ dependencies {
     } else {
         implementation jscFlavor
     }
+
+    // Phase 5j Private Call — stripped upstream WebRTC jar. The exclude
+    // on `org.jitsi:webrtc` above removes the original; this adds the
+    // version without `org/webrtc/audio/*` so D8/R8 don't see the
+    // duplicate FQCNs that our project-source fork also defines. The
+    // `builtBy` carries the task dependency so compileJava / dex /
+    // minify all wait for the strip to finish before reading the jar.
+    implementation files(strippedWebrtcJar) { builtBy speakeasyStripUpstreamWebrtcAudio }
 
     // Phase 5j Private Call (PR-B1): JUnit for the on-device voice-filter
     // DSP unit tests. Kotlin-only, runs on the JVM (no instrumented test).
