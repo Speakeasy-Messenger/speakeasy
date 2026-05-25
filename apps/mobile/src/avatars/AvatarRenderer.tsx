@@ -206,23 +206,7 @@ export function AvatarRenderer({
 
   return (
     <Animated.View style={{ width: size, height: size, transform: [{ scaleY: breathScale }] }}>
-      {/*
-        `key={animalId}` is load-bearing — see the rc.6 bananaman4
-        crash, where a hook-count change inside `AnimalSvg`'s fiber
-        between animals caused React to read past the end of the
-        hooks list on Hermes/release. Per-animal Render functions
-        are invoked via direct call (`def.Render({...})`) inside
-        `AnimalSvg`, so any hooks they declare attribute to
-        `AnimalSvg`'s fiber. Different animals declare different
-        hook counts (paid rares with signature effects vs free
-        commons that just paint paths) — and React requires a
-        consistent hook order per fiber across renders. Keying on
-        `animalId` forces a clean unmount + remount when the avatar
-        changes, so the new animal starts a fresh fiber and hook
-        ordering is verified from scratch.
-      */}
       <AnimalSvg
-        key={animalId}
         animalId={animalId}
         size={size}
         eyeScale={composedEyeScale}

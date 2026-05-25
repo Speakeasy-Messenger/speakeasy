@@ -771,6 +771,76 @@ export const ANIMAL_IDS = Object.keys(ANIMALS) as Array<keyof typeof ANIMALS>;
  * in an Animated.View for the breathing transform; this component
  * stays pure (props in, SVG out).
  */
+/**
+ * Renders a single animal's `def.Render(...)` output, isolated to its
+ * own React fiber. Always mount via this component — never call
+ * `ANIMALS[id].Render({...})` directly.
+ *
+ * **Why this exists** (rc.6 fox crash):
+ * Per-animal Render functions declare wildly different hook counts —
+ * Hawk and Fox call `useEmotionDrive` (4 hooks), Raven calls that plus
+ * `useHeadBob` (7 hooks), free commons like Owl/Cat declare zero. When
+ * an earlier version of the codebase inlined `def.Render(...)` inside
+ * a long-lived parent (e.g. `AnimalSvg`, `AvatarCacheWarmer`), every
+ * per-animal hook attributed to the *parent's* fiber. Switching
+ * `animalId` on that parent meant the fiber's hook-order check broke
+ * mid-render, and Hermes crashed the release build with "Rendered
+ * more hooks than during the previous render."
+ *
+ * `AnimalBody` is itself mounted with `key={animalId}` on its inner
+ * `<RenderHost>`, so animal changes force a clean unmount + remount.
+ * Consumers (`AnimalSvg`, `AvatarCacheWarmer`, any future site) just
+ * use `<AnimalBody animalId={...} ... />` without having to remember
+ * to pass a key — the invariant lives here.
+ *
+ * If you find yourself writing `def.Render(...)` somewhere new, stop
+ * and use this component instead. The
+ * `AvatarRenderer.regression.test.ts` invariant test exists to catch
+ * that mistake at CI time.
+ */
+export function AnimalBody({
+  animalId,
+  eyeScale,
+  mouthScale,
+  amplitude,
+  emotionState,
+}: {
+  animalId: string;
+  eyeScale: AnimalRenderProps['eyeScale'];
+  mouthScale: AnimalRenderProps['mouthScale'];
+  amplitude: AnimalRenderProps['amplitude'];
+  emotionState?: AnimalRenderProps['emotionState'];
+}): React.ReactElement | null {
+  const def = ANIMALS[animalId];
+  if (!def) return null;
+  // Inner component on `key={animalId}` is the load-bearing piece —
+  // hooks called inside `def.Render(...)` attribute to RenderHost's
+  // fiber, and a key change forces React to drop that fiber and
+  // create a fresh one for the new animal.
+  return (
+    <RenderHost
+      key={animalId}
+      render={def.Render}
+      eyeScale={eyeScale}
+      mouthScale={mouthScale}
+      amplitude={amplitude}
+      emotionState={emotionState}
+    />
+  );
+}
+
+function RenderHost({
+  render,
+  eyeScale,
+  mouthScale,
+  amplitude,
+  emotionState,
+}: {
+  render: AnimalRender;
+} & Omit<AnimalRenderProps, 'amplitude'> & { amplitude: AnimalRenderProps['amplitude'] }): React.ReactElement {
+  return <>{render({ eyeScale, mouthScale, amplitude, emotionState })}</>;
+}
+
 export function AnimalSvg({
   animalId,
   size,
@@ -791,21 +861,21 @@ export function AnimalSvg({
   amplitude?: AnimalRenderProps['amplitude'];
   emotionState?: AnimalRenderProps['emotionState'];
 }): React.ReactElement | null {
-  const def = ANIMALS[animalId];
   // Stable zero-amplitude backing Animated.Value — reused across
   // PortraitTile renders so static previews don't allocate a fresh
   // value every paint.
   const zeroAmpRef = React.useRef<Animated.Value | null>(null);
   if (zeroAmpRef.current === null) zeroAmpRef.current = new Animated.Value(0);
-  if (!def) return null;
+  if (!ANIMALS[animalId]) return null;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
-      {def.Render({
-        eyeScale,
-        mouthScale,
-        amplitude: amplitude ?? zeroAmpRef.current,
-        emotionState,
-      })}
+      <AnimalBody
+        animalId={animalId}
+        eyeScale={eyeScale}
+        mouthScale={mouthScale}
+        amplitude={amplitude ?? zeroAmpRef.current}
+        emotionState={emotionState}
+      />
     </Svg>
   );
 }
