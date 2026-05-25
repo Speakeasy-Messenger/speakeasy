@@ -1,7 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Animated, View } from 'react-native';
 import Svg, { G, Rect } from 'react-native-svg';
-import { ANIMALS } from './components.js';
+import { ANIMALS, AnimalBody } from './components.js';
 import { defaultAnimalForUser } from './default.js';
 import { useConversations } from '../store/conversations.js';
 import { useProfiles } from '../store/profiles.js';
@@ -146,7 +146,20 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
       <Svg ref={svgRef} width={RASTER_SIZE} height={RASTER_SIZE} viewBox="0 0 100 100">
         <Rect x={0} y={0} width={100} height={100} fill={themed.pale} />
         <G transform="translate(20 20) scale(0.60)">
-          {def.Render({ eyeScale: eyeOpen, mouthScale: mouthIdle, amplitude: noAmp })}
+          {/*
+            AnimalBody mounts def.Render in its own keyed fiber — this
+            warmer is a long-lived component that processes a queue of
+            (userId, animalId) pairs, so the animalId on this slot
+            transitions over time. The keyed inner fiber is what
+            prevents the rc.6 hook-count crash from re-firing here.
+            See components.tsx → AnimalBody for the full explanation.
+          */}
+          <AnimalBody
+            animalId={current.animalId}
+            eyeScale={eyeOpen}
+            mouthScale={mouthIdle}
+            amplitude={noAmp}
+          />
         </G>
       </Svg>
     </View>
