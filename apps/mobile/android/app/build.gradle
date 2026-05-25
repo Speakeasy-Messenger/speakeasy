@@ -407,6 +407,7 @@ configurations.all {
 // =====================================================================
 
 def strippedWebrtcJar = layout.buildDirectory.file('stripped-webrtc/webrtc-no-audio.jar').get().asFile
+def strippedWebrtcJniDir = layout.buildDirectory.dir('stripped-webrtc/jni').get().asFile
 
 // Detached configuration so we can resolve the upstream WebRTC AAR
 // without circular dependencies on our own classpaths. We ask for
@@ -428,9 +429,10 @@ dependencies {
 }
 
 task speakeasyStripUpstreamWebrtcAudio {
-    description "Strip org/webrtc/audio/*.class from the upstream WebRTC AAR's classes.jar so our Speakeasy fork doesn't collide at D8 dex-merge time."
+    description "Extract the upstream WebRTC AAR's classes (sans org/webrtc/audio fork-conflicts) and JNI .so libraries so the app can run without depending on org.jitsi:webrtc (which we exclude to dodge the duplicate-class D8 failure)."
     inputs.files(configurations.speakeasyWebrtcUpstream)
     outputs.file(strippedWebrtcJar)
+    outputs.dir(strippedWebrtcJniDir)
     doLast {
         def aar = configurations.speakeasyWebrtcUpstream.files.find {
             it.name.startsWith('webrtc-') && it.name.endsWith('.aar')
@@ -438,12 +440,17 @@ task speakeasyStripUpstreamWebrtcAudio {
         if (aar == null) {
             throw new GradleException("Could not find upstream webrtc-*.aar in the speakeasyWebrtcUpstream configuration. Files: ${configurations.speakeasyWebrtcUpstream.files*.name}")
         }
-        // The real WebRTC classes (~925KB jar) live inside the AAR at
-        // `libs/libwebrtc.jar`; the AAR's `classes.jar` is an almost-
-        // empty stub (just the Jitsi BuildConfig). Extract the real
-        // jar, then strip `org/webrtc/audio/*.class` while re-zipping.
+        // The upstream AAR holds the real WebRTC classes (~925KB) at
+        // `libs/libwebrtc.jar`, and the per-ABI native libraries
+        // (libjingle_peerconnection_so.so, ~10MB each) under `jni/`.
+        // We extract BOTH — the jar (sans our forked classes) goes
+        // into the classpath, and the .so files go into a jniLibs
+        // source dir AGP packages into the APK. The AAR's
+        // `classes.jar` is an almost-empty Jitsi stub, ignore it.
         strippedWebrtcJar.parentFile.mkdirs()
+        strippedWebrtcJniDir.mkdirs()
         new java.util.zip.ZipFile(aar).withCloseable { aarZip ->
+            // ----- libs/libwebrtc.jar — strip the fork conflicts -----
             def libsEntry = aarZip.getEntry('libs/libwebrtc.jar')
             if (libsEntry == null) {
                 throw new GradleException("Upstream webrtc AAR does not contain libs/libwebrtc.jar — AAR layout may have changed; investigate before re-running.")
@@ -483,8 +490,42 @@ task speakeasyStripUpstreamWebrtcAudio {
                 }
             }
             tempJar.delete()
+
+            // ----- jni/<abi>/*.so — extract native libraries -----
+            // Without this the app crashes at first WebRTCModule init
+            // with: UnsatisfiedLinkError: dlopen failed: library
+            // "libjingle_peerconnection_so.so" not found. The upstream
+            // exclude removes the AAR's classpath entry AND its
+            // jniLibs contribution; we re-add the latter here.
+            def entries = aarZip.entries()
+            while (entries.hasMoreElements()) {
+                def entry = entries.nextElement()
+                if (!entry.name.startsWith('jni/') || entry.isDirectory()) continue
+                def target = new File(strippedWebrtcJniDir, entry.name.substring('jni/'.length()))
+                target.parentFile.mkdirs()
+                target.bytes = aarZip.getInputStream(entry).bytes
+            }
         }
-        logger.lifecycle("[Speakeasy] stripped WebRTC audio classes -> ${strippedWebrtcJar}")
+        logger.lifecycle("[Speakeasy] stripped WebRTC -> ${strippedWebrtcJar} (+ jniLibs in ${strippedWebrtcJniDir})")
+    }
+}
+
+// Pull the extracted JNI .so libraries into the APK via jniLibs.
+// The merge tasks read `jniLibs.srcDirs` at execution time, so we
+// just need to make sure the strip task runs first.
+android {
+    sourceSets {
+        main {
+            jniLibs.srcDirs += strippedWebrtcJniDir
+        }
+    }
+}
+
+afterEvaluate {
+    tasks.matching {
+        it.name.startsWith('merge') && it.name.contains('JniLib')
+    }.configureEach {
+        dependsOn speakeasyStripUpstreamWebrtcAudio
     }
 }
 
