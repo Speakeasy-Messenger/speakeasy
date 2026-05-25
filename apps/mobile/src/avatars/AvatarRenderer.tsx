@@ -212,7 +212,6 @@ export function AvatarRenderer({
         eyeScale={composedEyeScale}
         mouthScale={mouthScale}
         amplitude={boostedSource}
-        emotionState={emotionState}
       />
     </Animated.View>
   );

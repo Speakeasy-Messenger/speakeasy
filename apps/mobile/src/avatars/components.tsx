@@ -45,7 +45,6 @@ import { Phoenix } from './legendaries/phoenix.js';
 import { Turtle } from './legendaries/turtle.js';
 import { Manticore } from './legendaries/manticore.js';
 import { makePlaceholder } from './placeholder.js';
-import { useEmotionDrive } from './emotion-drive.js';
 
 // react-native-svg's animated wrappers. Passed Animated.Values via the
 // `scaleY` prop; native driver isn't supported on SVG transforms but the
@@ -112,70 +111,31 @@ function Mouth({
 
 // ─────────────────────────────────────────────────────────────────────
 
-// Fox ear pivots — base of each ear, where it meets the skull. Ear
-// gestures rotate around these points so the tip swings rather than
-// the whole ear sliding. Phase 5j Private Call: excited → ears perk
-// outward-forward (alert pose, +6°/-6°); calm → ears flatten inward
-// (resting/listening, -12°/+12°). Baseline is 0°.
-const FOX_EAR_LEFT_PIVOT = { x: 28, y: 30 };
-const FOX_EAR_RIGHT_PIVOT = { x: 72, y: 30 };
-
-const Fox: AnimalRender = ({ eyeScale, mouthScale, emotionState }) => {
-  const earDrive = useEmotionDrive(emotionState, (s) => {
-    if (s === 'excited') return 1;
-    if (s === 'calm') return -1;
-    return 0;
-  });
-  // Mirror the right ear: left perks counter-clockwise on excited,
-  // right perks clockwise. -1..+1 → -12°..+6° on the left ear; the
-  // right ear inverts the sign so the motion reads symmetric.
-  // react-native-svg's <G rotation={…}> takes a numeric degree, not a
-  // `<n>deg` string the way <View transform={[{rotate}]}> does. Keep
-  // the interpolation in plain numbers.
-  const leftEarRot = earDrive.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [12, 0, -6],
-  });
-  const rightEarRot = earDrive.interpolate({
-    inputRange: [-1, 0, 1],
-    outputRange: [-12, 0, 6],
-  });
-  return (
-    <>
-      <AnimatedG
-        originX={FOX_EAR_LEFT_PIVOT.x}
-        originY={FOX_EAR_LEFT_PIVOT.y}
-        rotation={leftEarRot}
-      >
-        <Polygon points="18,12 38,12 28,32" fill={BRASS} />
-        <Polygon points="24,18 32,18 28,28" fill={INK} />
-      </AnimatedG>
-      <AnimatedG
-        originX={FOX_EAR_RIGHT_PIVOT.x}
-        originY={FOX_EAR_RIGHT_PIVOT.y}
-        rotation={rightEarRot}
-      >
-        <Polygon points="62,12 82,12 72,32" fill={BRASS} />
-        <Polygon points="68,18 76,18 72,28" fill={INK} />
-      </AnimatedG>
-      {/* head */}
-      <Path d="M20,28 L80,28 L74,62 L50,88 L26,62 Z" fill={BRASS} />
-      {/* white chest */}
-      <Path d="M38,56 L62,56 L50,86 Z" fill={BONE} />
-      <Eyes
-        leftPivot={{ x: 36, y: 44 }}
-        rightPivot={{ x: 64, y: 44 }}
-        scale={eyeScale}
-      >
-        <Ellipse cx={36} cy={44} rx={3.2} ry={3.2} fill={INK} />
-        <Ellipse cx={64} cy={44} rx={3.2} ry={3.2} fill={INK} />
-      </Eyes>
-      <Mouth pivot={{ x: 50, y: 60 }} scale={mouthScale} axis="y">
-        <Polygon points="46,60 54,60 50,66" fill={INK} />
-      </Mouth>
-    </>
-  );
-};
+const Fox: AnimalRender = ({ eyeScale, mouthScale }) => (
+  <>
+    {/* ear silhouettes */}
+    <Polygon points="18,12 38,12 28,32" fill={BRASS} />
+    <Polygon points="62,12 82,12 72,32" fill={BRASS} />
+    {/* ear inner */}
+    <Polygon points="24,18 32,18 28,28" fill={INK} />
+    <Polygon points="68,18 76,18 72,28" fill={INK} />
+    {/* head */}
+    <Path d="M20,28 L80,28 L74,62 L50,88 L26,62 Z" fill={BRASS} />
+    {/* white chest */}
+    <Path d="M38,56 L62,56 L50,86 Z" fill={BONE} />
+    <Eyes
+      leftPivot={{ x: 36, y: 44 }}
+      rightPivot={{ x: 64, y: 44 }}
+      scale={eyeScale}
+    >
+      <Ellipse cx={36} cy={44} rx={3.2} ry={3.2} fill={INK} />
+      <Ellipse cx={64} cy={44} rx={3.2} ry={3.2} fill={INK} />
+    </Eyes>
+    <Mouth pivot={{ x: 50, y: 60 }} scale={mouthScale} axis="y">
+      <Polygon points="46,60 54,60 50,66" fill={INK} />
+    </Mouth>
+  </>
+);
 
 const Owl: AnimalRender = ({ eyeScale, mouthScale }) => (
   <>
@@ -777,7 +737,6 @@ export function AnimalSvg({
   eyeScale,
   mouthScale,
   amplitude,
-  emotionState,
 }: {
   animalId: string;
   size: number;
@@ -789,7 +748,6 @@ export function AnimalSvg({
    * pose) can omit, in which case a no-op zero-value backs the prop.
    */
   amplitude?: AnimalRenderProps['amplitude'];
-  emotionState?: AnimalRenderProps['emotionState'];
 }): React.ReactElement | null {
   const def = ANIMALS[animalId];
   // Stable zero-amplitude backing Animated.Value — reused across
@@ -804,7 +762,6 @@ export function AnimalSvg({
         eyeScale,
         mouthScale,
         amplitude: amplitude ?? zeroAmpRef.current,
-        emotionState,
       })}
     </Svg>
   );
