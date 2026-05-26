@@ -90,19 +90,54 @@ describe('AnimalBody encapsulates def.Render', () => {
     ).toEqual([]);
   });
 
-  it('AnimalBody mounts its render output behind key={animalId}', () => {
+  it('AnimalBody mounts its render output behind a key that includes animalId', () => {
+    // The key sits on its own line inside the AnimalBody → RenderHost
+    // JSX, e.g.:
+    //
+    //     key={`${animalId}-${useCallMask ? 'call' : 'default'}`}
+    //
+    // Pattern-match the line non-greedily until the prop-closing `}`
+    // followed by end-of-line. Template-literal nesting (which
+    // contains its own `}` chars) is handled by anchoring against
+    // `\s*$` (the prop close is the last `}` on the line).
     const src = readSource(join(AVATARS_DIR, 'components.tsx'));
-    // Match the AnimalBody declaration through the keyed RenderHost
-    // mount. Lazy `[\s\S]*?` survives multi-line param destructuring,
-    // intermediate guards, and the inner JSX expansion. Order matters:
-    // RenderHost must come AFTER AnimalBody (so the key inside
-    // AnimalSvg's own `<AnimalBody key=...>` further down doesn't
-    // satisfy this assertion).
+    const bodyMatch =
+      /export function AnimalBody\b[\s\S]*?<RenderHost[\s\S]*?\/>/.exec(src);
+    expect(bodyMatch, 'expected an AnimalBody → RenderHost element').not.toBeNull();
+    const renderHostBlock = bodyMatch![0];
+    const keyLine = /key=\{(.+?)\}\s*$/m.exec(renderHostBlock);
+    expect(keyLine, 'expected a `key=` prop on RenderHost').not.toBeNull();
+    const keyExpr = keyLine![1]!;
     expect(
-      src,
-      'AnimalBody must mount its inner RenderHost with key={animalId}',
-    ).toMatch(
-      /export function AnimalBody\b[\s\S]*?<RenderHost[\s\S]*?key=\{animalId\}/,
-    );
+      keyExpr,
+      'AnimalBody key must reference animalId — that\'s the per-animal hook-order discriminator',
+    ).toContain('animalId');
+  });
+
+  it('AnimalBody key also distinguishes the call-mask variant from the default Render', () => {
+    // rc.12 invariant: when an animal has both `Render` and
+    // `RenderCall`, swapping between them MUST change the key so React
+    // unmounts the prior fiber and starts the new variant with a fresh
+    // hook order. Without this, a Render variant that calls more hooks
+    // than the default (e.g. an animated jaw-shape interpolation in
+    // the call mask but not the static default) would re-introduce the
+    // rc.6 fox-crash class of bug the moment a peer placed a call.
+    //
+    // The assertion pattern-matches the key for a non-`animalId`
+    // discriminator — typically `useCallMask`, `renderForCall`, or a
+    // string suffix like 'call'/'default' interpolated alongside the
+    // id.
+    const src = readSource(join(AVATARS_DIR, 'components.tsx'));
+    const bodyMatch =
+      /export function AnimalBody\b[\s\S]*?<RenderHost[\s\S]*?\/>/.exec(src);
+    expect(bodyMatch).not.toBeNull();
+    const renderHostBlock = bodyMatch![0];
+    const keyLine = /key=\{(.+?)\}\s*$/m.exec(renderHostBlock);
+    expect(keyLine).not.toBeNull();
+    const keyExpr = keyLine![1]!;
+    expect(
+      keyExpr,
+      "AnimalBody key must include a variant discriminator beyond animalId — currently `${animalId}-${... call/default ...}`",
+    ).toMatch(/call|render|variant|mask/i);
   });
 });
