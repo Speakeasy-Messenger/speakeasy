@@ -66,6 +66,13 @@ export class MockSignalProtocolClient implements SignalProtocolModule {
     return ciphertext.slice(1);
   }
 
+  async hasSession(_peerUserId: string): Promise<boolean> {
+    // Mock has no persistent store; tests that exercise the "session
+    // already on disk from a prior process" path override this via
+    // `vi.fn` after construction.
+    return false;
+  }
+
   async resetPeer(_peerUserId: string): Promise<void> {
     // Mock has no per-peer state; nothing to clear.
   }

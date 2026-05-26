@@ -89,6 +89,16 @@ export interface SignalProtocolModule {
   decrypt(peerUserId: string, ciphertext: Uint8Array): Promise<Uint8Array>;
 
   /**
+   * Is there a persisted Signal session row for `peerUserId` (device 1)
+   * in the native store? Lets `ensureSessionWithPeer` skip the destructive
+   * `initiateSession` path when a session already exists on disk from a
+   * prior process — without this, cold-start-send-first re-initiates and
+   * the peer's libsignal rejects the resulting PreKeySignalMessage
+   * ("invalid PreKey message: decryption failed").
+   */
+  hasSession(peerUserId: string): Promise<boolean>;
+
+  /**
    * Drop all stored Signal state for `peerUserId` — their identity key
    * and every session record. Used to recover from a TOFU-rejected
    * key change (`SignalClientError('untrusted_identity')`) when the
@@ -140,6 +150,7 @@ interface NativeSignalModule {
   initiateSession(peerUserId: string, peerBundle: PeerPreKeyBundle): Promise<null>;
   encrypt(peerUserId: string, plaintextB64: string): Promise<string>;
   decrypt(peerUserId: string, ciphertextB64: string): Promise<string>;
+  hasSession(peerUserId: string): Promise<boolean>;
   resetPeer(peerUserId: string): Promise<null>;
   wipeStore(): Promise<null>;
 }
@@ -220,6 +231,10 @@ export class NativeSignalProtocolModule implements SignalProtocolModule {
       this.module.decrypt(peerUserId, b64Encode(ciphertext)),
     );
     return b64Decode(out);
+  }
+
+  async hasSession(peerUserId: string): Promise<boolean> {
+    return await this.callBridge(() => this.module.hasSession(peerUserId));
   }
 
   async resetPeer(peerUserId: string): Promise<void> {

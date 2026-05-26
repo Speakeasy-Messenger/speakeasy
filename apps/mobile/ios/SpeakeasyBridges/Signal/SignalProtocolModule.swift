@@ -255,6 +255,34 @@ class SignalProtocolModule: NSObject {
         }
     }
 
+    // MARK: - hasSession
+
+    /// Is there a persisted Signal session row for `peerUserId`
+    /// (device 1)? Lets the JS `ensureSessionWithPeer` skip the
+    /// destructive `initiateSession` re-init when a session already
+    /// exists on disk from a prior process. Without it, a cold-start-
+    /// send-first burns a fresh OTPK and emits a PreKeySignalMessage
+    /// the peer's already-advanced libsignal rejects ("invalid PreKey
+    /// message: decryption failed").
+    ///
+    /// iOS has no `containsSession` on the SessionStore protocol —
+    /// `loadSession` returns nil when no row exists (see
+    /// SqlCipherSignalProtocolStore.loadSession).
+    @objc(hasSession:resolver:rejecter:)
+    func hasSession(_ peerUserId: NSString,
+                    resolver resolve: @escaping RCTPromiseResolveBlock,
+                    rejecter reject: @escaping RCTPromiseRejectBlock) {
+        do {
+            ensureRestored()
+            let store = try SpeakeasySignalStore.require()
+            let peerAddr = try ProtocolAddress(name: peerUserId as String, deviceId: deviceId)
+            let session = try store.loadSession(for: peerAddr, context: context)
+            resolve(session != nil)
+        } catch {
+            reject("has_session_failed", error.localizedDescription, error)
+        }
+    }
+
     // MARK: - Helpers
 
     /// Lazy on-disk restore, mirrors Android's ensureRestored().
