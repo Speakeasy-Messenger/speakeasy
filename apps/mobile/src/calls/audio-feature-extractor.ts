@@ -43,6 +43,24 @@ export const FEATURE_WINDOW_MS = 33;
 const FOLLOWER_ATTACK_MS = 80;
 const FOLLOWER_RELEASE_MS = 200;
 
+/** Phrasing-channel attack/release. Tracks shifts in vocal posture
+ *  (pitch trend, expressiveness, activity), not phonemes. Held
+ *  long enough that normal sentence-by-sentence prosody flicker
+ *  doesn't read as twitch in the rendered avatar. rc.13 dogfood
+ *  feedback: at 150/350 the ears/head visibly micro-corrected on
+ *  every syllable. 200/650 holds direction across a full clause. */
+const PHRASING_ATTACK_MS = 200;
+const PHRASING_RELEASE_MS = 650;
+
+/** Floor below which `pitchTrend` snaps to 0. Normal prosody hovers
+ *  in [-0.1, +0.1] between sentences and the per-animal interpolations
+ *  amplify any non-zero value into visible motion. The deadband kills
+ *  the "always slightly tilted" feel without losing emotionally
+ *  meaningful trend (rising at a question, falling on a sigh — both
+ *  comfortably exceed 0.2 in practice; see audio-feature-extractor
+ *  tests). Symmetric, applied after the follower. */
+const PITCH_TREND_DEADBAND = 0.12;
+
 /** ZCR baseline calibration window — first 500 ms of accumulated
  *  chunks are averaged to establish the per-call baseline. */
 const ZCR_CALIBRATION_WINDOWS = Math.ceil(500 / FEATURE_WINDOW_MS);
@@ -194,12 +212,22 @@ export class AudioFeatureExtractor {
   );
   // The trend / variance / activity followers run on a longer time
   // scale than the per-syllable channels — these signals are about
-  // *phrasing*, not phoneme detail. 150 ms attack / 350 ms release
-  // hides single-syllable wobble while still tracking when the
-  // speaker actually shifts register.
-  private readonly pitchTrendFollower = new Follower(150, 350, FEATURE_WINDOW_MS);
-  private readonly expressivenessFollower = new Follower(150, 350, FEATURE_WINDOW_MS);
-  private readonly activityFollower = new Follower(150, 350, FEATURE_WINDOW_MS);
+  // *phrasing*, not phoneme detail.
+  private readonly pitchTrendFollower = new Follower(
+    PHRASING_ATTACK_MS,
+    PHRASING_RELEASE_MS,
+    FEATURE_WINDOW_MS,
+  );
+  private readonly expressivenessFollower = new Follower(
+    PHRASING_ATTACK_MS,
+    PHRASING_RELEASE_MS,
+    FEATURE_WINDOW_MS,
+  );
+  private readonly activityFollower = new Follower(
+    PHRASING_ATTACK_MS,
+    PHRASING_RELEASE_MS,
+    FEATURE_WINDOW_MS,
+  );
   /** Rolling sum of ZCR readings during the calibration window. */
   private zcrCalibSum = 0;
   /** How many windows have contributed to the baseline so far. */
@@ -294,12 +322,14 @@ export class AudioFeatureExtractor {
     const activityInstant = this.trackActivity(voicedNow);
     this.prevVoiced = voicedNow;
 
+    const smoothedTrend = this.pitchTrendFollower.push(pitchTrendInstant);
     return {
       loudness: this.loudnessFollower.push(raw.loudness),
       pitchNorm: this.pitchNormFollower.push(pitchNormInstant),
       zcrNorm: this.zcrNormFollower.push(zcrNormInstant),
       mouthShape: this.mouthShapeFollower.push(mouthShapeInstant),
-      pitchTrend: this.pitchTrendFollower.push(pitchTrendInstant),
+      pitchTrend:
+        Math.abs(smoothedTrend) < PITCH_TREND_DEADBAND ? 0 : smoothedTrend,
       expressiveness: this.expressivenessFollower.push(expressivenessInstant),
       activity: this.activityFollower.push(activityInstant),
     };
