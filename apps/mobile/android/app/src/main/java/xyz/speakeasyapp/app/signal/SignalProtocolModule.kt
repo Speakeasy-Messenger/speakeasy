@@ -247,6 +247,30 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
   }
 
   /**
+   * Is there a persisted Signal session row for [peerUserId] (device 1)?
+   * Lets the JS `ensureSessionWithPeer` skip the destructive
+   * `initiateSession` re-init when a session already exists on disk
+   * from a prior process. Without it, a cold-start-send-first burns
+   * a fresh OTPK and emits a PreKeySignalMessage the peer's already-
+   * advanced libsignal rejects ("invalid PreKey message: decryption
+   * failed").
+   */
+  @ReactMethod
+  fun hasSession(peerUserId: String, promise: Promise) {
+    try {
+      ensureRestored()
+      val store = SpeakeasySignalStore.requireInitialized()
+      // containsSession is part of SessionStore (Java-only) — the prod
+      // impl is SqlCipherSignalProtocolStore; InMemoryStore (test) also
+      // implements it.
+      val exists = store.containsSession(SignalProtocolAddress(peerUserId, deviceId))
+      promise.resolve(exists)
+    } catch (e: Throwable) {
+      promise.reject("has_session_failed", e.message, e)
+    }
+  }
+
+  /**
    * Clear all stored state about a peer — their identity key + every
    * session record. Used to recover from `UntrustedIdentityException`
    * when the user opts in to trust a peer's freshly-rotated identity

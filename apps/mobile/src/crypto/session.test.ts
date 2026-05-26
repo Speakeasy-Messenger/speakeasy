@@ -188,6 +188,34 @@ describe('ensureSessionWithPeer', () => {
     expect(h.signalProtocol.initiateSession).toHaveBeenCalledTimes(2);
   });
 
+  it('skips fetch + initiate when hasSession reports a session already on disk (cold-start-send-first)', async () => {
+    // Simulates a cold start where the in-process cache is empty but
+    // the native SQLCipher store still has a session row from a prior
+    // process. Without the hasSession guard, ensureSessionWithPeer
+    // would re-initiate and burn an OTPK, producing a PreKey-style
+    // ciphertext the peer can't decrypt.
+    const h = makeHarness();
+    h.signalProtocol.hasSession = vi.fn(async () => true);
+    await ensureSessionWithPeer({
+      api: h.api as unknown as ApiClient,
+      signalProtocol: h.signalProtocol,
+      deviceToken: 'dvt_alice',
+      peerUserId: 'silent-golden-hawk',
+    });
+    expect(h.signalProtocol.hasSession).toHaveBeenCalledWith('silent-golden-hawk');
+    expect(h.api.fetchPreKeyBundle).not.toHaveBeenCalled();
+    expect(h.signalProtocol.initiateSession).not.toHaveBeenCalled();
+    // Second call also short-circuits — now via the in-process cache,
+    // so hasSession is not re-queried.
+    await ensureSessionWithPeer({
+      api: h.api as unknown as ApiClient,
+      signalProtocol: h.signalProtocol,
+      deviceToken: 'dvt_alice',
+      peerUserId: 'silent-golden-hawk',
+    });
+    expect(h.signalProtocol.hasSession).toHaveBeenCalledTimes(1);
+  });
+
   it('clearSessionCache forces a fresh handshake on the next call (sign-out / re-enrollment)', async () => {
     const h = makeHarness();
     const args = {

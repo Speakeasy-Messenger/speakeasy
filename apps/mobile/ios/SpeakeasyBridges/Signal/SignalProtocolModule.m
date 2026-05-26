@@ -34,4 +34,8 @@ RCT_EXTERN_METHOD(decrypt:(NSString *)peerUserId
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+RCT_EXTERN_METHOD(hasSession:(NSString *)peerUserId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end
