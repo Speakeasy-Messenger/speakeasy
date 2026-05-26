@@ -194,6 +194,7 @@ export function AvatarRenderer({
         mouthScale={mouthScale}
         amplitude={source}
         prosody={animatedProsody}
+        renderForCall={prosody !== undefined}
       />
     </Animated.View>
   );

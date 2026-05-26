@@ -111,6 +111,16 @@ export interface AudioResponse {
   translateMaxPx: number;
 }
 
+export interface AnimalAnchors {
+  breathePivot: Pivot;
+  eyeLeftPivot: Pivot;
+  eyeRightPivot: Pivot;
+  mouthPivot: Pivot;
+  /** `'y'` for most animals (mouth opens). `'x'` for animals where
+   * the visible motion is a beak click rather than a jaw drop. */
+  mouthAxis: 'x' | 'y';
+}
+
 export interface AnimalMeta {
   id: AnimalId;
   name: string;
@@ -118,15 +128,19 @@ export interface AnimalMeta {
    * place; the mouth scales (and optionally translates) from this
    * point; the breathe pivot anchors the whole-figure scale to the
    * bottom of the silhouette so it reads as inhalation, not float. */
-  anchors: {
-    breathePivot: Pivot;
-    eyeLeftPivot: Pivot;
-    eyeRightPivot: Pivot;
-    mouthPivot: Pivot;
-    /** `'y'` for most animals (mouth opens). `'x'` for animals where
-     * the visible motion is a beak click rather than a jaw drop. */
-    mouthAxis: 'x' | 'y';
-  };
+  anchors: AnimalAnchors;
+  /**
+   * rc.12 — call-mask anchors. Set on animals whose `RenderCall`
+   * variant moved the eye / mouth / breathe pivots (most re-posed
+   * call masks). Animals whose call mask keeps the default pivots
+   * (or that don't have a `RenderCall`) leave this undefined and
+   * the renderer falls back to `anchors`. Currently consumed only
+   * by code paths that *read* anchors for layout (none in v1 — the
+   * Render fn pins its own pivots inline); reserved here so the
+   * future renderer-level mouth-amplitude pipeline doesn't have to
+   * rummage in the Render function to find them.
+   */
+  callAnchors?: AnimalAnchors;
   audioResponse: AudioResponse;
 }
 
@@ -195,4 +209,17 @@ export type AnimalRender = (props: AnimalRenderProps) => React.ReactElement;
 export interface AnimalDef {
   meta: AnimalMeta;
   Render: AnimalRender;
+  /**
+   * rc.12 — optional call-mask Render variant. Used in *call*
+   * contexts only (anywhere the avatar receives a non-undefined
+   * `prosody` prop — CallScreen, IncomingCallScreen during the
+   * connected stage). Re-posed and feature-amplified vs the default
+   * `Render`, which stays in use for chat rows / picker grids /
+   * AppBar / IdReveal previews / push-notification thumbnails.
+   *
+   * Optional: animals without a `RenderCall` fall through to
+   * `Render` in every context. Free-common tier has the full set;
+   * rare + legendary tiers can opt in over time.
+   */
+  RenderCall?: AnimalRender;
 }
