@@ -51,6 +51,7 @@ import { makePlaceholder } from './placeholder.js';
 // JS-driver overhead at our update rates (60Hz idle, 30Hz audio) is in
 // the noise on a release build.
 const AnimatedG = Animated.createAnimatedComponent(G);
+const AnimatedPath = Animated.createAnimatedComponent(Path);
 
 // Brand-locked colors — duplicated here from `theme/tokens.ts` so the
 // SVG markup is fully self-contained (animal SVGs are intended to be
@@ -109,6 +110,78 @@ function Mouth({
   );
 }
 
+/**
+ * Mouth that morphs between a CLOSED path and an OPEN path via opacity
+ * crossfade, driven by the prosody `mouthShape` channel (0 = closed,
+ * 1 = open vowel). Replaces the scale-only `Mouth` for animals where
+ * the mouth needs (a) to be visible on the face — not implied by a
+ * tiny scaled polygon — and (b) to read as a *shape*, not just an
+ * amplitude-driven stretch.
+ *
+ * Brand note: this introduces strokes for the mouth (previously
+ * forbidden by the no-strokes rule from §2.2). The carve-out is
+ * deliberate — the face needs a legible mouth more than the rig
+ * needs a one-line spec. Thin INK strokes also sit naturally with
+ * the "speakeasy menu illustration" register we're moving toward.
+ *
+ * Both paths render simultaneously; their opacity is `1 - openness`
+ * and `openness` respectively. Path d-strings are intentionally
+ * unconstrained (any structure) — we crossfade pixel coverage rather
+ * than interpolate coordinates, so closed and open can be
+ * structurally different shapes (a line vs. a lens, a closed triangle
+ * vs. a separated upper+lower mandible).
+ */
+type Openness =
+  | Animated.Value
+  | Animated.AnimatedInterpolation<number>
+  | number;
+
+function MouthMorph({
+  closedD,
+  openD,
+  openness,
+  stroke,
+  strokeWidth,
+  fill,
+}: {
+  closedD: string;
+  openD: string;
+  /** Animated [0,1]. 0 = full-closed, 1 = full-open. Wire from
+   *  `prosody?.mouthShape` during a call; pass the static fallback
+   *  `0` when there's no prosody (chat row avatars, picker previews). */
+  openness: Openness;
+  stroke: string;
+  strokeWidth: number;
+  fill?: string;
+}): React.ReactElement {
+  const closedOpacity =
+    typeof openness === 'number'
+      ? 1 - openness
+      : openness.interpolate({ inputRange: [0, 1], outputRange: [1, 0] });
+  return (
+    <>
+      <AnimatedPath
+        d={closedD}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={fill ?? 'none'}
+        opacity={closedOpacity}
+      />
+      <AnimatedPath
+        d={openD}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinecap="round"
+        strokeLinejoin="round"
+        fill={fill ?? 'none'}
+        opacity={openness}
+      />
+    </>
+  );
+}
+
 // ─────────────────────────────────────────────────────────────────────
 
 // Fox ear pivots — base of each ear, where it meets the skull. Ears
@@ -120,7 +193,7 @@ function Mouth({
 const FOX_EAR_LEFT_PIVOT = { x: 28, y: 30 };
 const FOX_EAR_RIGHT_PIVOT = { x: 72, y: 30 };
 
-const Fox: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const Fox: AnimalRender = ({ eyeScale, prosody }) => {
   // pitchTrend ∈ [-1, +1] → left ear rotates from +12° (flat back,
   // falling pitch) through 0° (rest) to -6° (perked forward, rising
   // pitch). Right ear is mirrored.
@@ -168,9 +241,17 @@ const Fox: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Ellipse cx={36} cy={44} rx={3.2} ry={3.2} fill={INK} />
         <Ellipse cx={64} cy={44} rx={3.2} ry={3.2} fill={INK} />
       </Eyes>
-      <Mouth pivot={{ x: 50, y: 60 }} scale={mouthScale} axis="y">
-        <Polygon points="46,60 54,60 50,66" fill={INK} />
-      </Mouth>
+      {/* Mouth lives on the face between eyes and chest, not the chest
+          itself (rc.14 dogfood feedback: fox had no visible mouth).
+          Closed reads as a calm fox muzzle line dipping gently; open
+          forms a small lens that bows down to read as a parted mouth. */}
+      <MouthMorph
+        closedD="M 45 52 Q 50 54 55 52"
+        openD="M 44 51 Q 50 57 56 51 Q 50 53 44 51 Z"
+        openness={prosody?.mouthShape ?? 0}
+        stroke={INK}
+        strokeWidth={1.4}
+      />
     </>
   );
 };
@@ -473,7 +554,7 @@ const Octopus: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 // Heron signature: head + neck sway on pitchTrend. Rising pitch
 // pulls the head forward (lean-in), falling pitch pulls back.
 // Only the head + tip of the neck moves — body + legs stay rooted.
-const Heron: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const Heron: AnimalRender = ({ eyeScale, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const translateX = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-2, 0, 3] })
@@ -495,9 +576,19 @@ const Heron: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Circle cx={60} cy={14} r={1.6} fill={INK} />
           <G />
         </Eyes>
-        <Mouth pivot={{ x: 80, y: 16 }} scale={mouthScale} axis="x">
-          <Polygon points="68,14 92,18 68,20" fill={BRASS} />
-        </Mouth>
+        {/* Beak is the mouth. Switched from BRASS fill (invisible
+            against the BONE+BRASS body) to INK stroke so it actually
+            reads. Closed: upper + lower mandible meeting at the tip.
+            Open: mandibles spread, beak gapes. Same path structure
+            (M L L Z) so the morph reads as a beak opening, not a
+            shape replacement. */}
+        <MouthMorph
+          closedD="M 68 16 L 92 17 L 68 18 Z"
+          openD="M 68 14 L 92 17 L 68 20 Z"
+          openness={prosody?.mouthShape ?? 0}
+          stroke={INK}
+          strokeWidth={1.1}
+        />
       </AnimatedG>
       {/* legs */}
       <Line x1={54} y1={84} x2={50} y2={96} stroke={BRASS} strokeWidth={2} />
