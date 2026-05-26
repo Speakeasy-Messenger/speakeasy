@@ -9,7 +9,6 @@ import Animated, {
 } from 'react-native-reanimated';
 import { Ellipse, G, Line, Path, Polygon } from 'react-native-svg';
 import type { AnimalRender } from '../types.js';
-import { useEmotionDrive } from '../emotion-drive.js';
 
 const AnimatedG = Animated.createAnimatedComponent(G);
 const RNAnimatedG = RNAnimated.createAnimatedComponent(G);
@@ -60,16 +59,19 @@ function BeakScan(): React.ReactElement {
 const HEAD_TILT_PIVOT = { x: 50, y: 60 };
 const HEAD_TILT_MAX_DEG = 6;
 
-export const Hawk: AnimalRender = ({ eyeScale, mouthScale, emotionState }) => {
-  // Phase 5j Private Call — calm = sustained low-energy speech; the
-  // hawk's natural read for that is a "listening tilt." Excited and
-  // baseline hold the head level so the BeakScan stays unambiguous.
-  const tilt = useEmotionDrive(emotionState, (s) => (s === 'calm' ? 1 : 0));
+export const Hawk: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+  // rc.11: head tilt tracks `expressiveness` INVERTED — a flat,
+  // monotone speaker reads as "listening attentively" (tilt engaged);
+  // an animated speaker reads as "talking actively" (head level).
+  // Continuous replacement for the rc.6-9 binary calm-state trigger.
   // react-native-svg <G rotation={…}> takes a numeric degree.
-  const rotation = tilt.interpolate({
-    inputRange: [0, 1],
-    outputRange: [0, HEAD_TILT_MAX_DEG],
-  });
+  const exprSrc = prosody?.expressiveness;
+  const rotation = exprSrc
+    ? exprSrc.interpolate({
+        inputRange: [0, 1],
+        outputRange: [HEAD_TILT_MAX_DEG, 0],
+      })
+    : 0;
   return (
     <G>
       <Path d="M 32,62 L 68,62 L 76,92 L 24,92 Z" fill={BRASS} opacity={0.85} />

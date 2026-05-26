@@ -192,3 +192,184 @@ describe('AudioFeatureExtractor (stateful, smoothed)', () => {
     expect(after1).toBeGreaterThan(sat * 0.7);
   });
 });
+
+describe('AudioFeatureExtractor — continuous prosody channels', () => {
+  // Helpers for these tests: a vowel-like signal (clean sine in the
+  // speech range, voiced) and a fricative-like signal (white noise,
+  // unvoiced) at matched loudness.
+  function vowelLike(pitchHz: number, amp = 0.5): Float32Array {
+    return sine(pitchHz, amp);
+  }
+  function fricativeLike(amp = 0.5): Float32Array {
+    return whiteNoise(amp);
+  }
+
+  describe('mouthShape', () => {
+    it('is 0 for silence', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      for (let i = 0; i < 10; i++) {
+        const f = fx.push(silence());
+        expect(f.mouthShape).toBe(0);
+      }
+    });
+
+    it('rises on a loud sustained vowel', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let f = fx.push(vowelLike(200, 0.8));
+      for (let i = 0; i < 30; i++) f = fx.push(vowelLike(200, 0.8));
+      // Settled mouthShape should be near (loudness × 1.2 saturated).
+      // RMS of a 0.8 sine ≈ 0.566; × 1.2 = 0.68. Allow some headroom
+      // for follower lag.
+      expect(f.mouthShape).toBeGreaterThan(0.5);
+    });
+
+    it('is meaningfully LOWER on a fricative than on a vowel at the same loudness', () => {
+      // Vowel run.
+      const vowelFx = new AudioFeatureExtractor({ sampleRate: SR });
+      let vowel = vowelFx.push(vowelLike(200, 0.5));
+      for (let i = 0; i < 30; i++) vowel = vowelFx.push(vowelLike(200, 0.5));
+      // Fricative run.
+      const fricFx = new AudioFeatureExtractor({ sampleRate: SR });
+      let fric = fricFx.push(fricativeLike(0.5));
+      for (let i = 0; i < 30; i++) fric = fricFx.push(fricativeLike(0.5));
+      // The fricative is unvoiced (no detectable pitch), so the
+      // mouth-shape signal is half what the vowel produces at the
+      // same RMS — distinct enough that the avatar's mouth opens
+      // perceptibly less on a sibilant.
+      expect(fric.mouthShape).toBeLessThan(vowel.mouthShape * 0.7);
+    });
+  });
+
+  describe('pitchTrend', () => {
+    it('is 0 with no voiced material', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      for (let i = 0; i < 30; i++) {
+        const f = fx.push(silence());
+        expect(f.pitchTrend).toBe(0);
+      }
+    });
+
+    it('is positive when pitch is rising over the trend window', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      // Ramp pitch from 120 Hz → 280 Hz over 20 windows (~660 ms).
+      let last = fx.push(vowelLike(120, 0.5));
+      for (let i = 0; i < 20; i++) {
+        const f0 = 120 + (i * (280 - 120)) / 20;
+        last = fx.push(vowelLike(f0, 0.5));
+      }
+      expect(last.pitchTrend).toBeGreaterThan(0.2);
+    });
+
+    it('is negative when pitch is falling over the trend window', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(vowelLike(280, 0.5));
+      for (let i = 0; i < 20; i++) {
+        const f0 = 280 - (i * (280 - 120)) / 20;
+        last = fx.push(vowelLike(f0, 0.5));
+      }
+      expect(last.pitchTrend).toBeLessThan(-0.2);
+    });
+
+    it('settles toward 0 on a held monotone', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(vowelLike(200, 0.5));
+      for (let i = 0; i < 40; i++) last = fx.push(vowelLike(200, 0.5));
+      expect(Math.abs(last.pitchTrend)).toBeLessThan(0.1);
+    });
+  });
+
+  describe('expressiveness', () => {
+    it('is low on a held monotone', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(vowelLike(200, 0.5));
+      for (let i = 0; i < 40; i++) last = fx.push(vowelLike(200, 0.5));
+      expect(last.expressiveness).toBeLessThan(0.15);
+    });
+
+    it('rises when pitch varies widely across the prosody window', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      // Alternate between 120 Hz and 280 Hz every window — large
+      // pitch swings = high coefficient of variation.
+      let last = fx.push(vowelLike(120, 0.5));
+      for (let i = 0; i < 40; i++) {
+        last = fx.push(vowelLike(i % 2 === 0 ? 280 : 120, 0.5));
+      }
+      expect(last.expressiveness).toBeGreaterThan(0.4);
+    });
+
+    it('is robust to a single octave-jump glitch in otherwise flat pitch', () => {
+      // Simulate the YIN/autocorrelation failure mode: 30 windows
+      // of a monotone 200 Hz signal, with ONE window where the
+      // detector spuriously reports the octave-up (400 Hz). With
+      // mean+stddev this single outlier pushes the CoV into the
+      // "well-animated speech" range; with median+MAD it shouldn't.
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(vowelLike(200, 0.5));
+      for (let i = 0; i < 30; i++) {
+        const hz = i === 15 ? 400 : 200;
+        last = fx.push(vowelLike(hz, 0.5));
+      }
+      // Still classified as flat — under 0.25 with the robust metric.
+      // A pre-rc.11 (mean/stddev) implementation would hit ~0.45.
+      expect(last.expressiveness).toBeLessThan(0.25);
+    });
+  });
+
+  describe('activity', () => {
+    it('is 0 on continuous silence', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(silence());
+      for (let i = 0; i < 30; i++) last = fx.push(silence());
+      expect(last.activity).toBe(0);
+    });
+
+    it('is low on a sustained continuous note', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(vowelLike(200, 0.5));
+      for (let i = 0; i < 30; i++) last = fx.push(vowelLike(200, 0.5));
+      // One initial transition (silence → voiced), then steady →
+      // very low activity.
+      expect(last.activity).toBeLessThan(0.15);
+    });
+
+    it('rises on alternating speech/pause windows', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      let last = fx.push(vowelLike(200, 0.5));
+      // Toggle: 30 windows of {voiced, silent, voiced, silent...}
+      for (let i = 0; i < 30; i++) {
+        last = fx.push(i % 2 === 0 ? silence() : vowelLike(200, 0.5));
+      }
+      expect(last.activity).toBeGreaterThan(0.4);
+    });
+  });
+
+  describe('shape sanity', () => {
+    it('every new channel is finite and within its declared range', () => {
+      const fx = new AudioFeatureExtractor({ sampleRate: SR });
+      // Run a mixed signal so each channel exercises its computation.
+      const sources = [
+        () => vowelLike(120, 0.3),
+        () => vowelLike(250, 0.6),
+        () => fricativeLike(0.4),
+        () => silence(),
+        () => vowelLike(200, 0.8),
+      ];
+      for (let i = 0; i < 60; i++) {
+        const src = sources[i % sources.length]!;
+        const f = fx.push(src());
+        expect(Number.isFinite(f.mouthShape)).toBe(true);
+        expect(f.mouthShape).toBeGreaterThanOrEqual(0);
+        expect(f.mouthShape).toBeLessThanOrEqual(1);
+        expect(Number.isFinite(f.pitchTrend)).toBe(true);
+        expect(f.pitchTrend).toBeGreaterThanOrEqual(-1);
+        expect(f.pitchTrend).toBeLessThanOrEqual(1);
+        expect(Number.isFinite(f.expressiveness)).toBe(true);
+        expect(f.expressiveness).toBeGreaterThanOrEqual(0);
+        expect(f.expressiveness).toBeLessThanOrEqual(1);
+        expect(Number.isFinite(f.activity)).toBe(true);
+        expect(f.activity).toBeGreaterThanOrEqual(0);
+        expect(f.activity).toBeLessThanOrEqual(1);
+      }
+    });
+  });
+});

@@ -17,7 +17,57 @@ import type React from 'react';
 // react-native's Animated namespace. Imported as a type for the value
 // handles passed to the per-animal render functions.
 import type { Animated as RNAnimated } from 'react-native';
-import type { EmotionState } from '../calls/emotion-state-machine.js';
+import type { AcousticEvent } from '../calls/audio-feature-extractor.js';
+
+/**
+ * Phase 5j Private Call — the continuous prosody channels (plus the
+ * one-shot acoustic event) the peer's audio pipeline produces, as
+ * the receiver sees them. The avatar Render maps these onto its
+ * own animation vocabulary — mouth shape, head tilt, fidget rate,
+ * gesture amplitude, signature pose.
+ *
+ * Numeric values, NOT Animated.Values — the AvatarRenderer drives
+ * its internal Animated.Values from these on prop change. Numeric
+ * values let the prosody flow through the React tree as a normal
+ * prop (zustand-driven re-renders at 30 Hz) without each consumer
+ * having to wire its own Animated.Value handles.
+ *
+ * `amplitude` is duplicated here from the AvatarRenderer's existing
+ * `amplitude` prop. Call sites for the *peer* avatar set prosody;
+ * call sites for the *local self* avatar set `amplitude` only
+ * (everything else stays at neutral defaults).
+ *
+ * `eventAt` is the receiver's local clock at the moment the event
+ * arrived — used to tick the one-shot pose overlay's ~1.5 s
+ * lifetime against the receiver's clock so sender/receiver clock
+ * drift doesn't shorten or extend it.
+ */
+export interface ProsodyState {
+  amplitude: number;
+  pitchNorm: number;
+  zcrNorm: number;
+  mouthShape: number;
+  pitchTrend: number;
+  expressiveness: number;
+  activity: number;
+  event: AcousticEvent;
+  eventAt: number;
+}
+
+/** Neutral prosody — every channel at rest, no event. Use as a
+ *  static fallback at mount sites that don't have a peer feed
+ *  (picker tiles, chat list rows, etc.). */
+export const NEUTRAL_PROSODY: ProsodyState = {
+  amplitude: 0,
+  pitchNorm: 0,
+  zcrNorm: 0,
+  mouthShape: 0,
+  pitchTrend: 0,
+  expressiveness: 0,
+  activity: 0,
+  event: 'none',
+  eventAt: 0,
+};
 
 /** Stable identifier persisted in the user's profile + sent on
  *  conversation handshake to peers. Don't rename without a migration.
@@ -102,20 +152,43 @@ export type AnimalRenderProps = {
    */
   amplitude: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
   /**
-   * Phase 5j Private Call — current decoded emotion from
-   * `EmotionStateMachine`. Drives per-animal *signature* tells
-   * (raven feather ruffle, fox ear perk, hawk head tilt). Universal
-   * channels — eye scale, blink interval, amplitude boost — are
-   * applied by `AvatarRenderer` upstream; this prop is only for
-   * animal-shape-specific motion that can't be expressed as a
-   * generic scale/blink.
+   * Phase 5j Private Call (rc.11 prosody rewrite) — the receiver's
+   * latest snapshot of the peer's continuous prosody channels +
+   * any active one-shot acoustic event. Per-animal Renders pick
+   * the channels they care about (fox ears watch pitchTrend, hawk
+   * head watches expressiveness, raven feathers watch activity,
+   * etc.) and ignore the rest.
    *
-   * Optional + defaults to `'baseline'` so non-private call sites
-   * (chat row avatars, picker tiles, idle previews) render the
-   * neutral pose without any flag-checking.
+   * Driven by Animated.Values inside `AvatarRenderer` — see
+   * `useProsodyAnimatedValues` — so per-animal Renders get
+   * AnimatedInterpolation<number> handles instead of raw numbers.
+   * This lets each animal compose prosody channels with its own
+   * Animated values (e.g., blink × emotion-eye-scale) without
+   * forcing a re-render per frame.
+   *
+   * Optional + defaults to a neutral set so non-private call sites
+   * (chat row avatars, picker tiles) render the rest pose.
    */
-  emotionState?: EmotionState;
+  prosody?: AnimatedProsody;
 };
+
+/**
+ * Animated counterpart to `ProsodyState` that per-animal Renders
+ * consume. `event` + `eventAt` are *not* animated — they're
+ * one-shot triggers; the overlay system reads them as plain values
+ * via `useProsodyEvent`.
+ */
+export interface AnimatedProsody {
+  amplitude: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  pitchNorm: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  zcrNorm: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  mouthShape: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  pitchTrend: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  expressiveness: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  activity: RNAnimated.Value | RNAnimated.AnimatedInterpolation<number>;
+  event: AcousticEvent;
+  eventAt: number;
+}
 
 export type AnimalRender = (props: AnimalRenderProps) => React.ReactElement;
 

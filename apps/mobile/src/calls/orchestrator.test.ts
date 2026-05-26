@@ -652,9 +652,13 @@ describe('CallOrchestrator', () => {
       // delivered it. The orchestrator decodes and forwards.
       const seq = h.caller.sendAnimationFrame({
         amplitude: 0.5,
-        emotionState: 'excited',
         pitchNorm: 0.7,
         zcrNorm: 0.3,
+        mouthShape: 0.4,
+        pitchTrend: 0.3,
+        expressiveness: 0.6,
+        activity: 0.4,
+        event: 'none',
       });
       expect(seq).toBe(1);
       expect(h.callerPeer().sentAnimationFrames).toHaveLength(1);
@@ -662,7 +666,7 @@ describe('CallOrchestrator', () => {
 
       expect(peerAnimationFrames).toHaveLength(1);
       expect(peerAnimationFrames[0]?.peerUserId).toBe('alice');
-      expect(peerAnimationFrames[0]?.frame.emotionState).toBe('excited');
+      expect(peerAnimationFrames[0]?.frame.pitchTrend).toBeCloseTo(0.3, 1);
       expect(peerAnimationFrames[0]?.frame.amplitude).toBeCloseTo(0.5, 2);
     });
 
@@ -678,15 +682,23 @@ describe('CallOrchestrator', () => {
 
       h.caller.sendAnimationFrame({
         amplitude: 0.1,
-        emotionState: 'baseline',
         pitchNorm: 0,
         zcrNorm: 0,
+        mouthShape: 0,
+        pitchTrend: 0,
+        expressiveness: 0,
+        activity: 0,
+        event: 'none',
       });
       h.caller.sendAnimationFrame({
         amplitude: 0.5,
-        emotionState: 'excited',
         pitchNorm: 0.7,
         zcrNorm: 0.5,
+        mouthShape: 0.6,
+        pitchTrend: 0.2,
+        expressiveness: 0.4,
+        activity: 0.3,
+        event: 'none',
       });
       const frames = h.callerPeer().sentAnimationFrames;
       // Deliver in order: 1, 2 — both accepted.
@@ -705,9 +717,13 @@ describe('CallOrchestrator', () => {
       expect(
         h.caller.sendAnimationFrame({
           amplitude: 0.5,
-          emotionState: 'excited',
           pitchNorm: 0.5,
           zcrNorm: 0.5,
+          mouthShape: 0.5,
+          pitchTrend: 0.2,
+          expressiveness: 0.3,
+          activity: 0.4,
+          event: 'none',
         }),
       ).toBe(-1);
     });
@@ -716,24 +732,24 @@ describe('CallOrchestrator', () => {
       const h = makeOrchHarness();
       await h.caller.startOutgoing('bob', 'private');
       await h.pump();
-      const seq1 = h.caller.sendAnimationFrame({
+      const neutralFrame = {
         amplitude: 0.1,
-        emotionState: 'baseline',
         pitchNorm: 0,
         zcrNorm: 0,
-      });
+        mouthShape: 0,
+        pitchTrend: 0,
+        expressiveness: 0,
+        activity: 0,
+        event: 'none' as const,
+      };
+      const seq1 = h.caller.sendAnimationFrame(neutralFrame);
       expect(seq1).toBe(1);
       h.caller.hangup();
       await h.pump();
       // Fresh dial — the same orchestrator must restart the seq
       // counter (cleanup() resets outboundAnimationSeq).
       await h.caller.startOutgoing('bob', 'private');
-      const seq2 = h.caller.sendAnimationFrame({
-        amplitude: 0.1,
-        emotionState: 'baseline',
-        pitchNorm: 0,
-        zcrNorm: 0,
-      });
+      const seq2 = h.caller.sendAnimationFrame(neutralFrame);
       expect(seq2).toBe(1);
     });
   });
