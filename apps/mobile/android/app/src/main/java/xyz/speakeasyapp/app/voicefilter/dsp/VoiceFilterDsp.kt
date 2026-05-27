@@ -41,7 +41,15 @@ class VoiceFilterDsp(
 ) : SampleFilter {
 
   private val factor: Float = 2.0.pow((semitones / 12.0)).toFloat()
-  private val shifter = GranularPitchShifter()
+  // Phase 2a: phase vocoder replaces the granular shifter as the
+  // default. Lower latency (~10ms vs ~21ms) and no crackle, at the
+  // cost of some pitch-shift artifacts on transients (plosives) and
+  // sustained vowels (faint metallic edge). The boolean below lets
+  // us flip back to granular fast if field testing finds the new
+  // path worse on real hardware.
+  private val shifter: PitchShifter =
+    if (USE_PHASE_VOCODER) PhaseVocoderShifterAdapter()
+    else GranularShifterAdapter()
   private val guard = LatencyGuard(budgetMicros)
 
   /**
@@ -100,15 +108,9 @@ class VoiceFilterDsp(
       }
     }
 
-    // In-place pitch+formant shift.
-    shifter.process(
-        input = scratch,
-        inOffset = 0,
-        output = scratch,
-        outOffset = 0,
-        n = frameSamples,
-        factor = factor,
-    )
+    // In-place pitch+formant shift via the active shifter
+    // (phase vocoder or granular — see USE_PHASE_VOCODER above).
+    shifter.process(scratch, 0, scratch, 0, frameSamples, factor)
 
     // Encode → PCM16 back into the original byte buffer at the
     // original position. Stereo writes the same mono sample to both
@@ -151,5 +153,48 @@ class VoiceFilterDsp(
      * a longer accumulator.
      */
     const val MAX_FRAME_SAMPLES = 2880
+
+    /** Phase 2a default — flip to `false` to revert to the rc.17
+     *  granular shifter if field testing finds the vocoder worse. */
+    private const val USE_PHASE_VOCODER = true
   }
+}
+
+/** Common shape so [VoiceFilterDsp] can hold either shifter. */
+private interface PitchShifter {
+  fun process(
+      input: ShortArray,
+      inOffset: Int,
+      output: ShortArray,
+      outOffset: Int,
+      n: Int,
+      factor: Float,
+  )
+  fun reset()
+}
+
+private class GranularShifterAdapter : PitchShifter {
+  private val inner = GranularPitchShifter()
+  override fun process(
+      input: ShortArray,
+      inOffset: Int,
+      output: ShortArray,
+      outOffset: Int,
+      n: Int,
+      factor: Float,
+  ) = inner.process(input, inOffset, output, outOffset, n, factor)
+  override fun reset() = inner.reset()
+}
+
+private class PhaseVocoderShifterAdapter : PitchShifter {
+  private val inner = PhaseVocoderPitchShifter()
+  override fun process(
+      input: ShortArray,
+      inOffset: Int,
+      output: ShortArray,
+      outOffset: Int,
+      n: Int,
+      factor: Float,
+  ) = inner.process(input, inOffset, output, outOffset, n, factor)
+  override fun reset() = inner.reset()
 }
