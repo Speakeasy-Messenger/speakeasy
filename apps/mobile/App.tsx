@@ -35,6 +35,7 @@ import {
   disposeFilter,
   wrapTrackWithFilter,
 } from './src/native/voice-filter.js';
+import { semitonesForProfile } from './src/calls/voice-filter-profiles.js';
 import { attachFeatureEventListener } from './src/calls/feature-event-listener.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
@@ -682,8 +683,16 @@ export default function App() {
         // The shim itself does the failure-closed gating
         // (isPrivateCallAvailable + FilterError taxonomy); the
         // orchestrator just decides when to call.
+        //
+        // rc.17+: pass the user's Smoke/Velvet/Glass profile to
+        // the native filter so the wrapped voice matches the
+        // setting they picked in Account → Voice filter.
         voiceFilter: {
-          wrap: (callId) => wrapTrackWithFilter(callId),
+          wrap: (callId) => {
+            const profileId = useSettings.getState().voiceFilterProfile;
+            const semitones = semitonesForProfile(profileId);
+            return wrapTrackWithFilter(callId, semitones);
+          },
           dispose: () => disposeFilter(),
         },
       });

@@ -33,10 +33,19 @@ interface NativeVoiceFilterModule {
    * own avatar mouth animates from the unfiltered mic — that's the
    * "speakeasy outfit" the wearer sees in the mirror.
    *
+   * `semitones` selects the user's Smoke/Velvet/Glass profile
+   * (see voice-filter-profiles.ts). Optional/nullable on the wire
+   * so an older native binary running against a newer JS bundle
+   * (rare during rolling RC installs) still works — native falls
+   * back to its built-in −2 default in that case.
+   *
    * Rejects with one of the typed codes in `FilterErrorCode`. The
    * orchestrator maps each to user-facing copy + a metric tag.
    */
-  wrapTrack(trackId: string): Promise<{ filteredTrackId: string }>;
+  wrapTrack(
+    trackId: string,
+    semitones: number | null,
+  ): Promise<{ filteredTrackId: string }>;
   /** Release filter resources for the active call. Idempotent. */
   dispose(): Promise<void>;
 }
@@ -88,13 +97,21 @@ export function isPrivateCallAvailable(): boolean {
  * Wrap a local audio track with the filter. Throws `FilterError` on
  * failure. Callers (orchestrator) catch and map to a `call_end` with
  * reason `filter_failure` + the inline failure UI on CallScreen.
+ *
+ * `semitones` is the pitch + formant shift to apply (see
+ * voice-filter-profiles.ts for the Smoke/Velvet/Glass values). Pass
+ * `null` to let the native side use its built-in default — useful
+ * for tests that don't care about the specific shift.
  */
-export async function wrapTrackWithFilter(trackId: string): Promise<string> {
+export async function wrapTrackWithFilter(
+  trackId: string,
+  semitones: number | null,
+): Promise<string> {
   if (!isPrivateCallAvailable()) {
     throw new FilterError('runtime_unavailable');
   }
   try {
-    const result = await NATIVE!.wrapTrack(trackId);
+    const result = await NATIVE!.wrapTrack(trackId, semitones);
     return result.filteredTrackId;
   } catch (err) {
     // RN promise rejections from native carry a `.code` string when the

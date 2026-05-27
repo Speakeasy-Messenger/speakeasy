@@ -1,5 +1,9 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { create } from 'zustand';
+import {
+  DEFAULT_VOICE_FILTER_PROFILE,
+  type VoiceFilterProfileId,
+} from '../calls/voice-filter-profiles.js';
 
 const STORAGE_KEY = 'speakeasy.settings.v2';
 
@@ -42,6 +46,13 @@ interface SettingsState {
   ringtoneEnabled: boolean;
   vibrateOnIncoming: boolean;
 
+  // Account → Voice filter (Private Call)
+  /** Which Smoke/Velvet/Glass voice filter the user uses on
+   *  outgoing Private Calls. Default is `velvet` — matches the
+   *  hardcoded −2 semitones used before profiles existed, so
+   *  pre-upgrade users hear the same voice they had. */
+  voiceFilterProfile: VoiceFilterProfileId;
+
   hydrated: boolean;
 
   setAllowIncomingCalls: (v: boolean) => void;
@@ -53,6 +64,7 @@ interface SettingsState {
   setNotificationPrivacy: (privacy: NotificationPrivacy) => void;
   setRingtoneEnabled: (v: boolean) => void;
   setVibrateOnIncoming: (v: boolean) => void;
+  setVoiceFilterProfile: (id: VoiceFilterProfileId) => void;
   hydrate: () => Promise<void>;
   reset: () => Promise<void>;
 }
@@ -70,6 +82,7 @@ type PersistedShape = Partial<
     | 'setNotificationPrivacy'
     | 'setRingtoneEnabled'
     | 'setVibrateOnIncoming'
+    | 'setVoiceFilterProfile'
     | 'hydrate'
     | 'reset'
   >
@@ -85,6 +98,7 @@ const DEFAULTS = {
   notificationPrivacy: 'rich' as NotificationPrivacy,
   ringtoneEnabled: true,
   vibrateOnIncoming: true,
+  voiceFilterProfile: DEFAULT_VOICE_FILTER_PROFILE,
 } as const;
 
 async function persist(s: PersistedShape): Promise<void> {
@@ -106,6 +120,7 @@ function snapshot(s: SettingsState): PersistedShape {
     notificationPrivacy: s.notificationPrivacy,
     ringtoneEnabled: s.ringtoneEnabled,
     vibrateOnIncoming: s.vibrateOnIncoming,
+    voiceFilterProfile: s.voiceFilterProfile,
   };
 }
 
@@ -150,6 +165,10 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
   setVibrateOnIncoming: (v) => {
     set({ vibrateOnIncoming: v });
+    void persist(snapshot(get()));
+  },
+  setVoiceFilterProfile: (id) => {
+    set({ voiceFilterProfile: id });
     void persist(snapshot(get()));
   },
 

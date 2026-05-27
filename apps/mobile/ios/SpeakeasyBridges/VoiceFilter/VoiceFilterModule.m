@@ -22,6 +22,7 @@
 @interface RCT_EXTERN_REMAP_MODULE(SpeakeasyVoiceFilter, VoiceFilterModule, RCTEventEmitter)
 
 RCT_EXTERN_METHOD(wrapTrack:(NSString *)trackId
+                  semitones:(nullable NSNumber *)semitones
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
