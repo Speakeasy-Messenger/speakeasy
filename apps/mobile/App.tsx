@@ -35,7 +35,10 @@ import {
   disposeFilter,
   wrapTrackWithFilter,
 } from './src/native/voice-filter.js';
-import { semitonesForProfile } from './src/calls/voice-filter-profiles.js';
+import {
+  formantSemitonesForProfile,
+  semitonesForProfile,
+} from './src/calls/voice-filter-profiles.js';
 import { attachFeatureEventListener } from './src/calls/feature-event-listener.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
@@ -687,11 +690,14 @@ export default function App() {
         // rc.17+: pass the user's Smoke/Velvet/Glass profile to
         // the native filter so the wrapped voice matches the
         // setting they picked in Account → Voice filter.
+        // rc.19+ (Phase 2b): also pass the per-profile formant
+        // shift so pitch and vocal-tract size are decoupled.
         voiceFilter: {
           wrap: (callId) => {
             const profileId = useSettings.getState().voiceFilterProfile;
             const semitones = semitonesForProfile(profileId);
-            return wrapTrackWithFilter(callId, semitones);
+            const formantSemitones = formantSemitonesForProfile(profileId);
+            return wrapTrackWithFilter(callId, semitones, formantSemitones);
           },
           dispose: () => disposeFilter(),
         },

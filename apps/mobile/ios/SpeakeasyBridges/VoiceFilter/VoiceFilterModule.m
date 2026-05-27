@@ -23,6 +23,7 @@
 
 RCT_EXTERN_METHOD(wrapTrack:(NSString *)trackId
                   semitones:(nullable NSNumber *)semitones
+                  formantSemitones:(nullable NSNumber *)formantSemitones
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
