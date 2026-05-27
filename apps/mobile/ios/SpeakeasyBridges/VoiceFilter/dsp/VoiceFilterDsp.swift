@@ -19,8 +19,12 @@ import Foundation
 
 final class VoiceFilterDsp: SampleFilter {
 
+  /// Phase 2a default — flip to `false` to revert to the rc.17
+  /// granular shifter if field testing finds the vocoder worse.
+  private static let USE_PHASE_VOCODER: Bool = true
+
   private let factor: Float
-  private let shifter: GranularPitchShifter
+  private let shifter: PitchShifter
   private let guardrail: LatencyGuard
   private let nowMicros: () -> Int64
 
@@ -39,7 +43,14 @@ final class VoiceFilterDsp: SampleFilter {
     }
   ) {
     self.factor = pow(2.0, semitones / 12.0)
-    self.shifter = GranularPitchShifter()
+    // Phase 2a: phase vocoder by default. Lower latency (~10ms vs
+    // ~21ms) and no crackle, at the cost of some pitch-shift
+    // artifacts on transients and faint metallic edge on sustained
+    // vowels. The boolean above lets us flip back to granular if
+    // field testing finds the vocoder worse on real hardware.
+    self.shifter = Self.USE_PHASE_VOCODER
+      ? PhaseVocoderShifterAdapter()
+      : GranularShifterAdapter()
     self.guardrail = LatencyGuard(budgetMicros: budgetMicros)
     self.nowMicros = nowMicros
   }
@@ -106,4 +117,41 @@ final class VoiceFilterDsp: SampleFilter {
   /// margin keeps us safe if a future RTCAudioDevice configuration
   /// bumps to a longer IO buffer.
   static let maxFrameSamples = 2880
+}
+
+/// Common shape so [VoiceFilterDsp] can hold either shifter.
+protocol PitchShifter {
+  func process(
+    input: UnsafePointer<Int16>,
+    output: UnsafeMutablePointer<Int16>,
+    count: Int,
+    factor: Float
+  )
+  func reset()
+}
+
+final class GranularShifterAdapter: PitchShifter {
+  private let inner = GranularPitchShifter()
+  func process(
+    input: UnsafePointer<Int16>,
+    output: UnsafeMutablePointer<Int16>,
+    count: Int,
+    factor: Float
+  ) {
+    inner.process(input: input, output: output, count: count, factor: factor)
+  }
+  func reset() { inner.reset() }
+}
+
+final class PhaseVocoderShifterAdapter: PitchShifter {
+  private let inner = PhaseVocoderPitchShifter()
+  func process(
+    input: UnsafePointer<Int16>,
+    output: UnsafeMutablePointer<Int16>,
+    count: Int,
+    factor: Float
+  ) {
+    inner.process(input: input, output: output, count: count, factor: factor)
+  }
+  func reset() { inner.reset() }
 }
