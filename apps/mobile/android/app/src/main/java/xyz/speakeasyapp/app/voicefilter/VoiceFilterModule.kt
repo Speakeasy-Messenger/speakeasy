@@ -57,14 +57,20 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
   )
 
   @ReactMethod
-  fun wrapTrack(trackId: String, promise: Promise) {
+  fun wrapTrack(trackId: String, semitones: Double?, promise: Promise) {
     // The JS shim doesn't actually need a new track id — the filter
     // wraps the same track's samples in place via the ADM fork. We
     // return the original id so the orchestrator's call to
     // `pc.addTrack(wrapped)` adds the same MediaStreamTrack handle,
     // and the AudioLevelMeter (which reads the unfiltered mic for
     // the user's own avatar) continues to work.
-    val dsp = VoiceFilterDsp(semitones = DEFAULT_SHIFT_SEMITONES)
+    //
+    // rc.17+: semitones arg lets the user pick Smoke/Velvet/Glass
+    // from Account → Voice filter. Falls back to the legacy default
+    // so older JS bundles still work without a JS update. (RN
+    // ReadableMap nullables come through as boxed Double on Kotlin.)
+    val shift = semitones?.toFloat() ?: DEFAULT_SHIFT_SEMITONES
+    val dsp = VoiceFilterDsp(semitones = shift)
     ActiveFilterHolder.setFilter(dsp)
     val result = Arguments.createMap().apply {
       putString("filteredTrackId", trackId)
@@ -118,10 +124,10 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
     const val EVENT_FEATURES = "SpeakeasyVoiceFilterFeatures"
 
     /**
-     * Default pitch + formant shift in semitones. Negative sounds
-     * "deeper" / more disguised; the locked v1 plan picked this side.
-     * Configurable from the orchestrator later (per call, per
-     * peer) if the founder wants A/B testing.
+     * Fallback pitch + formant shift in semitones when JS doesn't
+     * supply one (legacy callers, tests). Matches the `velvet`
+     * profile in voice-filter-profiles.ts so pre-rc.17 callers
+     * land on the voice they had before profiles existed.
      */
     private const val DEFAULT_SHIFT_SEMITONES = -2f
 

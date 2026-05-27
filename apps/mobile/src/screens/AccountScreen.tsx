@@ -1,10 +1,22 @@
 import React from 'react';
-import { SafeAreaView, ScrollView, StyleSheet, Text, View } from 'react-native';
+import {
+  Pressable,
+  SafeAreaView,
+  ScrollView,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { AppBar } from '../components/AppBar.js';
 import { SettingsHeader } from '../components/SettingsHeader.js';
 import { SettingsListItem } from '../components/SettingsListItem.js';
 import { useColors } from '../theme/index.js';
-import { space, type as typeScale } from '../theme/tokens.js';
+import { font, space, type as typeScale } from '../theme/tokens.js';
+import { useSettings } from '../store/settings.js';
+import {
+  VOICE_FILTER_PROFILES,
+  type VoiceFilterProfileId,
+} from '../calls/voice-filter-profiles.js';
 
 interface Props {
   onBack: () => void;
@@ -58,6 +70,15 @@ export function AccountScreen({
         />
 
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
+          VOICE FILTER
+        </Text>
+        <Text style={[styles.sectionHint, { color: themed.slate }]}>
+          Used on Private Calls. Anonymizes your voice. Pick the one
+          that fits.
+        </Text>
+        <VoiceFilterPicker />
+
+        <Text style={[styles.sectionLabel, { color: themed.slate }]}>
           DANGER
         </Text>
         <SettingsListItem
@@ -73,6 +94,52 @@ export function AccountScreen({
   );
 }
 
+/**
+ * Smoke / Velvet / Glass picker. Three stacked rows; the active one
+ * shows a brass dot trailing. Tap to switch — the change persists
+ * via the settings store and takes effect on the NEXT Private Call
+ * (active calls keep the filter they were placed with).
+ */
+function VoiceFilterPicker(): React.ReactElement {
+  const themed = useColors();
+  const selected = useSettings((s) => s.voiceFilterProfile);
+  const setProfile = useSettings((s) => s.setVoiceFilterProfile);
+  return (
+    <View testID="voice-filter-picker">
+      {VOICE_FILTER_PROFILES.map((p) => {
+        const isActive = selected === p.id;
+        return (
+          <Pressable
+            key={p.id}
+            onPress={() => setProfile(p.id satisfies VoiceFilterProfileId)}
+            style={[
+              styles.profileRow,
+              { borderBottomColor: themed.divider },
+            ]}
+            testID={`voice-filter-${p.id}`}
+            accessibilityRole="radio"
+            accessibilityState={{ selected: isActive }}
+          >
+            <View style={styles.profileBody}>
+              <Text style={[styles.profileLabel, { color: themed.ink }]}>
+                {p.label}
+              </Text>
+              <Text style={[styles.profileBlurb, { color: themed.slate }]}>
+                {p.blurb}
+              </Text>
+            </View>
+            {isActive ? (
+              <View
+                style={[styles.activeDot, { backgroundColor: themed.primary }]}
+              />
+            ) : null}
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1 },
   sectionLabel: {
@@ -83,5 +150,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.base,
     paddingTop: space.xl,
     paddingBottom: space.m,
+  },
+  sectionHint: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    lineHeight: 16,
+    paddingHorizontal: space.base,
+    paddingBottom: space.m,
+  },
+  profileRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    paddingHorizontal: space.base,
+    paddingVertical: space.m,
+    borderBottomWidth: StyleSheet.hairlineWidth,
+  },
+  profileBody: { flex: 1 },
+  profileLabel: {
+    fontFamily: font.medium,
+    fontSize: 15,
+    marginBottom: 2,
+  },
+  profileBlurb: {
+    fontFamily: font.regular,
+    fontSize: 12,
+    lineHeight: 16,
+  },
+  activeDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
   },
 });

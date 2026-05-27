@@ -22,8 +22,13 @@ import Foundation
 final class GranularPitchShifter {
 
   /// `grainSize` must be a positive power of two so the ring-wrap
-  /// arithmetic stays a cheap mask. 2048 ≈ 42ms at 48kHz — good
-  /// compromise between artifact frequency and pitch resolution.
+  /// arithmetic stays a cheap mask. 1024 ≈ 21ms at 48kHz — halved
+  /// from the previous 2048 (rc.16 dogfood: filter delay was
+  /// pushing end-to-end call latency past the "feels natural"
+  /// threshold). Trade-off accepted: more audible granular
+  /// crackle at this grain size, especially on sustained vowels.
+  /// Phase 2 swaps the algorithm for a phase vocoder which fixes
+  /// both — until then, latency is the more painful axis.
   private let grainSize: Int
   /// Cross-fade width in samples. 256 ≈ 5ms at 48kHz.
   private let crossFade: Int
@@ -40,7 +45,7 @@ final class GranularPitchShifter {
   /// cross-fade lap to ~0.4–0.8s — past the warmup window.
   private var readPos: Double
 
-  init(grainSize: Int = 2048, crossFade: Int = 256) {
+  init(grainSize: Int = 1024, crossFade: Int = 256) {
     precondition(grainSize > 0 && grainSize & (grainSize - 1) == 0,
                  "grainSize must be a positive power of two")
     precondition(crossFade > 0 && crossFade <= grainSize / 4,

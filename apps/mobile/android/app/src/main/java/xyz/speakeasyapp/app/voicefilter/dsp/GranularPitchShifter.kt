@@ -23,11 +23,15 @@ package xyz.speakeasyapp.app.voicefilter.dsp
  */
 internal class GranularPitchShifter(
     /**
-     * Length of one grain in samples. ~42ms at 48kHz is a good
-     * compromise between artifact frequency (smaller grain = louder
-     * crackle) and pitch resolution (larger grain = audible delay).
+     * Length of one grain in samples. ~21ms at 48kHz — halved from
+     * the previous 2048 (rc.16 dogfood: filter delay was pushing
+     * end-to-end call latency past the "feels natural" threshold).
+     * Trade-off accepted: more audible granular crackle at this
+     * grain size, especially on sustained vowels. Phase 2 swaps
+     * the algorithm for a phase vocoder which fixes both — until
+     * then, latency is the more painful axis.
      */
-    private val grainSize: Int = 2048,
+    private val grainSize: Int = 1024,
     /**
      * Cross-fade width in samples. Wider = smoother but more
      * "smear"; narrower = sharper but more crackle. 256 ≈ 5ms at

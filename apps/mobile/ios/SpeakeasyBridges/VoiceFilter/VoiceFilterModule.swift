@@ -105,20 +105,21 @@ final class VoiceFilterModule: RCTEventEmitter {
 
   // MARK: - JS-callable methods
 
-  /// Default pitch + formant shift in semitones. Negative sounds
-  /// "deeper" / more disguised; locked v1 plan pick. Matches the
-  /// Android-side default in VoiceFilterModule.kt.
+  /// Default pitch + formant shift in semitones. Used when the JS
+  /// shim doesn't supply one (legacy callers, tests). Matches the
+  /// `velvet` profile in voice-filter-profiles.ts.
   private static let defaultShiftSemitones: Float = -2.0
 
-  @objc(wrapTrack:resolver:rejecter:)
+  @objc(wrapTrack:semitones:resolver:rejecter:)
   func wrapTrack(_ trackId: String,
+                 semitones: NSNumber?,
                  resolver resolve: @escaping RCTPromiseResolveBlock,
                  rejecter reject: @escaping RCTPromiseRejectBlock) {
-    // Phase 5j 0.7.0-rc.3+ — gate flipped open for RC testers.
-    // Same shape as Android: install the DSP into the holder; return
-    // the original track id back since the filter wraps the SAMPLES,
-    // not the track handle.
-    let dsp = VoiceFilterDsp(semitones: Self.defaultShiftSemitones)
+    // rc.17+: semitones arg lets the user pick Smoke/Velvet/Glass
+    // from Account → Voice filter. Falls back to the legacy default
+    // so older JS bundles still work without a JS update.
+    let shift = semitones?.floatValue ?? Self.defaultShiftSemitones
+    let dsp = VoiceFilterDsp(semitones: shift)
     ActiveFilterHolder.shared.set(dsp)
     resolve(["filteredTrackId": trackId])
   }
