@@ -425,6 +425,16 @@ export default function App() {
           userId,
           ageMs,
         });
+      } else if (!cachedToken) {
+        // Genuinely no token (fresh install over existing account, or
+        // recovery-path reset). VerifyGateScreen handles this case as
+        // a non-dismissible full-screen prompt — don't ALSO pop the
+        // launch-refresh sheet here. Doing so would race the gate's
+        // own vouchflow.verify call and produce a double biometric
+        // prompt.
+        diag('app', 'launch verify deferred — VerifyGate will handle', {
+          userId,
+        });
       } else {
         try {
           const r = await verifyDeviceWithExplanation(vouchflow, 'launch_refresh');
