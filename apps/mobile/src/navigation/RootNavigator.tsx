@@ -12,6 +12,7 @@ import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
 import { ChatScreen } from '../screens/ChatScreen.js';
+import { VerifyGateScreen } from '../screens/VerifyGateScreen.js';
 import { FullMessageScreen } from '../screens/FullMessageScreen.js';
 import { ConversationSettingsScreen } from '../screens/ConversationSettingsScreen.js';
 import { GroupChatScreen } from '../screens/GroupChatScreen.js';
@@ -39,6 +40,11 @@ import type { CallOrchestrator } from '../calls/orchestrator.js';
 
 export type RootStack = {
   Onboarding: undefined;
+  /** Full-screen verify gate. Mounted when the user is enrolled
+   *  (userId set) but the Vouchflow device token is absent. Blocks
+   *  all other routes until verification succeeds. See
+   *  VerifyGateScreen for the two scenarios that route here. */
+  VerifyGate: undefined;
   IdReveal: { userId: string };
   /** Authed root — renders the conversation list directly. The
    * previous Chats+Calls bottom-tab nav was retired; calls live
@@ -85,6 +91,13 @@ interface RootNavigatorProps {
 
 export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }: RootNavigatorProps) {
   const userId = useIdentity((s) => s.userId);
+  const hasDeviceToken = useIdentity((s) => !!s.deviceToken);
+  // Identity isn't usable until both the userId AND the device token
+  // are present. The gate sits between Onboarding (no userId) and the
+  // authed Group (full identity) and forces verification before any
+  // other screen mounts. See VerifyGateScreen for the scenarios that
+  // land here (fresh install over existing account, recovery paths).
+  const showGate = !!userId && !hasDeviceToken;
 
   return (
     <NavigationContainer ref={navRef} onReady={onReady}>
@@ -108,6 +121,10 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                 onEnrolled={(id) => navigation.replace('IdReveal', { userId: id })}
               />
             )}
+          </Stack.Screen>
+        ) : showGate ? (
+          <Stack.Screen name="VerifyGate">
+            {() => <VerifyGateScreen />}
           </Stack.Screen>
         ) : (
           // Initial route is Conversations: re-launches with a hydrated
