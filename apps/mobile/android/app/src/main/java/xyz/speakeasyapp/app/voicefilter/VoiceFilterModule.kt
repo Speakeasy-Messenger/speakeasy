@@ -57,7 +57,12 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
   )
 
   @ReactMethod
-  fun wrapTrack(trackId: String, semitones: Double?, promise: Promise) {
+  fun wrapTrack(
+      trackId: String,
+      semitones: Double?,
+      formantSemitones: Double?,
+      promise: Promise,
+  ) {
     // The JS shim doesn't actually need a new track id — the filter
     // wraps the same track's samples in place via the ADM fork. We
     // return the original id so the orchestrator's call to
@@ -66,11 +71,18 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
     // the user's own avatar) continues to work.
     //
     // rc.17+: semitones arg lets the user pick Smoke/Velvet/Glass
-    // from Account → Voice filter. Falls back to the legacy default
-    // so older JS bundles still work without a JS update. (RN
-    // ReadableMap nullables come through as boxed Double on Kotlin.)
+    // from Account → Voice filter.
+    // rc.19+: formantSemitones is the Phase 2b independent-formant
+    // shift — separates vocal-tract size from pitch height so the
+    // 3 profiles get genuinely different voice characters.
+    // Both nullable so older JS bundles still work — falls back to
+    // pre-2b behavior (formant tied to pitch via the granular path).
     val shift = semitones?.toFloat() ?: DEFAULT_SHIFT_SEMITONES
-    val dsp = VoiceFilterDsp(semitones = shift)
+    val formantShift = formantSemitones?.toFloat() ?: 0f
+    val dsp = VoiceFilterDsp(
+        semitones = shift,
+        formantSemitones = formantShift,
+    )
     ActiveFilterHolder.setFilter(dsp)
     val result = Arguments.createMap().apply {
       putString("filteredTrackId", trackId)

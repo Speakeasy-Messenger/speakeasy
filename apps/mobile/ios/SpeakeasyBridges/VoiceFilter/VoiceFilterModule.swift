@@ -110,16 +110,22 @@ final class VoiceFilterModule: RCTEventEmitter {
   /// `velvet` profile in voice-filter-profiles.ts.
   private static let defaultShiftSemitones: Float = -2.0
 
-  @objc(wrapTrack:semitones:resolver:rejecter:)
+  @objc(wrapTrack:semitones:formantSemitones:resolver:rejecter:)
   func wrapTrack(_ trackId: String,
                  semitones: NSNumber?,
+                 formantSemitones: NSNumber?,
                  resolver resolve: @escaping RCTPromiseResolveBlock,
                  rejecter reject: @escaping RCTPromiseRejectBlock) {
     // rc.17+: semitones arg lets the user pick Smoke/Velvet/Glass
-    // from Account → Voice filter. Falls back to the legacy default
-    // so older JS bundles still work without a JS update.
+    // from Account → Voice filter.
+    // rc.19+: formantSemitones is Phase 2b's independent-formant
+    // shift — separates vocal-tract size from pitch height so the
+    // 3 profiles get genuinely different voice characters.
+    // Both nullable so older JS bundles still work — falls back to
+    // pre-2b behavior (formant tied to pitch).
     let shift = semitones?.floatValue ?? Self.defaultShiftSemitones
-    let dsp = VoiceFilterDsp(semitones: shift)
+    let formantShift = formantSemitones?.floatValue ?? 0.0
+    let dsp = VoiceFilterDsp(semitones: shift, formantSemitones: formantShift)
     ActiveFilterHolder.shared.set(dsp)
     resolve(["filteredTrackId": trackId])
   }

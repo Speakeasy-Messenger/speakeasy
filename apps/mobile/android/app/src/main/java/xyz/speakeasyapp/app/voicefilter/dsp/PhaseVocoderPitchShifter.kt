@@ -3,6 +3,10 @@ package xyz.speakeasyapp.app.voicefilter.dsp
 import kotlin.math.PI
 import kotlin.math.atan2
 import kotlin.math.cos
+import kotlin.math.exp
+import kotlin.math.floor
+import kotlin.math.ln
+import kotlin.math.max
 import kotlin.math.roundToInt
 import kotlin.math.sin
 import kotlin.math.sqrt
@@ -54,7 +58,20 @@ import kotlin.math.sqrt
  * Not thread-safe. The single WebRTC audio-record thread is the
  * only intended caller.
  */
-internal class PhaseVocoderPitchShifter {
+internal class PhaseVocoderPitchShifter(
+    /** Formant scale factor in cycles-per-spectrum-bin units.
+     *  1.0 = no formant shift (pitch and formant shift together,
+     *  legacy Phase 2a behavior). >1.0 = formants shifted up
+     *  (smaller-sounding vocal tract). <1.0 = formants shifted down
+     *  (larger-sounding vocal tract). Independent of the pitch
+     *  factor passed to [process], so pitchFactor=2,
+     *  formantFactor=1 gives "same person speaking on helium" while
+     *  pitchFactor=2, formantFactor=2 reverts to the chipmunk
+     *  effect. Constructor-time because the formant shift is
+     *  per-call configuration set at wrapTrack(), not per-process()
+     *  variable. */
+    private val formantFactor: Float = 1f,
+) {
   companion object {
     /** Analysis + synthesis FFT length. Power of two for FFT, large
      *  enough that 80Hz speech fundamentals get adequate bin
@@ -70,6 +87,20 @@ internal class PhaseVocoderPitchShifter {
      *  Hann window. At 75% overlap with Hann analysis + synthesis,
      *  the sum-of-squares window OLA constant is 1.5; we divide. */
     private const val OLA_GAIN = 1f / 1.5f
+    /** Cepstral envelope cutoff (quefrency bins). Bins 0..CEP_CUTOFF
+     *  are kept; the rest are zeroed. Determines how "smooth" the
+     *  extracted spectral envelope is. 32 bins ≈ formant detail
+     *  (formant bandwidths of 50-200 Hz), far smaller than the
+     *  pitch-period component which sits at hundreds of samples
+     *  for adult voice (80-400 Hz fundamentals at 48 kHz). Keep
+     *  too few → over-smoothed envelope, formants get smeared.
+     *  Keep too many → pitch leaks into the envelope, breaks
+     *  source/envelope separation. 32 is the standard pick for
+     *  speech vocoders. */
+    private const val CEP_CUTOFF = 32
+    /** Floor on the spectral envelope before we divide by it.
+     *  Prevents source-spectrum blowup in near-silent bins. */
+    private const val ENV_FLOOR = 1e-6f
   }
 
   private val fft = Fft1024()
@@ -111,6 +142,19 @@ internal class PhaseVocoderPitchShifter {
   private val trueFreq = FloatArray(HALF_FFT + 1)
   private val newMagnitude = FloatArray(HALF_FFT + 1)
   private val newTrueFreq = FloatArray(HALF_FFT + 1)
+  // Phase 2b: source-filter separation. The cepstrum needs its own
+  // FFT scratch (we can't reuse `re`/`im` because they hold the
+  // post-analysis spectrum while envelope extraction runs).
+  private val cepRe = FloatArray(FFT_SIZE)
+  private val cepIm = FloatArray(FFT_SIZE)
+  /** Smooth spectral envelope (linear scale, one-sided). */
+  private val envelope = FloatArray(HALF_FFT + 1)
+  /** Formant-shifted target envelope reapplied to the source. */
+  private val targetEnvelope = FloatArray(HALF_FFT + 1)
+  /** Source-only magnitude (signal with envelope divided out). */
+  private val sourceMagnitude = FloatArray(HALF_FFT + 1)
+  /** Pitch-shifted source magnitude before envelope reapplication. */
+  private val newSourceMagnitude = FloatArray(HALF_FFT + 1)
 
   /**
    * Process [n] mono PCM16 samples. Same contract as
@@ -209,26 +253,51 @@ internal class PhaseVocoderPitchShifter {
       lastInputPhase[k] = phase
     }
 
-    // Pitch shift: reassign bin k to round(k * factor).
+    // Phase 2b: extract the spectral envelope via cepstral
+    // smoothing. The cepstrum is the IFFT of the log-magnitude
+    // spectrum; low-pass-filtering it (zeroing high quefrencies)
+    // and going back to log-magnitude leaves us with the smooth
+    // formant envelope, separated from the pitch-period harmonic
+    // structure. This is the "source-filter" decomposition that
+    // lets us pitch-shift the source independently of the
+    // formant envelope.
+    extractEnvelope()
+
+    // Build the formant-shifted target envelope. If formantFactor
+    // == 1.0 this is identity (envelope[k] copied as-is). Otherwise
+    // we resample env[k / formantFactor] so the formants land at
+    // factor × their original frequencies. >1 = formants up
+    // (smaller-sounding vocal tract); <1 = formants down (larger).
+    buildTargetEnvelope()
+
+    // Source = original magnitude / envelope. Floor at ENV_FLOOR
+    // to avoid blowup in near-silent bins.
     for (k in 0..HALF_FFT) {
-      newMagnitude[k] = 0f
+      sourceMagnitude[k] = magnitude[k] / max(envelope[k], ENV_FLOOR)
+    }
+
+    // Pitch shift the SOURCE: reassign source bin k to bin
+    // round(k * factor). Adopt the true-freq of the loudest
+    // contributor when multiple input bins map to one output.
+    for (k in 0..HALF_FFT) {
+      newSourceMagnitude[k] = 0f
       newTrueFreq[k] = 0f
     }
     for (k in 0..HALF_FFT) {
       val target = (k * factor).roundToInt()
       if (target in 0..HALF_FFT) {
-        // Accumulate magnitude if multiple inputs hit the same output bin.
-        // Adopt the true-freq of the loudest contributor.
-        if (magnitude[k] > newMagnitude[target]) {
+        if (sourceMagnitude[k] > newSourceMagnitude[target]) {
           newTrueFreq[target] = trueFreq[k] * factor
         }
-        newMagnitude[target] += magnitude[k]
+        newSourceMagnitude[target] += sourceMagnitude[k]
       }
     }
 
-    // Reconstruct output phases from new true freqs. Phase advance
-    // per hop = 2π * trueFreqCyclesPerSample * HOP_SIZE.
+    // Reapply the target envelope to the shifted source to get
+    // the final output magnitudes. Reconstruct phases from the
+    // new true frequencies.
     for (k in 0..HALF_FFT) {
+      newMagnitude[k] = newSourceMagnitude[k] * targetEnvelope[k]
       val advance = 2.0 * PI * newTrueFreq[k] * HOP_SIZE
       sumOutputPhase[k] = ((sumOutputPhase[k] + advance) % (2.0 * PI)).toFloat()
       val mag = newMagnitude[k]
@@ -251,5 +320,76 @@ internal class PhaseVocoderPitchShifter {
       w = (w + 1) % outputRing.size
     }
     outputWritePos = (outputWritePos + HOP_SIZE) % outputRing.size
+  }
+
+  /**
+   * Cepstral envelope: log-magnitude → IFFT → keep low quefrencies
+   * → FFT → exp. Result populates [envelope] in linear scale at
+   * indices 0..HALF_FFT.
+   *
+   * Two extra FFTs per hop, ~sub-millisecond on a modern phone.
+   * Reads from [magnitude]; clobbers [cepRe] and [cepIm] but
+   * doesn't touch [re]/[im] (those still hold the post-analysis
+   * spectrum we need for phase reconstruction).
+   */
+  private fun extractEnvelope() {
+    // Build full-spectrum log-magnitude with Hermitian symmetry.
+    for (k in 0..HALF_FFT) {
+      cepRe[k] = ln(max(magnitude[k], ENV_FLOOR))
+      cepIm[k] = 0f
+    }
+    for (k in 1 until HALF_FFT) {
+      cepRe[FFT_SIZE - k] = cepRe[k]
+      cepIm[FFT_SIZE - k] = 0f
+    }
+
+    // IFFT to the time-domain (real) cepstrum.
+    fft.inverse(cepRe, cepIm)
+
+    // Low-pass: zero quefrencies beyond CEP_CUTOFF, both ends of
+    // the symmetric cepstrum.
+    for (n in (CEP_CUTOFF + 1) until (FFT_SIZE - CEP_CUTOFF)) {
+      cepRe[n] = 0f
+      cepIm[n] = 0f
+    }
+
+    // Forward FFT back to smooth log-magnitude.
+    fft.forward(cepRe, cepIm)
+
+    // Exponentiate to linear envelope. Imaginary part should be
+    // ~0 (real-even input cepstrum); we trust the real part.
+    for (k in 0..HALF_FFT) {
+      envelope[k] = exp(cepRe[k])
+    }
+  }
+
+  /**
+   * Target envelope = source envelope resampled by 1/formantFactor.
+   * `targetEnv[k] = envelope[k / formantFactor]` with linear
+   * interpolation. formantFactor > 1 stretches the envelope along
+   * the frequency axis (formants move up); < 1 compresses (formants
+   * move down). formantFactor == 1 is a memcpy.
+   */
+  private fun buildTargetEnvelope() {
+    if (formantFactor == 1f) {
+      for (k in 0..HALF_FFT) targetEnvelope[k] = envelope[k]
+      return
+    }
+    for (k in 0..HALF_FFT) {
+      val srcK = k / formantFactor
+      val srcKFloor = floor(srcK).toInt()
+      val srcKCeil = srcKFloor + 1
+      if (srcKFloor < 0 || srcKCeil > HALF_FFT) {
+        // Out of range: clamp to edge envelope value to avoid a
+        // brick-wall cut that would sound artificial.
+        targetEnvelope[k] =
+          if (srcKFloor < 0) envelope[0]
+          else envelope[HALF_FFT]
+        continue
+      }
+      val frac = srcK - srcKFloor
+      targetEnvelope[k] =
+        envelope[srcKFloor] * (1f - frac) + envelope[srcKCeil] * frac
+    }
   }
 }

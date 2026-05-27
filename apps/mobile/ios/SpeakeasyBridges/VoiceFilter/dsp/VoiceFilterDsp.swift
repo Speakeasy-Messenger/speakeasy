@@ -24,6 +24,7 @@ final class VoiceFilterDsp: SampleFilter {
   private static let USE_PHASE_VOCODER: Bool = true
 
   private let factor: Float
+  private let formantFactor: Float
   private let shifter: PitchShifter
   private let guardrail: LatencyGuard
   private let nowMicros: () -> Int64
@@ -37,19 +38,23 @@ final class VoiceFilterDsp: SampleFilter {
 
   init(
     semitones: Float = -2.0,
+    formantSemitones: Float = 0.0,
     budgetMicros: Int64 = 120_000,
     nowMicros: @escaping () -> Int64 = {
       Int64(DispatchTime.now().uptimeNanoseconds / 1_000)
     }
   ) {
     self.factor = pow(2.0, semitones / 12.0)
+    self.formantFactor = pow(2.0, formantSemitones / 12.0)
     // Phase 2a: phase vocoder by default. Lower latency (~10ms vs
     // ~21ms) and no crackle, at the cost of some pitch-shift
     // artifacts on transients and faint metallic edge on sustained
     // vowels. The boolean above lets us flip back to granular if
     // field testing finds the vocoder worse on real hardware.
+    // Phase 2b: vocoder gets formantFactor for independent
+    // pitch/formant control. Granular ignores it (can't do it).
     self.shifter = Self.USE_PHASE_VOCODER
-      ? PhaseVocoderShifterAdapter()
+      ? PhaseVocoderShifterAdapter(formantFactor: self.formantFactor)
       : GranularShifterAdapter()
     self.guardrail = LatencyGuard(budgetMicros: budgetMicros)
     self.nowMicros = nowMicros
@@ -144,7 +149,10 @@ final class GranularShifterAdapter: PitchShifter {
 }
 
 final class PhaseVocoderShifterAdapter: PitchShifter {
-  private let inner = PhaseVocoderPitchShifter()
+  private let inner: PhaseVocoderPitchShifter
+  init(formantFactor: Float = 1.0) {
+    self.inner = PhaseVocoderPitchShifter(formantFactor: formantFactor)
+  }
   func process(
     input: UnsafePointer<Int16>,
     output: UnsafeMutablePointer<Int16>,

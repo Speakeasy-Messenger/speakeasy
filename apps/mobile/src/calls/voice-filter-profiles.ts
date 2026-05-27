@@ -1,19 +1,23 @@
 /**
- * Voice-filter profiles for Private Call. Each profile is just a
- * pitch shift (in semitones) on the current granular DSP. The
- * algorithm shifts pitch AND formants together — independent
- * shifting lands when Phase 2 swaps granular for a phase vocoder.
- * Until then, the 3 profiles differ in pitch height but share the
- * same timbral character.
+ * Voice-filter profiles for Private Call. Phase 2b — each profile
+ * is now a (pitch, formant) pair, both in semitones, applied
+ * independently by the phase vocoder. Pitch moves the perceived
+ * voice height; formant moves the perceived vocal-tract size
+ * (think: how big the speaker's head sounds). Decoupling them
+ * lets Smoke read as "big person speaking low" rather than just
+ * "shifted-down voice," and Glass as "small person speaking
+ * high" rather than "chipmunk."
  *
- * The id (`'smoke' | 'velvet' | 'glass'`) is the wire identifier
- * used in the settings store, AccountScreen picker, and orchestrator
- * lookup. The label + blurb are user-facing. The semitones value is
- * what the native side actually consumes.
+ * The id is the wire identifier used in the settings store,
+ * AccountScreen picker, and orchestrator lookup. The label and
+ * blurb are user-facing. The two semitone values are what the
+ * native side consumes.
  *
- * `velvet` matches the previous hardcoded default (−2 semitones), so
- * any user who hasn't picked a profile stays on the voice they
- * already had.
+ * `velvet` keeps the −2 pitch and 0 formant (no formant shift)
+ * — closest to a neutral "warm anonymization." `smoke` adds a
+ * substantial formant drop (larger vocal tract) on top of its
+ * pitch drop. `glass` pairs a pitch rise with a smaller vocal
+ * tract for a bright, lighter character.
  */
 export type VoiceFilterProfileId = 'smoke' | 'velvet' | 'glass';
 
@@ -21,27 +25,37 @@ export interface VoiceFilterProfile {
   id: VoiceFilterProfileId;
   label: string;
   blurb: string;
+  /** Pitch shift in semitones. Negative = lower. */
   semitones: number;
+  /** Phase 2b: formant shift in semitones, independent of pitch.
+   *  Negative = formants down (larger-sounding vocal tract).
+   *  Positive = formants up (smaller, brighter).
+   *  0 = preserve original formants (helium-without-chipmunk
+   *  when paired with pitch shift; "pure pitch shift" effect). */
+  formantSemitones: number;
 }
 
 export const VOICE_FILTER_PROFILES: readonly VoiceFilterProfile[] = [
   {
     id: 'smoke',
     label: 'Smoke',
-    blurb: 'Deeper, lower, slightly menacing.',
+    blurb: 'Deep, large vocal tract. Reads as tall and quiet.',
     semitones: -4,
+    formantSemitones: -3,
   },
   {
     id: 'velvet',
     label: 'Velvet',
-    blurb: 'Warm and anonymized. The default.',
+    blurb: 'Warm, natural mid-range. Anonymized but human.',
     semitones: -2,
+    formantSemitones: 0,
   },
   {
     id: 'glass',
     label: 'Glass',
-    blurb: 'Higher, lighter, brighter.',
+    blurb: 'Higher, brighter, smaller-sounding.',
     semitones: +3,
+    formantSemitones: +3,
   },
 ] as const;
 
@@ -50,4 +64,9 @@ export const DEFAULT_VOICE_FILTER_PROFILE: VoiceFilterProfileId = 'velvet';
 export function semitonesForProfile(id: VoiceFilterProfileId): number {
   const match = VOICE_FILTER_PROFILES.find((p) => p.id === id);
   return match ? match.semitones : -2;
+}
+
+export function formantSemitonesForProfile(id: VoiceFilterProfileId): number {
+  const match = VOICE_FILTER_PROFILES.find((p) => p.id === id);
+  return match ? match.formantSemitones : 0;
 }
