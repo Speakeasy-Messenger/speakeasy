@@ -27,12 +27,12 @@ import { formatMessageTime } from '../utils/time.js';
  * trajectory alone reads as a dissolve.
  */
 
-export type DisappearingStage =
-  | 'sent'
-  | 'seen'
-  | 'disappearing'
-  | 'almost-gone'
-  | 'gone';
+// DisappearingStage moved to ./disappearing-stage.ts so the type can
+// be imported by modules outside React (e.g. the conversations store)
+// without dragging react-native's Flow-laced ESM into their parse
+// graph. Re-export here for back-compat with existing call sites.
+export type { DisappearingStage } from './disappearing-stage.js';
+import type { DisappearingStage } from './disappearing-stage.js';
 
 export interface DisappearingMessageBubbleProps {
   text: string;

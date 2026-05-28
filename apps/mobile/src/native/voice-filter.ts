@@ -18,7 +18,19 @@
  * Tests can swap an `isAvailable: true` mock to exercise the UI path.
  */
 
-import { NativeModules, Platform } from 'react-native';
+// Lazy access to react-native — mirrors apps/mobile/src/permissions/runtime.ts.
+// Top-level `import 'react-native'` pulls Flow `import typeof` syntax into
+// vitest's rollup parse graph and breaks unit tests that transitively
+// import this file (orchestrator.test.ts). Lazy require keeps the module
+// importable from tests where the native module isn't registered.
+interface RnSurface {
+  NativeModules: { SpeakeasyVoiceFilter?: NativeVoiceFilterModule };
+  Platform: { OS: string };
+}
+function rn(): RnSurface {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+  return require('react-native') as RnSurface;
+}
 
 interface NativeVoiceFilterModule {
   /**
@@ -79,9 +91,17 @@ export class FilterError extends Error {
   }
 }
 
-const NATIVE: NativeVoiceFilterModule | undefined = (
-  NativeModules as { SpeakeasyVoiceFilter?: NativeVoiceFilterModule }
-).SpeakeasyVoiceFilter;
+function getNative(): NativeVoiceFilterModule | undefined {
+  // Wrapped in try/catch because react-native isn't loadable from
+  // pure-Node test runners. Returning undefined sends every call
+  // path through the runtime_unavailable branch, which is exactly
+  // what unit tests of the JS shim want.
+  try {
+    return rn().NativeModules.SpeakeasyVoiceFilter;
+  } catch {
+    return undefined;
+  }
+}
 
 /**
  * True when the native filter is present AND reports itself ready on
@@ -94,9 +114,16 @@ const NATIVE: NativeVoiceFilterModule | undefined = (
  * doesn't exist. False until proven true.
  */
 export function isPrivateCallAvailable(): boolean {
-  if (Platform.OS !== 'ios' && Platform.OS !== 'android') return false;
-  if (!NATIVE) return false;
-  return NATIVE.isAvailable === true;
+  let os: string;
+  try {
+    os = rn().Platform.OS;
+  } catch {
+    return false;
+  }
+  if (os !== 'ios' && os !== 'android') return false;
+  const native = getNative();
+  if (!native) return false;
+  return native.isAvailable === true;
 }
 
 /**
@@ -117,8 +144,10 @@ export async function wrapTrackWithFilter(
   if (!isPrivateCallAvailable()) {
     throw new FilterError('runtime_unavailable');
   }
+  const native = getNative();
+  if (!native) throw new FilterError('runtime_unavailable');
   try {
-    const result = await NATIVE!.wrapTrack(trackId, semitones, formantSemitones);
+    const result = await native.wrapTrack(trackId, semitones, formantSemitones);
     return result.filteredTrackId;
   } catch (err) {
     // RN promise rejections from native carry a `.code` string when the
@@ -134,9 +163,10 @@ export async function wrapTrackWithFilter(
 
 /** Release filter resources for the active call. Idempotent. */
 export async function disposeFilter(): Promise<void> {
-  if (!NATIVE) return;
+  const native = getNative();
+  if (!native) return;
   try {
-    await NATIVE.dispose();
+    await native.dispose();
   } catch {
     /* dispose is best-effort; engine will be torn down by call_end anyway */
   }

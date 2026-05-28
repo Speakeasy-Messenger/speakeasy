@@ -9,7 +9,7 @@ import {
   type ConversationKind,
   type TtlOption,
 } from '@speakeasy/shared';
-import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
+import type { DisappearingStage } from '../components/disappearing-stage.js';
 
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
