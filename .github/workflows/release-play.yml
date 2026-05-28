@@ -99,26 +99,28 @@ jobs:
 
       - name: Assert built AAB carries the tag version
         # Same defensive check as the APK pipeline — fail before publishing
-        # if the version-derivation chain produces a wrong manifest.
-        # bundletool extracts the manifest from the AAB without needing
-        # to install it.
+        # if the version-derivation chain produces a wrong manifest. AABs
+        # need bundletool to extract the manifest (aapt2 only handles APK
+        # format). bundletool is a single jar; download + run.
         run: |
           tag="${GITHUB_REF##*/}"
           expected_name="${tag#alpha-}"
           expected_code="${tag##*-rc.}"
           aab="apps/mobile/android/app/build/outputs/bundle/release/app-release.aab"
 
-          # The manifest sits at base/manifest/AndroidManifest.xml in the
-          # AAB zip. Use aapt2 to dump its versionName/versionCode.
-          aapt2="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt2"
-          if [ ! -x "$aapt2" ]; then
-            aapt2=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt2 -type f -executable | head -1)
-          fi
+          # Pinned to a known-good bundletool release. Bump deliberately;
+          # newer versions occasionally change command-line surface area
+          # (e.g. xpath output formatting).
+          BUNDLETOOL_VERSION=1.18.1
+          bundletool="$RUNNER_TEMP/bundletool.jar"
+          curl -fsSL -o "$bundletool" \
+            "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
 
-          # AABs are zip-based; aapt2 dump can read the bundle directly.
-          badging=$("$aapt2" dump badging "$aab")
-          actual_name=$(echo "$badging" | grep -oP "versionName='\K[^']+")
-          actual_code=$(echo "$badging" | grep -oP "versionCode='\K[^']+")
+          # bundletool's --xpath returns the attribute value as a plain
+          # string on stdout (with a trailing newline). No quoting,
+          # no JSON wrapper.
+          actual_name=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@versionName)
+          actual_code=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@versionCode)
 
           echo "Expected versionName: $expected_name"
           echo "Expected versionCode: $expected_code"
