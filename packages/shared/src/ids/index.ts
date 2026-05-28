@@ -31,24 +31,28 @@ const ulid = factory(() => Math.random());
 export const ID_REGEX = /^[a-z]+-[a-z]+-[a-z]+$/;
 
 /**
- * User-chosen handle: lowercase ASCII, 3-20 chars total. Per the
- * ONBOARDING.md §2.3.2 cutover, the allowed character set widened
- * from `[a-z0-9_]` to `[a-z0-9._-]`. Generated handles use hyphens
- * (`amber-quiet-fox`); user-typed handles may use any of the three
- * separators.
+ * User-chosen handle: lowercase ASCII, 3-20 chars total. Users pick
+ * any single-token handle they want, subject only to this format
+ * constraint — the server doesn't dictate shape beyond the regex.
  *
  * The regex enforces:
- *  - first char: letter or digit (no leading separator)
+ *  - first char: letter (no leading digit or separator)
  *  - last char: letter or digit (no trailing separator)
- *  - 1–18 middle chars from `[a-z0-9._-]`
+ *  - 1–18 middle chars from `[a-z0-9._-]` (letters, digits, underscore,
+ *    dot, hyphen — the three separators that read cleanly in a handle).
+ *
+ * Accepted examples: `alice`, `user_2026`, `midnight_traveler`,
+ * `amber-quiet-fox`, `dr.who`. Rejected examples: `al ice` (space),
+ * `1abc` (leading digit), `Alice` (uppercase), `-abc` (leading
+ * separator), `a--b` (consecutive separators — `validateHandle`).
  *
  * `validateHandle` adds the additional check that no two separators
- * appear consecutively (regex would get unwieldy; a single
+ * appear consecutively (the regex would get unwieldy; a single
  * `/[._-]{2}/` post-filter is clearer).
  *
  * Stored raw; displayed with an `@` prefix everywhere.
  */
-export const HANDLE_REGEX = /^[a-z][a-z0-9_]{1,18}[a-z0-9]$/;
+export const HANDLE_REGEX = /^[a-z][a-z0-9._-]{1,18}[a-z0-9]$/;
 
 /** Two-or-more consecutive separators reject post-regex. Spec §2.3.2:
  * "no double symbols" (`..`, `--`, `__`, `.-`, `-_`, etc.). */

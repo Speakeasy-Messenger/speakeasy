@@ -16,15 +16,31 @@ interface Props {
   data: string;
   mime: string;
   onClose: () => void;
+  /**
+   * Optional save callback. When provided, a "Save" affordance
+   * appears in the top bar. Parent wires this to the same
+   * `saveAndAnnounceFile` path the file-attachment tap uses — the
+   * image lands in the app's external storage and (on Android, via
+   * MediaStore.scanFile) shows up in the system gallery.
+   *
+   * Omit on read-only viewers (e.g. previewing your own outgoing
+   * attachment before send) to hide the button.
+   */
+  onSave?: () => void;
 }
 
-export function MediaViewerScreen({ data, mime, onClose }: Props): React.JSX.Element {
+export function MediaViewerScreen({ data, mime, onClose, onSave }: Props): React.JSX.Element {
   return (
     <SafeAreaView style={styles.root}>
       <View style={styles.bar}>
         <Pressable onPress={onClose} hitSlop={12} testID="media-viewer-close">
           <Text style={styles.close}>‹ Close</Text>
         </Pressable>
+        {onSave ? (
+          <Pressable onPress={onSave} hitSlop={12} testID="media-viewer-save">
+            <Text style={styles.save}>Save</Text>
+          </Pressable>
+        ) : null}
       </View>
       <View style={styles.imgWrap}>
         <Image
@@ -43,10 +59,16 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.lg,
     paddingVertical: space.s,
     flexDirection: 'row',
-    justifyContent: 'flex-start',
+    justifyContent: 'space-between',
+    alignItems: 'center',
   },
   close: {
     color: accent.base, // brass — mode-invariant on brand canvas
+    fontFamily: font.medium,
+    fontSize: type.subtitle.size,
+  },
+  save: {
+    color: accent.base,
     fontFamily: font.medium,
     fontSize: type.subtitle.size,
   },

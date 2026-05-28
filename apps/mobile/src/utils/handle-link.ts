@@ -14,6 +14,8 @@
  * lockstep.
  */
 
+import { isUserId } from '@speakeasy/shared';
+
 export const HANDLE_LINK_SCHEME = 'speakeasy';
 export const HANDLE_LINK_HOST = 'add';
 
@@ -42,11 +44,9 @@ export function parseAdd(url: string): string | undefined {
   if (parsed.hostname !== HANDLE_LINK_HOST) return undefined;
   const handle = parsed.searchParams.get('handle');
   if (!handle) return undefined;
-  // Server's HANDLE_REGEX is `[a-z][a-z0-9_]{2,19}` for new-style
-  // handles; legacy ID_REGEX is `[a-z]+-[a-z]+-[a-z]+`. Accept either
-  // shape — NewChat does the same dual-validation.
-  if (!/^[a-z][a-z0-9_]{2,19}$/.test(handle) && !/^[a-z]+-[a-z]+-[a-z]+$/.test(handle)) {
-    return undefined;
-  }
+  // Delegate to the shared validator — accepts both the new HANDLE_REGEX
+  // and the legacy 3-word ID_REGEX. Single source of truth so future
+  // regex tweaks propagate without a re-edit here.
+  if (!isUserId(handle)) return undefined;
   return handle;
 }

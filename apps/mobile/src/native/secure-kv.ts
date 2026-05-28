@@ -17,6 +17,14 @@ import { NativeModules } from 'react-native';
  * Both surface as a rejected promise; callers treat that as "nothing
  * persisted" and fall back to in-memory state — conversations only
  * exist post-enrollment anyway.
+ *
+ * Eager top-level `import { NativeModules } from 'react-native'` is
+ * load-bearing: vitest aliases `react-native` to the mock, NativeModules
+ * is read at module-load time, and the mock's `_secureKvStore` Map
+ * stays a single instance across imports. Lazy require / dynamic
+ * import split the test harness's mock from this module's reference
+ * (different module-cache lookups in vitest's worker), so persist
+ * writes to one Map and hydrate reads from a different one.
  */
 interface NativeSecureKv {
   get(key: string): Promise<string | null>;

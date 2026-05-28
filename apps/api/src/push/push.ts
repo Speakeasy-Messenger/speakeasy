@@ -11,7 +11,7 @@
 import type { ConversationKind } from '@speakeasy/shared';
 
 export interface PushDeliveryNotice {
-  /** The recipient's adjective-adjective-noun id. */
+  /** The recipient's handle (or legacy adj-adj-noun id, still accepted for back-compat). */
   userId: string;
   /** The conversation the buffered message lives on. */
   conversationId: string;

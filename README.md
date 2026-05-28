@@ -1,7 +1,7 @@
 # Speakeasy
 
 Private, end-to-end-encrypted messenger. No phone number, no email — just a
-random three-word ID. Messages disappear by default. Built on Signal Protocol
+handle you pick (or let us suggest). Messages disappear by default. Built on Signal Protocol
 1:1 + Sender Keys for groups, X25519 ECIES for community channel keys, and
 Vouchflow for device-attested signup (no SIM, no captcha).
 
@@ -43,7 +43,7 @@ storage, conversations UI).
    a real Android device (Android 9+).
 2. Open the app, tap **Continue** — biometric prompt + Play Integrity →
    identity generated → land on Conversations.
-3. Tap **+ New chat**, paste a peer's three-word ID, send a message.
+3. Tap **+ New chat**, paste a peer's handle, send a message.
 
 The alpha points at a dev sandbox API server on a public IP. Production
 DNS / TLS coming with Phase 5d.

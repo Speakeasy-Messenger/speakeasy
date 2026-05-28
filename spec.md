@@ -41,7 +41,7 @@ Speakeasy is a private, encrypted messenger with the following core principles:
 - **Zero personal information collected.** No phone number, no email, no name.
 - **Device-native identity.** Authentication is handled entirely by Vouchflow (vouchflow.dev) — a device-native verification API using Secure Enclave (iOS) and Keystore (Android) cryptography.
 - **Ephemeral by default.** Messages disappear after 7 days locally. Persistence must be explicitly opted into per conversation.
-- **Human-readable anonymous IDs.** Every user is identified by a randomly generated `adjective-adjective-noun` handle (e.g. `bouncy-red-dragon`). This is their only identifier. No display name layer exists on top.
+- **Human-readable anonymous IDs.** Every user is identified by a handle they pick (or generate) at enrollment — any single-token name matching `HANDLE_REGEX` (e.g. `@alice`, `@midnight_traveler`, `@quiet_fox`). This is their only identifier. No display name layer exists on top.
 - **End-to-end encrypted** for all 1:1 and small group conversations.
 - **Server-side encrypted** (channel key model) for community chats.
 
@@ -131,17 +131,18 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 
 ## 3. Identity
 
-- Every user receives a **randomly generated ID** at enrollment in the format `adjective-adjective-noun`.
-- Examples: `bouncy-red-dragon`, `silent-golden-hawk`, `velvet-dark-river`
-- The ID is generated server-side, guaranteed unique, and stored as the primary user identifier.
-- **There is no display name.** The random ID is everything. Users share their ID to connect.
-- IDs are permanent. There is no rename or reset mechanism in MVP.
+- Every user picks a **handle** at enrollment — any single-token name matching `HANDLE_REGEX` in `packages/shared/src/ids/index.ts`. Users can also tap "Generate one for me" to get a suggestion.
+- Examples: `@alice`, `@midnight_traveler`, `@user_2026`, `@quiet_fox`
+- The handle is checked for uniqueness server-side at enrollment and stored as the primary user identifier.
+- **There is no display name.** The handle is everything. Users share their handle to connect.
+- Handles are permanent. There is no rename or reset mechanism in MVP.
 
-### ID Generator Rules
+### Handle Rules
 
-- Word lists: curated adjective list (~500 words) + noun list (~500 words). No offensive, political, or sensitive words.
-- Format: `[adj]-[adj]-[noun]`, all lowercase, hyphen-separated.
-- Collision resistance: 500 × 500 × 500 = 125,000,000 possible combinations. Server checks uniqueness before issuance.
+- Format: 3–20 lowercase chars, must start with a letter, must end with a letter or digit, middle chars from `[a-z0-9._-]` (letters, digits, underscore, dot, hyphen). See `HANDLE_REGEX` for the canonical regex.
+- Reserved names (`admin`, `support`, `speakeasy`, `feedback`, `speaker`, etc.) are rejected — see `RESERVED_HANDLES`.
+- The server checks availability before issuance; first-come, first-served.
+- A legacy `adjective-adjective-noun` wordlist generator still ships in `packages/shared/src/ids/generate.ts` for back-compat with pre-handle-cutover state, but new enrollment goes through `HANDLE_REGEX`.
 
 ---
 
@@ -264,7 +265,7 @@ Communities are a distinct type from the data model level — separate tables, s
 ```sql
 -- Users
 users (
-  id                  TEXT PRIMARY KEY,    -- adjective-adjective-noun
+  id                  TEXT PRIMARY KEY,    -- handle (HANDLE_REGEX); legacy adj-adj-noun ids also stored here
   public_key          BYTEA NOT NULL,      -- identity public key
   device_token        TEXT NOT NULL,       -- Vouchflow deviceToken (0010)
   selected_avatar_id  TEXT,                -- animal id from avatar catalog
@@ -451,7 +452,7 @@ speakeasy/
 
 ### Phase 0 — Foundation (Week 1)
 - [x] Turborepo monorepo scaffold
-- [x] `packages/shared`: TypeScript types, adjective-adjective-noun ID generator, message envelope schema, ULID utility
+- [x] `packages/shared`: TypeScript types, handle validators + legacy wordlist ID generator, message envelope schema, ULID utility
 - [x] Database schema + first migration (users, prekey_bundles, groups, communities, messages)
 - [x] Fly.io initial config (`speakeasy-api`, `speakeasy-db`, `speakeasy-redis`)
 - [x] GitHub Actions: lint, type-check, test pipeline
@@ -684,7 +685,7 @@ A solid purple disc on the left with parallel horizontal trails extending to the
 
 Execute these well; animate nothing else.
 
-1. **ID reveal** — The three words arrive one at a time, staggered 200ms apart, each fading up from 8px below. Primary-purple `·` separators fade in after each word. Total ~800ms.
+1. **ID reveal** — The whole identity stack fades up (opacity 0→1, translateY 8→0) over 600ms ease-out. (The previous staggered-word reveal was retired along with the legacy hyphenated id format.)
 2. **Message disappear (the brand-critical moment)** — five-stage dissolve, **must be a real Animated transition, not static frames**:
    1. **Sent** — bubble at full opacity, full scale, sharp.
    2. **Seen** — small acknowledgement pulse: scale `1 → 1.02 → 1` over 200ms.
