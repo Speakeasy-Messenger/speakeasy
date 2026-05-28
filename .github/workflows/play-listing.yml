@@ -1,0 +1,66 @@
+name: Sync Play Store listing
+
+# Manually-triggered workflow that pushes the store-listing assets
+# (title, descriptions, icon, feature graphic, phone screenshots) to
+# Play Console via the AndroidPublisher REST API.
+#
+# Separate from release-play.yml because:
+#   - AAB upload happens on every `alpha-*` tag (every RC).
+#   - Listing updates happen rarely — a copy revision, a new shot, a
+#     re-rendered icon. Bundling them onto every RC would push
+#     incidental graphics-folder churn on every build.
+#
+# Trigger: `gh workflow run play-listing.yml` from your dev box, or
+# via the GitHub UI's "Run workflow" button on this file's page.
+#
+# Auth: Same WIF flow as release-play.yml — no static service-account
+# JSON. The GitHub OIDC token gets exchanged for a short-lived GCP
+# access token bound to fastlane-play-publisher@speakeasy-mobile-497702.
+#
+# Reads from: fastlane/metadata/android/en-US/{title,short_description,
+# full_description}.txt + fastlane/metadata/android/en-US/images/.
+# Anything that's in the tree on the branch you trigger from is what
+# gets pushed.
+#
+# Safety: The script lands all edits in a single Play Console "edit"
+# and commits it as a unit. If anything fails mid-run, no partial
+# changes survive — Play Console only sees the edit once it's
+# committed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      language:
+        description: 'Locale to push (must match a subdir of fastlane/metadata/android/)'
+        required: true
+        default: 'en-US'
+
+permissions:
+  contents: read
+  # google-github-actions/auth needs id-token: write to read the
+  # GitHub OIDC token that gets exchanged for the GCP access token.
+  id-token: write
+
+jobs:
+  sync-listing:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/480139204146/locations/global/workloadIdentityPools/github-actions-pool/providers/github
+          service_account: fastlane-play-publisher@speakeasy-mobile-497702.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+
+      - name: Sync store listing
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          METADATA_DIR: fastlane/metadata/android
+          LANGUAGE: ${{ inputs.language }}
+        run: bash scripts/play-publish-listing.sh
