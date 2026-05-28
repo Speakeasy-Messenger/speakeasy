@@ -77,17 +77,23 @@ version_code=$(echo "$upload_response" | python3 -c "import sys, json; print(jso
 echo "  uploaded versionCode: $version_code"
 
 echo "3/4 Setting ${TRACK} track release (${RELEASE_NAME}, status=${RELEASE_STATUS})..."
-track_body=$(python3 -c "
+# `VAR=val command` makes VAR an env var FOR THAT COMMAND. The
+# `command VAR=val` form does NOT — bash treats it as a positional
+# argument python3 silently ignores. VERSION_CODE is a bash local
+# here so it has to be exported into python's env this way;
+# TRACK/RELEASE_NAME/RELEASE_STATUS are already in env via the
+# workflow's env block, so python inherits them automatically.
+track_body=$(VERSION_CODE="$version_code" python3 -c "
 import json, os
 print(json.dumps({
   'track': os.environ['TRACK'],
   'releases': [{
     'name': os.environ['RELEASE_NAME'],
     'status': os.environ['RELEASE_STATUS'],
-    'versionCodes': [str(os.environ['VERSION_CODE'])],
+    'versionCodes': [os.environ['VERSION_CODE']],
   }],
 }))
-" VERSION_CODE="$version_code" TRACK="$TRACK" RELEASE_NAME="$RELEASE_NAME" RELEASE_STATUS="$RELEASE_STATUS")
+")
 
 api PUT "${API}/edits/${edit_id}/tracks/${TRACK}" \
   -H "Content-Type: application/json" \
