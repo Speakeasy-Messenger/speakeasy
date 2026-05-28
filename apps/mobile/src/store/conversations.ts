@@ -46,8 +46,24 @@ export interface ChatMessage {
   mentions?: string[];
   /** Conversation membership type — affects routing on outbound. */
   kind: ConversationKind;
-  /** Wall-clock send time (ms). */
+  /** Wall-clock send time (ms) — the sender's clock at the moment
+   *  they hit send. Used for the bubble's displayed timestamp. */
   sentAt: number;
+  /** Wall-clock ms when THIS device first saw the message. For sent
+   *  messages this equals sentAt. For received messages this is the
+   *  WS-delivery time, which can be much later than sentAt when the
+   *  server buffered the message while the recipient was offline.
+   *
+   *  Conversation rendering sorts by this (with sentAt as fallback
+   *  for messages persisted before the field existed) so a late-
+   *  delivered message lands at the BOTTOM of the chat where the
+   *  user expects it after tapping its push notification — instead
+   *  of buried earlier in history at its send-time position.
+   *
+   *  Optional for back-compat with persisted state from older
+   *  versions that didn't track it.
+   */
+  receivedAt?: number;
   /** Animated dissolve stage; updated by the local TTL engine. */
   stage: DisappearingStage;
   /**
@@ -223,18 +239,40 @@ function emptyConversation(kind: ConversationKind): ConversationState {
 }
 
 /**
- * Append `msg` keeping `messages` ordered by `sentAt`.
+ * Append `msg` keeping `messages` ordered by **local arrival order**
+ * (receivedAt, falling back to sentAt for legacy persisted messages).
  *
- * Live messages arrive in send order, so the append fast-path covers
- * almost every call. The exception is an inline reply drained from the
- * background queue: it can carry an earlier `sentAt` than messages that
- * landed while the app was closed, and a blind append would render it
- * below newer messages. Equal timestamps keep insertion order.
+ * # Why receivedAt, not sentAt
+ *
+ * The server buffers messages while a recipient is offline, then
+ * relays them in a batch when the WS reconnects. Those buffered
+ * messages can carry sentAt values from minutes ago — and inserting
+ * them into the chat at their original send-time position buries
+ * them above all the messages the user has already been reading.
+ *
+ * rc.19 user feedback (peachtree): tapped a push for "sup chigga",
+ * opened the chat, couldn't find the message at the bottom — it had
+ * been inserted four messages back in history at its sentAt
+ * position. Cardinal "message disappeared" UX bug for any messenger.
+ *
+ * Sorting by receivedAt lands the message at the BOTTOM of the chat
+ * the moment it arrives — where the user just saw the notification
+ * preview, and where they'd expect the message they tapped on to be.
+ * The bubble's *displayed* timestamp stays sentAt — original send
+ * time, like every other messenger shows.
  */
-function insertBySentAt(messages: ChatMessage[], msg: ChatMessage): ChatMessage[] {
+function localOrderKey(m: ChatMessage): number {
+  return m.receivedAt ?? m.sentAt;
+}
+
+function insertByLocalOrder(
+  messages: ChatMessage[],
+  msg: ChatMessage,
+): ChatMessage[] {
   const last = messages[messages.length - 1];
-  if (!last || msg.sentAt >= last.sentAt) return [...messages, msg];
-  const at = messages.findIndex((m) => m.sentAt > msg.sentAt);
+  const k = localOrderKey(msg);
+  if (!last || k >= localOrderKey(last)) return [...messages, msg];
+  const at = messages.findIndex((m) => localOrderKey(m) > k);
   return [...messages.slice(0, at), msg, ...messages.slice(at)];
 }
 
@@ -352,12 +390,23 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       // into the store after the foreground app comes up; the server's
       // buffered `delivered`/`read` acks for that wire id can arrive
       // first, hit no message, and be parked here. Apply them now.
-      let merged = msg;
+      //
+      // Also stamp receivedAt — this is the canonical place. The
+      // upstream callers (router.addToConversation, ChatScreen's
+      // optimistic local echo, inline-reply drain) don't all know
+      // about ordering policy; centralizing the stamp here keeps
+      // localOrderKey's contract simple. msg.receivedAt being set
+      // already (e.g. during rehydration from persistence) means
+      // "use what's already there"; missing means "now".
+      let merged: ChatMessage = {
+        ...msg,
+        receivedAt: msg.receivedAt ?? Date.now(),
+      };
       const pending = s._pendingReceipts[msg.id];
       let nextPending = s._pendingReceipts;
       if (pending) {
         merged = {
-          ...msg,
+          ...merged,
           delivered: pending.delivered || msg.delivered || !!pending.readAt,
           ...(pending.readAt ? { readAt: pending.readAt } : {}),
         };
@@ -370,7 +419,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           [conversationId]: {
             ...c,
             peerUserId,
-            messages: insertBySentAt(c.messages, merged),
+            messages: insertByLocalOrder(c.messages, merged),
           },
         },
         _pendingReceipts: nextPending,
