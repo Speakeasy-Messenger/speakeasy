@@ -1,0 +1,168 @@
+name: Release to Play Store (Internal)
+
+# Triggered alongside the existing direct-download APK release workflow.
+# Same `alpha-*` tags, separate job — uploads the signed AAB to the
+# Play Console Internal Testing track via the AndroidPublisher REST API.
+#
+# Internal Testing is a closed list of testers (max 100), invisible to
+# anyone outside the list. Safe to run on every RC: doesn't affect
+# direct-download testers, doesn't appear in Play Store search, and
+# doesn't require Google review.
+#
+# Auth path: Workload Identity Federation (no static service-account
+# JSON to leak/rotate). The GCP-side setup lives in project
+# speakeasy-mobile-497702: pool `github-actions-pool`, provider
+# `github`, SA `fastlane-play-publisher@speakeasy-mobile-497702`.
+# See PARITY / PLAY-STORE-SETUP docs for the GCP console steps.
+#
+# Releases land with status=draft — i.e. the upload appears in Play
+# Console as "Ready to publish" but doesn't auto-promote to testers.
+# Click "Send to testers" in Play Console after reviewing the build.
+
+on:
+  push:
+    tags: ['alpha-*']
+
+permissions:
+  contents: read
+  # google-github-actions/auth requires id-token: write to read the
+  # GitHub OIDC token that gets exchanged for a GCP access token.
+  id-token: write
+
+jobs:
+  release-play:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.1.10909125 cmake;3.22.1'
+
+      - name: Cache Gradle
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            apps/mobile/android/.gradle
+          key: gradle-play-${{ runner.os }}-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-play-${{ runner.os }}-
+            gradle-release-${{ runner.os }}-
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Build release AAB
+        working-directory: apps/mobile/android
+        env:
+          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+          ORG_GRADLE_PROJECT_RELEASE_STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
+            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set."
+            exit 1
+          fi
+          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot sign the release AAB."
+            exit 1
+          fi
+          keystore="$RUNNER_TEMP/speakeasy-release.keystore"
+          echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          # bundleRelease produces an .aab (Android App Bundle) instead
+          # of the .apk that assembleRelease produces. Play Store only
+          # accepts AABs since 2021.
+          ./gradlew :app:bundleRelease --no-daemon \
+            -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY" \
+            -Pvouchflow.environment=production \
+            -PRELEASE_STORE_FILE="$keystore"
+
+      - name: Assert built AAB carries the tag version
+        # Same defensive check as the APK pipeline — fail before publishing
+        # if the version-derivation chain produces a wrong manifest.
+        # bundletool extracts the manifest from the AAB without needing
+        # to install it.
+        run: |
+          tag="${GITHUB_REF##*/}"
+          expected_name="${tag#alpha-}"
+          expected_code="${tag##*-rc.}"
+          aab="apps/mobile/android/app/build/outputs/bundle/release/app-release.aab"
+
+          # The manifest sits at base/manifest/AndroidManifest.xml in the
+          # AAB zip. Use aapt2 to dump its versionName/versionCode.
+          aapt2="$ANDROID_SDK_ROOT/build-tools/35.0.0/aapt2"
+          if [ ! -x "$aapt2" ]; then
+            aapt2=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt2 -type f -executable | head -1)
+          fi
+
+          # AABs are zip-based; aapt2 dump can read the bundle directly.
+          badging=$("$aapt2" dump badging "$aab")
+          actual_name=$(echo "$badging" | grep -oP "versionName='\K[^']+")
+          actual_code=$(echo "$badging" | grep -oP "versionCode='\K[^']+")
+
+          echo "Expected versionName: $expected_name"
+          echo "Expected versionCode: $expected_code"
+          echo "Actual versionName:   $actual_name"
+          echo "Actual versionCode:   $actual_code"
+
+          fail=0
+          if [ "$actual_name" != "$expected_name" ]; then
+            echo "::error::AAB versionName ($actual_name) does not match tag ($expected_name)"
+            fail=1
+          fi
+          if [ "$actual_code" != "$expected_code" ]; then
+            echo "::error::AAB versionCode ($actual_code) does not match tag-derived code ($expected_code)"
+            fail=1
+          fi
+          exit $fail
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        # Exchanges the GitHub OIDC token for a short-lived GCP access
+        # token that impersonates the fastlane-play-publisher SA. The
+        # access token is exposed as the step's `access_token` output
+        # AND written to a credentials file at $GOOGLE_APPLICATION_CREDENTIALS.
+        # Our upload script uses the access_token output directly.
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/480139204146/locations/global/workloadIdentityPools/github-actions-pool/providers/github
+          service_account: fastlane-play-publisher@speakeasy-mobile-497702.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+
+      - name: Upload AAB to Play Console Internal Testing track
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          AAB_PATH: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          TRACK: internal
+          # Play Console release name is what shows up in the dashboard's
+          # "Release name" column — use the full tag so it's bisectable
+          # against the GitHub release.
+          RELEASE_NAME: ${{ github.ref_name }}
+          # 'draft' lands the AAB but doesn't auto-promote to testers —
+          # you click "Send to testers" in Play Console after a sanity
+          # check. Switch to 'completed' once we're confident enough
+          # to auto-promote every RC.
+          RELEASE_STATUS: draft
+        run: bash scripts/play-publish.sh
