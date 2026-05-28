@@ -30,6 +30,7 @@ import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { CallTypeSheet } from '../components/CallTypeSheet.js';
+import { SEND_TEXT_MAX_CHARS } from '../components/rich-message-text.js';
 import { FrozenInputBar } from '../components/FrozenInputBar.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { PhoneIcon } from '../components/icons/CallIcons.js';
@@ -358,6 +359,33 @@ export function ChatScreen({
     const mentions = opts.mentions?.length ? opts.mentions : undefined;
     if (!text && !attachments) return;
     const id = newMessageId();
+    // Long-message hard cap. We stamp the optimistic bubble as a
+    // `too_long` failure WITHOUT dispatching — long-form text doesn't
+    // fit the WS/FCM/Signal envelope chain, and retrying is futile.
+    // The bubble renders with a non-tappable "TOO LONG TO SEND" cue
+    // so the user knows to shorten + try again instead of mashing
+    // "tap to resend" forever.
+    if (text && text.length > SEND_TEXT_MAX_CHARS) {
+      diag('chat', 'send: text too long — stamped as too_long', {
+        convId: conversationId,
+        peerId,
+        textLength: text.length,
+        limit: SEND_TEXT_MAX_CHARS,
+      });
+      add(conversationId, {
+        id,
+        from: 'me',
+        text: text,
+        attachments,
+        mentions,
+        kind: 'direct',
+        sentAt: Date.now(),
+        stage: 'sent',
+        delivered: false,
+        sendFailure: 'too_long',
+      });
+      return;
+    }
     // Optimistic local echo — render immediately, encrypt + send
     // in the background.
     diag('chat', 'send', {
@@ -707,10 +735,13 @@ export function ChatScreen({
                 onTapPhoto={(a) => setViewerAttachment(a)}
                 onTapFile={(a) => void saveAndAnnounceFile(a)}
                 onSeeMore={() => onOpenFullMessage?.(item.text)}
-                onMentionPress={(h) => {
-                  // Tapping the current peer or yourself is a no-op.
-                  if (h !== myUserId && h !== peerId) onOpenPeer?.(h);
-                }}
+                // Mentions render highlighted but inert — the
+                // tap-to-open-chat behavior was flaky (only worked
+                // for existing handles, silently no-op'd otherwise)
+                // and rc.19 user feedback flagged it as more
+                // confusing than useful. RichMessageText falls back
+                // to non-pressable rendering when onMentionPress
+                // is omitted.
               />
             );
           }}

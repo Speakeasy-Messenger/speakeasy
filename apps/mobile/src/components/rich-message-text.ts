@@ -12,6 +12,21 @@
  */
 export const LONG_MESSAGE_CHARS = 600;
 
+/**
+ * Hard cap on outbound message text. Sends above this are stamped as
+ * `too_long` failures client-side without ever attempting WS dispatch
+ * — long-form text doesn't fit cleanly through the WS frame, FCM push
+ * payload, and signal-protocol envelope chain, and the user-visible
+ * symptom was a generic "couldn't send · tap to resend" cue that
+ * never recovered no matter how many times you tapped.
+ *
+ * 16k is generous — multi-paragraph notes fit, document-length essays
+ * don't. If field feedback says this is wrong (real users hitting it
+ * on legitimate sends), drop it; if real users complain that 1000-char
+ * messages still mysteriously fail, lower it.
+ */
+export const SEND_TEXT_MAX_CHARS = 16_000;
+
 // http/https URLs and bare `www.` links. Trailing sentence punctuation
 // is trimmed off the match below so "see http://x.com." keeps the period
 // as plain text.

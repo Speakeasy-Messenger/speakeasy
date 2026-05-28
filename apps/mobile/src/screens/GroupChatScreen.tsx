@@ -17,6 +17,7 @@ import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { AppBar } from '../components/AppBar.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
+import { SEND_TEXT_MAX_CHARS } from '../components/rich-message-text.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
@@ -277,6 +278,26 @@ export function GroupChatScreen({
       return;
     }
     const localId = newMessageId();
+    // Same long-message hard cap as the 1:1 send path
+    // (ChatScreen.sendOutbound). See SEND_TEXT_MAX_CHARS for why.
+    if (text && text.length > SEND_TEXT_MAX_CHARS) {
+      diag('chat', 'group send: text too long — stamped as too_long', {
+        groupId,
+        textLength: text.length,
+        limit: SEND_TEXT_MAX_CHARS,
+      });
+      add(groupId, {
+        id: localId,
+        from: 'me',
+        text,
+        attachments,
+        kind: 'group',
+        sentAt: Date.now(),
+        stage: 'sent',
+        sendFailure: 'too_long',
+      });
+      return;
+    }
     add(groupId, {
       id: localId,
       from: 'me',
@@ -446,10 +467,10 @@ export function GroupChatScreen({
                   onTapPhoto={(a) => setViewerAttachment(a)}
                   onTapFile={(a) => void saveAndAnnounceFile(a)}
                   onSeeMore={() => onOpenFullMessage?.(item.text)}
-                  onMentionPress={(h) => {
-                    // Tapping your own handle is a no-op.
-                    if (h !== myUserId) onOpenPeer?.(h);
-                  }}
+                  // Mentions are inert — rc.19 user feedback said
+                  // the tap-to-open behavior was flaky and more
+                  // confusing than useful. See the ChatScreen
+                  // counterpart for the rationale.
                 />
               </View>
             );

@@ -288,24 +288,45 @@ export function DisappearingMessageBubble({
     </Animated.View>
   );
 
-  // Failed bubbles get a resend cue below — meta-style small caps,
-  // slate so it reads as a hint and not a system error. The Pressable
-  // wraps the bubble + cue together so the entire failed message is
-  // tappable, not just the cue.
-  if (isFailed && onTapResend) {
-    return (
-      <Pressable
-        onPress={onTapResend}
-        accessibilityRole="button"
-        accessibilityLabel={`Couldn't send. Tap to resend: ${text}`}
-        style={styles.failedWrap}
-      >
-        {bubble}
-        <Text style={[styles.resendCue, { color: themed.slate }]}>
-          COULDN'T SEND · TAP TO RESEND
-        </Text>
-      </Pressable>
-    );
+  // Failed bubbles get a hint cue below — meta-style small caps,
+  // slate so it reads as a hint and not a system error.
+  //
+  // `too_long` failures are non-retryable (the message will fail
+  // for the same reason on every retry — see SEND_TEXT_MAX_CHARS in
+  // rich-message-text.ts). Render with a different label and NO
+  // tap-to-resend wrapper, so the user knows to shorten the text
+  // instead of mashing "tap to resend" forever.
+  //
+  // All other failures (network blip, encrypt error, server 5xx)
+  // are retryable — Pressable wraps the bubble + cue together so
+  // the entire failed message area is tappable.
+  if (isFailed) {
+    const isTooLong = sendFailure === 'too_long';
+    if (isTooLong) {
+      return (
+        <View style={styles.failedWrap}>
+          {bubble}
+          <Text style={[styles.resendCue, { color: themed.slate }]}>
+            TOO LONG TO SEND · SHORTEN AND TRY AGAIN
+          </Text>
+        </View>
+      );
+    }
+    if (onTapResend) {
+      return (
+        <Pressable
+          onPress={onTapResend}
+          accessibilityRole="button"
+          accessibilityLabel={`Couldn't send. Tap to resend: ${text}`}
+          style={styles.failedWrap}
+        >
+          {bubble}
+          <Text style={[styles.resendCue, { color: themed.slate }]}>
+            COULDN'T SEND · TAP TO RESEND
+          </Text>
+        </Pressable>
+      );
+    }
   }
 
   return bubble;
