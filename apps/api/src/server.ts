@@ -23,6 +23,13 @@ import type { EventLogRepo } from './db/event-log.js';
 import { registerEnrollRoutes } from './routes/enroll.js';
 import { registerAvailabilityRoute } from './routes/availability.js';
 import { registerUserRoutes } from './routes/users.js';
+import { registerAbuseRoutes } from './routes/abuse.js';
+import {
+  DrizzleAbuseReportsRepo,
+  InMemoryAbuseReportsRepo,
+  type AbuseReportsRepo,
+} from './db/abuse-reports.js';
+import { getDb } from './db/client.js';
 import { registerPreKeyRoutes } from './routes/prekeys.js';
 import { registerGroupRoutes } from './routes/groups.js';
 import { registerCommunityRoutes } from './routes/communities.js';
@@ -98,6 +105,9 @@ export interface BuildServerOptions {
    *  to env-driven (Cloudflare if env set; STUN-only fallback). */
   turnProvider?: TurnProvider;
   devicesRepo?: DevicesRepo;
+  /** Override the abuse-reports repo (test injection). Defaults to
+   *  Drizzle when DATABASE_URL is set, else in-memory. */
+  abuseReports?: AbuseReportsRepo;
   connections?: Connections;
   presence?: Presence;
   /** Override the in-process notifier used by route handlers (test injection). */
@@ -238,6 +248,14 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // Private Call's `supported_call_kinds` UNION aggregation.
   await registerUserRoutes(app, { repo, devices, connections });
   await registerDeviceRoutes(app, { devices });
+  const abuseReports =
+    opts.abuseReports ?? (hasDb ? new DrizzleAbuseReportsRepo(getDb()) : new InMemoryAbuseReportsRepo());
+  await registerAbuseRoutes(app, {
+    abuseReports,
+    userRepo: repo,
+    limiter,
+    db: hasDb ? getDb() : undefined,
+  });
   await registerFeedbackRoute(app);
   await registerAdminRoutes(app, { eventLog, devices, users: repo });
   await registerBroadcastRoute(app, { devices, messages, push, userNotifier });
