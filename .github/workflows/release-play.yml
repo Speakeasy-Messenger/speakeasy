@@ -118,9 +118,11 @@ jobs:
 
           # bundletool's --xpath returns the attribute value as a plain
           # string on stdout (with a trailing newline). No quoting,
-          # no JSON wrapper.
-          actual_name=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@versionName)
-          actual_code=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@versionCode)
+          # no JSON wrapper. Manifest attributes are in the `android:`
+          # namespace — omit the prefix and the xpath silently returns
+          # empty (bundletool doesn't warn).
+          actual_name=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionName)
+          actual_code=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionCode)
 
           echo "Expected versionName: $expected_name"
           echo "Expected versionCode: $expected_code"
