@@ -5,7 +5,10 @@ buildscript {
         // Bumped from RN-template default 24 — see Vouchflow Android README.
         minSdkVersion = 28
         compileSdkVersion = 35
-        targetSdkVersion = 34
+        // Play Store requires API 35 minimum since Aug 2025 (per the
+        // Play Console error shown on rc.26 upload). compileSdk is
+        // already 35 so this is just lifting the runtime target.
+        targetSdkVersion = 35
         ndkVersion = "26.1.10909125"
         kotlinVersion = "1.9.24"
     }
