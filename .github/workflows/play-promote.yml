@@ -1,0 +1,77 @@
+name: Promote Play Store release between tracks
+
+# Manually-triggered workflow that takes the most recent release on one
+# Play Console track and promotes it onto another track (e.g. internal
+# → beta, where Google's API name "beta" maps to the Play Console UI's
+# "Open testing" label).
+#
+# Separate from release-play.yml because:
+#   - release-play.yml uploads the AAB to Internal Testing on every
+#     `alpha-*` tag (every RC). That's the right place for routine
+#     RCs that don't need any review.
+#   - Promotion to a public-facing track (Open / Production) is an
+#     intentional, infrequent step that triggers Google's mandatory
+#     track review on first roll-out. It belongs on its own trigger.
+#
+# Trigger: `gh workflow run play-promote.yml` from your dev box,
+# or via the GitHub UI's "Run workflow" button on this file's page.
+#
+# Auth: Same WIF flow as release-play.yml + play-listing.yml — no
+# static service-account JSON.
+#
+# Inputs:
+#   from_track       — internal | alpha | beta
+#   to_track         — alpha | beta | production
+#   release_status   — draft | completed
+#                       'draft' (default) lands the release in "Ready
+#                       to publish" on the destination track. You
+#                       still click "Send to testers" / "Submit for
+#                       review" in Play Console. Safer for first-time
+#                       roll-out to Open Testing because you get a
+#                       final eyeball pass before triggering Google's
+#                       24-48h review.
+
+on:
+  workflow_dispatch:
+    inputs:
+      from_track:
+        description: 'Source track (internal|alpha|beta)'
+        required: true
+        default: 'internal'
+      to_track:
+        description: 'Destination track (alpha|beta|production). "beta" = Open Testing in Play Console UI.'
+        required: true
+        default: 'beta'
+      release_status:
+        description: 'draft = Ready to publish (click to roll). completed = auto-publish after review.'
+        required: true
+        default: 'draft'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/480139204146/locations/global/workloadIdentityPools/github-actions-pool/providers/github
+          service_account: fastlane-play-publisher@speakeasy-mobile-497702.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+
+      - name: Promote release between tracks
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          FROM_TRACK: ${{ inputs.from_track }}
+          TO_TRACK: ${{ inputs.to_track }}
+          RELEASE_STATUS: ${{ inputs.release_status }}
+        run: bash scripts/play-promote-track.sh
