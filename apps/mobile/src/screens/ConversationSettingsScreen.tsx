@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import {
+  Alert,
   Pressable,
   SafeAreaView,
   ScrollView,
@@ -8,11 +9,14 @@ import {
   Text,
   View,
 } from 'react-native';
-import type { TtlOption } from '@speakeasy/shared';
+import type { AbuseReportReason, TtlOption } from '@speakeasy/shared';
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import { AppBar } from '../components/AppBar.js';
 import { BlockConfirmSheet, UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { BurnConfirmSheet } from '../components/BurnConfirmSheet.js';
+import { ReportConfirmSheet } from '../components/ReportSheets.js';
+import { ApiError } from '../api/client.js';
+import { api } from '../services.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { TTLSegmentedControl } from '../components/TTLSegmentedControl.js';
@@ -77,6 +81,38 @@ export function ConversationSettingsScreen({
   const [blockSheetOpen, setBlockSheetOpen] = useState(false);
   const [unblockSheetOpen, setUnblockSheetOpen] = useState(false);
   const [burnSheetOpen, setBurnSheetOpen] = useState(false);
+  const [reportSheetOpen, setReportSheetOpen] = useState(false);
+
+  async function handleReportSubmit(
+    reason: AbuseReportReason,
+    detail?: string,
+  ): Promise<void> {
+    const deviceToken = useIdentity.getState().deviceToken;
+    if (!deviceToken) {
+      // Without a token we can't auth the request — close silently
+      // and surface the same generic toast so we don't leak the
+      // auth state to a misbehaving caller.
+      setReportSheetOpen(false);
+      Alert.alert('Report filed', `Thanks. We'll review @${peerId}.`);
+      return;
+    }
+    try {
+      await api.reportUser(peerId, { reason, detail }, deviceToken);
+      diag('report', 'filed', { peerId, reason });
+    } catch (err) {
+      // 404 (handle vanished mid-flight) or 429 (caller spammed
+      // reports) are quiet failures from the UI's perspective —
+      // showing technical detail leaks the threshold + rate-limit
+      // shape. Generic toast either way.
+      if (err instanceof ApiError) {
+        diag('report', 'api error (suppressed)', { peerId, status: err.status, code: err.code });
+      } else {
+        diag('report', 'unknown error (suppressed)', { peerId, err: String(err) });
+      }
+    }
+    setReportSheetOpen(false);
+    Alert.alert('Report filed', `Thanks. We'll review @${peerId}.`);
+  }
 
   function handleBurnConfirm() {
     setBurnSheetOpen(false);
@@ -196,6 +232,16 @@ export function ConversationSettingsScreen({
               {peerId}
             </Text>
           </Pressable>
+          <Pressable
+            onPress={() => setReportSheetOpen(true)}
+            testID="conv-settings-report"
+            style={styles.reportRow}
+          >
+            <Text style={[styles.dangerName, { color: themed.primary }]}>
+              Report <Text style={{ color: themed.primary }}>@</Text>
+              {peerId}
+            </Text>
+          </Pressable>
         </View>
       </ScrollView>
 
@@ -236,6 +282,12 @@ export function ConversationSettingsScreen({
           setUnblockSheetOpen(false);
           unblockUser(peerId);
         }}
+      />
+      <ReportConfirmSheet
+        visible={reportSheetOpen}
+        handle={peerId}
+        onClose={() => setReportSheetOpen(false)}
+        onSubmit={handleReportSubmit}
       />
     </SafeAreaView>
   );
@@ -329,5 +381,8 @@ const styles = StyleSheet.create({
     fontFamily: font.medium,
     fontSize: 14,
     paddingVertical: 4,
+  },
+  reportRow: {
+    marginTop: space.s,
   },
 });

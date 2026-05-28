@@ -351,3 +351,39 @@ export const TTL_OPTIONS = {
 export type TtlOption = keyof typeof TTL_OPTIONS;
 
 export const DEFAULT_TTL_SECONDS = TTL_OPTIONS.week;
+
+// ------------ Abuse reporting ------------
+
+/**
+ * Mirrors the CHECK constraint on `abuse_reports.reason` (server) and
+ * the picker options on the mobile Report sheet. Extending this set
+ * requires a DB migration to widen the CHECK.
+ */
+export const ABUSE_REPORT_REASONS = [
+  'spam',
+  'harassment',
+  'threats',
+  'hate_speech',
+  'other',
+] as const;
+
+export type AbuseReportReason = (typeof ABUSE_REPORT_REASONS)[number];
+
+/** Free-text detail field cap (chars). Server enforces same limit. */
+export const ABUSE_REPORT_DETAIL_MAX_CHARS = 200;
+
+/**
+ * Trailing window used for the auto-ban threshold check. Reports older
+ * than this are kept in the table for audit but don't count toward
+ * the threshold. Days, not raw ms, so the server SQL can express it as
+ * `INTERVAL 'N days'`.
+ */
+export const ABUSE_REPORT_DECAY_DAYS = 90;
+
+/**
+ * Threshold: when this many distinct reporters have an active report
+ * against a user within `ABUSE_REPORT_DECAY_DAYS`, the user's account
+ * is auto-deleted. The dedup constraint on (reporter, reported)
+ * guarantees "distinct" — one user can't fill the count alone.
+ */
+export const ABUSE_REPORT_BAN_THRESHOLD = 5;

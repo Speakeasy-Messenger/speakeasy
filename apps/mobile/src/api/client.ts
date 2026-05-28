@@ -1,4 +1,18 @@
+import type { AbuseReportReason } from '@speakeasy/shared';
 import type { PreKey, PreKeyBundleInput } from '../crypto/types.js';
+
+/**
+ * Parse a fetch response body as JSON, swallowing errors (some
+ * server error paths return text/html or empty bodies). Returns
+ * `undefined` when parsing fails — callers should handle that.
+ */
+async function safeJson(res: Response): Promise<unknown> {
+  try {
+    return await res.json();
+  } catch {
+    return undefined;
+  }
+}
 
 export interface EnrollRequest {
   /** Vouchflow deviceToken from the SDK's verify() result. */
@@ -297,6 +311,44 @@ export class ApiClient {
       method: 'DELETE',
       headers: { authorization: `Bearer ${deviceToken}` },
     });
+  }
+
+  /**
+   * File an abuse report against a peer. Idempotent on the
+   * (reporter, reported) pair: the server treats a duplicate report
+   * from the same caller as a no-op and returns `recorded: false`.
+   *
+   * Throws `ApiError(400)` on self-report or invalid reason,
+   * `ApiError(404)` on unknown handle, `ApiError(429)` on rate-limit
+   * (10/day per reporter).
+   *
+   * Returns `{ recorded, banned }` — `banned: true` means this report
+   * pushed the active count over the 5-strike threshold and the peer
+   * was auto-deleted. Callers don't surface that to the reporter
+   * directly (it leaks the threshold value).
+   */
+  async reportUser(
+    handle: string,
+    body: { reason: AbuseReportReason; detail?: string },
+    deviceToken: string,
+  ): Promise<{ recorded: boolean; banned: boolean }> {
+    const res = await this.doFetch(
+      `${this.baseUrl}/v1/users/${encodeURIComponent(handle)}/report`,
+      {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          authorization: `Bearer ${deviceToken}`,
+        },
+        body: JSON.stringify(body),
+      },
+    );
+    if (res.status !== 200) {
+      const err = (await safeJson(res)) as { error?: string } | undefined;
+      throw new ApiError(res.status, err?.error);
+    }
+    const json = (await res.json()) as { recorded: boolean; banned: boolean };
+    return { recorded: json.recorded, banned: json.banned };
   }
 
   /**

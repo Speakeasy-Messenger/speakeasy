@@ -11,6 +11,7 @@ import {
   primaryKey,
   text,
   timestamp,
+  unique,
 } from 'drizzle-orm/pg-core';
 
 const bytea = customType<{ data: Buffer; default: false }>({
@@ -260,6 +261,50 @@ export const feedback = pgTable('feedback', {
   createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   reviewedAt: timestamp('reviewed_at', { withTimezone: true }),
 });
+
+/**
+ * Per-(reporter, reported) abuse reports. UNIQUE on the pair so a single
+ * user cannot drive the auto-ban threshold alone. Five distinct reporters
+ * within `ABUSE_REPORT_DECAY_DAYS` triggers account deletion of the
+ * reported user via the route's transactional ban path.
+ *
+ * `reported_user_id` deliberately has NO foreign key: once the auto-ban
+ * deletes the reported user, the report rows survive as an audit trail.
+ *
+ * See `infra/migrations/0019_abuse_reports.sql` for the canonical
+ * column comments + behavioral notes.
+ */
+export const abuseReports = pgTable(
+  'abuse_reports',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    reporterUserId: text('reporter_user_id')
+      .notNull()
+      .references(() => users.id, { onDelete: 'cascade' }),
+    reportedUserId: text('reported_user_id').notNull(),
+    reason: text('reason').notNull(),
+    detail: text('detail'),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    reporterReportedUq: unique('abuse_reports_reporter_reported_key').on(
+      t.reporterUserId,
+      t.reportedUserId,
+    ),
+    reportedRecentIdx: index('abuse_reports_reported_recent_idx').on(
+      t.reportedUserId,
+      t.createdAt,
+    ),
+    reasonEnum: check(
+      'abuse_reports_reason_check',
+      sql`${t.reason} IN ('spam', 'harassment', 'threats', 'hate_speech', 'other')`,
+    ),
+    detailLen: check(
+      'abuse_reports_detail_len_check',
+      sql`${t.detail} IS NULL OR length(${t.detail}) <= 200`,
+    ),
+  }),
+);
 
 /**
  * Persistent server-side event log for diagnostics whose answers fly's
