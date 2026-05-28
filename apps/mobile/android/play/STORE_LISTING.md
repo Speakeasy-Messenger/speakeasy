@@ -40,8 +40,8 @@ specifically.
   enforcement notices)
 - **Phone**: optional, leave blank
 - **Website**: `https://speakeasyapp.xyz`
-- **Privacy policy**: `https://speakeasyapp.xyz/privacy` (confirm
-  the exact path)
+- **Privacy policy**: `https://speakeasyapp.xyz/privacy/` (confirmed
+  live, branded page, 5.7 KB of real content)
 
 ---
 

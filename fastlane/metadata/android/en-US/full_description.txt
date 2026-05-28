@@ -18,13 +18,9 @@ WHO BUILT IT
 
 Speakeasy is built by a small team that wanted a private messenger that didn't ask for the keys to the rest of your life as the price of admission. The protocol layer is open-source and uses libsignal, the same library Signal Messenger Foundation maintains. The brand layer is ours.
 
-HONEST ABOUT WHERE WE ARE
-
-This is an alpha release. The cryptographic core is solid; the polish on the edges is being built in public. You will encounter rough edges, especially around iOS — that platform is several weeks behind Android in feature parity. We ship updates frequently. If you want a finished, polished experience right now, wait a few months. If you want to use the app and tell us what is missing, you are exactly who we are looking for.
-
 YOUR DATA STAYS YOURS
 
-Speakeasy does not collect personal information. Read the full privacy policy at https://speakeasyapp.xyz to see the technical details of what is and isn't kept on our servers.
+Speakeasy does not collect personal information. Read the full privacy policy at https://speakeasyapp.xyz/privacy/ for the technical details of what is and isn't kept on our servers.
 
 If you delete your account, we delete your handle (releasing it back to the pool), your prekey bundle, and your encrypted message-relay buffer. The messages already delivered to your peers stay on their devices — we cannot reach into someone else's phone to delete them.
 
