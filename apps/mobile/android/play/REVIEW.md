@@ -92,23 +92,30 @@ renderer doesn't honor Markdown. CAPS is the convention competitors
 
 ---
 
-## Graphics — **MISSING (blocks public-track promotion)**
+## Graphics
 
 | Asset | Spec | Status |
 |---|---|---|
 | App icon | 512×512 PNG | **MISSING** — needs upscale from `mipmap-xxxhdpi/ic_launcher.png` or vector source |
 | Feature graphic | 1024×500 PNG, no transparency | **MISSING** — proposed: brand canvas (INK background) with wordmark + animal silhouette |
-| Phone screenshots | 1080×1920+ portrait, 2–8 images | **MISSING** — proposed shots below |
+| Phone screenshots | 1080×1920+ portrait, 2–8 images | ✅ **7 real-device captures landed** in `fastlane/metadata/android/en-US/images/phoneScreenshots/` — see lineup below |
 | Tablet screenshots | optional | N/A (don't claim tablet support) |
 | 7-inch / 10-inch tablets | optional | N/A |
 | Promo video (YouTube) | optional | Skip for v1 |
 
-### Proposed screenshot lineup (5 of 5)
+### Screenshot lineup — 7 real-device captures (1080×2340 / 1080×2400)
 
-1. **Conversation list** — multiple rooms with animal avatars. Sells the "anonymous identity by animal" story.
-2. **A 1:1 chat** — bubble design, message styling, brand register. Use a curated test conversation, no real PII.
-3. **A Private Call in progress** — avatar with active speech rings + voice filter indicator. Most differentiating feature.
-4. **Account → Voice filter picker** — Smoke/Velvet/Glass options visible. Reinforces unique customization.
+In Play Store carousel order (first is the most-visible hero):
+
+1. **`1_door.png`** — Door / "speakeasy." wordmark — the brand-defining first impression. Light mode. Brass wordmark on cream + the door brand mark.
+2. **`2_avatar-picker.jpg`** — "Change my face" / 12-animal menagerie + selected Phoenix below — sells the unique animal-as-identity model. Most distinctive single shot in the app.
+3. **`3_private-call-connected.jpg`** — Private call to `@bananaman5` with the peer's heron portrait inside a portrait frame, call timer 00:02, your own avatar (red bat) bottom-left tagged "YOU". "PRIVATE CALL · CONNECTED" header in brass. Sells the voice filter / avatar-as-face moment that no other messenger has.
+4. **`4_group-chat.jpg`** — "Workout crew" group room, "2 IN THE ROOM · LEAVES IN 24H" status, real conversation visible with brass outgoing bubble + dark incoming bubbles. Sells the chat-with-ephemeral-default story.
+5. **`5_your-handle-qr.jpg`** — Your handle (`@peachtree`) + portrait + QR code + Copy/Share-via buttons. Sells the no-phone-number / share-by-handle mechanic.
+6. **`6_private-call-ringing.jpg`** — Outgoing call to `@bananaman5`, "their phone is ringing" copy, the brass door mark pulsing. The ambient brand moment — calls feel like an event.
+7. **`7_speaker-announcements.jpg`** — `@speaker` ANNOUNCEMENTS channel with release-note messages. Shows the bot/announcements feature and the "Announcements only — you can't reply here" pattern. (Optional — drop if 6 reads tighter.)
+
+Original device captures: see `~/.claude/uploads/.../*.jpg` from session 2026-05-28.
 5. **Avatar picker** — the menagerie of animal avatars. Sells the "your face is an animal" identity model.
 
 Internal Testing track does NOT require any of these. We can ship to
@@ -227,7 +234,7 @@ ticked:
 
 - [x] App icon uploaded (512×512) — **MISSING**
 - [x] Feature graphic uploaded (1024×500) — **MISSING**
-- [x] At least 2 phone screenshots uploaded — **MISSING**
+- [x] At least 2 phone screenshots uploaded — ✅ **7 ready**
 - [x] Short description filled — ✅ done
 - [x] Full description filled — ✅ done
 - [x] Privacy policy URL set — ✅ done (`https://speakeasyapp.xyz/privacy/`)
@@ -247,10 +254,9 @@ Production.
 
 In rough order of effort:
 
-1. **Generate three graphics** (icon, feature graphic, screenshots) —
-   biggest open task. Either contract a designer, use an in-house Figma
-   pass, or assemble screenshots from a real device with two test handles
-   running side-by-side.
+1. **Generate two graphics still missing** — app icon (512×512) and
+   feature graphic (1024×500). Screenshots are done (7 real-device
+   captures landed under `images/phoneScreenshots/`).
 2. **Create reviewer handle(s)** in production — 10 minutes once we have
    a stable build.
 3. **Fill content rating + data safety + target audience in Play
