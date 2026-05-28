@@ -1,0 +1,3 @@
+Voice filters now sound like three different people instead of three pitch shifts of one. Smoke = tall + deep. Velvet = warm + natural (no chipmunk). Glass = bright + small. Pick yours in Account → Voice filter.
+
+Behind the scenes: independent pitch and formant control via cepstral envelope separation. About 10ms of voice-call latency, down from ~21ms.
