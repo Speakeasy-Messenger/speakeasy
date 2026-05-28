@@ -123,7 +123,7 @@ Google's reviewers test the app. Provide test credentials so they
 can see the messaging flow.
 
 - **Username/Handle**: Provide a pre-enrolled test handle (e.g.
-  `@reviewer-speakeasy` — sign up once, save the handle and a backup
+  `@reviewer_speakeasy` — sign up once, save the handle and a backup
   of the keystore).
 - **Password**: N/A — Speakeasy uses device attestation (Vouchflow),
   not passwords. Note this in the "Notes" field of the App access

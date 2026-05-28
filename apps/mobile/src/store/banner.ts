@@ -10,9 +10,10 @@ import { create } from 'zustand';
 export interface BannerData {
   /** Unique id — used as React key + to drive the auto-dismiss timer. */
   id: string;
-  /** Sender id (adjective-adjective-noun) for direct chats. For group
-   * chats this is also the sender, with `groupId` set so tap navigates
-   * to the group rather than a 1:1 with the sender. */
+  /** Sender id (handle, or legacy adj-adj-noun for back-compat) for
+   * direct chats. For group chats this is also the sender, with
+   * `groupId` set so tap navigates to the group rather than a 1:1
+   * with the sender. */
   sender: string;
   /** Decrypted message text (truncated for display). */
   text: string;

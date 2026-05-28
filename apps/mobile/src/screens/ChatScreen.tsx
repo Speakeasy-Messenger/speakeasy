@@ -67,7 +67,7 @@ import {
 } from '../auth/verify-device.js';
 
 interface Props {
-  /** The other user's adjective-adjective-noun id, for direct chats only. */
+  /** The other user's handle (or legacy adj-adj-noun id), for direct chats only. */
   peerId: string;
   onBack?: () => void;
   /**

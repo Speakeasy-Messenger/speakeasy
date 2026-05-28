@@ -62,7 +62,7 @@ Walk the form's data-type checklist. For each category, mark
 |---|---|---|---|
 | Name | NOT collected | — | Handle is not a real name. |
 | Email address | NOT collected | — | No email at signup. |
-| User IDs | **Collected** (required) | NOT shared | The handle (`@velvet-cardinal`) and the Vouchflow device token. Both are app-internal — neither links to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
+| User IDs | **Collected** (required) | NOT shared | The user-chosen handle (a short lowercase string, 3–20 chars) and the Vouchflow device token. Both are app-internal — neither links to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
 | Address | NOT collected | — | |
 | Phone number | NOT collected | — | Famously not asked. |
 | Race and ethnicity | NOT collected | — | |

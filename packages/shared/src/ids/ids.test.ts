@@ -88,7 +88,12 @@ describe('group / community / message ids', () => {
 
 describe('handles (user-chosen ids)', () => {
   it('accepts 3-20 char lowercase identifiers starting with a letter', () => {
-    for (const ok of ['abc', 'a_b_c', 'abc123', 'alice', 'user_2026', 'a123456789012345678'])
+    for (const ok of [
+      'abc', 'a_b_c', 'abc123', 'alice', 'user_2026', 'a123456789012345678',
+      // Widened charset (regex now allows `.` and `-` as separators) —
+      // covers user-typed handles and the output of generateShortHandle.
+      'al-ice', 'al.ice', 'amber-quiet-fox', 'dr.who', 'rose-keen-moss',
+    ])
       expect(HANDLE_REGEX.test(ok), `should accept "${ok}"`).toBe(true);
   });
 
@@ -96,13 +101,24 @@ describe('handles (user-chosen ids)', () => {
     for (const bad of [
       '', 'ab',                     // too short
       'a'.repeat(21),               // too long
-      '1abc', '_abc',               // bad first char
+      '1abc', '_abc',               // bad first char (digit or separator)
+      '-abc', '.abc',               // bad first char (separator)
+      'abc-', 'abc.', 'abc_',       // bad last char (trailing separator)
       'Alice', 'AB',                // uppercase
-      'al-ice', 'al ice', 'al.ice', // disallowed chars
-      'alice-blue-fox',             // legacy 3-word
+      'al ice',                     // space disallowed
+      'al!ice', 'al@ice',           // punctuation outside the set
     ]) {
       expect(isHandle(bad), `should reject "${bad}"`).toBe(false);
     }
+  });
+
+  it('validateHandle rejects consecutive separators', () => {
+    for (const bad of ['a--b', 'a..b', 'a__b', 'a.-b', 'a-_b'])
+      expect(validateHandle(bad)).toBe('invalid');
+  });
+
+  it('validateHandle accepts a generated 3-word handle', () => {
+    expect(validateHandle('amber-quiet-fox')).toBeUndefined();
   });
 
   it('validateHandle returns "invalid" for malformed', () => {

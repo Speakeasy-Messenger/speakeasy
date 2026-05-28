@@ -13,8 +13,11 @@ import { randomInt } from 'node:crypto';
 import { ADJECTIVES, NOUNS } from '../wordlists/index.js';
 
 /**
- * Generate a candidate user ID in `adjective-adjective-noun` form.
- * Server must verify uniqueness against the users table before issuing.
+ * Generate a candidate legacy user ID in `adjective-adjective-noun`
+ * form. New enrollment goes through `HANDLE_REGEX` (user-picked
+ * single-token handle) — this generator is retained for legacy
+ * pre-handle-cutover code paths only. Server must verify uniqueness
+ * against the users table before issuing.
  */
 export function generateUserId(): string {
   const adj1 = ADJECTIVES[randomInt(ADJECTIVES.length)]!;

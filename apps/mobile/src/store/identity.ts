@@ -10,8 +10,9 @@ import { getCachedDeviceToken } from '../native/cached-device-token.js';
  *     than Onboarding, with the same userId.
  *
  * What we persist to AsyncStorage:
- *   - userId — the canonical adjective-adjective-noun id the server
- *     minted at signup. Not a secret.
+ *   - userId — the canonical handle the user picked at signup (or a
+ *     legacy adj-adj-noun id for pre-handle-cutover accounts). Not a
+ *     secret.
  *   - deviceTokenIssuedAt — when the token was last refreshed; drives
  *     the launch-verify freshness skip. Not a secret.
  *
