@@ -169,9 +169,10 @@ Tick everything that's true:
 
 ## Privacy policy
 
-URL: **https://speakeasyapp.xyz/privacy** (confirm the exact path
-before submitting — earlier message said `speakeasyapp.xyz` without
-the `/privacy` suffix).
+URL: **https://speakeasyapp.xyz/privacy/** (confirmed live — 301
+redirects from /privacy to /privacy/; Play's URL field follows
+redirects, but submitting the canonical trailing-slash form avoids
+any future issue if Play tightens URL validation).
 
 ---
 
