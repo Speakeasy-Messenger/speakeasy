@@ -539,6 +539,7 @@ export function GroupChatScreen({
             data={viewerAttachment.data}
             mime={viewerAttachment.mime}
             onClose={() => setViewerAttachment(null)}
+            onSave={() => void saveAndAnnounceFile(viewerAttachment)}
           />
         ) : null}
       </Modal>
