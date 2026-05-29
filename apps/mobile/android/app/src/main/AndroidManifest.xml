@@ -2,11 +2,13 @@
     xmlns:tools="http://schemas.android.com/tools">
 
     <uses-permission android:name="android.permission.INTERNET" />
-    <!-- Optional. Used by the InviteFriendsScreen to populate a list
-         of contacts the user can tap to share their @handle with.
-         Discovery (matching contacts to existing speakeasy users) is
-         deliberately NOT done — contact data never leaves the device. -->
-    <uses-permission android:name="android.permission.READ_CONTACTS" />
+    <!-- READ_CONTACTS was declared in earlier rcs as a placeholder for a
+         since-cancelled InviteFriendsScreen. No code path ever read the
+         contact list (the npm dep `react-native-contacts` had zero JS
+         imports), and ShareHandleScreen uses Share/QR/Clipboard
+         instead. Permission + dep both dropped in rc.33 so Play
+         Console's permission scanner doesn't flag a permission we
+         don't use. -->
 
     <!-- Push notifications. Android 13+ (API 33) requires this permission
          at runtime; without it, the OS silently drops every FCM-delivered

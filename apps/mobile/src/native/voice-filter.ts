@@ -10,12 +10,14 @@
  * (Kotlin) and `SpeakeasyBridges/VoiceFilter/VoiceFilter.swift` (Swift)
  * for the native sides.
  *
- * **Stub status (this commit):** the native module returns
- * `isAvailable: false` on both platforms. The wire/server work below
- * (capability handshake, fan-out filter, KNOWN_CALL_KINDS guard,
- * shared types) lands in main behind this gate so the CallTypeSheet's
- * Private row never appears in production until the real filter ships.
- * Tests can swap an `isAvailable: true` mock to exercise the UI path.
+ * **Status (rc.33+):** the DSP is shipped and the native modules
+ * return `isAvailable: true` on both Android and iOS. Voice filter
+ * runs in-process via `xyz.speakeasyapp.app.voicefilter.VoiceFilterDsp`
+ * (phase vocoder pitch shift + cepstral envelope formant shift,
+ * Phase 2a/2b). CallTypeSheet's Private row appears in production
+ * release builds; previous BuildConfig.DEBUG gate was flipped in
+ * 0.7.0-rc.3. Tests still swap a stub to exercise the no-native
+ * path; that's a separate concern from production availability.
  */
 
 // Lazy access to react-native — mirrors apps/mobile/src/permissions/runtime.ts.

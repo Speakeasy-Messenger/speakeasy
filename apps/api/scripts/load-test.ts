@@ -14,22 +14,22 @@
  * Run:  npm run test:load
  *       REDIS_URL=redis://... npm run test:load
  */
-import { buildServer } from '../server.js';
+import { buildServer } from '../src/server.js';
 import type { FastifyInstance } from 'fastify';
 import WebSocket from 'ws';
-import { InMemoryAckRouter } from './ack-router.js';
-import { InMemoryConnections } from './connections.js';
-import { InMemoryPresence } from '../presence/memory.js';
-import { InMemoryMessagesRepo } from '../db/messages.memory.js';
-import { InMemoryGroupRepo } from '../db/groups.memory.js';
-import { InMemoryCommunityRepo } from '../db/communities.memory.js';
-import { InMemoryDevicesRepo } from '../db/devices.memory.js';
-import { InMemoryUserRepo } from '../db/users.memory.js';
-import { InMemoryPreKeyRepo } from '../db/prekeys.memory.js';
-import { MockPushProvider } from '../push/push.mock.js';
-import type { AckRouter } from './ack-router.js';
+import { InMemoryAckRouter } from '../src/ws/ack-router.js';
+import { InMemoryConnections } from '../src/ws/connections.js';
+import { InMemoryPresence } from '../src/presence/memory.js';
+import { InMemoryMessagesRepo } from '../src/db/messages.memory.js';
+import { InMemoryGroupRepo } from '../src/db/groups.memory.js';
+import { InMemoryCommunityRepo } from '../src/db/communities.memory.js';
+import { InMemoryDevicesRepo } from '../src/db/devices.memory.js';
+import { InMemoryUserRepo } from '../src/db/users.memory.js';
+import { InMemoryPreKeyRepo } from '../src/db/prekeys.memory.js';
+import { MockPushProvider } from '../src/push/push.mock.js';
+import type { AckRouter } from '../src/ws/ack-router.js';
 import { Redis } from 'ioredis';
-import { RedisAckRouter } from './ack-router.redis.js';
+import { RedisAckRouter } from '../src/ws/ack-router.redis.js';
 import { MockValidator, type Validator } from '@speakeasy/vouchflow';
 import type { AddressInfo } from 'net';
 

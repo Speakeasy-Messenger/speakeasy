@@ -1,5 +1,9 @@
-/** Spec §4a: small-group ceiling is 100 members. */
-export const SMALL_GROUP_MAX_MEMBERS = 100;
+/**
+ * Spec §4a: small-group ceiling. Lowered from 100 → 50 in rc.33 to
+ * match the Play Store listing copy. Conversations above this size
+ * must be a Community (server-side encrypted channel-key model).
+ */
+export const SMALL_GROUP_MAX_MEMBERS = 50;
 
 export interface GroupSummary {
   id: string;
