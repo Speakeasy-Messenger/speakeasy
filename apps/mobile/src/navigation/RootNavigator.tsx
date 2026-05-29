@@ -27,6 +27,7 @@ import { NotificationsScreen } from '../screens/NotificationsScreen.js';
 import { AppearanceScreen } from '../screens/AppearanceScreen.js';
 import { AccountScreen } from '../screens/AccountScreen.js';
 import { AvatarPickerScreen } from '../screens/AvatarPickerScreen.js';
+import { VoiceFilterScreen } from '../screens/VoiceFilterScreen.js';
 import { DeleteAccountScreen } from '../screens/DeleteAccountScreen.js';
 import { AboutScreen } from '../screens/AboutScreen.js';
 import { ShareHandleScreen } from '../screens/ShareHandleScreen.js';
@@ -66,6 +67,7 @@ export type RootStack = {
   Appearance: undefined;
   Account: undefined;
   AvatarPicker: undefined;
+  VoiceFilter: undefined;
   DeleteAccount: undefined;
   About: undefined;
   Call: undefined;
@@ -211,6 +213,7 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                   onBack={() => navigation.goBack()}
                   onChangeFace={() => navigation.navigate('AvatarPicker')}
                   onShareHandle={() => navigation.navigate('ShareHandle')}
+                  onChangeVoiceFilter={() => navigation.navigate('VoiceFilter')}
                   onDeleteAccount={() => navigation.navigate('DeleteAccount')}
                 />
               )}
@@ -218,6 +221,11 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
             <Stack.Screen name="AvatarPicker">
               {({ navigation }: NativeStackScreenProps<RootStack, 'AvatarPicker'>) => (
                 <AvatarPickerScreen onBack={() => navigation.goBack()} />
+              )}
+            </Stack.Screen>
+            <Stack.Screen name="VoiceFilter">
+              {({ navigation }: NativeStackScreenProps<RootStack, 'VoiceFilter'>) => (
+                <VoiceFilterScreen onBack={() => navigation.goBack()} />
               )}
             </Stack.Screen>
             <Stack.Screen name="DeleteAccount">

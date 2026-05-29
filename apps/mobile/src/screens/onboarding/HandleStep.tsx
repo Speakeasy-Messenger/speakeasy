@@ -10,8 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../../components/Button.js';
-import { useSettings } from '../../store/settings.js';
-import { api, signalProtocol, vouchflow, pushNotifications } from '../../services.js';
+import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../../native/vouchflow.js';
 import { SignalClientError } from '@speakeasy/crypto';
@@ -158,24 +157,21 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
         },
       });
 
-      // Best-effort push token registration. Same path as the legacy
-      // OnboardingScreen; deferred to a fire-and-forget so we don't
-      // gate the Face step on FCM availability.
-      void (async () => {
-        try {
-          const pushResult = await pushNotifications.getToken();
-          if (pushResult) {
-            await api.registerPushToken(
-              deviceToken,
-              pushResult.pushToken,
-              pushResult.platform,
-              useSettings.getState().notificationPrivacy,
-            );
-          }
-        } catch {
-          /* non-fatal */
-        }
-      })();
+      // Push token registration is intentionally NOT done here.
+      //
+      // `pushNotifications.getToken()` on Android 13+ internally
+      // requests POST_NOTIFICATIONS, which would pop the OS prompt
+      // over the Face / Avatar screen the user is about to land on
+      // — directly contradicting the dedicated PermissionsStep that
+      // asks for the same permission a step later. Tester feedback
+      // (rc.33): "notification permissions should be granted at the
+      // page that is actually requesting the permissions, but right
+      // now it is being asked at the page for avatar selection."
+      //
+      // Push registration happens via App.tsx's `userId`-keyed
+      // useEffect right after PermissionsStep flips identity — at
+      // which point the user has already answered the prompt on the
+      // dedicated screen and getToken() resolves without re-asking.
 
       onClaimed({ userId: user_id, deviceToken });
     } catch (err: unknown) {
