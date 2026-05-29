@@ -1,0 +1,49 @@
+name: Clear Play Store track
+
+# Manually-triggered workflow that removes every draft / pending
+# release on a Play Console track. Useful when a release was promoted
+# in error or when we want to halt a pending Google review without
+# rolling back live releases.
+#
+# Sister to release-play.yml (AAB upload), play-listing.yml (store
+# listing), and play-promote.yml (track promotion). Same WIF auth.
+#
+# Trigger: `gh workflow run play-clear-track.yml -f track=beta`
+#
+# Released-to-testers history is unaffected; only the upcoming /
+# unrolled releases that hadn't gone live yet get removed.
+
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Track to clear (internal|alpha|beta|production). beta = Open Testing.'
+        required: true
+        default: 'beta'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  clear:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/480139204146/locations/global/workloadIdentityPools/github-actions-pool/providers/github
+          service_account: fastlane-play-publisher@speakeasy-mobile-497702.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+
+      - name: Clear track
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          TRACK: ${{ inputs.track }}
+        run: bash scripts/play-clear-track.sh

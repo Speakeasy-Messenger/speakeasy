@@ -18,6 +18,7 @@ import {
 } from '../avatars/catalog.js';
 import { AcquireSheet } from '../components/AcquireSheet.js';
 import { PortraitTile } from '../components/PortraitTile.js';
+import { PURCHASING_LIVE } from '../services/purchases.js';
 import { api } from '../services.js';
 import { useIdentity } from '../store/identity.js';
 import { useOwnership } from '../store/ownership.js';
@@ -163,7 +164,14 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
           ))}
         </View>
 
-        {lockedRares.length > 0 ? (
+        {/* Locked Rare + Legendary sections + the Restore Purchases
+            link are gated on `PURCHASING_LIVE` (false until Phase C
+            wires real Play Billing). When off, the picker only
+            surfaces avatars the user can actually wear — no price
+            chips, no "Coming soon" tiles, no restore affordance for
+            a purchase channel that doesn't exist. Reverts in the same
+            PR that adds `Purchases.purchase()`. */}
+        {PURCHASING_LIVE && lockedRares.length > 0 ? (
           <>
             <SectionHeader label="Rare" themed={themed} testID="picker-section-rare" />
             <View style={styles.grid}>
@@ -183,7 +191,7 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
           </>
         ) : null}
 
-        {lockedLegendaries.length > 0 ? (
+        {PURCHASING_LIVE && lockedLegendaries.length > 0 ? (
           <>
             <SectionHeader
               label="Legendary"
@@ -207,16 +215,18 @@ export function AvatarPickerScreen({ onBack }: Props): React.ReactElement {
           </>
         ) : null}
 
-        <Pressable
-          onPress={() => void restore()}
-          hitSlop={8}
-          style={styles.restoreWrap}
-          testID="picker-restore"
-        >
-          <Text style={[styles.restoreText, { color: themed.slate }]}>
-            Restore purchases
-          </Text>
-        </Pressable>
+        {PURCHASING_LIVE ? (
+          <Pressable
+            onPress={() => void restore()}
+            hitSlop={8}
+            style={styles.restoreWrap}
+            testID="picker-restore"
+          >
+            <Text style={[styles.restoreText, { color: themed.slate }]}>
+              Restore purchases
+            </Text>
+          </Pressable>
+        ) : null}
       </ScrollView>
 
       <AcquireSheet
