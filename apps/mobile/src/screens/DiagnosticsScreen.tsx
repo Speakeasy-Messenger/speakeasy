@@ -40,11 +40,17 @@ interface Props {
 }
 
 /**
- * Diagnostics — DEBUG / alpha-channel only (CLAUDECODENOTE.md §3).
+ * Diagnostics — alpha-channel only (CLAUDECODENOTE.md §3).
  *
- * The route mounting this screen is `__DEV__`-gated in
- * RootNavigator; production release builds don't include it. Layout
- * follows the rebrand mockup:
+ * Reachable via the 7-tap-version unlock on the About footer. NOT
+ * `__DEV__`-gated at the route level (see RootNavigator.tsx) — the
+ * tap-gate is the access control, the diag buffer's redaction
+ * (peerFp + textLen, never plaintext) is the data-leak defense.
+ * Any tester who finds the unlock can open this screen and copy
+ * the buffer; that buffer must never contain plaintext peer handles
+ * or message previews. See `diag/log.ts:diagFingerprint`.
+ *
+ * Layout follows the rebrand mockup:
  *
  *   - Last-crash card pinned at the top (when a captured crash
  *     exists)

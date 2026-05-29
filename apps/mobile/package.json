@@ -7,7 +7,7 @@
     "start": "react-native start",
     "android": "react-native run-android",
     "ios": "react-native run-ios",
-    "build": "echo 'mobile build runs via xcodebuild / gradlew — see README'",
+    "build": "echo 'mobile build runs via xcodebuild / gradlew \u2014 see README'",
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "lint": "node ../../scripts/lint-package.mjs @speakeasy/mobile"
@@ -27,7 +27,6 @@
     "react": "18.3.1",
     "react-native": "0.76.5",
     "react-native-callkeep": "^4.3.16",
-    "react-native-contacts": "^8.0.5",
     "react-native-document-picker": "^9.3.1",
     "react-native-fs": "^2.20.0",
     "react-native-image-picker": "^7.2.3",

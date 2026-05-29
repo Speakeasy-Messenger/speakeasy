@@ -15,7 +15,7 @@ import type { GroupOrchestrator } from '../crypto/group-orchestration.js';
 import type { ChatMessage } from '../store/conversations.js';
 import { b64ToBytes as bytesFromB64, utf8FromBytes } from '../utils/bytes.js';
 import { noteSessionEstablishedWith } from '../crypto/session.js';
-import { diag } from '../diag/log.js';
+import { diag, diagFingerprint } from '../diag/log.js';
 
 /**
  * Single dispatcher for every inbound WS frame.
@@ -175,7 +175,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
       code?: string;
       message?: string;
     };
-    if (f.from) breadcrumb.from = f.from;
+    if (f.from) breadcrumb.peerFp = diagFingerprint(f.from);
     if (f.msg_type) breadcrumb.msg_type = f.msg_type;
     // Surface server-side error reasons on the on-device Diagnostics
     // screen — without these, error frames showed up as `error {}` and
@@ -207,7 +207,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
       case 'read':
         diag('router', 'read', {
           msgId: frame.message_id,
-          from: frame.from,
+          peerFp: diagFingerprint(frame.from ?? ''),
         });
         deps.markMessageRead(frame.message_id, Date.now());
         return;
@@ -224,7 +224,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         // rejects with no SenderKey installed yet).
         diag('router', 'skdm: enter', {
           msgId: frame.message_id,
-          from: frame.from,
+          peerFp: diagFingerprint(frame.from ?? ''),
           groupId: frame.group_id,
         });
         const senderId = frame.from;
@@ -240,16 +240,16 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             () => {
               diag('router', 'skdm: handled OK', {
                 msgId: messageId,
-                from: senderId,
+                peerFp: diagFingerprint(senderId),
               });
             },
             (err) => {
               diag('router', 'skdm: handle FAILED', {
                 msgId: messageId,
-                from: senderId,
+                peerFp: diagFingerprint(senderId),
                 err: String(err),
               });
-              log('skdm handle failed', { err: String(err), from: senderId });
+              log('skdm handle failed', { err: String(err), peerFp: diagFingerprint(senderId) });
             },
           );
         pendingSkdms.set(senderId, handled);
@@ -274,7 +274,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         // try/catch, leaving zero on-device evidence of where it died.
         const frameDesc = {
           msgId: frame.message_id,
-          from: frame.from,
+          peerFp: diagFingerprint(frame.from ?? ''),
           msgType: frame.msg_type,
           ctLen: typeof frame.ciphertext === 'string' ? frame.ciphertext.length : -1,
         };
@@ -290,16 +290,24 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         if (frame.msg_type === 'direct') {
           // Sealed-sender direct messages omit `from` — recipient is
           // expected to unwrap the inner envelope to recover sender
-          // identity. Phase A (this commit) ships server-side wire
-          // support but no mobile unwrap path yet — surface a
-          // placeholder bubble + ack so the buffer drains, and log
-          // the event so it's visible on the on-device Diagnostics
-          // screen. Phase B will replace this with real unwrap.
+          // identity. Phase A shipped server-side wire support but
+          // no mobile unwrap path yet.
+          //
+          // Previously: we ack'd and dropped the frame. That was a
+          // silent data-loss bug — if the server ever flips the
+          // sealed-sender path on before the mobile unwrap ships,
+          // every direct message disappears with no way to recover
+          // the ciphertext.
+          //
+          // Now: we DO NOT ack. The server keeps the message
+          // buffered (TTL = 7d per ws/handler.ts:RELAY_TTL_MS).
+          // Once mobile-side unwrap lands, the buffer drains on the
+          // next reconnect. Same tradeoff as the community-message
+          // branch below.
           if (typeof frame.from !== 'string') {
-            diag('router', 'direct: sealed-sender frame, no unwrap (Phase B)', {
+            diag('router', 'direct: sealed-sender frame buffered (no unwrap yet)', {
               msgId: frame.message_id,
             });
-            deps.ws.enqueueAck(frame.message_id);
             return;
           }
           // After the guard above, `frame.from` is narrowed to string.
@@ -331,7 +339,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 decryptedOk = true;
                 diag('router', 'message: plaintext decoded', {
                   ...frameDesc,
-                  textPreview: bubble.slice(0, 24),
+                  textLen: bubble.length,
                   attachCount: attachments?.length ?? 0,
                   mentionCount: mentions?.length ?? 0,
                 });
@@ -355,7 +363,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   decryptedOk = true;
                   diag('router', 'message: signal decrypted', {
                     ...frameDesc,
-                    textPreview: bubble.slice(0, 24),
+                    textLen: bubble.length,
                     attachCount: attachments?.length ?? 0,
                   });
                 } catch (err) {
@@ -383,9 +391,9 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
               }
               diag('router', 'add direct to conversation', {
                 convId: conversationId,
-                from: senderId,
+                peerFp: diagFingerprint(senderId),
                 isSelf: senderId === deps.myUserId,
-                textPreview: bubble.slice(0, 24),
+                textLen: bubble.length,
               });
               const inboundSentAt = Date.now();
               try {
@@ -488,8 +496,8 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 decryptedOk = true;
                 diag('router', 'group: decrypted', {
                   msgId: frame.message_id,
-                  from: groupSenderId,
-                  textPreview: bubble.slice(0, 24),
+                  peerFp: diagFingerprint(groupSenderId),
+                  textLen: bubble.length,
                   attachCount: groupAttachments?.length ?? 0,
                 });
               } catch (err) {
@@ -561,10 +569,25 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             }
           })();
         } else {
-          // community — not yet wired into a screen; ack so the buffer drains.
-          deps.ws.enqueueAck(frame.message_id);
-          log('dropping community message — UI not yet wired', {
-            from: frame.from,
+          // Community message arrived but the UI isn't wired yet.
+          //
+          // Previously: we ack'd to keep the server buffer from
+          // backing up. That was a silent data-loss bug — the server
+          // saw the ack as delivered and deleted the row, but the
+          // mobile client had nothing to render and the ciphertext
+          // never reached the user. As soon as community UI ships
+          // those messages are gone with no recovery.
+          //
+          // Now: we DO NOT ack. The server keeps the message
+          // buffered (TTL = 7d per ws/handler.ts:RELAY_TTL_MS). Once
+          // the UI lands and a connected client rebuilds the
+          // community surface, the buffer drains on reconnect. The
+          // tradeoff is a slowly-growing server buffer for users
+          // who never get community UI, capped by the 7d TTL — much
+          // better than silently throwing away ciphertext we don't
+          // know how to render.
+          log('community message buffered server-side — UI not yet wired', {
+            peerFp: diagFingerprint(frame.from ?? ''),
             messageId: frame.message_id,
           });
         }

@@ -49,7 +49,7 @@ Speakeasy is a private, encrypted messenger with the following core principles:
 
 - Vouchflow enrollment and authentication
 - 1:1 messaging (E2E)
-- Small group messaging (E2E, up to ~100 members)
+- Small group messaging (E2E, up to 50 members; lowered from 100 in rc.33)
 - Community chats (channel key model, server-relay)
 - Disappearing messages (7-day default, per-conversation override, persistence opt-in)
 - Random ID generation and display
@@ -154,7 +154,7 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 - Keys never leave devices. Server relays ciphertext only.
 - PreKey bundles stored server-side for session establishment. Server never has access to private keys.
 - Group messaging uses **Sender Keys** (one encryption operation per message, distributed to all members).
-- Small group ceiling: **100 members**. Above this, conversation must be a Community.
+- Small group ceiling: **50 members** (lowered from 100 in rc.33 to match listing copy). Above this, conversation must be a Community.
 
 **Signal Protocol implementation:**
 
