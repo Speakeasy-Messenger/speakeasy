@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, SafeAreaView, StyleSheet, View } from 'react-native';
+import { Animated, StyleSheet, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { CipherS } from '../../brand/CipherS.js';
 import { Wordmark } from '../../components/Wordmark.js';
 import { Button } from '../../components/Button.js';

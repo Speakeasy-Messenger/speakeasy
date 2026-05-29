@@ -6,7 +6,6 @@ import {
   Modal,
   Platform,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
@@ -14,6 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import type { TtlOption } from '@speakeasy/shared';
 import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';

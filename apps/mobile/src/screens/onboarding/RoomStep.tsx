@@ -1,5 +1,6 @@
 import React, { useEffect } from 'react';
-import { SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button.js';
 import { signalProtocol } from '../../services.js';
 import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';

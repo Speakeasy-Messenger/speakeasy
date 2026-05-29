@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
-import { SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button.js';
 import { requestStartupPermissions } from '../../permissions/startup.js';
 import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';

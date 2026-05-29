@@ -1,11 +1,11 @@
 import React, { useEffect, useState } from 'react';
 import {
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { RTCView } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import {

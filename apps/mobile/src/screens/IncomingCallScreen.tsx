@@ -1,5 +1,6 @@
 import React from 'react';
-import { Pressable, SafeAreaView, StyleSheet, Text, View } from 'react-native';
+import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Handle } from '../components/Handle.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';

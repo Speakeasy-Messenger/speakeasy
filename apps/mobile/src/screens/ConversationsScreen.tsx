@@ -4,11 +4,11 @@ import {
   Easing,
   FlatList,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import {
@@ -174,7 +174,7 @@ export function ConversationsScreen({
   // doesn't re-pop it. NEW-CONVERSATION.md §6.1.
   const pendingFindHandle = useUiState((s) => s.pendingFindHandle);
   const [initialFindHandle, setInitialFindHandle] = useState<string | undefined>(
-    undefined,
+  undefined,
   );
   useEffect(() => {
     if (pendingFindHandle) {

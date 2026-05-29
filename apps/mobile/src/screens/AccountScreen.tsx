@@ -1,12 +1,12 @@
 import React from 'react';
 import {
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppBar } from '../components/AppBar.js';
 import { SettingsHeader } from '../components/SettingsHeader.js';
 import { SettingsListItem } from '../components/SettingsListItem.js';

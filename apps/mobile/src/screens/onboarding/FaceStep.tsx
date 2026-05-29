@@ -3,12 +3,12 @@ import {
   Animated,
   Easing,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { Button } from '../../components/Button.js';
 import { PortraitTile } from '../../components/PortraitTile.js';
 import { FREE_AVATARS } from '../../avatars/catalog.js';

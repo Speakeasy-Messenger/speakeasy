@@ -1,12 +1,12 @@
 import React, { useState } from 'react';
 import {
   Pressable,
-  SafeAreaView,
   Share,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { Handle } from '../components/Handle.js';
