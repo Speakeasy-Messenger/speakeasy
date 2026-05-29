@@ -23,6 +23,23 @@
 import { useOwnership } from '../store/ownership.js';
 import { descriptorFor } from '../avatars/catalog.js';
 
+/**
+ * Master kill-switch for the paid-avatar UX. When `false`, the
+ * AvatarPickerScreen hides the Rare and Legendary sections entirely
+ * — users only see avatars they can actually wear (the free 12 plus
+ * any paid SKUs the ownership store already has, e.g. from a future
+ * restore). No "Coming soon" tiles, no price chips visible anywhere.
+ *
+ * Why a bare boolean instead of a config / remote flag: Phase C
+ * (real Play Billing wired up) is a deliberate, app-version-tied
+ * launch. The right gate is "is the next bundle's purchase code path
+ * actually live" — a constant in this file, flipped in the same PR
+ * that adds the real `Purchases.purchase()` call. Remote toggling
+ * would risk surfacing the price UX with no working buy button when
+ * the toggle and the code diverge in versions.
+ */
+export const PURCHASING_LIVE = false;
+
 export type PurchaseOutcome =
   | { kind: 'owned'; skuId: string }
   | { kind: 'cancelled' }
