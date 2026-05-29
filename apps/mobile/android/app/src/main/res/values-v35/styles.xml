@@ -1,0 +1,35 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+
+    <!--
+        Android 15 (API 35) override of AppTheme.
+
+        On targetSdk 35 the framework FORCES edge-to-edge layout: the
+        system bars become transparent overlays and app content draws
+        under them. Apps must either handle WindowInsets themselves
+        (via react-native-safe-area-context) or use this attribute to
+        opt out and keep the legacy "system bars push content" behavior.
+
+        Our SafeAreaView swap (PR #104) wires the JS side to consume
+        insets, but the Activity's default theme on this app does not
+        reliably forward the bars' insets through the React Native view
+        tree on API 35 — testers reported chat input behind the nav bar
+        and AppBar under the status bar even after the swap. Until the
+        proper inset-handling fix lands, opt out here.
+
+        Limited shelf life: `windowOptOutEdgeToEdgeEnforcement` is API 35
+        only. API 36 removes the escape hatch and apps must handle
+        edge-to-edge themselves. By then we should either be on
+        `react-native-edge-to-edge` or have all-screens inset coverage
+        verified end to end.
+
+        This file lives under `values-v35/` so the attribute is only
+        applied on API 35+; older platforms keep the base theme and
+        never see the unknown attribute.
+    -->
+    <style name="AppTheme" parent="Theme.AppCompat.DayNight.NoActionBar">
+        <item name="android:editTextBackground">@drawable/rn_edit_text_material</item>
+        <item name="android:windowOptOutEdgeToEdgeEnforcement">true</item>
+    </style>
+
+</resources>
