@@ -164,9 +164,18 @@ jobs:
           # "Release name" column — use the full tag so it's bisectable
           # against the GitHub release.
           RELEASE_NAME: ${{ github.ref_name }}
-          # 'draft' lands the AAB but doesn't auto-promote to testers —
-          # you click "Send to testers" in Play Console after a sanity
-          # check. Switch to 'completed' once we're confident enough
-          # to auto-promote every RC.
-          RELEASE_STATUS: draft
+          # 'completed' auto-rolls the AAB out to the Internal Testing
+          # tester list on upload — no Play Console click required.
+          # Safe for Internal: that track is the founder's hand-picked
+          # tester list, doesn't undergo Google review, and is the
+          # whole point of the pipeline (every RC should reach testers
+          # without manual ceremony). Open / Production promotions
+          # still go through `play-promote.yml` with their own status
+          # choice and Google review gating.
+          #
+          # Was 'draft' through rc.34. Flipped after a tester reported
+          # the Play Store wasn't surfacing the upgrade — every RC was
+          # silently waiting on a "Send to testers" click that wasn't
+          # always remembered.
+          RELEASE_STATUS: completed
         run: bash scripts/play-publish.sh
