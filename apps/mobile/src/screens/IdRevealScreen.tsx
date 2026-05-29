@@ -3,11 +3,11 @@ import {
   Animated,
   Easing,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { useProfiles } from '../store/profiles.js';

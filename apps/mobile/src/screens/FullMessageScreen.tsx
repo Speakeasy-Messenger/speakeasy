@@ -1,5 +1,6 @@
 import React from 'react';
-import { SafeAreaView, ScrollView, StyleSheet } from 'react-native';
+import { ScrollView, StyleSheet } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppBar } from '../components/AppBar.js';
 import { RichMessageText } from '../components/RichMessageText.js';
 import { space, useColors } from '../theme/index.js';

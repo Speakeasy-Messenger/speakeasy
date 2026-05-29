@@ -2,13 +2,13 @@ import React, { useState } from 'react';
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   ScrollView,
   StyleSheet,
   Switch,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import type { AbuseReportReason, TtlOption } from '@speakeasy/shared';
 import { conversationIdForDirect, newMessageId } from '@speakeasy/shared';
 import { AppBar } from '../components/AppBar.js';

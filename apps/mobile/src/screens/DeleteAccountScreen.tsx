@@ -2,11 +2,11 @@ import React from 'react';
 import {
   Alert,
   Pressable,
-  SafeAreaView,
   StyleSheet,
   Text,
   View,
 } from 'react-native';
+import { SafeAreaView } from 'react-native-safe-area-context';
 import { AppBar } from '../components/AppBar.js';
 import { Handle } from '../components/Handle.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
