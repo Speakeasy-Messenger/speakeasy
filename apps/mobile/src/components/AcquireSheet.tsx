@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { descriptorFor, type AvatarDescriptor } from '../avatars/catalog.js';
 import { purchaseAvatar } from '../services/purchases.js';
@@ -154,6 +155,21 @@ export function AcquireSheet({
     }
   }
 
+  // The sheet uses absolute positioning to overlay its parent
+  // (AvatarPickerScreen's SafeAreaView). Absolute children fill the
+  // parent's border box, which on Android 15 (targetSdk 35) extends
+  // edge-to-edge under the system navigation bar. Without the inset
+  // applied here the sheet's content — including the "Confirm
+  // purchase" CTA — sits at the absolute screen bottom, partly
+  // hidden under the gesture bar, looking from the user's side
+  // exactly like "the payment view doesn't show up".
+  //
+  // The `+ space.xxl` is the design's baseline bottom padding (the
+  // value the style sheet used to hard-code). We keep that as a
+  // minimum and add the inset on top.
+  const insets = useSafeAreaInsets();
+  const sheetPaddingBottom = insets.bottom + space.xxl;
+
   if (!visible) return <View testID="acquire-sheet-hidden" />;
 
   return (
@@ -167,7 +183,11 @@ export function AcquireSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: brand.canvas, borderTopColor: brand.surface },
+            {
+              backgroundColor: brand.canvas,
+              borderTopColor: brand.surface,
+              paddingBottom: sheetPaddingBottom,
+            },
           ]}
           testID="acquire-sheet"
         >
