@@ -1,0 +1,57 @@
+name: Announce via @speaker
+
+# Manually-triggered workflow that posts a custom message from the
+# @speaker broadcast bot to every Speakeasy user. Sister to the
+# automatic per-tag announcement in release.yml, which only ever
+# sends the generic "New build <tag> is available — <url>" line —
+# this one lets the founder send a richer, hand-written note
+# (e.g. "rc.X fixes the chat-input regression, voice-filter moved
+# to its own page, etc.") without re-shipping anything.
+#
+# Trigger: gh workflow run announce.yml -f text="..."
+# or the GitHub UI's "Run workflow" button.
+#
+# Auth: uses the same `ADMIN_TOKEN` secret release.yml already
+# consumes for the per-tag broadcast. No additional setup.
+
+on:
+  workflow_dispatch:
+    inputs:
+      text:
+        description: 'Message body to broadcast (plain text; appears in the @speaker conversation on every user device).'
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  announce:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Broadcast via @speaker
+        env:
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+          TEXT: ${{ inputs.text }}
+        run: |
+          if [ -z "$ADMIN_TOKEN" ]; then
+            echo "::error::ADMIN_TOKEN secret not set."
+            exit 1
+          fi
+          # Build the JSON body via python so quotes / newlines /
+          # unicode in the input survive the round trip; bash heredocs
+          # would happily mangle any of those.
+          BODY=$(TEXT="$TEXT" python3 -c '
+          import json, os
+          print(json.dumps({"text": os.environ["TEXT"]}))
+          ')
+          RESP=$(curl -fsS -X POST "https://api.speakeasyapp.xyz/v1/broadcast" \
+            -H "Authorization: Bearer $ADMIN_TOKEN" \
+            -H "Content-Type: application/json" \
+            -d "$BODY")
+          echo "$RESP"
+          # Server returns `{"ok":true,"sent":N}` on success — surface
+          # the recipient count in the workflow summary so the trigger
+          # has a tight feedback signal.
+          SENT=$(echo "$RESP" | python3 -c 'import json,sys; print(json.load(sys.stdin).get("sent",0))')
+          echo "Broadcast delivered to $SENT users." >> "$GITHUB_STEP_SUMMARY"
