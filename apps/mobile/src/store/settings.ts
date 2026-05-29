@@ -25,8 +25,6 @@ interface SettingsState {
   // Privacy → Calls
   allowIncomingCalls: boolean;
   animateAvatarMouth: boolean;
-  // wakeFromBackground intentionally not in state — toggle is
-  // disabled "Coming soon" per §4.1.
 
   // Privacy → Findability
   showOnlineStatus: boolean;

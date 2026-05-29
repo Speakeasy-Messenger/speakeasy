@@ -52,15 +52,6 @@ export function PrivacyScreen({
           value={animateAvatarMouth}
           onChange={setAnimateAvatarMouth}
         />
-        <SettingsListItem
-          kind="toggle"
-          title="Wake from background"
-          description="Coming soon — when on, calls log to your phone's call history (and iCloud, if synced)."
-          value={false}
-          onChange={() => {}}
-          disabled
-        />
-
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
           FINDABILITY
         </Text>
