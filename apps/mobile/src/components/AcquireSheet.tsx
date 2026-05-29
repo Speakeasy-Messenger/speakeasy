@@ -7,6 +7,7 @@ import {
   Text,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { descriptorFor, type AvatarDescriptor } from '../avatars/catalog.js';
 import { purchaseAvatar } from '../services/purchases.js';
@@ -154,6 +155,21 @@ export function AcquireSheet({
     }
   }
 
+  // The sheet uses absolute positioning to overlay its parent
+  // (AvatarPickerScreen's SafeAreaView). Absolute children fill the
+  // parent's border box, which on Android 15 (targetSdk 35) extends
+  // edge-to-edge under the system navigation bar. Without the inset
+  // applied here the sheet's content — including the "Confirm
+  // purchase" CTA — sits at the absolute screen bottom, partly
+  // hidden under the gesture bar, looking from the user's side
+  // exactly like "the payment view doesn't show up".
+  //
+  // The `+ space.xxl` is the design's baseline bottom padding (the
+  // value the style sheet used to hard-code). We keep that as a
+  // minimum and add the inset on top.
+  const insets = useSafeAreaInsets();
+  const sheetPaddingBottom = insets.bottom + space.xxl;
+
   if (!visible) return <View testID="acquire-sheet-hidden" />;
 
   return (
@@ -167,7 +183,11 @@ export function AcquireSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: brand.canvas, borderTopColor: brand.surface },
+            {
+              backgroundColor: brand.canvas,
+              borderTopColor: brand.surface,
+              paddingBottom: sheetPaddingBottom,
+            },
           ]}
           testID="acquire-sheet"
         >
@@ -202,46 +222,59 @@ export function AcquireSheet({
                 </Text>
               ) : null}
 
-              {/* Price line + Phase-A disclaimer only when NOT already
-                  owned. For owned avatars the sheet is a "wear this"
-                  confirmation, not a purchase. */}
-              {!alreadyOwned ? (
+              {/* Three render branches:
+                  - alreadyOwned: brass "Wear {name}" CTA, fully active.
+                  - paid + not yet purchasable: price + "Coming soon"
+                    disabled CTA. No `handleAcquire` wire — Play
+                    Billing isn't live, so the only honest CTA is
+                    "you can't buy this yet".
+                  - free + not owned: shouldn't reach here (free
+                    avatars route through `handlePick` in the picker,
+                    not the sheet) but render defensively as a
+                    disabled CTA. */}
+              {alreadyOwned ? (
+                <>
+                  <View style={styles.divider} />
+                  <Pressable
+                    onPress={() => void handleAcquire()}
+                    disabled={busy}
+                    style={({ pressed }) => [
+                      styles.cta,
+                      {
+                        backgroundColor: pressed ? accent.pressed : accent.base,
+                      },
+                    ]}
+                    testID="acquire-confirm"
+                  >
+                    {busy ? (
+                      <ActivityIndicator color={accent.foreground} />
+                    ) : (
+                      <Text style={styles.ctaText}>{`Wear ${desc.name}`}</Text>
+                    )}
+                  </Pressable>
+                </>
+              ) : (
                 <>
                   <Text style={styles.priceLine} testID="acquire-price">
                     {desc.displayPrice}
                   </Text>
                   <View style={styles.disclaimer}>
-                    <Text style={styles.disclaimerText}>
-                      PHASE A — simulated purchase, no charge. Real
-                      App Store / Play Billing wires up in Phase C.
+                    <Text style={styles.disclaimerText} testID="acquire-coming-soon">
+                      COMING SOON — In-app purchases wire up with the
+                      next release. We won't charge you, and you can't
+                      claim this yet.
+                    </Text>
+                  </View>
+                  <View
+                    style={[styles.cta, styles.ctaDisabled]}
+                    testID="acquire-confirm-disabled"
+                  >
+                    <Text style={[styles.ctaText, styles.ctaTextDisabled]}>
+                      Coming soon
                     </Text>
                   </View>
                 </>
-              ) : (
-                <View style={styles.divider} />
               )}
-
-              <Pressable
-                onPress={() => void handleAcquire()}
-                disabled={busy}
-                style={({ pressed }) => [
-                  styles.cta,
-                  {
-                    backgroundColor: pressed ? accent.pressed : accent.base,
-                  },
-                ]}
-                testID="acquire-confirm"
-              >
-                {busy ? (
-                  <ActivityIndicator color={accent.foreground} />
-                ) : (
-                  <Text style={styles.ctaText}>
-                    {alreadyOwned
-                      ? `Wear ${desc.name}`
-                      : `Confirm purchase — ${desc.displayPrice ?? ''}`}
-                  </Text>
-                )}
-              </Pressable>
 
               {err ? (
                 <Text style={styles.err} testID="acquire-error">
@@ -372,6 +405,17 @@ const styles = StyleSheet.create({
     fontSize: 16,
     color: accent.foreground,
     letterSpacing: -16 * 0.01,
+  },
+  /** Phase-B "Coming soon" CTA state. Brass at low opacity reads as
+   *  "this is the same brass button you know, but inactive" — clearer
+   *  than dropping to a neutral grey. */
+  ctaDisabled: {
+    backgroundColor: brand.surface,
+    borderWidth: StyleSheet.hairlineWidth,
+    borderColor: workspace.dark.textFaint,
+  },
+  ctaTextDisabled: {
+    color: workspace.dark.textMute,
   },
   err: {
     fontFamily: font.regular,
