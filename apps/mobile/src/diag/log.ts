@@ -64,6 +64,41 @@ let persistTimer: ReturnType<typeof setTimeout> | undefined;
  */
 let loadInFlight: Promise<void> | undefined;
 
+/**
+ * Stable, non-reversible 6-hex-char fingerprint of a string. Used to
+ * redact handles and message previews in diag logs while preserving
+ * enough correlation that a developer reading a tester's log can tell
+ * "these three events are the same peer" without learning who the peer
+ * is.
+ *
+ * Why this exists: until rc.33 the router was writing
+ * `textPreview: bubble.slice(0, 24)` and `from: <handle>` on every
+ * decrypt. The diag buffer is persisted across launches and the
+ * Diagnostics screen has a Copy Logs button — any "send me your diag"
+ * support thread exfiltrates plaintext message previews and peer
+ * handles, contradicting the About-screen "we can't read what you say"
+ * promise. Replacing with a fingerprint preserves debuggability and
+ * stops the leak.
+ *
+ * Uses FNV-1a 32-bit because it's deterministic and doesn't need
+ * `crypto.subtle` (which Hermes doesn't ship reliably). Not
+ * cryptographic — a determined attacker who already has the diag log
+ * AND a target handle can confirm the fingerprint matches. The threat
+ * model is "tester casually shares logs"; collision-resistance against
+ * a motivated attacker is out of scope.
+ */
+export function diagFingerprint(s: string): string {
+  if (!s) return '------';
+  // FNV-1a 32-bit
+  let h = 0x811c9dc5;
+  for (let i = 0; i < s.length; i++) {
+    h ^= s.charCodeAt(i);
+    h = Math.imul(h, 0x01000193);
+  }
+  // Force unsigned + hex, pad to 6.
+  return (h >>> 0).toString(16).padStart(8, '0').slice(0, 6);
+}
+
 export function diag(tag: string, msg: string, ctx?: Record<string, unknown>): void {
   const entry: DiagEntry = { t: Date.now(), tag, msg, ctx };
   buffer.push(entry);
