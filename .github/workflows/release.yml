@@ -202,6 +202,13 @@ jobs:
         # bot to every user (POST /v1/broadcast). Best-effort: if the
         # ADMIN_TOKEN secret isn't set the step is skipped, and a
         # broadcast failure is a warning, not a build failure.
+        #
+        # The link points to the Play Console Internal Testing opt-in
+        # URL — testers tapping it land in their Play Store with the
+        # update offered, instead of a raw .apk on GitHub that needs
+        # an "Install unknown apps" sideload. The GitHub release page
+        # still has the universal APK as a fallback for testers who
+        # opt out of the Play track.
         env:
           ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: |
@@ -210,7 +217,7 @@ jobs:
             exit 0
           fi
           tag="${GITHUB_REF##*/}"
-          url="https://github.com/${GITHUB_REPOSITORY}/releases/tag/${tag}"
+          url="https://play.google.com/apps/internaltest/4700431525241449795"
           curl -fsS -X POST "https://api.speakeasyapp.xyz/v1/broadcast" \
             -H "Authorization: Bearer $ADMIN_TOKEN" \
             -H "Content-Type: application/json" \
