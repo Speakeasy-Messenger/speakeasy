@@ -770,6 +770,24 @@ export default function App() {
         });
       },
       onPrekeysLow: () => void replenisher.trigger(),
+      onPeerDeleted: (handle) => {
+        // Server told us a direct message we just sent landed on a
+        // tombstoned recipient. Surface an in-chat system bubble +
+        // freeze the conversation so the user understands and can't
+        // keep composing into the void. Both effects are local — no
+        // server round-trip; the server already knows.
+        if (!userId) return;
+        const cid = useConversations.getState().openDirect(userId, handle);
+        useConversations.getState().add(cid, {
+          id: newMessageId(),
+          from: 'system',
+          text: `@${handle}'s account was deleted.`,
+          kind: 'direct',
+          sentAt: Date.now(),
+          stage: 'sent',
+        });
+        useConversations.getState().setFrozen(cid, true);
+      },
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
       markDelivered: (msgId) =>

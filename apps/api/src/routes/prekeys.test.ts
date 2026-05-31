@@ -3,6 +3,7 @@ import { MockValidator } from '@speakeasy/vouchflow';
 import { buildServer } from '../server.js';
 import { InMemoryUserRepo } from '../db/users.memory.js';
 import { InMemoryPreKeyRepo } from '../db/prekeys.memory.js';
+import { InMemoryDeletedHandlesRepo } from '../db/deleted-handles.js';
 import type { UserNotifier } from '../ws/user-notifier.js';
 
 function bundle(prekeyCount = 3) {
@@ -32,6 +33,7 @@ async function makeApp(initialPreKeys = 3, notifier?: UserNotifier) {
     bundle: bundle(initialPreKeys),
   });
   const preKeyRepo = new InMemoryPreKeyRepo(userRepo);
+  const deletedHandles = new InMemoryDeletedHandlesRepo();
   const validator = MockValidator.fromMap({
     dvt_caller_hawk: {
       ok: true,
@@ -44,9 +46,10 @@ async function makeApp(initialPreKeys = 3, notifier?: UserNotifier) {
     userRepo,
     preKeyRepo,
     userNotifier: notifier,
+    deletedHandles,
     logger: false,
   });
-  return { app, preKeyRepo, userRepo };
+  return { app, preKeyRepo, userRepo, deletedHandles };
 }
 
 describe('POST /v1/prekeys/bundle', () => {
@@ -96,6 +99,20 @@ describe('POST /v1/prekeys/bundle', () => {
       payload: { user_id: 'ghost-ghost-ghost' },
     });
     expect(res.statusCode).toBe(404);
+    await app.close();
+  });
+
+  it('410 with user_deleted when peer handle is in the tombstone set', async () => {
+    const { app, deletedHandles } = await makeApp();
+    await deletedHandles.record('quiet-fox-river');
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prekeys/bundle',
+      headers: { authorization: 'Bearer dvt_caller_anon' },
+      payload: { user_id: 'quiet-fox-river' },
+    });
+    expect(res.statusCode).toBe(410);
+    expect(res.json()).toEqual({ error: 'user_deleted' });
     await app.close();
   });
 

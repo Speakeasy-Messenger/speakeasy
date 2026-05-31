@@ -233,7 +233,7 @@ describe('PUT /v1/users/me/avatar', () => {
 });
 
 describe('DELETE /v1/users/me', () => {
-  it('deletes the account and frees the handle for reuse', async () => {
+  it('deletes the account, tombstones the handle, and 410s subsequent GETs', async () => {
     const { app, repo } = await makeApp();
     const del = await app.inject({
       method: 'DELETE',
@@ -245,14 +245,20 @@ describe('DELETE /v1/users/me', () => {
 
     // The user row is gone.
     expect(await repo.findById('silent-golden-hawk')).toBeUndefined();
+    // GET now returns 410 Gone (not 404) so peers can render the
+    // peer-deleted in-chat system bubble. 404 would imply
+    // "never existed" — a different UX path.
     const get = await app.inject({
       method: 'GET',
       url: '/v1/users/silent-golden-hawk',
       headers: { authorization: 'Bearer dvt_demo' },
     });
-    expect(get.statusCode).toBe(404);
+    expect(get.statusCode).toBe(410);
+    expect(get.json()).toEqual({ error: 'user_deleted' });
 
-    // The handle is claimable again — re-create succeeds.
+    // Phase 1 keeps the handle re-claimable (enrollment cooldown is
+    // Phase 2). Re-create still succeeds at the repo level — this
+    // assertion documents the current behavior, not a guarantee.
     const reclaimed = await repo.tryCreate({
       userId: 'silent-golden-hawk',
       deviceToken: 'dvt_new-owner',

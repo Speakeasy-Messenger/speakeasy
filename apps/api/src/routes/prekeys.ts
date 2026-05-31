@@ -3,6 +3,7 @@ import { isUserId } from '@speakeasy/shared';
 import { requireAuth } from '../auth/vouchflow.js';
 import type { PreKey } from '../db/users.js';
 import type { PreKeyRepo } from '../db/prekeys.js';
+import type { DeletedHandlesRepo } from '../db/deleted-handles.js';
 import { rateLimit } from '../ratelimit/middleware.js';
 import type { RateLimiter } from '../ratelimit/ratelimit.js';
 import { NoopUserNotifier, type UserNotifier } from '../ws/user-notifier.js';
@@ -35,7 +36,18 @@ interface ReplenishBody {
  */
 export async function registerPreKeyRoutes(
   app: FastifyInstance,
-  opts: { repo: PreKeyRepo; limiter?: RateLimiter; notifier?: UserNotifier },
+  opts: {
+    repo: PreKeyRepo;
+    limiter?: RateLimiter;
+    notifier?: UserNotifier;
+    /**
+     * Tombstone for deleted handles. When the bundle target is in the
+     * set we return 410 Gone instead of 404 — stops the fetcher from
+     * trying to establish a fresh Signal session against a ghost
+     * identity. Optional so older test harnesses keep returning 404.
+     */
+    deletedHandles?: DeletedHandlesRepo;
+  },
 ): Promise<void> {
   const notifier = opts.notifier ?? new NoopUserNotifier();
   const rateLimitBundle = opts.limiter
@@ -75,7 +87,16 @@ export async function registerPreKeyRoutes(
       const { user_id } = request.body;
       if (!isUserId(user_id)) return reply.code(400).send({ error: 'invalid_id' });
       const bundle = await opts.repo.fetchBundleConsume(user_id);
-      if (!bundle) return reply.code(404).send({ error: 'not_found' });
+      if (!bundle) {
+        // Distinguish deleted from never-existed so the mobile client
+        // can render the peer-deleted system message + freeze the
+        // chat instead of bouncing the user back with a generic
+        // not-found error.
+        if (opts.deletedHandles && (await opts.deletedHandles.isDeleted(user_id))) {
+          return reply.code(410).send({ error: 'user_deleted' });
+        }
+        return reply.code(404).send({ error: 'not_found' });
+      }
       const lowWater = bundle.remainingPreKeys < PREKEY_LOW_WATER;
       if (lowWater) {
         request.log.warn(

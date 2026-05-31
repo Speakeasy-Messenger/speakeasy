@@ -28,6 +28,7 @@ import type { AckRouter } from './ack-router.js';
 import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
+import type { DeletedHandlesRepo } from '../db/deleted-handles.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
@@ -49,6 +50,19 @@ interface Deps {
   push: PushProvider;
   devices: DevicesRepo;
   users: UserRepo;
+  /**
+   * Tombstone for handles deleted via `DELETE /v1/users/me`. When the
+   * message handler is about to relay a direct frame to a recipient
+   * the user repo doesn't know, it consults this tombstone to decide
+   * between "never existed" (emit a generic `invalid_target` error)
+   * and "was deleted" (emit a typed `peer_deleted` frame so the
+   * mobile client can render an in-chat tombstone instead of a
+   * generic error toast).
+   *
+   * Optional so older test harnesses without the repo wired keep
+   * the legacy behavior of buffering whatever was requested.
+   */
+  deletedHandles?: DeletedHandlesRepo;
   /**
    * Ringing-window buffer for call signaling addressed to a recipient
    * with no live WS. Drained on auth. See call-offer-buffer.ts for
@@ -442,6 +456,30 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         }
         if (recipients.length === 0) {
           sendError(socket, 'no_recipients', 'no other members in conversation');
+          return;
+        }
+        // Phase 1 peer-deleted: for direct sends specifically, check
+        // whether the recipient handle has been tombstoned. If so,
+        // emit `peer_deleted` to the sender so their mobile client
+        // can render an in-chat tombstone bubble instead of silently
+        // dropping the message into a 7-day relay buffer no one is
+        // ever going to drain. `recipientsFor` for direct unconditionally
+        // returns `[to]` without an existence check, so the
+        // `recipients.length === 0` branch above never fires for
+        // missing direct recipients — the tombstone lookup is the
+        // only signal we have at this layer.
+        //
+        // Group/community sends are unchanged: a deleted ex-member's
+        // userId won't appear in `recipientsFor`'s membership result.
+        if (
+          msg.msg_type === 'direct' &&
+          deps.deletedHandles &&
+          (await deps.deletedHandles.isDeleted(msg.to))
+        ) {
+          socket.send(JSON.stringify({ type: 'peer_deleted', handle: msg.to }));
+          // No relay row written, no ack expected from the sender for
+          // this frame. Server-side this is a refused-relay; client
+          // treats it as a terminal conversation state.
           return;
         }
 

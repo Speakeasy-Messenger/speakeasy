@@ -135,6 +135,16 @@ export interface MessageRouterDeps {
    * Optional so tests that don't care about push can omit it.
    */
   onAuthed?: () => void;
+  /**
+   * Counterpart to the server's `peer_deleted` WS frame: the recipient
+   * of a direct message the user just sent has deleted their account.
+   * Caller surfaces an in-chat system bubble + freezes the chat
+   * (input disabled, no resend). Phase 1 peer-deleted notification.
+   *
+   * Optional so unit tests of the router that don't exercise the
+   * tombstone path can omit it.
+   */
+  onPeerDeleted?: (handle: string) => void;
   /** Optional structured logger. Omitted in production unless a caller wires one. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
@@ -214,6 +224,20 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
 
       case 'prekeys_low':
         deps.onPrekeysLow();
+        return;
+
+      case 'peer_deleted':
+        // Server refused to relay a direct message because the
+        // recipient handle has been deleted. Caller surfaces the
+        // in-chat tombstone + freezes the conversation. We don't
+        // do anything to local state here — the conversation freeze
+        // + system bubble are app-level UX concerns. Diagnose with a
+        // redacted fingerprint so the support flow doesn't expose
+        // peer handles in copy-logs.
+        diag('router', 'peer_deleted', {
+          peerFp: diagFingerprint(frame.handle),
+        });
+        deps.onPeerDeleted?.(frame.handle);
         return;
 
       case 'skdm': {

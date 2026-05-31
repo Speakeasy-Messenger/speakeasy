@@ -4,6 +4,7 @@ import { requireAuth } from '../auth/vouchflow.js';
 import type { UserRepo } from '../db/users.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { Connections } from '../ws/connections.js';
+import type { DeletedHandlesRepo } from '../db/deleted-handles.js';
 
 interface Params {
   id: string;
@@ -92,6 +93,14 @@ export async function registerUserRoutes(
      */
     devices?: DevicesRepo;
     connections?: Connections;
+    /**
+     * Tombstone for handles deleted via `DELETE /v1/users/me`. When
+     * provided, `GET /v1/users/:id` returns 410 Gone for a handle in
+     * the tombstone set (instead of 404 = never existed). Optional so
+     * older test harnesses that don't init the repo keep returning
+     * plain 404.
+     */
+    deletedHandles?: DeletedHandlesRepo;
   },
 ): Promise<void> {
   app.get<{ Params: Params }>(
@@ -103,7 +112,16 @@ export async function registerUserRoutes(
         return reply.code(400).send({ error: 'invalid_id' });
       }
       const u = await opts.repo.findById(id);
-      if (!u) return reply.code(404).send({ error: 'not_found' });
+      if (!u) {
+        // Distinguish "deleted" from "never existed" so the mobile
+        // client can render an in-chat "@<handle>'s account was
+        // deleted" system message instead of a generic "user not
+        // found" toast.
+        if (opts.deletedHandles && (await opts.deletedHandles.isDeleted(id))) {
+          return reply.code(410).send({ error: 'user_deleted' });
+        }
+        return reply.code(404).send({ error: 'not_found' });
+      }
       const supportedCallKinds = await aggregateCallKinds(id, opts);
       return reply.send({
         id: u.id,
@@ -187,6 +205,17 @@ export async function registerUserRoutes(
       const userId = request.auth?.userId;
       if (!userId) return reply.code(401).send({ error: 'not_enrolled' });
       await opts.repo.deleteUser(userId);
+      // Tombstone the handle for the peer-deleted notification path.
+      // Sequenced AFTER deleteUser intentionally: if the user-delete
+      // throws (FK cascade trips, etc.) we don't want a stale
+      // tombstone for a handle that wasn't actually deleted. The
+      // tombstone-then-delete race the other direction (handle in
+      // tombstone before user row is fully gone) is fine — `findById`
+      // is still resolving and the small window just yields the same
+      // not-found-with-tombstone result the steady state has.
+      if (opts.deletedHandles) {
+        await opts.deletedHandles.record(userId);
+      }
       request.log.info({ audit: 'account_deleted', userId }, 'account deleted');
       return reply.code(200).send({ ok: true });
     },
