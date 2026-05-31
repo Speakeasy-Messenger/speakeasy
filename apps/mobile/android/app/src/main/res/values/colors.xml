@@ -1,7 +1,13 @@
 <?xml version="1.0" encoding="utf-8"?>
 <resources>
-    <!-- Adaptive icon background — cream from spec §14 palette. -->
-    <color name="ic_launcher_background">#F7F6F3</color>
+    <!-- Adaptive icon background — aubergine (#14091A) from spec §1
+         palette, matching @drawable/ic_launcher_background and the Play
+         Store master. Kept in sync so that regenerating the adaptive
+         icon (e.g. via Android Studio's Image Asset wizard, which wires
+         the background to @color/ic_launcher_background) can't flip the
+         launcher background to the old cream value. Currently unused —
+         the adaptive-icon XML references the @drawable vector directly. -->
+    <color name="ic_launcher_background">#14091A</color>
     <!-- FCM accent color for the small notification icon. Brand brass
          from spec §1 palette. The system tints the silhouette icon to
          this color when rendering the notification. -->
