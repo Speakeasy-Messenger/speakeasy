@@ -11,6 +11,7 @@ import type { AckRouter } from './ack-router.js';
 import type { PushProvider } from '../push/push.js';
 import type { DevicesRepo } from '../db/devices.js';
 import type { UserRepo } from '../db/users.js';
+import type { DeletedHandlesRepo } from '../db/deleted-handles.js';
 import { createCallOfferBuffer } from './call-offer-buffer.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import { createAckBuffer, type AckBuffer } from './ack-buffer.js';
@@ -29,6 +30,13 @@ export interface AttachWsOptions {
   push: PushProvider;
   devices: DevicesRepo;
   users: UserRepo;
+  /**
+   * Tombstone for handles deleted via `DELETE /v1/users/me`. Drives
+   * the `peer_deleted` WS frame emission for direct messages whose
+   * recipient handle is in the set. Optional so older test harnesses
+   * keep the legacy behavior.
+   */
+  deletedHandles?: DeletedHandlesRepo;
   /**
    * Optional injected buffer (tests). When omitted, one is created
    * per attachWebsocket call with the default 30s ringing TTL.
@@ -90,6 +98,7 @@ export function attachWebsocket(
         push: opts.push,
         devices: opts.devices,
         users: opts.users,
+        deletedHandles: opts.deletedHandles,
         callBuffer,
         ackBuffer,
         userNotifier: opts.userNotifier,

@@ -132,6 +132,13 @@ export function ChatScreen({
   const messages = useConversations((s) => s.byId[conversationId]?.messages ?? EMPTY_MESSAGES);
   const ttl = useConversations((s) => s.byId[conversationId]?.ttl ?? 'week');
   const muted = useConversations((s) => s.byId[conversationId]?.muted ?? false);
+  // Phase 1 peer-deleted: the WS `peer_deleted` frame sets this flag
+  // on the conversation. Behaves like the existing `isBlocked` freeze
+  // path — composer collapsed, send disabled — but the affordance
+  // copy is different (no "Unblock" action; nothing to unfreeze).
+  const isPeerDeleted = useConversations(
+    (s) => s.byId[conversationId]?.frozen ?? false,
+  );
   const ttlSecondsFor = useConversations((s) => s.ttlSecondsFor);
   const add = useConversations((s) => s.add);
   const setStage = useConversations((s) => s.setStage);
@@ -770,6 +777,21 @@ export function ChatScreen({
             blocked them." + brass "Unblock"). */}
         {isBlocked ? (
           <FrozenInputBar onUnblock={() => setUnblockSheetOpen(true)} />
+        ) : isPeerDeleted ? (
+          // Peer-deleted freeze (Phase 1). No "Unblock" — there's no
+          // counterparty to unfreeze. Caption explains the state;
+          // the system bubble inserted by the WS frame handler
+          // carries the timestamp + handle in the message log.
+          <View
+            style={[
+              styles.composer,
+              { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            ]}
+          >
+            <Text style={[styles.speakerNote, { color: themed.slate }]}>
+              This account was deleted. You can't reply here.
+            </Text>
+          </View>
         ) : isSpeakerHandle(peerId) ? (
           // @speaker is a one-way broadcast — no composer, just a note
           // where the input bar would be.

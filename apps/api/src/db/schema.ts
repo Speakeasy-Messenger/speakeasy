@@ -253,6 +253,24 @@ export const messages = pgTable(
  * mobile send path (POST /v1/feedback instead of WS-encrypt-and-send).
  * Plaintext on purpose — opt-in by the user, not E2E.
  */
+/**
+ * Tombstone for handles deleted via `DELETE /v1/users/me`. See
+ * `infra/migrations/0020_deleted_handles.sql` for the full rationale.
+ * Backs the peer-deleted notification path: REST 410 on
+ * `GET /v1/users/:handle` + `POST /v1/prekeys/bundle`, and the WS
+ * `peer_deleted` frame emitted to senders targeting a deleted handle.
+ */
+export const deletedHandles = pgTable(
+  'deleted_handles',
+  {
+    handle: text('handle').primaryKey(),
+    deletedAt: timestamp('deleted_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    deletedAtIdx: index('deleted_handles_deleted_at_idx').on(t.deletedAt),
+  }),
+);
+
 export const feedback = pgTable('feedback', {
   id: text('id').primaryKey(),
   senderUserId: text('sender_user_id').notNull(),

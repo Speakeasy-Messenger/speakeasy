@@ -218,6 +218,22 @@ export type WsServerMsg =
    */
   | { type: 'prekeys_low'; remaining_prekeys: number }
   /**
+   * Server-pushed signal: the recipient of a message you just sent
+   * doesn't exist anymore — the handle was deleted via
+   * `DELETE /v1/users/me`. The originating `message` frame is NOT
+   * buffered; the relay row is skipped. Counterpart REST signals
+   * (410 Gone on `GET /v1/users/:handle` and `POST /v1/prekeys/bundle`)
+   * cover the other discovery paths.
+   *
+   * Mobile-side handling: render an in-chat system bubble
+   * ("@<handle>'s account was deleted.") and freeze the conversation
+   * — input disabled, no resend. The handle's cryptographic identity
+   * is gone regardless of whether a new owner re-claims the string
+   * later; libsignal's safety-number guard protects continuity if
+   * the same handle is re-enrolled with new keys.
+   */
+  | { type: 'peer_deleted'; handle: UserId }
+  /**
    * Server-pushed signal: a community's channel key MUST rotate.
    * Fires on every remaining member's live socket when a member is
    * removed (revocation guarantee per spec §4b) — possibly other

@@ -4,6 +4,7 @@ import { MockValidator } from '@speakeasy/vouchflow';
 import { conversationIdForDirect, newCommunityId, newGroupId } from '@speakeasy/shared';
 import { buildServer } from '../server.js';
 import { InMemoryUserRepo } from '../db/users.memory.js';
+import { InMemoryDeletedHandlesRepo } from '../db/deleted-handles.js';
 import { InMemoryConnections } from './connections.js';
 import { InMemoryPresence } from '../presence/memory.js';
 import { InMemoryMessagesRepo } from '../db/messages.memory.js';
@@ -50,6 +51,7 @@ let communityRepo: InMemoryCommunityRepo;
 let pushProvider: MockPushProvider;
 let devicesRepo: InMemoryDevicesRepo;
 let userRepo: InMemoryUserRepo;
+let deletedHandlesRepo: InMemoryDeletedHandlesRepo;
 const openSockets = new Set<WebSocket>();
 
 function makeValidator(): MockValidator {
@@ -77,6 +79,7 @@ beforeEach(async () => {
   pushProvider = new MockPushProvider();
   devicesRepo = new InMemoryDevicesRepo();
   userRepo = new InMemoryUserRepo();
+  deletedHandlesRepo = new InMemoryDeletedHandlesRepo();
   app = await buildServer({
     validator: makeValidator(),
     userRepo,
@@ -87,6 +90,7 @@ beforeEach(async () => {
     groupRepo,
     communityRepo,
     push: pushProvider,
+    deletedHandles: deletedHandlesRepo,
     instanceId: 'test-instance-1',
     logger: false,
   });
@@ -219,6 +223,35 @@ describe('ws auth handshake', () => {
     const ack = (await qA.next()) as { type: string; message_id: string };
     expect(ack.type).toBe('delivered');
     expect(ack.message_id).toBe(incoming.message_id);
+  });
+
+  it('emits peer_deleted instead of buffering when the direct recipient was deleted', async () => {
+    const wsA = await open();
+    const qA = new MsgQueue(wsA);
+    wsA.send(JSON.stringify({ type: 'auth', token: 'dvt_alpha-bravo-charlie' }));
+    await qA.next(); // authed
+
+    // Recipient was tombstoned (simulates `DELETE /v1/users/me`
+    // having already run for golf-hotel-india on a prior session).
+    await deletedHandlesRepo.record('golf-hotel-india');
+
+    wsA.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'golf-hotel-india',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+      }),
+    );
+    const frame = (await qA.next()) as { type: string; handle: string };
+    expect(frame.type).toBe('peer_deleted');
+    expect(frame.handle).toBe('golf-hotel-india');
+    // No relay row should have been written — buffer scan turns up empty.
+    const buffered = await messagesRepo.listUndeliveredFor(
+      'golf-hotel-india',
+      'any-device',
+    );
+    expect(buffered).toHaveLength(0);
   });
 
   it('removes connection on close', async () => {

@@ -29,6 +29,11 @@ import {
   InMemoryAbuseReportsRepo,
   type AbuseReportsRepo,
 } from './db/abuse-reports.js';
+import {
+  DrizzleDeletedHandlesRepo,
+  InMemoryDeletedHandlesRepo,
+  type DeletedHandlesRepo,
+} from './db/deleted-handles.js';
 import { getDb } from './db/client.js';
 import { registerPreKeyRoutes } from './routes/prekeys.js';
 import { registerGroupRoutes } from './routes/groups.js';
@@ -108,6 +113,9 @@ export interface BuildServerOptions {
   /** Override the abuse-reports repo (test injection). Defaults to
    *  Drizzle when DATABASE_URL is set, else in-memory. */
   abuseReports?: AbuseReportsRepo;
+  /** Override the deleted-handles tombstone repo (test injection).
+   *  Defaults to Drizzle when DATABASE_URL is set, else in-memory. */
+  deletedHandles?: DeletedHandlesRepo;
   connections?: Connections;
   presence?: Presence;
   /** Override the in-process notifier used by route handlers (test injection). */
@@ -223,10 +231,17 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const preKeyRepo =
     opts.preKeyRepo ??
     (hasDb ? new DrizzlePreKeyRepo() : new InMemoryPreKeyRepo(repo as InMemoryUserRepo));
+  // Tombstone for deleted handles. Shared across the user route (410
+  // on GET /v1/users/:id), the prekey route (410 on POST /v1/prekeys/
+  // bundle), and the WS handler (peer_deleted frame on send-attempt).
+  const deletedHandles =
+    opts.deletedHandles ??
+    (hasDb ? new DrizzleDeletedHandlesRepo(getDb()) : new InMemoryDeletedHandlesRepo());
   await registerPreKeyRoutes(app, {
     repo: preKeyRepo,
     limiter,
     notifier: userNotifier,
+    deletedHandles,
   });
   const groups = opts.groupRepo ?? (hasDb ? new DrizzleGroupRepo() : new InMemoryGroupRepo());
   const communities = opts.communityRepo ?? (hasDb ? new DrizzleCommunityRepo() : new InMemoryCommunityRepo());
@@ -246,7 +261,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
   // Deferred from above so we can pass devices + connections for
   // Private Call's `supported_call_kinds` UNION aggregation.
-  await registerUserRoutes(app, { repo, devices, connections });
+  await registerUserRoutes(app, { repo, devices, connections, deletedHandles });
   await registerDeviceRoutes(app, { devices });
   const abuseReports =
     opts.abuseReports ?? (hasDb ? new DrizzleAbuseReportsRepo(getDb()) : new InMemoryAbuseReportsRepo());
@@ -323,6 +338,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       push,
       devices,
       users: repo,
+      deletedHandles,
       callBuffer,
       ackBuffer,
       userNotifier,

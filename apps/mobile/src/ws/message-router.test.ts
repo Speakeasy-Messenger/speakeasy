@@ -66,3 +66,22 @@ describe('messageRouter — authed frame', () => {
     expect(onAuthed).not.toHaveBeenCalled();
   });
 });
+
+describe('messageRouter — peer_deleted frame', () => {
+  it('forwards the handle to onPeerDeleted', () => {
+    const onPeerDeleted = vi.fn();
+    const router = makeMessageRouter(makeStubDeps({ onPeerDeleted }));
+
+    router({ type: 'peer_deleted', handle: 'quiet_fox' } as WsServerMsg);
+
+    expect(onPeerDeleted).toHaveBeenCalledTimes(1);
+    expect(onPeerDeleted).toHaveBeenCalledWith('quiet_fox');
+  });
+
+  it('does not crash when onPeerDeleted is not wired (back-compat)', () => {
+    const router = makeMessageRouter(makeStubDeps());
+    expect(() =>
+      router({ type: 'peer_deleted', handle: 'quiet_fox' } as WsServerMsg),
+    ).not.toThrow();
+  });
+});

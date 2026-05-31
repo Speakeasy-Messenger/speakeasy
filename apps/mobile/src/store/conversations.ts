@@ -142,6 +142,16 @@ export interface ConversationState {
    * for this conversation are dropped. Default false.
    */
   muted?: boolean;
+  /**
+   * Marks the conversation as terminal: the peer's account has been
+   * deleted server-side. Set by the WS `peer_deleted` frame handler
+   * (Phase 1 peer-deleted). When true the ChatScreen disables the
+   * input + send button; the user can still scroll history but
+   * cannot compose. Distinct from `muted` (notifications only) and
+   * from `blocked` (lives in a separate store) — a frozen
+   * conversation has no live counterparty at all.
+   */
+  frozen?: boolean;
 }
 
 interface ConversationsState {
@@ -217,6 +227,7 @@ interface ConversationsState {
   setPersistence: (conversationId: string, on: boolean) => void;
   /** Toggle per-conversation notification suppression. */
   setMuted: (conversationId: string, muted: boolean) => void;
+  setFrozen: (conversationId: string, frozen: boolean) => void;
   /** Resolved TTL in seconds, or `null` if `off` / persistence is on. */
   ttlSecondsFor: (conversationId: string) => number | null;
   /** Mark a conversation as read up to the current time. */
@@ -630,6 +641,16 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       const c = s.byId[conversationId] ?? emptyConversation('direct');
       return {
         byId: { ...s.byId, [conversationId]: { ...c, muted } },
+      };
+    });
+    void persist(get().byId);
+  },
+
+  setFrozen: (conversationId, frozen) => {
+    set((s) => {
+      const c = s.byId[conversationId] ?? emptyConversation('direct');
+      return {
+        byId: { ...s.byId, [conversationId]: { ...c, frozen } },
       };
     });
     void persist(get().byId);
