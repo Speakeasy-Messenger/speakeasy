@@ -8,8 +8,11 @@
 
   Brand: the Cipher S — three offset bars forming an abstract "S" /
   three-redacted-bars motif. Same primary brand mark used on the
-  splash screen and the call screen. Geometry mirrors
-  src/brand/CipherS.tsx (Rect-by-Rect, viewport 100×100).
+  launcher icon. Geometry matches the launcher master at
+  apps/mobile/android/play/images/icon.png — bars 44 wide × 10 tall
+  in a 100-unit viewport, L-R-L staircase. The in-app splash uses
+  the cramped CipherS.tsx variant; launcher + notification share the
+  spread variant so the system chrome reads as one icon.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -19,11 +22,11 @@
     android:tint="?attr/colorControlNormal">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M5,20 L65,20 L65,34 L5,34 Z" />
+      android:pathData="M17,24 L61,24 L61,34 L17,34 Z" />
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M35,43 L95,43 L95,57 L35,57 Z" />
+      android:pathData="M39,45 L83,45 L83,55 L39,55 Z" />
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M5,66 L65,66 L65,80 L5,80 Z" />
+      android:pathData="M17,66 L61,66 L61,76 L17,76 Z" />
 </vector>
