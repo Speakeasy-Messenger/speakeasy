@@ -8,12 +8,12 @@
   one for launcher, notification, and Play Store surfaces.
 
   Geometry matches the Play Store listing mark exactly (the bold,
-  spread staircase the store shows): bars are 36 units wide × 8 tall
-  in a 100-unit viewport, L-R-L, spanning x:23-77, y:29-71 with
-  ~9-unit vertical gaps. That's the listing's bold geometry scaled
-  in ~18% toward center so the bar ends clear every launcher mask
-  (round, squircle, square) — keeping the launcher and the store icon
-  pixel-identical while staying inside the adaptive-icon safe zone.
+  spread staircase the store shows): bars are 29 units wide × 8 tall
+  in a 100-unit viewport, L-R-L, spanning x:28-72, y:32-68 with
+  ~6-unit vertical gaps. The mark's farthest corner sits ~31dp from
+  centre on the 108dp canvas — comfortably inside the 36dp safe zone,
+  so all three bars have visible breathing room on every launcher mask
+  (round, squircle, square). Launcher and store icon stay pixel-identical.
 
   Vector drawable: scales to any density at install time, so we don't
   have to maintain mipmap-mdpi/…/xxxhdpi PNGs for the foreground.
@@ -26,14 +26,14 @@
     android:viewportHeight="100">
 
   <path
-      android:pathData="M23,29 L59,29 L59,37 L23,37 Z"
+      android:pathData="M28,32 L57,32 L57,40 L28,40 Z"
       android:fillColor="#E5A645"/>
 
   <path
-      android:pathData="M41,46 L77,46 L77,54 L41,54 Z"
+      android:pathData="M43,46 L72,46 L72,54 L43,54 Z"
       android:fillColor="#E5A645"/>
 
   <path
-      android:pathData="M23,63 L59,63 L59,71 L23,71 Z"
+      android:pathData="M28,60 L57,60 L57,68 L28,68 Z"
       android:fillColor="#E5A645"/>
 </vector>
