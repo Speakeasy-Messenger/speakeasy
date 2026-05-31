@@ -154,9 +154,15 @@ PY
 # Echo what we're about to push for the workflow log — operators
 # reviewing the run want to see the status + version + notes mutation
 # without grepping the full JSON.
-echo "$MODIFIED" | python3 <<'PY'
-import json, sys
-body = json.load(sys.stdin)
+#
+# Pass MODIFIED through the environment rather than stdin: with
+# `python3 <<'PY'` the heredoc IS the script, so the interpreter owns
+# stdin and `sys.stdin` is at EOF by the time the program runs (any
+# upstream `echo … |` is silently dropped). Same pattern as the
+# MODIFIED build block above.
+MODIFIED_JSON="$MODIFIED" python3 <<'PY'
+import json, os
+body = json.loads(os.environ["MODIFIED_JSON"])
 r = body["releases"][0]
 print("  → versionCode(s): " + str(r.get("versionCodes")))
 print("  → status:         " + str(r.get("status")))
