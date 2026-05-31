@@ -154,19 +154,20 @@ PY
 # Echo what we're about to push for the workflow log — operators
 # reviewing the run want to see the status + version + notes mutation
 # without grepping the full JSON.
-echo "$MODIFIED" | python3 -c '
+echo "$MODIFIED" | python3 <<'PY'
 import json, sys
 body = json.load(sys.stdin)
 r = body["releases"][0]
-print(f"  → versionCode(s): {r.get(\"versionCodes\")}")
-print(f"  → status:         {r.get(\"status\")}")
-if r.get("userFraction") is not None:
-    print(f"  → userFraction:   {r.get(\"userFraction\")}")
+print("  → versionCode(s): " + str(r.get("versionCodes")))
+print("  → status:         " + str(r.get("status")))
+uf = r.get("userFraction")
+if uf is not None:
+    print("  → userFraction:   " + str(uf))
 notes = r.get("releaseNotes") or []
 if notes:
     snippet = notes[0]["text"][:80].replace("\n", " ")
-    print(f"  → releaseNotes:   [{notes[0][\"language\"]}] {snippet}…")
-'
+    print("  → releaseNotes:   [" + notes[0]["language"] + "] " + snippet + "…")
+PY
 
 echo "▸ Writing modified release to $TRACK"
 api PUT "$API/edits/$EDIT_ID/tracks/$TRACK" \
