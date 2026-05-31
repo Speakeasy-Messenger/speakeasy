@@ -1,112 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!--
-  Cipher S — metallic adaptive icon foreground.
+  Cipher S — adaptive icon foreground.
 
-  Three brass bars rendered with a diagonal gradient (highlight on the
-  top-left, shadow toward the bottom-right) plus a thin top-edge
-  highlight and a soft ambient shadow underneath. The effect is a
-  premium metallic sheen in the vein of Linear's launcher icon —
-  brass that looks struck, not flat.
+  Three flat brass bars in the LEFT-RIGHT-LEFT cipher pattern. The
+  earlier metallic-gradient + ambient-shadow + edge-highlight pass was
+  retired with the rebrand to a flat mark; the new look is the canonical
+  one for launcher, notification, and Play Store surfaces.
 
-  Geometry mirrors src/brand/CipherS.tsx's LEFT-RIGHT-LEFT cipher
-  pattern, but scaled so the mark sits well inside the adaptive-icon
-  safe zone with a generous ring of margin (x:30-70 in this 100×100
-  viewport, so ~30 units of padding on each side — roughly double
-  the previous spread). The mark reads as a deliberate, centered
-  cipher rather than a logo crammed against the icon edges.
+  Geometry matches the 512px master (apps/mobile/android/play/images/
+  icon.png): bars are 44 units wide × 10 tall in a 100-unit viewport,
+  with the staircase pattern (L-R-L) and ~10-unit vertical gaps. That
+  places the mark within the adaptive-icon safe zone (inner 66% of the
+  108dp canvas) without crowding the edges.
 
   Vector drawable: scales to any density at install time, so we don't
   have to maintain mipmap-mdpi/…/xxxhdpi PNGs for the foreground.
-  Pre-v26 devices keep using the bundled PNGs at mipmap/ic_launcher.png.
+  Pre-v26 devices use the bundled PNGs at mipmap/ic_launcher.png.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
-    xmlns:aapt="http://schemas.android.com/aapt"
     android:width="108dp"
     android:height="108dp"
     android:viewportWidth="100"
     android:viewportHeight="100">
 
-  <!-- Bar 1 (LEFT): ambient shadow underneath, offset down 0.5 -->
   <path
-      android:pathData="M30.5,37.5 L58.5,37.5 L58.5,44.5 L30.5,44.5 Z"
-      android:fillColor="#3A2A0E"
-      android:fillAlpha="0.45"/>
+      android:pathData="M17,24 L61,24 L61,34 L17,34 Z"
+      android:fillColor="#E5A645"/>
 
-  <!-- Bar 1: main, diagonal metallic gradient -->
-  <path android:pathData="M30,37 L58,37 L58,44 L30,44 Z">
-    <aapt:attr name="android:fillColor">
-      <gradient
-          android:type="linear"
-          android:startX="30" android:startY="37"
-          android:endX="58" android:endY="44">
-        <item android:offset="0.0" android:color="#FCE4A4"/>
-        <item android:offset="0.20" android:color="#F2C167"/>
-        <item android:offset="0.50" android:color="#E5A645"/>
-        <item android:offset="0.80" android:color="#B07E2C"/>
-        <item android:offset="1.0" android:color="#7E5A1C"/>
-      </gradient>
-    </aapt:attr>
-  </path>
-
-  <!-- Bar 1: top-edge highlight -->
   <path
-      android:pathData="M30,37 L58,37 L58,37.8 L30,37.8 Z"
-      android:fillColor="#FFF4D0"
-      android:fillAlpha="0.55"/>
+      android:pathData="M39,45 L83,45 L83,55 L39,55 Z"
+      android:fillColor="#E5A645"/>
 
-  <!-- Bar 2 (RIGHT): ambient shadow underneath -->
   <path
-      android:pathData="M42.5,46.5 L70.5,46.5 L70.5,53.5 L42.5,53.5 Z"
-      android:fillColor="#3A2A0E"
-      android:fillAlpha="0.45"/>
-
-  <!-- Bar 2: main, diagonal metallic gradient -->
-  <path android:pathData="M42,46 L70,46 L70,53 L42,53 Z">
-    <aapt:attr name="android:fillColor">
-      <gradient
-          android:type="linear"
-          android:startX="42" android:startY="46"
-          android:endX="70" android:endY="53">
-        <item android:offset="0.0" android:color="#FCE4A4"/>
-        <item android:offset="0.20" android:color="#F2C167"/>
-        <item android:offset="0.50" android:color="#E5A645"/>
-        <item android:offset="0.80" android:color="#B07E2C"/>
-        <item android:offset="1.0" android:color="#7E5A1C"/>
-      </gradient>
-    </aapt:attr>
-  </path>
-
-  <!-- Bar 2: top-edge highlight -->
-  <path
-      android:pathData="M42,46 L70,46 L70,46.8 L42,46.8 Z"
-      android:fillColor="#FFF4D0"
-      android:fillAlpha="0.55"/>
-
-  <!-- Bar 3 (LEFT): ambient shadow underneath -->
-  <path
-      android:pathData="M30.5,55.5 L58.5,55.5 L58.5,62.5 L30.5,62.5 Z"
-      android:fillColor="#3A2A0E"
-      android:fillAlpha="0.45"/>
-
-  <!-- Bar 3: main, diagonal metallic gradient -->
-  <path android:pathData="M30,55 L58,55 L58,62 L30,62 Z">
-    <aapt:attr name="android:fillColor">
-      <gradient
-          android:type="linear"
-          android:startX="30" android:startY="55"
-          android:endX="58" android:endY="62">
-        <item android:offset="0.0" android:color="#FCE4A4"/>
-        <item android:offset="0.20" android:color="#F2C167"/>
-        <item android:offset="0.50" android:color="#E5A645"/>
-        <item android:offset="0.80" android:color="#B07E2C"/>
-        <item android:offset="1.0" android:color="#7E5A1C"/>
-      </gradient>
-    </aapt:attr>
-  </path>
-
-  <!-- Bar 3: top-edge highlight -->
-  <path
-      android:pathData="M30,55 L58,55 L58,55.8 L30,55.8 Z"
-      android:fillColor="#FFF4D0"
-      android:fillAlpha="0.55"/>
+      android:pathData="M17,66 L61,66 L61,76 L17,76 Z"
+      android:fillColor="#E5A645"/>
 </vector>
