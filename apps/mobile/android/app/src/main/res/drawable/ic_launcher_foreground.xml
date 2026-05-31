@@ -7,13 +7,13 @@
   retired with the rebrand to a flat mark; the new look is the canonical
   one for launcher, notification, and Play Store surfaces.
 
-  Geometry matches the 512px master (apps/mobile/android/play/images/
-  icon.png): bars are 28 units wide × 7 tall in a 100-unit viewport,
-  with the staircase pattern (L-R-L) and ~2-unit vertical gaps. The
-  mark spans x:30-70, y:37-62 — the same comfortably-padded footprint
-  the pre-flat icon used, so all three bars sit well inside the
-  adaptive-icon safe zone (inner 66% of the 108dp canvas) and survive
-  every launcher mask (round, squircle, square) without truncation.
+  Geometry matches the Play Store listing mark exactly (the bold,
+  spread staircase the store shows): bars are 36 units wide × 8 tall
+  in a 100-unit viewport, L-R-L, spanning x:23-77, y:29-71 with
+  ~9-unit vertical gaps. That's the listing's bold geometry scaled
+  in ~18% toward center so the bar ends clear every launcher mask
+  (round, squircle, square) — keeping the launcher and the store icon
+  pixel-identical while staying inside the adaptive-icon safe zone.
 
   Vector drawable: scales to any density at install time, so we don't
   have to maintain mipmap-mdpi/…/xxxhdpi PNGs for the foreground.
@@ -26,14 +26,14 @@
     android:viewportHeight="100">
 
   <path
-      android:pathData="M30,37 L58,37 L58,44 L30,44 Z"
+      android:pathData="M23,29 L59,29 L59,37 L23,37 Z"
       android:fillColor="#E5A645"/>
 
   <path
-      android:pathData="M42,46 L70,46 L70,53 L42,53 Z"
+      android:pathData="M41,46 L77,46 L77,54 L41,54 Z"
       android:fillColor="#E5A645"/>
 
   <path
-      android:pathData="M30,55 L58,55 L58,62 L30,62 Z"
+      android:pathData="M23,63 L59,63 L59,71 L23,71 Z"
       android:fillColor="#E5A645"/>
 </vector>
