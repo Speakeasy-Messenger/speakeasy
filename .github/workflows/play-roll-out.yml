@@ -1,0 +1,85 @@
+name: Roll out / modify Play Store release
+
+# Manually-triggered workflow that modifies the most recent release on
+# a Play Console track in place. Closes the last manual-click hole in
+# the pipeline: previously "Send for review" / "Start rollout" /
+# "Resume track" / "Add release notes" all required clicking through
+# Play Console. This wraps all four into one REST round trip.
+#
+# Sister to release-play.yml (AAB upload), play-listing.yml (store
+# listing), play-promote.yml (track-to-track promotion), and
+# play-clear-track.yml (wipe). Same WIF-friendly bearer-token model.
+#
+# Triggers (some common ones):
+#
+#   # Submit the latest beta release to Google for review:
+#   gh workflow run play-roll-out.yml -f track=beta -f status=completed
+#
+#   # Stage a 10% rollout on beta:
+#   gh workflow run play-roll-out.yml -f track=beta -f status=inProgress -f user_fraction=0.1
+#
+#   # Add release notes without changing status (useful pre-rollout):
+#   gh workflow run play-roll-out.yml -f track=beta \
+#     -f release_notes_text="First public testing release. End-to-end encrypted messaging and calling, no phone number required."
+#
+#   # Pause an active rollout:
+#   gh workflow run play-roll-out.yml -f track=beta -f status=halted
+#
+# Auth: same WIF flow as release-play.yml — no static service-account
+# JSON. The GitHub OIDC token exchanges for a GCP access token bound
+# to fastlane-play-publisher@speakeasy-mobile-497702.
+
+on:
+  workflow_dispatch:
+    inputs:
+      track:
+        description: 'Track to modify (internal|alpha|beta|production). beta = Open Testing.'
+        required: true
+        default: 'beta'
+      status:
+        description: 'New release status (draft|inProgress|halted|completed). Leave blank to preserve.'
+        required: false
+        default: 'completed'
+      user_fraction:
+        description: 'Staged-rollout fraction 0.0–1.0. Only used with status=inProgress.'
+        required: false
+        default: ''
+      release_notes_text:
+        description: 'Release notes (free text). Leave blank to preserve existing notes.'
+        required: false
+        default: ''
+      release_notes_language:
+        description: 'Locale tag for release notes.'
+        required: false
+        default: 'en-US'
+
+permissions:
+  contents: read
+  id-token: write
+
+jobs:
+  roll-out:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Authenticate to Google Cloud via Workload Identity Federation
+        id: gcp-auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: projects/480139204146/locations/global/workloadIdentityPools/github-actions-pool/providers/github
+          service_account: fastlane-play-publisher@speakeasy-mobile-497702.iam.gserviceaccount.com
+          token_format: access_token
+          access_token_scopes: https://www.googleapis.com/auth/androidpublisher
+
+      - name: Modify release
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          TRACK: ${{ inputs.track }}
+          RELEASE_STATUS: ${{ inputs.status }}
+          USER_FRACTION: ${{ inputs.user_fraction }}
+          RELEASE_NOTES_TEXT: ${{ inputs.release_notes_text }}
+          RELEASE_NOTES_LANGUAGE: ${{ inputs.release_notes_language }}
+        run: bash scripts/play-roll-out.sh
