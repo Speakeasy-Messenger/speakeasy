@@ -17,7 +17,7 @@ jobs:
     timeout-minutes: 30
     
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
 
       - name: Install dependencies
         run: npm ci
@@ -139,7 +139,7 @@ jobs:
 
       - name: Upload logcat
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: push-test-direct-${{ github.sha }}
           path: /tmp/logcat-all.txt
