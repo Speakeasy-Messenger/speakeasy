@@ -7,12 +7,15 @@
   tint to brand brass.
 
   Brand: the Cipher S — three offset bars forming an abstract "S" /
-  three-redacted-bars motif. Same primary brand mark used on the
-  launcher icon. Geometry matches the launcher master at
-  apps/mobile/android/play/images/icon.png — bars 29 wide × 8 tall
-  in a 100-unit viewport, L-R-L staircase (x:28-72, y:32-68). The in-app splash uses
-  the cramped CipherS.tsx variant; launcher + notification share the
-  spread variant so the system chrome reads as one icon.
+  three-redacted-bars motif. Same primary brand mark as the launcher,
+  but deliberately BOLDER: the launcher mark is padded (x:28-72) so its
+  bars survive the round/squircle adaptive-icon mask, whereas this
+  silhouette has no mask and the system renders it tiny in the status
+  bar (and inside a small tinted badge in the shade). Reusing the
+  launcher's padding made the mark look shrunken, so the notification
+  fills its canvas instead: bars 50 wide × 10 tall, L-R-L staircase
+  (x:13-87, y:20-80), leaving only a hair of margin for the system's
+  own inset. The in-app splash uses the cramped CipherS.tsx variant.
 -->
 <vector xmlns:android="http://schemas.android.com/apk/res/android"
     android:width="24dp"
@@ -22,11 +25,11 @@
     android:tint="?attr/colorControlNormal">
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M28,32 L57,32 L57,40 L28,40 Z" />
+      android:pathData="M13,20 L63,20 L63,30 L13,30 Z" />
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M43,46 L72,46 L72,54 L43,54 Z" />
+      android:pathData="M37,45 L87,45 L87,55 L37,55 Z" />
   <path
       android:fillColor="@android:color/white"
-      android:pathData="M28,60 L57,60 L57,68 L28,68 Z" />
+      android:pathData="M13,70 L63,70 L63,80 L13,80 Z" />
 </vector>
