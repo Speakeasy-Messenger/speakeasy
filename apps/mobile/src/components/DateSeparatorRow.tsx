@@ -30,13 +30,19 @@ export function DateSeparatorRow({ timestamp }: Props): React.ReactElement {
 }
 
 const styles = StyleSheet.create({
+  // Full-width row (no `alignSelf: 'center'` shrink-wrap) so the centered
+  // Text spans the whole feed width. With letterSpacing + uppercase, a
+  // shrink-wrapped Text clips its trailing glyph on Android — the layout
+  // under-measures the last character's advance, so "TODAY" rendered as
+  // "TODA". Giving the Text full width moves that overflow into empty
+  // trailing space instead of the glyph, and textAlign keeps it centered.
   row: {
-    alignSelf: 'center',
     paddingVertical: 6,
     marginVertical: space.xs,
     paddingHorizontal: space.md,
   },
   text: {
+    alignSelf: 'stretch',
     fontFamily: font.medium,
     fontSize: typeScale.caption.size,
     lineHeight: 18,
