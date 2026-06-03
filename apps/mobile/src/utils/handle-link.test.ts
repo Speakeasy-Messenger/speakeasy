@@ -33,6 +33,28 @@ describe('handle-link encode/parse', () => {
     expect(parseAdd('speakeasy://invite?handle=alice')).toBeUndefined();
   });
 
+  it('returns undefined for a same-prefix host (address, not add)', () => {
+    expect(parseAdd('speakeasy://address?handle=alice')).toBeUndefined();
+  });
+
+  it('accepts a trailing slash before the query', () => {
+    expect(parseAdd('speakeasy://add/?handle=alice')).toBe('alice');
+  });
+
+  it('finds handle among multiple query params, order-independent', () => {
+    expect(parseAdd('speakeasy://add?ref=qr&handle=alice')).toBe('alice');
+    expect(parseAdd('speakeasy://add?handle=alice&ref=qr')).toBe('alice');
+  });
+
+  it('is case-insensitive on the scheme/host the OS may normalize', () => {
+    expect(parseAdd('SPEAKEASY://ADD?handle=alice')).toBe('alice');
+  });
+
+  it('decodes a percent-encoded handle', () => {
+    // encodeAdd uses encodeURIComponent; a legacy id round-trips cleanly.
+    expect(parseAdd('speakeasy://add?handle=quiet-blue-river')).toBe('quiet-blue-river');
+  });
+
   it('returns undefined for missing handle param', () => {
     expect(parseAdd('speakeasy://add')).toBeUndefined();
     expect(parseAdd('speakeasy://add?other=x')).toBeUndefined();
