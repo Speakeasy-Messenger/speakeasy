@@ -247,6 +247,11 @@ export class CallOrchestrator {
 
   /** User accepted an incoming call. Builds + sends the answer. */
   async accept(): Promise<void> {
+    diag('call', 'accept: enter', {
+      stage: this.active?.stage,
+      callId: this.active?.callId,
+      kind: this.active?.kind,
+    });
     if (!this.active || this.active.stage !== 'incoming_ringing') {
       throw new Error(`cannot accept in stage=${this.active?.stage}`);
     }
