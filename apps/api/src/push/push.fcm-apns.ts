@@ -33,6 +33,48 @@ export function buildBasePushData(notice: PushDeliveryNotice): Record<string, st
   };
 }
 
+/**
+ * Resolve the banner title + body for one device's privacy setting.
+ *
+ * Privacy-aware, content-free (the device decrypts the forwarded
+ * ciphertext and overrides the body when it can):
+ *   - call           → "@sender" / ringer copy, or generic when private/sealed
+ *   - group message  → the room name (rich) so it reads "<Group> · New
+ *                      message"; generic for private devices
+ *   - direct message → "@sender" (rich) or generic
+ *
+ * `notice.body` is the @speaker exception — plaintext announcements the
+ * server legitimately has.
+ */
+export function resolveBannerCopy(
+  notice: PushDeliveryNotice,
+  privacy: 'rich' | 'private',
+): { title: string; body: string } {
+  const showSender = privacy === 'rich' && !!notice.senderId;
+  if ((notice.kind ?? 'message') === 'call') {
+    return {
+      title: showSender ? `@${notice.senderId}` : 'speakeasy',
+      body:
+        notice.callEvent === 'missed'
+          ? 'Missed call'
+          : showSender
+            ? 'Calling…'
+            : 'Incoming call',
+    };
+  }
+  const fallbackBody = privacy === 'rich' && notice.body ? notice.body : 'New message';
+  if (notice.msgType === 'group') {
+    return {
+      title: privacy === 'rich' && notice.groupName ? notice.groupName : 'speakeasy',
+      body: fallbackBody,
+    };
+  }
+  return {
+    title: showSender ? `@${notice.senderId}` : 'speakeasy',
+    body: fallbackBody,
+  };
+}
+
 export function buildIosPushData(
   notice: PushDeliveryNotice,
   privacy: 'rich' | 'private',
@@ -139,25 +181,7 @@ export class FcmApnsPushProvider implements PushProvider {
     >();
     for (const d of withPush) {
       const privacy = d.notificationPrivacy ?? 'rich';
-      const showSender = privacy === 'rich' && !!notice.senderId;
-      // 'rich' surfaces the sender handle. Preview text is the server's
-      // fallback ("New message") — for E2E messages the device decrypts
-      // the forwarded ciphertext and overrides it. `notice.body` is the
-      // @speaker exception: plaintext announcements the server has.
-      let title: string;
-      let body: string;
-      if (kind === 'call') {
-        title = showSender ? `@${notice.senderId}` : 'speakeasy';
-        body =
-          notice.callEvent === 'missed'
-            ? 'Missed call'
-            : showSender
-              ? 'Calling…'
-              : 'Incoming call';
-      } else {
-        title = showSender ? `@${notice.senderId}` : 'speakeasy';
-        body = privacy === 'rich' && notice.body ? notice.body : 'New message';
-      }
+      const { title, body } = resolveBannerCopy(notice, privacy);
       const platform = d.platform ?? 'android';
       const key = `${title}\0${body}\0${platform}\0${privacy}`;
       const bucket = buckets.get(key);

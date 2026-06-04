@@ -454,6 +454,13 @@ async function displayMessagingNotification(args: {
   msgType: string;
   messages: MsgStyleMsg[];
   withReply: boolean;
+  /**
+   * Banner title. Defaults to the peer handle for 1:1 chats. For groups
+   * the caller passes the server-resolved room name (FCM `data.title`)
+   * so the notification reads "<Group>" instead of "@sender" — the
+   * sender is still shown per-line inside MessagingStyle.
+   */
+  title?: string;
 }): Promise<void> {
   await ensureChannel();
   const myUserId = await loadPersistedUserId();
@@ -461,7 +468,14 @@ async function displayMessagingNotification(args: {
   // bitmaps directly via BitmapFactory.decodeFile, sidestepping the
   // five failed attempts to coax notifee/Fresco into loading a
   // runtime-cached PNG by URI (file://, data:, content://).
-  const peerAvatarPath = await resolveAvatarPath(args.peerHandle);
+  //
+  // For a group, the conversation icon is the room's own mark
+  // (GroupMarkCacheWarmer caches it under the conversation/group id), not
+  // the sender's portrait — so the banner is identified by the room, like
+  // any messenger. The sender still shows per-line inside MessagingStyle.
+  const conversationAvatarId =
+    args.msgType === 'group' ? args.conversationId : args.peerHandle;
+  const peerAvatarPath = await resolveAvatarPath(conversationAvatarId);
   const selfAvatarPath = myUserId ? await resolveAvatarPath(myUserId) : undefined;
   // Pre-trim the visible stack to MAX_NOTIF_MESSAGES so the persisted
   // copy + the native call see the same set.
@@ -473,6 +487,8 @@ async function displayMessagingNotification(args: {
   // stack.
   await persistNotifStack(args.conversationId, messages);
   const latest = messages[messages.length - 1];
+  // Group banners use the server-resolved room name; 1:1 uses the handle.
+  const bannerTitle = args.title ?? '@' + args.peerHandle;
 
   if (NotifMessaging.available()) {
     try {
@@ -483,7 +499,7 @@ async function displayMessagingNotification(args: {
         peerAvatarPath: peerAvatarPath ?? null,
         selfAvatarPath: selfAvatarPath ?? null,
         withReply: args.withReply,
-        title: '@' + args.peerHandle,
+        title: bannerTitle,
         body: latest?.text ?? 'New message',
         msgType: args.msgType,
         messages: messages.map((m) => ({
@@ -530,7 +546,7 @@ async function displayMessagingNotification(args: {
   );
   await notifee.displayNotification({
     id: args.conversationId,
-    title: '@' + args.peerHandle,
+    title: bannerTitle,
     body: latest?.text ?? 'New message',
     data: {
       conversation_id: args.conversationId,
@@ -637,6 +653,9 @@ async function displayPushNotification(data: FcmData): Promise<void> {
           conversationId,
           peerHandle: peer,
           msgType: data.msg_type ?? 'direct',
+          // Server-resolved title: the room name for groups, "@sender"
+          // for 1:1 (identical to the peerHandle default there).
+          title: data.title,
           messages: [
             ...prior,
             { text, timestamp: Date.now(), person: { id: peer, name: '@' + peer } },

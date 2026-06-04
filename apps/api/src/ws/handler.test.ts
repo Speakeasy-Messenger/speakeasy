@@ -817,7 +817,13 @@ describe('ws SKDM envelope — Phase 5b carry-over', () => {
     expect(err.code).toBe('bad_skdm');
   });
 
-  it('fires push when recipient is offline', async () => {
+  it('does NOT push when recipient is offline — SKDM is a control message, not a banner', async () => {
+    // An SKDM is sender-key bootstrap, not a user message. Pushing it
+    // rendered a phantom 1:1 "New message" banner on every group send
+    // (fuertechino repro 2026-06-04). Delivery is preserved by the
+    // buffered row (drains on reconnect, asserted above) + the
+    // accompanying group message's own push, so the SKDM itself must
+    // not fire a push.
     const groupId = newGroupId();
     const a = await authedSocket('alice-blue-fox');
     a.ws.send(
@@ -829,11 +835,11 @@ describe('ws SKDM envelope — Phase 5b carry-over', () => {
       }),
     );
     await new Promise((r) => setTimeout(r, 30));
-    expect(pushProvider.calls).toHaveLength(1);
-    expect(pushProvider.calls[0]).toMatchObject({
-      userId: 'bob-red-bear',
-      msgType: 'direct',
-    });
+    // No push fired...
+    expect(pushProvider.calls).toHaveLength(0);
+    // ...but the SKDM is still buffered for offline drain (no delivery lost).
+    expect(messagesRepo.buffer.size).toBe(1);
+    expect([...messagesRepo.buffer.values()][0]!.skdmGroupId).toBe(groupId);
   });
 });
 

@@ -25,6 +25,13 @@ export interface PushDeliveryNotice {
    */
   senderId?: string;
   /**
+   * Group room name (plaintext server-side per spec). Set only for
+   * `msgType: 'group'` messages so the banner title reads the room's
+   * name instead of the sender's handle. Surfaced only to `rich`
+   * devices, same gate as `senderId`.
+   */
+  groupName?: string;
+  /**
    * What was buffered. Default 'message'. 'call' triggers ringer copy
    * ("@bananaman1 is calling…") and stamps `notify_kind: 'call'` in
    * the FCM data block so the mobile app's foreground-message handler

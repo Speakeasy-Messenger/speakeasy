@@ -1,5 +1,5 @@
 import React from 'react';
-import Svg, { Rect } from 'react-native-svg';
+import Svg, { G, Rect } from 'react-native-svg';
 
 /**
  * Deterministic geometric mark for group conversations.
@@ -50,11 +50,19 @@ interface Props {
   color?: string;
 }
 
-export function RoomMark({
+/**
+ * The mark's primitives in the 0–100 viewBox, with no `<Svg>` wrapper —
+ * so it can be composed inside another `<Svg>` (e.g. the notification
+ * rasterizer's background tile in GroupMarkCacheWarmer). `RoomMark`
+ * wraps this in an `<Svg>`; both share the same deterministic geometry.
+ */
+export function RoomMarkPrimitives({
   roomId,
-  size,
   color = '#E5A645', // brass
-}: Props): React.ReactElement {
+}: {
+  roomId: string;
+  color?: string;
+}): React.ReactElement {
   const seed = hash32(roomId);
   const cells = cellsFromSeed(seed);
   const rotate = (seed >> 27) & 1;
@@ -62,12 +70,7 @@ export function RoomMark({
   const inset = 2;
 
   return (
-    <Svg
-      width={size}
-      height={size}
-      viewBox="0 0 100 100"
-      transform={rotate ? 'rotate(90 50 50)' : undefined}
-    >
+    <G transform={rotate ? 'rotate(90 50 50)' : undefined}>
       {cells.map((primitive, i) => {
         const col = i % 3;
         const row = Math.floor(i / 3);
@@ -135,6 +138,14 @@ export function RoomMark({
             return null;
         }
       })}
+    </G>
+  );
+}
+
+export function RoomMark({ roomId, size, color }: Props): React.ReactElement {
+  return (
+    <Svg width={size} height={size} viewBox="0 0 100 100">
+      <RoomMarkPrimitives roomId={roomId} color={color} />
     </Svg>
   );
 }
