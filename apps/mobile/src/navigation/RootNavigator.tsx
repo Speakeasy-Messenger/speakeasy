@@ -388,6 +388,7 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                 <GroupSettingsScreen
                   groupId={route.params.groupId}
                   onBack={() => navigation.goBack()}
+                  onOpenPeer={(peerId) => navigation.navigate('Chat', { peerId })}
                 />
               )}
             </Stack.Screen>

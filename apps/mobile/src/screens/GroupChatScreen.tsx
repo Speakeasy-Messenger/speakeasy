@@ -454,10 +454,19 @@ export function GroupChatScreen({
             return (
               <View>
                 {showAttribution ? (
-                  <View style={styles.attribution}>
+                  // Tap a sender's portrait/handle to open a 1:1 with them
+                  // (feedback rc.40). Only non-self rows show attribution,
+                  // so this never targets yourself. Reuses onOpenPeer —
+                  // the same Chat-navigation the @mention path is wired to.
+                  <Pressable
+                    style={styles.attribution}
+                    onPress={() => onOpenPeer?.(item.from)}
+                    hitSlop={6}
+                    testID={`group-sender-${item.from}`}
+                  >
                     <Avatar userId={item.from} size={18} />
                     <Handle value={item.from} variant="caption" />
-                  </View>
+                  </Pressable>
                 ) : null}
                 <DisappearingMessageBubble
                   text={item.text}
