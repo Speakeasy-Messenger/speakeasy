@@ -276,3 +276,65 @@ describe('DELETE /v1/users/me', () => {
     await app.close();
   });
 });
+
+describe('PUT /v1/users/me/refuse-video (#13)', () => {
+  const AUTH = { authorization: 'Bearer dvt_silent-golden-hawk' };
+
+  it('defaults to false on GET /v1/users/me', async () => {
+    const { app } = await makeApp();
+    const me = await app.inject({ method: 'GET', url: '/v1/users/me', headers: AUTH });
+    expect(me.json().refuse_video).toBe(false);
+    await app.close();
+  });
+
+  it('sets the flag, persists it, and reflects it on GET /me', async () => {
+    const { app } = await makeApp();
+    const put = await app.inject({
+      method: 'PUT',
+      url: '/v1/users/me/refuse-video',
+      headers: AUTH,
+      payload: { refuse: true },
+    });
+    expect(put.statusCode).toBe(204);
+    const me = await app.inject({ method: 'GET', url: '/v1/users/me', headers: AUTH });
+    expect(me.json().refuse_video).toBe(true);
+    await app.close();
+  });
+
+  it("drops 'video' from the user's advertised supported_call_kinds when refused", async () => {
+    const { app, repo } = await makeApp();
+    // Pretend the user's devices advertise audio+video+private, then refuse video.
+    await repo.setRefuseVideo('silent-golden-hawk', true);
+    const res = await app.inject({
+      method: 'GET',
+      url: '/v1/users/silent-golden-hawk',
+      headers: AUTH,
+    });
+    const kinds: string[] = res.json().supported_call_kinds ?? [];
+    expect(kinds).not.toContain('video');
+    await app.close();
+  });
+
+  it('400 on a non-boolean refuse value', async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/users/me/refuse-video',
+      headers: AUTH,
+      payload: { refuse: 'yes' },
+    });
+    expect(res.statusCode).toBe(400);
+    await app.close();
+  });
+
+  it('401 without bearer', async () => {
+    const { app } = await makeApp();
+    const res = await app.inject({
+      method: 'PUT',
+      url: '/v1/users/me/refuse-video',
+      payload: { refuse: true },
+    });
+    expect(res.statusCode).toBe(401);
+    await app.close();
+  });
+});

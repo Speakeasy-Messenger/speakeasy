@@ -122,7 +122,14 @@ export async function registerUserRoutes(
         }
         return reply.code(404).send({ error: 'not_found' });
       }
-      const supportedCallKinds = await aggregateCallKinds(id, opts);
+      let supportedCallKinds = await aggregateCallKinds(id, opts);
+      // "Refuse video calls" (#13): hide 'video' from this peer's
+      // advertised kinds so the caller's sheet never shows the Video row.
+      // The call-router enforces the real rejection (this is cosmetic /
+      // pre-flight); a stale caller is still rejected server-side.
+      if (supportedCallKinds && u.refuseVideo) {
+        supportedCallKinds = supportedCallKinds.filter((k) => k !== 'video');
+      }
       return reply.send({
         id: u.id,
         public_key: u.publicKey.toString('base64'),
@@ -156,7 +163,34 @@ export async function registerUserRoutes(
         public_key: u.publicKey.toString('base64'),
         created_at: u.createdAt.toISOString(),
         selected_avatar_id: u.selectedAvatarId ?? null,
+        refuse_video: u.refuseVideo ?? false,
       });
+    },
+  );
+
+  /**
+   * PUT /v1/users/me/refuse-video — set the per-user "Refuse video calls"
+   * privacy flag (#13). When on, the call-router rejects inbound video
+   * offers before ringing (caller gets `video_refused`), and this user's
+   * `/v1/users/:id` aggregation drops 'video' from supported_call_kinds.
+   */
+  app.put<{ Body: { refuse: boolean } }>(
+    '/v1/users/me/refuse-video',
+    {
+      preHandler: requireAuth,
+      schema: {
+        body: {
+          type: 'object',
+          required: ['refuse'],
+          properties: { refuse: { type: 'boolean' } },
+        },
+      },
+    },
+    async (request, reply) => {
+      const userId = request.auth?.userId;
+      if (!userId) return reply.code(401).send({ error: 'not_enrolled' });
+      await opts.repo.setRefuseVideo(userId, request.body.refuse);
+      return reply.code(204).send();
     },
   );
 

@@ -70,6 +70,8 @@ function buildDeps(opts?: {
     deviceToken: string;
     capabilities?: readonly ('audio' | 'video' | 'private')[];
   }>;
+  /** User ids whose "Refuse video calls" flag is on (#13). */
+  refuseVideoFor?: readonly string[];
 }): CallRouterDeps & { _push: MockPushProvider; _notifier: MockNotifier } {
   const connections = new InMemoryConnections();
   if (opts?.localPeerOf) {
@@ -98,6 +100,10 @@ function buildDeps(opts?: {
   const push = new MockPushProvider();
   const notifier: MockNotifier = { notify: vi.fn() };
   const callBuffer = createCallOfferBuffer();
+  const refuse = new Set(opts?.refuseVideoFor ?? []);
+  const users = {
+    findById: vi.fn(async (id: string) => ({ id, refuseVideo: refuse.has(id) })),
+  } as unknown as CallRouterDeps['users'];
   return {
     connections,
     presence,
@@ -106,6 +112,7 @@ function buildDeps(opts?: {
     callBuffer,
     push,
     log: silentLog(),
+    users,
     _push: push,
     _notifier: notifier,
   };
@@ -281,10 +288,9 @@ describe('routeCallFrame — online routing', () => {
       call_id: CALL_ID,
       ciphertext: CIPHERTEXT,
     });
-    // Server fans out with the normalized plaintext `kind` hint
-    // (Phase 5j Private Call); absent ⇒ defaults to 'audio'. The
-    // `undefined` third arg is the optional NotifyOptions — only set
-    // when kind === 'private' to filter peer devices by capability.
+    // Server fans out with the normalized plaintext `kind` hint; absent
+    // ⇒ defaults to 'audio'. Post-#13 there is NO third NotifyOptions
+    // argument — the capability gate was removed (masking is caller-local).
     expect(deps._notifier.notify).toHaveBeenCalledWith(
       'bob',
       expect.objectContaining({
@@ -294,7 +300,6 @@ describe('routeCallFrame — online routing', () => {
         ciphertext: CIPHERTEXT,
         kind: 'audio',
       }),
-      undefined,
     );
   });
 
@@ -421,27 +426,18 @@ describe('routeCallFrame — offline routing', () => {
 });
 
 /**
- * Phase 5j Private Call — server-side capability fan-out filter.
- *
- * The plan's "Capability handshake" / "Server-side fan-out filter
- * (load-bearing — Codex tension #1 catch)" section: when the caller
- * sends a `kind:'private'` offer, the server must NOT notify the peer's
- * devices whose declared `supported_call_kinds` doesn't include
- * `'private'`. Without this, an old device on the same account rings
- * with raw audio while the sender believes their voice is masked.
- *
- * These tests assert the router passes the right `requireCapability`
- * option down to `userNotifier.notify` so the filtering happens at the
- * notifier layer (which checks both local sockets via
- * `getDevicesWithCapability` and cross-instance via Redis envelope).
+ * #13 unified call entry — masking is caller-local, so the OLD
+ * `requireCapability:'private'` fan-out gate was REMOVED. A masked
+ * ('private') offer must now ring ALL of the callee's devices, old and
+ * new: a device that can't render the animal UI falls back to a plain
+ * audio call and still hears the caller's masked voice. These tests are
+ * the rewritten regression guard for that gate removal — they assert the
+ * router no longer passes any `requireCapability` option to notify.
  */
-describe('routeCallFrame — Private Call capability fan-out', () => {
-  it("kind:'private' passes requireCapability:'private' to userNotifier", async () => {
+describe('routeCallFrame — masked offer rings all devices (no capability gate)', () => {
+  it("kind:'private' rings the peer with NO requireCapability option", async () => {
     const deps = buildDeps({
-      localPeerOf: {
-        userId: 'bob',
-        deviceToken: 'dvt_bob_capable',
-      },
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_capable' },
       localPeerCapabilities: ['audio', 'video', 'private'],
     });
     await routeCallFrame(deps, 'alice', {
@@ -451,23 +447,17 @@ describe('routeCallFrame — Private Call capability fan-out', () => {
       ciphertext: CIPHERTEXT,
       kind: 'private',
     });
+    // Exactly two args — no third `requireCapability` argument.
     expect(deps._notifier.notify).toHaveBeenCalledWith(
       'bob',
-      expect.objectContaining({
-        type: 'call_offer',
-        from: 'alice',
-        kind: 'private',
-      }),
-      { requireCapability: 'private' },
+      expect.objectContaining({ type: 'call_offer', from: 'alice', kind: 'private' }),
     );
+    expect(deps._notifier.notify.mock.calls[0]).toHaveLength(2);
   });
 
-  it("kind:'audio' does NOT set requireCapability (existing fan-out behavior)", async () => {
+  it("kind:'audio' rings with no requireCapability option", async () => {
     const deps = buildDeps({
-      localPeerOf: {
-        userId: 'bob',
-        deviceToken: 'dvt_bob_phone',
-      },
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_phone' },
       localPeerCapabilities: ['audio', 'video'],
     });
     await routeCallFrame(deps, 'alice', {
@@ -480,11 +470,11 @@ describe('routeCallFrame — Private Call capability fan-out', () => {
     expect(deps._notifier.notify).toHaveBeenCalledWith(
       'bob',
       expect.objectContaining({ type: 'call_offer', kind: 'audio' }),
-      undefined,
     );
+    expect(deps._notifier.notify.mock.calls[0]).toHaveLength(2);
   });
 
-  it('unknown kind on the wire is coerced to audio (defense in depth alongside the receiver guard)', async () => {
+  it('unknown kind on the wire is coerced to audio (defense in depth)', async () => {
     const deps = buildDeps({
       localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob' },
     });
@@ -498,20 +488,16 @@ describe('routeCallFrame — Private Call capability fan-out', () => {
     expect(deps._notifier.notify).toHaveBeenCalledWith(
       'bob',
       expect.objectContaining({ kind: 'audio' }),
-      undefined,
     );
   });
 
-  it('peer has two devices, only the capable one receives a kind:private offer (via getDevicesWithCapability)', async () => {
-    // This is the Codex-tension-#1 scenario in concrete form: bob is
-    // signed in on his old phone (no Private support) AND his new phone
-    // (with Private support). A kind:'private' offer must reach ONLY
-    // the new phone — the old one rings with raw audio otherwise.
+  it('a masked offer reaches a peer signed in on BOTH an old and new device', async () => {
+    // Post-#13: the old phone (no 'private' capability) must ALSO ring —
+    // it falls back to plain audio and still hears the masked voice. The
+    // gate that previously filtered it out is gone, so the router rings
+    // the user (all devices) and passes no capability filter.
     const deps = buildDeps({
-      localPeerOf: {
-        userId: 'bob',
-        deviceToken: 'dvt_bob_old',
-      },
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_old' },
       localPeerCapabilities: ['audio', 'video'],
       extraLocalPeers: [
         {
@@ -521,13 +507,7 @@ describe('routeCallFrame — Private Call capability fan-out', () => {
         },
       ],
     });
-    // Sanity-check the connections map: getDevicesWithCapability('bob',
-    // 'private') should return exactly one socket (the new phone).
-    expect(
-      deps.connections.getDevicesWithCapability('bob', 'private').length,
-    ).toBe(1);
     expect(deps.connections.getDevices('bob').length).toBe(2);
-
     await routeCallFrame(deps, 'alice', {
       type: 'call_offer',
       to: 'bob',
@@ -535,13 +515,99 @@ describe('routeCallFrame — Private Call capability fan-out', () => {
       ciphertext: CIPHERTEXT,
       kind: 'private',
     });
-    // Router delegates the actual filtering to userNotifier — the
-    // assertion here is that the right opts get passed down so the
-    // notifier's getDevicesWithCapability fan-out filter kicks in.
     expect(deps._notifier.notify).toHaveBeenCalledWith(
       'bob',
       expect.objectContaining({ kind: 'private' }),
-      { requireCapability: 'private' },
+    );
+    expect(deps._notifier.notify.mock.calls[0]).toHaveLength(2);
+  });
+});
+
+/**
+ * #13 — "Refuse video calls". A video offer to a user who refuses video
+ * is rejected at the router BEFORE any ring/push/buffer: the caller gets
+ * a `video_refused` call_end; the callee sees nothing. Audio + masked
+ * ('private') offers are never gated by it.
+ */
+describe('routeCallFrame — refuse-video gate', () => {
+  it('rejects a video offer to a refusing callee: caller gets video_refused, callee untouched', async () => {
+    const deps = buildDeps({
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob' },
+      refuseVideoFor: ['bob'],
+    });
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+      kind: 'video',
+    });
+    // Caller (alice) is told video_refused.
+    expect(deps._notifier.notify).toHaveBeenCalledWith('alice', {
+      type: 'call_end',
+      from: 'bob',
+      call_id: CALL_ID,
+      reason: 'video_refused',
+    });
+    // The callee (bob) is never rung, pushed, or buffered.
+    expect(deps._notifier.notify).not.toHaveBeenCalledWith(
+      'bob',
+      expect.anything(),
+    );
+    expect(deps._push.calls).toHaveLength(0);
+    expect(await deps.callBuffer.drain('bob')).toEqual([]);
+  });
+
+  it('does NOT gate an audio offer to a video-refusing callee', async () => {
+    const deps = buildDeps({
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob' },
+      refuseVideoFor: ['bob'],
+    });
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+      kind: 'audio',
+    });
+    expect(deps._notifier.notify).toHaveBeenCalledWith(
+      'bob',
+      expect.objectContaining({ kind: 'audio' }),
+    );
+  });
+
+  it('does NOT gate a masked (private) offer to a video-refusing callee', async () => {
+    const deps = buildDeps({
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob' },
+      refuseVideoFor: ['bob'],
+    });
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+      kind: 'private',
+    });
+    expect(deps._notifier.notify).toHaveBeenCalledWith(
+      'bob',
+      expect.objectContaining({ kind: 'private' }),
+    );
+  });
+
+  it('lets a video offer through to a callee who does NOT refuse video', async () => {
+    const deps = buildDeps({
+      localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob' },
+    });
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+      kind: 'video',
+    });
+    expect(deps._notifier.notify).toHaveBeenCalledWith(
+      'bob',
+      expect.objectContaining({ kind: 'video' }),
     );
   });
 });

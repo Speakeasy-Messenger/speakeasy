@@ -297,7 +297,17 @@ export type CallEndReason =
    * "Private Call ended due to a technical issue on the other end",
    * distinct from a social `decline`. Closes Codex tension #5.
    */
-  | 'peer_filter_failure';
+  | 'peer_filter_failure'
+  /**
+   * The callee has "Refuse video calls" on (a per-user, server-stored
+   * setting). The server rejects a `kind: 'video'` offer at the router
+   * BEFORE ringing/pushing/buffering the callee, and sends this reason
+   * back to the CALLER only. The caller renders a quiet branded notice
+   * ("No video here.") with a one-tap fall-back to a masked audio call;
+   * the callee sees nothing. Audio/masked offers are never gated by it.
+   * (#13 unified call entry.)
+   */
+  | 'video_refused';
 
 /**
  * Call modality. `'private'` is the brand-promise mode that filters the

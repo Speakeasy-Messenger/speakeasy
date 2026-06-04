@@ -32,6 +32,13 @@ export interface UserSummary {
    * field. Server doesn't store JPEG photos at all.
    */
   selectedAvatarId?: string;
+  /**
+   * "Refuse video calls" — per-user privacy setting (#13). When true the
+   * call-router rejects inbound video offers before ringing, and the
+   * capability aggregation drops 'video' from `supported_call_kinds`.
+   * Defaults to false (video accepted) for users enrolled before #13.
+   */
+  refuseVideo?: boolean;
 }
 
 export interface UserRepo {
@@ -98,6 +105,10 @@ export interface UserRepo {
    * the client computes from userId).
    */
   setSelectedAvatar(userId: string, animalId: string | undefined): Promise<void>;
+
+  /** Set the per-user "Refuse video calls" flag (#13). Upsert-style; the
+   * route gates auth. */
+  setRefuseVideo(userId: string, refuse: boolean): Promise<void>;
 
   /**
    * Permanently delete a user and everything tied to them — devices,
