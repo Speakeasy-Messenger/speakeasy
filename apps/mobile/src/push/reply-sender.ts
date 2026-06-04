@@ -106,3 +106,55 @@ export async function sendReplyMessage(
   await new Promise((r) => setTimeout(r, deps.settleMs ?? 1500));
   return { messageId };
 }
+
+/** Deps for a headless GROUP inline reply — the orchestrator is injected
+ * so this module stays free of `../services.js` (unit-testable with a
+ * mock send). */
+export interface GroupReplySenderDeps {
+  /** The group send orchestrator's `sendGroupMessage` (does SKDM
+   * bootstrap → encryptForGroup → `message` frame with msg_type='group'). */
+  sendGroupMessage(opts: {
+    groupId: string;
+    members: string[];
+    selfUserId: string;
+    plaintext: Uint8Array;
+  }): Promise<void>;
+  /** Current group members (incl. self — the orchestrator filters self out). */
+  members: string[];
+  selfUserId: string;
+  /** Socket flush grace before the headless task ends. Default 1500ms. */
+  settleMs?: number;
+}
+
+/**
+ * Encrypt `text` for the group and fan it out via the orchestrator. Used
+ * by the headless inline-reply path — group sends are now reachable from
+ * a background task because the SenderKey store (SQLCipher), the per-group
+ * distributionId (AsyncStorage), and the member list (groups store) all
+ * open from any Android context.
+ *
+ * Returns a locally-minted `messageId` for the in-app echo. Group message
+ * frames don't carry a client message_id (the foreground send mints a
+ * local echo id the same way), so this id is for the local record only.
+ */
+export async function sendGroupReplyMessage(
+  groupId: string,
+  text: string,
+  deps: GroupReplySenderDeps,
+): Promise<{ messageId: string }> {
+  const trimmed = text.trim();
+  if (!trimmed) throw new Error('empty_reply');
+
+  const plaintext = encodePayload({ v: 1, text: trimmed });
+  await deps.sendGroupMessage({
+    groupId,
+    members: deps.members,
+    selfUserId: deps.selfUserId,
+    plaintext: utf8ToBytes(plaintext),
+  });
+  const messageId = newMessageId();
+  diag('push-reply', 'inline group reply sent', { groupId });
+
+  await new Promise((r) => setTimeout(r, deps.settleMs ?? 1500));
+  return { messageId };
+}

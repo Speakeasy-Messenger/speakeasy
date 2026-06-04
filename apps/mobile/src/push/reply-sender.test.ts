@@ -1,5 +1,11 @@
 import { describe, expect, it, vi } from 'vitest';
-import { sendReplyMessage, type ReplySenderDeps, type ReplyWsClient } from './reply-sender.js';
+import {
+  sendReplyMessage,
+  sendGroupReplyMessage,
+  type ReplySenderDeps,
+  type GroupReplySenderDeps,
+  type ReplyWsClient,
+} from './reply-sender.js';
 import { bytesToB64 } from '../utils/bytes.js';
 
 function mockWs(): { ws: ReplyWsClient; sent: WsClientMsgLike[] } {
@@ -127,5 +133,53 @@ describe('sendReplyMessage', () => {
     };
     await expect(sendReplyMessage('bob', '   ', deps)).rejects.toThrow('empty_reply');
     expect(encrypt).not.toHaveBeenCalled();
+  });
+});
+
+describe('sendGroupReplyMessage', () => {
+  it('fans the reply out through the orchestrator with the group members', async () => {
+    const sendGroupMessage = vi.fn().mockResolvedValue(undefined);
+    const deps: GroupReplySenderDeps = {
+      sendGroupMessage,
+      members: ['me', 'alice', 'bob'],
+      selfUserId: 'me',
+      settleMs: 0,
+    };
+
+    const { messageId } = await sendGroupReplyMessage('grp-1', '  hey all  ', deps);
+
+    expect(sendGroupMessage).toHaveBeenCalledOnce();
+    expect(sendGroupMessage).toHaveBeenCalledWith({
+      groupId: 'grp-1',
+      members: ['me', 'alice', 'bob'],
+      selfUserId: 'me',
+      plaintext: expect.any(Uint8Array),
+    });
+    // A local echo id is minted (group frames carry no client message_id).
+    expect(messageId).toBeTruthy();
+  });
+
+  it('throws on an empty reply without touching the orchestrator', async () => {
+    const sendGroupMessage = vi.fn();
+    const deps: GroupReplySenderDeps = {
+      sendGroupMessage,
+      members: ['me', 'alice'],
+      selfUserId: 'me',
+      settleMs: 0,
+    };
+    await expect(sendGroupReplyMessage('grp-1', '   ', deps)).rejects.toThrow('empty_reply');
+    expect(sendGroupMessage).not.toHaveBeenCalled();
+  });
+
+  it('propagates an orchestrator send failure to the caller', async () => {
+    const deps: GroupReplySenderDeps = {
+      sendGroupMessage: vi.fn().mockRejectedValue(new Error('skdm_bootstrap_failed')),
+      members: ['me', 'alice'],
+      selfUserId: 'me',
+      settleMs: 0,
+    };
+    await expect(sendGroupReplyMessage('grp-1', 'hi', deps)).rejects.toThrow(
+      'skdm_bootstrap_failed',
+    );
   });
 });

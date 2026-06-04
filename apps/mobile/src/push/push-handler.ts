@@ -39,12 +39,15 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
+import { useDistributionIds } from '../store/distribution-ids.js';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
-import { signalProtocol, groupMessaging, getWsClient } from '../services.js';
+import { api, signalProtocol, groupMessaging, getWsClient } from '../services.js';
+import { makeGroupOrchestrator } from '../crypto/group-orchestration.js';
 import { b64ToBytes, utf8FromBytes } from '../utils/bytes.js';
 import {
   sendReplyMessage,
+  sendGroupReplyMessage,
   loadPersistedUserId,
   type ReplySenderDeps,
 } from './reply-sender.js';
@@ -171,11 +174,15 @@ async function consumeRawPush(): Promise<PersistedPush | null> {
  */
 type PendingReply = {
   conversationId: string;
-  /** Peer handle — used to (re)open the direct conversation. */
+  /** Peer handle — used to (re)open the direct conversation (1:1 only). */
   peerId: string;
   messageId: string;
   text: string;
   sentAt: number;
+  /** Direct vs group — group echoes land in the group conversation
+   * (`byId[groupId]`) instead of an openDirect 1:1. Absent = 'direct'
+   * (back-compat with replies queued before group reply existed). */
+  msgType?: 'direct' | 'group';
 };
 
 async function enqueuePendingReply(p: PendingReply): Promise<void> {
@@ -210,6 +217,23 @@ export async function drainPendingReplies(): Promise<void> {
   if (list.length === 0) return;
   const myUserId = await loadPersistedUserId();
   for (const p of list) {
+    if (p.msgType === 'group') {
+      // Group echo: messages live in `byId[<groupId>]` (the bare id),
+      // keyed the same as inbound group messages + the foreground send's
+      // optimistic echo. No openDirect — that would mis-file the reply
+      // into a 1:1 with the inbound sender.
+      const groupId = p.conversationId.replace(/^group-/, '');
+      useConversations.getState().add(groupId, {
+        id: p.messageId,
+        from: 'me',
+        text: p.text,
+        kind: 'group',
+        sentAt: p.sentAt,
+        stage: 'sent',
+        delivered: false,
+      });
+      continue;
+    }
     // openDirect sets peerUserId (so the row lists) and is idempotent
     // on an existing entry. It returns conversationIdForDirect(...),
     // the same key inbound messages bucket under. Fall back to the
@@ -680,9 +704,11 @@ async function displayPushNotification(data: FcmData): Promise<void> {
             ...prior,
             { text, timestamp: Date.now(), person: { id: peer, name: '@' + peer } },
           ],
-          // Inline reply is 1:1 only — group send needs JS-side
-          // SenderKey state that isn't reachable headlessly.
-          withReply: data.msg_type !== 'group',
+          // Inline reply works for both 1:1 and groups now — group send
+          // is reachable headlessly (SenderKey store + distributionId +
+          // members all open from a background task). See
+          // sendGroupReplyHeadless.
+          withReply: true,
         });
         diag('push-bg', 'messaging notification displayed', { conversationId });
         return;
@@ -697,7 +723,7 @@ async function displayPushNotification(data: FcmData): Promise<void> {
   await displayGenericNotification(data);
 }
 
-/** Service-backed deps for the headless inline-reply sender. */
+/** Service-backed deps for the headless 1:1 inline-reply sender. */
 function replyDeps(): ReplySenderDeps {
   return {
     encrypt: (peer, plain) => signalProtocol.encrypt(peer, plain),
@@ -706,6 +732,48 @@ function replyDeps(): ReplySenderDeps {
     // storage — it is no longer mirrored into JS AsyncStorage.
     loadDeviceToken: getCachedDeviceToken,
   };
+}
+
+/**
+ * Send a headless inline reply to a GROUP. Builds the same send
+ * orchestrator the chat screen uses, but from a background task: the
+ * SenderKey store (SQLCipher), the per-group distributionId (AsyncStorage),
+ * and the member list (groups store) all open from any Android context,
+ * so a backgrounded reply can fan the SKDM out and encryptForGroup just
+ * like the foreground. `groupId` is derived from the conversationId
+ * (`group-<groupId>`). Throws (no token / no group / WS timeout) so the
+ * caller can surface a "couldn't send" banner.
+ */
+async function sendGroupReplyHeadless(
+  conversationId: string,
+  text: string,
+): Promise<{ messageId: string }> {
+  const groupId = conversationId.replace(/^group-/, '');
+  if (!useGroups.getState().hydrated) await useGroups.getState().hydrate();
+  if (!useDistributionIds.getState().hydrated)
+    await useDistributionIds.getState().hydrate();
+  const group = useGroups.getState().byId[groupId];
+  const myUserId = await loadPersistedUserId();
+  if (!group || !myUserId) throw new Error('group_reply_no_context');
+  const deviceToken = await getCachedDeviceToken();
+  if (!deviceToken) throw new Error('no_device_token');
+
+  const ws = getWsClient(async () => deviceToken);
+  ws.connect();
+  await ws.waitForAuthed();
+  const orchestrator = makeGroupOrchestrator({
+    api,
+    signalProtocol,
+    groupMessaging,
+    ws,
+    getDeviceToken: async () => deviceToken,
+    getOrCreateDistributionId: (id) => useDistributionIds.getState().getOrCreate(id),
+  });
+  return sendGroupReplyMessage(groupId, text, {
+    sendGroupMessage: (opts) => orchestrator.sendGroupMessage(opts),
+    members: group.members,
+    selfUserId: myUserId,
+  });
 }
 
 /**
@@ -790,30 +858,38 @@ export async function handleInlineReplyFromData(args: {
   // the send so the banner doesn't vanish for the WS round-trip.
   // No `person` on the sent message → MessagingStyle renders it as the
   // local user.
+  const isGroup = msgType === 'group';
   await displayMessagingNotification({
     conversationId,
     peerHandle: peerId,
     msgType,
     messages: [...prior, { text, timestamp: Date.now() }],
-    withReply: msgType !== 'group',
+    withReply: true,
   });
 
   try {
-    const { messageId } = await sendReplyMessage(peerId, text, replyDeps());
+    // Group replies fan out via the send orchestrator (SKDM bootstrap +
+    // encryptForGroup); 1:1 replies use the direct Signal session. Both
+    // run headlessly.
+    const { messageId } = isGroup
+      ? await sendGroupReplyHeadless(conversationId, text)
+      : await sendReplyMessage(peerId, text, replyDeps());
     // Record the reply in the in-app conversation log. Queued (not
     // added straight to the store) because this may run headlessly
     // with an un-hydrated store; drained right away when the app is
     // already foreground, otherwise on the next foreground.
     //
-    // `messageId` MUST be the id that went out on the wire — the peer's
-    // read receipt references it. Minting a fresh id here is what left
-    // inline replies showing no read receipt.
+    // For 1:1, `messageId` MUST be the wire id — the peer's read receipt
+    // references it; minting a fresh id left inline replies un-receipted.
+    // Group frames carry no client message_id (the foreground echo mints
+    // a local id the same way), so the group id is local-only.
     await enqueuePendingReply({
       conversationId,
       peerId,
       messageId,
       text,
       sentAt: Date.now(),
+      msgType: isGroup ? 'group' : 'direct',
     });
     if (AppState.currentState === 'active') await drainPendingReplies();
     diag('push-reply', 'reply sent + notification updated', { conversationId });
@@ -827,7 +903,7 @@ export async function handleInlineReplyFromData(args: {
         ...prior,
         { text: `⚠️ Not sent — open the app to resend: "${text}"`, timestamp: Date.now() },
       ],
-      withReply: msgType !== 'group',
+      withReply: true,
     });
   }
 }
