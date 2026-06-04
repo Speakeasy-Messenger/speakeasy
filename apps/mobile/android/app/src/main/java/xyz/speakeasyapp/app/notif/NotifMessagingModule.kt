@@ -175,13 +175,21 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
 
       val builder = NotificationCompat.Builder(reactContext, channelId)
         .setSmallIcon(R.drawable.ic_notification)
-        .setContentTitle(title)
         .setContentText(body)
         .setStyle(style)
         .setContentIntent(tapPendingIntent)
         .setAutoCancel(true)
         .setShortcutId(shortcutId)
         .setCategory(NotificationCompat.CATEGORY_MESSAGE)
+      // Title source, exactly one per notification:
+      //   - group → MessagingStyle.conversationTitle (set above)
+      //   - 1:1   → setContentTitle here
+      // Setting BOTH made Samsung One UI render the title on two lines
+      // (the #119 regression: "@sender" / room name shown twice). A 1:1
+      // has no conversationTitle, so its header still comes from here.
+      if (msgType != "group") {
+        builder.setContentTitle(title)
+      }
       // Intentionally NOT calling `setLargeIcon`. On Samsung One UI
       // and Pixel, a largeIcon paints a second avatar on the right
       // side of the notification — no real messenger does that. The

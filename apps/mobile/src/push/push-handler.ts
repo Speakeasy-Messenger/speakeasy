@@ -38,6 +38,7 @@ import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
+import { useGroups } from '../store/groups.js';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
 import { signalProtocol, groupMessaging, getWsClient } from '../services.js';
@@ -486,8 +487,18 @@ async function displayMessagingNotification(args: {
   // stack.
   await persistNotifStack(args.conversationId, messages);
   const latest = messages[messages.length - 1];
-  // Group banners use the server-resolved room name; 1:1 uses the handle.
-  const bannerTitle = args.title ?? '@' + args.peerHandle;
+  // Banner title resolution:
+  //   1:1   → server-resolved "@sender" (data.title) or the handle.
+  //   group → server-resolved room name (data.title). If that's missing
+  //           (e.g. a stale pre-fix push), fall back to the locally-known
+  //           room name, then a neutral label — NEVER the sender handle,
+  //           which is what made a group banner read "@sender" twice.
+  let bannerTitle = args.title;
+  if (!bannerTitle && args.msgType === 'group') {
+    const groupId = args.conversationId.replace(/^group-/, '');
+    bannerTitle = useGroups.getState().byId[groupId]?.name || 'speakeasy';
+  }
+  bannerTitle = bannerTitle ?? '@' + args.peerHandle;
 
   if (NotifMessaging.available()) {
     try {
@@ -630,6 +641,11 @@ async function displayPushNotification(data: FcmData): Promise<void> {
   const conversationId = data.conversation_id;
   if (!useConversations.getState().hydrated) {
     await useConversations.getState().hydrate();
+  }
+  // Group banner falls back to the locally-known room name when the push
+  // omits it — needs the groups store hydrated in this headless context.
+  if (!useGroups.getState().hydrated) {
+    await useGroups.getState().hydrate();
   }
   if (shouldSuppressPushForMute(conversationId, useConversations.getState())) {
     diag('push-bg', 'notification suppressed for muted conversation', {
