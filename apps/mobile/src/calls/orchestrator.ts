@@ -295,6 +295,7 @@ export class CallOrchestrator {
   /** User declined an incoming call before answering. */
   decline(): void {
     if (!this.active || this.active.stage !== 'incoming_ringing') return;
+    diag('call', 'decline', { callId: this.active.callId, stage: this.active.stage });
     this.deps.send({
       type: 'call_end',
       to: this.active.peerUserId,
@@ -307,6 +308,7 @@ export class CallOrchestrator {
   /** User hung up an active call, or cancelled a ringing one. */
   hangup(): void {
     if (!this.active) return;
+    diag('call', 'hangup', { callId: this.active.callId, stage: this.active.stage });
     const wireReason: CallEndReason =
       this.active.stage === 'outgoing_dialing' ||
       this.active.stage === 'outgoing_ringing'
@@ -709,6 +711,7 @@ export class CallOrchestrator {
     if (!this.active || this.active.callId !== callId || this.active.peerUserId !== fromUserId) {
       return;
     }
+    diag('call', 'handleIncomingEnd', { reason, callId, fromUserId, stage: this.active.stage });
     // Wire reason is the SENDER's POV. `filter_failure` over the wire
     // means "the OTHER party's filter died" from my perspective — the
     // local stored reason becomes `peer_filter_failure` so the inline
@@ -938,6 +941,26 @@ export class CallOrchestrator {
 
   private endLocally(reason: CallEndedReason): void {
     if (!this.active) return;
+    // rc.60 — the video-call-from-cold-start-push teardown bug (chloro,
+    // 2026-06-04) tore the call down ~2.3s into ringing with NO logged
+    // cause: every teardown entry point below (decline/hangup/
+    // handleIncomingEnd) was silent on the happy path, so the diagnostic
+    // could only show the lagging `[webrtc] connectionstate closed` from
+    // our own peer.close() — never WHY. Log the reason + stage + a
+    // best-effort caller frame here (the single chokepoint every
+    // teardown funnels through) so the next repro names the path in one
+    // line. The stack is minified in release but the `reason` alone
+    // disambiguates most callers (decline→'decline', hangup→
+    // 'completed'/'cancel', incoming call_end→'no_answer'/'busy'/…,
+    // filter→'filter_failure', connstate→'failed').
+    diag('call', 'endLocally', {
+      reason,
+      stage: this.active.stage,
+      callId: this.active.callId,
+      kind: this.active.kind,
+      isCaller: this.active.isCaller,
+      by: new Error('endLocally').stack?.split('\n').slice(2, 6).join(' ‹ ').slice(0, 280),
+    });
     const startedAt = this.active.stageEnteredAt; // first stage's timestamp
     const connectedAt = this.active.connectedAt;
     const endedAt = this.now();
