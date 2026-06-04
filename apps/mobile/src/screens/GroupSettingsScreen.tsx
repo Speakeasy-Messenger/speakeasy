@@ -19,7 +19,6 @@ import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
-import { StatusSquare } from '../components/StatusSquare.js';
 import { TTLSegmentedControl } from '../components/TTLSegmentedControl.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { ApiError } from '../api/client.js';
@@ -425,9 +424,7 @@ function MemberRow({
             <Text style={[styles.youSuffix, { color: themed.slate }]}>
               · you
             </Text>
-          ) : (
-            <StatusSquare variant="offline" />
-          )}
+          ) : null}
         </View>
         {isCreator ? (
           <Text style={[styles.creatorBadge, { color: themed.primary }]}>

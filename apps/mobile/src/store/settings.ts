@@ -31,9 +31,6 @@ interface SettingsState {
    * `api.setRefuseVideo` and seeds this from `GET /v1/users/me`. */
   refuseVideo: boolean;
 
-  // Privacy → Findability
-  showOnlineStatus: boolean;
-
   // Notifications → Messages
   /** Drives the in-app banner toggle row "Banner when in another
    * conversation" — same value the original `inAppNotificationsEnabled`
@@ -61,7 +58,6 @@ interface SettingsState {
   setAllowIncomingCalls: (v: boolean) => void;
   setAnimateAvatarMouth: (v: boolean) => void;
   setRefuseVideo: (v: boolean) => void;
-  setShowOnlineStatus: (v: boolean) => void;
   setInAppNotificationsEnabled: (v: boolean) => void;
   setMessageSoundEnabled: (v: boolean) => void;
   setMessageVibrationEnabled: (v: boolean) => void;
@@ -80,7 +76,6 @@ type PersistedShape = Partial<
     | 'setAllowIncomingCalls'
     | 'setAnimateAvatarMouth'
     | 'setRefuseVideo'
-    | 'setShowOnlineStatus'
     | 'setInAppNotificationsEnabled'
     | 'setMessageSoundEnabled'
     | 'setMessageVibrationEnabled'
@@ -97,7 +92,6 @@ const DEFAULTS = {
   allowIncomingCalls: true,
   animateAvatarMouth: true,
   refuseVideo: false,
-  showOnlineStatus: true,
   inAppNotificationsEnabled: true,
   messageSoundEnabled: true,
   messageVibrationEnabled: true,
@@ -120,7 +114,6 @@ function snapshot(s: SettingsState): PersistedShape {
     allowIncomingCalls: s.allowIncomingCalls,
     animateAvatarMouth: s.animateAvatarMouth,
     refuseVideo: s.refuseVideo,
-    showOnlineStatus: s.showOnlineStatus,
     inAppNotificationsEnabled: s.inAppNotificationsEnabled,
     messageSoundEnabled: s.messageSoundEnabled,
     messageVibrationEnabled: s.messageVibrationEnabled,
@@ -145,10 +138,6 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
   setRefuseVideo: (v) => {
     set({ refuseVideo: v });
-    void persist(snapshot(get()));
-  },
-  setShowOnlineStatus: (v) => {
-    set({ showOnlineStatus: v });
     void persist(snapshot(get()));
   },
   setInAppNotificationsEnabled: (v) => {
