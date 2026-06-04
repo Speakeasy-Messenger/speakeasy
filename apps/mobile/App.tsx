@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { AvatarCacheWarmer } from './src/avatars/AvatarCacheWarmer.js';
+import { GroupMarkCacheWarmer } from './src/avatars/GroupMarkCacheWarmer.js';
 import { useIdentity } from './src/store/identity.js';
 import { useBlocks } from './src/store/blocks.js';
 import { useOwnership } from './src/store/ownership.js';
@@ -1012,6 +1013,8 @@ export default function App() {
             />
             {/* Off-screen — rasterizes peer avatars for notifications. */}
             <AvatarCacheWarmer />
+            {/* Off-screen — rasterizes group room-marks for notifications. */}
+            <GroupMarkCacheWarmer />
           </>
         ) : (
           <SplashScreen />

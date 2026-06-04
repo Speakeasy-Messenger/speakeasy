@@ -468,7 +468,14 @@ async function displayMessagingNotification(args: {
   // bitmaps directly via BitmapFactory.decodeFile, sidestepping the
   // five failed attempts to coax notifee/Fresco into loading a
   // runtime-cached PNG by URI (file://, data:, content://).
-  const peerAvatarPath = await resolveAvatarPath(args.peerHandle);
+  //
+  // For a group, the conversation icon is the room's own mark
+  // (GroupMarkCacheWarmer caches it under the conversation/group id), not
+  // the sender's portrait — so the banner is identified by the room, like
+  // any messenger. The sender still shows per-line inside MessagingStyle.
+  const conversationAvatarId =
+    args.msgType === 'group' ? args.conversationId : args.peerHandle;
+  const peerAvatarPath = await resolveAvatarPath(conversationAvatarId);
   const selfAvatarPath = myUserId ? await resolveAvatarPath(myUserId) : undefined;
   // Pre-trim the visible stack to MAX_NOTIF_MESSAGES so the persisted
   // copy + the native call see the same set.
