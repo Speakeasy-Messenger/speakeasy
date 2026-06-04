@@ -20,14 +20,7 @@ import React from 'react';
 import { Animated } from 'react-native';
 import Svg, {
   Circle,
-  Defs,
   Ellipse,
-  FeComposite,
-  FeFlood,
-  FeMerge,
-  FeMergeNode,
-  FeMorphology,
-  Filter,
   G,
   Line,
   Path,
@@ -67,6 +60,50 @@ const AnimatedPath = Animated.createAnimatedComponent(Path);
 const BRASS = '#E5A645';
 const BONE = '#F2E9D8';
 const INK = '#14091A';
+
+/**
+ * Per-theme contrast outline (#12). The marks hard-code BONE ("white") +
+ * INK ("black") with no theme awareness, so BONE shapes vanish on the cream
+ * surface (light) and INK shapes vanish on the aubergine (dark).
+ *
+ * Fix: render the mark a SECOND time BEHIND the real one, recolored to the
+ * theme-contrast color (INK edge in light mode, BONE in dark) with every
+ * shape grown by an even stroke — so a uniform hairline pokes out past the
+ * real mark's silhouette. Pure fill/stroke (NOT a filter — react-native-svg
+ * filters don't paint on Android; NOT a scale — that gives an uneven edge),
+ * so it renders everywhere incl. the `toDataURL` notification path.
+ * `recolorEdge` clones the mark's element tree (zero per-mark edits):
+ *  - real fills (≠ 'none') → edge color; filled-only shapes gain an outward
+ *    stroke so they grow evenly.
+ *  - strokes (the heron neck, beak, legs) → edge color, widened by EDGE_GROW.
+ * Verified visually on the heron via an offline resvg render before shipping.
+ */
+const EDGE_GROW = 3;
+function recolorEdge(node: React.ReactNode, color: string): React.ReactNode {
+  if (!React.isValidElement(node)) return node;
+  const p = node.props as {
+    fill?: string;
+    stroke?: string;
+    strokeWidth?: number | string;
+    children?: React.ReactNode;
+  };
+  const hasFill = p.fill !== undefined && p.fill !== 'none';
+  const hasStroke = p.stroke !== undefined && p.stroke !== 'none';
+  const patch: Record<string, unknown> = {};
+  if (hasFill) patch.fill = color;
+  if (hasStroke) {
+    patch.stroke = color;
+    if (typeof p.strokeWidth === 'number') patch.strokeWidth = p.strokeWidth + EDGE_GROW;
+  } else if (hasFill) {
+    patch.stroke = color;
+    patch.strokeWidth = EDGE_GROW;
+  }
+  if (p.children !== undefined) {
+    const kids = React.Children.map(p.children, (c) => recolorEdge(c, color));
+    return React.cloneElement(node, patch, kids);
+  }
+  return React.cloneElement(node, patch);
+}
 
 // ─────────────────────────────────────────────────────────────────────
 // Helper: a pair of <AnimatedG> wrappers for the left + right eye that
@@ -1799,6 +1836,7 @@ export function AnimalBody({
   amplitude,
   prosody,
   renderForCall,
+  edgeColor,
 }: {
   animalId: string;
   eyeScale: AnimalRenderProps['eyeScale'];
@@ -1813,6 +1851,8 @@ export function AnimalBody({
    * static surfaces (chat row, picker) never set it.
    */
   renderForCall?: boolean;
+  /** #12 contrast outline color, or undefined to skip the edge layer. */
+  edgeColor?: string;
 }): React.ReactElement | null {
   const def = ANIMALS[animalId];
   if (!def) return null;
@@ -1832,16 +1872,52 @@ export function AnimalBody({
   // means swapping in/out of a call (default ↔ call-mask) also
   // resets hook order, so any future per-animal Render that adds
   // hooks doesn't trip the rc.6 "Rendered more hooks" class of crash.
+  const variant = useCallMask ? 'call' : 'default';
   return (
-    <RenderHost
-      key={`${animalId}-${useCallMask ? 'call' : 'default'}`}
-      render={render}
-      eyeScale={eyeScale}
-      mouthScale={mouthScale}
-      amplitude={amplitude}
-      prosody={prosody}
-    />
+    <>
+      {edgeColor ? (
+        <EdgeHost
+          key={`${animalId}-${variant}-edge`}
+          render={render}
+          eyeScale={eyeScale}
+          mouthScale={mouthScale}
+          amplitude={amplitude}
+          prosody={prosody}
+          color={edgeColor}
+        />
+      ) : null}
+      <RenderHost
+        key={`${animalId}-${variant}`}
+        render={render}
+        eyeScale={eyeScale}
+        mouthScale={mouthScale}
+        amplitude={amplitude}
+        prosody={prosody}
+      />
+    </>
   );
+}
+
+/**
+ * Renders the mark recolored to the contrast `color` (the #12 outline
+ * layer), drawn behind the real `RenderHost`. Hooks inside `render(...)`
+ * attribute to THIS component's fiber (same contract as RenderHost), so
+ * its own `key` keeps it isolated.
+ */
+function EdgeHost({
+  render,
+  color,
+  eyeScale,
+  mouthScale,
+  amplitude,
+  prosody,
+}: {
+  render: AnimalRender;
+  color: string;
+} & Omit<AnimalRenderProps, 'amplitude'> & {
+    amplitude: AnimalRenderProps['amplitude'];
+  }): React.ReactElement {
+  return <>{recolorEdge(render({ eyeScale, mouthScale, amplitude, prosody }), color)}</>;
 }
 
 function RenderHost({
@@ -1884,60 +1960,24 @@ export function AnimalSvg({
   // value every paint.
   const zeroAmpRef = React.useRef<Animated.Value | null>(null);
   if (zeroAmpRef.current === null) zeroAmpRef.current = new Animated.Value(0);
-  // Per-theme contrast edge (#12). The marks hard-code BONE ("white") +
-  // INK ("black") with no theme awareness, so BONE shapes vanish on the
-  // cream surface (light) and INK shapes vanish on the aubergine (dark).
-  //
-  // Fix: an EVEN-WIDTH outline around the mark's silhouette, in the
-  // theme-contrast color (INK in light mode, BONE in dark mode), via an
-  // SVG dilate filter — `feMorphology(dilate)` grows the mark's alpha
-  // uniformly in every direction (so thin parts like the heron neck and
-  // octopus legs get the SAME hairline as fat parts), floods it with the
-  // edge color, and draws the real mark back on top. One filter, zero
-  // per-mark edits, renders through `toDataURL` too.
-  //
-  // (Replaces the rc.47 scale-up "sticker" silhouette, which produced an
-  // UNEVEN, directional edge — scaling from center can't make a uniform
-  // outline — and used React.useId() colon-ids that broke `url(#…)`
-  // references and cross-clipped different animals in the list.)
+  // Per-theme contrast outline (#12) — AnimalBody draws the recolored edge
+  // layer behind the real mark when `edgeColor` is set. See `recolorEdge`.
+  // INK edge on the cream (light) surface; BONE edge on the aubergine (dark).
   const { mode } = useTheme();
   const edgeColor = mode === 'dark' ? BONE : INK;
-  // Valid, unique filter id. useId() returns colon-bearing strings (":r0:")
-  // that are illegal in an SVG id / `url(#…)` reference — strip to a safe
-  // charset so each avatar's filter resolves to ITS OWN definition.
-  const safeId = React.useId().replace(/[^a-zA-Z0-9]/g, '');
-  const edgeFilterId = `avedge-${safeId}`;
   if (!ANIMALS[animalId]) return null;
   const amp = amplitude ?? zeroAmpRef.current;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
-      <Defs>
-        {/* Region padded so the dilated edge isn't clipped at the bounds. */}
-        <Filter id={edgeFilterId} x="-15%" y="-15%" width="130%" height="130%">
-          <FeMorphology
-            in="SourceAlpha"
-            operator="dilate"
-            radius={1.4}
-            result="dilated"
-          />
-          <FeFlood floodColor={edgeColor} floodOpacity={0.55} result="flood" />
-          <FeComposite in="flood" in2="dilated" operator="in" result="edge" />
-          <FeMerge>
-            <FeMergeNode in="edge" />
-            <FeMergeNode in="SourceGraphic" />
-          </FeMerge>
-        </Filter>
-      </Defs>
-      <G filter={`url(#${edgeFilterId})`}>
-        <AnimalBody
-          animalId={animalId}
-          eyeScale={eyeScale}
-          mouthScale={mouthScale}
-          amplitude={amp}
-          prosody={prosody}
-          renderForCall={renderForCall}
-        />
-      </G>
+      <AnimalBody
+        animalId={animalId}
+        eyeScale={eyeScale}
+        mouthScale={mouthScale}
+        amplitude={amp}
+        prosody={prosody}
+        renderForCall={renderForCall}
+        edgeColor={edgeColor}
+      />
     </Svg>
   );
 }
