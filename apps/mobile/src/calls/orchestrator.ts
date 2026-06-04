@@ -557,7 +557,22 @@ export class CallOrchestrator {
     ciphertextB64: string,
   ): Promise<void> {
     if (this.active) {
-      // Already on a call — tell the caller we're busy. Don't transition.
+      // Re-delivered offer for the call we're ALREADY handling — ignore
+      // it, don't busy-reject our own call. The server now always buffers
+      // the offer as a safety net against stale-presence delivery to a
+      // dead socket (call-router.ts), so a network flap mid-ring can drain
+      // a duplicate of the live offer. Without this guard that duplicate
+      // would hit the busy branch below and `call_end` our own ringing
+      // call. Match on callId (peer is implied — same call).
+      if (this.active.callId === callId) {
+        diag('call', 'duplicate offer for active call ignored', {
+          fromUserId,
+          callId,
+          stage: this.active.stage,
+        });
+        return;
+      }
+      // A DIFFERENT call while we're busy — tell that caller we're busy.
       this.deps.send({
         type: 'call_end',
         to: fromUserId,

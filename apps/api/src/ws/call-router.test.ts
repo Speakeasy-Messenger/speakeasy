@@ -314,7 +314,11 @@ describe('routeCallFrame — online routing', () => {
     expect(deps._notifier.notify).toHaveBeenCalledTimes(1);
   });
 
-  it('does NOT buffer the offer when recipient is online (live route wins)', async () => {
+  it('buffers the offer as a safety net even when the recipient appears online', async () => {
+    // Presence can be stale for a few seconds after a background
+    // disconnect; a live notify to a now-dead socket is silently dropped.
+    // The buffer must still hold the offer so the callee's reconnect drain
+    // recovers it (chloro 2026-06-04: tapped call notif → chat, no ring).
     const deps = buildDeps({
       localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_phone' },
     });
@@ -323,6 +327,31 @@ describe('routeCallFrame — online routing', () => {
       to: 'bob',
       call_id: CALL_ID,
       ciphertext: CIPHERTEXT,
+    });
+    // Live route still fires...
+    expect(deps._notifier.notify).toHaveBeenCalledTimes(1);
+    // ...AND the offer is buffered for the reconnect-drain safety net.
+    expect(await deps.callBuffer.drain('bob')).toEqual([
+      { type: 'call_offer', fromUserId: 'alice', callId: CALL_ID, ciphertext: CIPHERTEXT },
+    ]);
+  });
+
+  it('clears the buffered offer when the callee answers (no phantom re-ring)', async () => {
+    // Seed a buffered offer for bob (the callee), then bob answers. The
+    // answer flows bob→alice, so the callee whose buffer must be cleared
+    // is the SENDER of the answer, not `to`.
+    const deps = buildDeps({ presenceInstance: 'B' });
+    deps.callBuffer.put('bob', {
+      type: 'call_offer',
+      fromUserId: 'alice',
+      callId: CALL_ID,
+      ciphertext: CIPHERTEXT,
+    });
+    await routeCallFrame(deps, 'bob', {
+      type: 'call_answer',
+      to: 'alice',
+      call_id: CALL_ID,
+      ciphertext: 'QU5T',
     });
     expect(await deps.callBuffer.drain('bob')).toEqual([]);
   });

@@ -227,6 +227,51 @@ export async function routeCallFrame(
       );
   }
 
+  // -- buffer bookkeeping (runs regardless of online status) ----------
+  // Presence can be stale for a few seconds after a background
+  // disconnect (the app closes its WS when it backgrounds). In that
+  // window the OLD code saw the callee as "online", live-`notify`d the
+  // offer to a now-dead socket (silently dropped), and returned WITHOUT
+  // buffering — so the callee's reconnect drained nothing and never rang
+  // (chloro 2026-06-04: tapped the call notification, landed in the chat,
+  // no offer ever arrived; the caller gave up). Always buffer the offer
+  // (+ trailing ICE) so the reconnect drain is authoritative. The 30s TTL
+  // plus clear-on-answer / clear-on-end keep a successfully-delivered
+  // offer from re-ringing; the client also ignores a re-delivered offer
+  // for the call it's already handling (orchestrator handleIncomingOffer).
+  switch (msg.type) {
+    case 'call_offer':
+      deps.callBuffer.put(msg.to, {
+        type: 'call_offer',
+        fromUserId: senderUserId,
+        callId: msg.call_id,
+        ciphertext: msg.ciphertext as string,
+      });
+      break;
+    case 'call_ice':
+      // Buffered only if it matches a buffered offer; otherwise dropped
+      // (no anchor SDP makes a stray ICE useless).
+      deps.callBuffer.put(msg.to, {
+        type: 'call_ice',
+        fromUserId: senderUserId,
+        callId: msg.call_id,
+        ciphertext: msg.ciphertext as string,
+      });
+      break;
+    case 'call_answer':
+      // Callee answered → drop their buffered offer so a mid-call
+      // reconnect within the TTL can't re-ring an answered call. The
+      // answer flows callee→caller, so the callee (whose buffer holds the
+      // offer) is the SENDER, not `msg.to`.
+      deps.callBuffer.clear(senderUserId, msg.call_id);
+      break;
+    case 'call_end':
+      // Either side hung up / caller cancelled → drop the buffered offer
+      // so the callee doesn't ring on a stale offer when they reconnect.
+      deps.callBuffer.clear(msg.to, msg.call_id);
+      break;
+  }
+
   // -- presence check: online anywhere? -------------------------------
   // Local fast path first (cheap, avoids Redis). If not local, ask
   // presence whether the user is authed on any instance in the
@@ -251,14 +296,9 @@ export async function routeCallFrame(
     // the animal UI fall back to a plain audio call and still hear the
     // masked voice. (Previously 'private' offers were filtered to
     // private-capable devices; that gate is gone with the unify.)
+    // The offer is ALSO buffered above; if this live delivery lands on a
+    // stale (dead) socket, the callee's reconnect drain recovers it.
     deps.userNotifier.notify(msg.to, frameToSend);
-
-    // Clear any stale buffered offer if the caller hung up while the
-    // callee was reconnecting (rare race). Without this, the next
-    // buffer drain would surface a phantom ring.
-    if (msg.type === 'call_end') {
-      deps.callBuffer.clear(msg.to, msg.call_id);
-    }
     if (msg.type !== 'call_ice') {
       recordCallRoute(deps, msg.type, msg.to, msg.call_id, senderUserId, {
         decision: onlineLocally ? 'online_local' : 'online_cross_instance',
@@ -268,32 +308,9 @@ export async function routeCallFrame(
     return ok();
   }
 
-  // -- truly offline: buffer + (for offer) push already fired ---------
-  if (msg.type === 'call_offer') {
-    // Buffer for the ringing window. On the recipient's next WS auth
-    // (any instance), the offer + trailing ICE drain in order.
-    // Replaces any prior buffered call for this recipient.
-    deps.callBuffer.put(msg.to, {
-      type: 'call_offer',
-      fromUserId: senderUserId,
-      callId: msg.call_id,
-      ciphertext: msg.ciphertext as string,
-    });
-  } else if (msg.type === 'call_ice') {
-    // Trickle ICE after a buffered offer. The buffer drops ICE
-    // without a matching offer — no anchor SDP makes them useless.
-    deps.callBuffer.put(msg.to, {
-      type: 'call_ice',
-      fromUserId: senderUserId,
-      callId: msg.call_id,
-      ciphertext: msg.ciphertext as string,
-    });
-  } else if (msg.type === 'call_end') {
-    // Caller gave up before the callee reconnected. Clear the buffer
-    // so the callee doesn't ring on a stale offer when they come back.
-    deps.callBuffer.clear(msg.to, msg.call_id);
-  }
-  // call_answer to offline peer is a no-op — the peer's local
+  // -- truly offline: the offer/ICE is already buffered above and the
+  // always-push (for offers) already fired. Just record the decision.
+  // call_answer to an offline peer is a no-op — the peer's local
   // ringing-window timeout produces the same outcome.
   if (msg.type !== 'call_ice') {
     recordCallRoute(deps, msg.type, msg.to, msg.call_id, senderUserId, {
