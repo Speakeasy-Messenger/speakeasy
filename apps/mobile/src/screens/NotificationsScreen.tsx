@@ -45,18 +45,16 @@ export function NotificationsScreen({ onBack }: Props): React.ReactElement {
         <SettingsListItem
           kind="toggle"
           title="Sound"
-          description="Coming soon — for now, control message sound in your phone's notification settings."
+          description="Play a sound for new messages."
           value={messageSoundEnabled}
           onChange={setMessageSoundEnabled}
-          disabled
         />
         <SettingsListItem
           kind="toggle"
           title="Vibration"
-          description="Coming soon — for now, control vibration in your phone's notification settings."
+          description="Vibrate for new messages."
           value={messageVibrationEnabled}
           onChange={setMessageVibrationEnabled}
-          disabled
         />
         <SettingsListItem
           kind="toggle"
@@ -79,18 +77,16 @@ export function NotificationsScreen({ onBack }: Props): React.ReactElement {
         <SettingsListItem
           kind="toggle"
           title="Ringtone"
-          description="Coming soon — incoming calls use your system ringtone for now."
+          description="Play a sound for incoming calls."
           value={ringtoneEnabled}
           onChange={setRingtoneEnabled}
-          disabled
         />
         <SettingsListItem
           kind="toggle"
           title="Vibrate on incoming"
-          description="Coming soon — incoming calls vibrate per your system settings for now."
+          description="Vibrate for incoming calls."
           value={vibrateOnIncoming}
           onChange={setVibrateOnIncoming}
-          disabled
         />
       </ScrollView>
     </SafeAreaView>

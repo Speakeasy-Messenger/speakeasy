@@ -40,6 +40,8 @@ import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
+import { useSettings } from '../store/settings.js';
+import { notifChannelSpec, type NotifKind } from './notif-channels.js';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
 import { api, signalProtocol, groupMessaging, getWsClient } from '../services.js';
@@ -59,8 +61,10 @@ import { shouldSuppressPushForMute } from './push-mute-policy.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
-/** Android notification channel — also created natively in MainActivity. */
-const CHANNEL_ID = 'speakeasy_default';
+// Notification channels are now resolved per-kind from the user's Sound /
+// Vibration toggles — see resolveChannel + notif-channels.ts (#10). The
+// legacy `speakeasy_default` channel is still pre-created natively in
+// MainActivity and remains the native module's hard fallback.
 
 // ---------------------------------------------------------------------------
 // FCM data-payload shape
@@ -376,14 +380,29 @@ const SELF_PERSON = { id: 'self', name: 'You' };
 /** How many recent messages to keep stacked in one notification. */
 const MAX_NOTIF_MESSAGES = 6;
 
-async function ensureChannel(): Promise<void> {
+/**
+ * Create (idempotently) and return the notification channel id that
+ * honors the user's Sound + Vibration toggles for this kind (#10).
+ * Messages use Sound/Vibration; calls use Ringtone/Vibrate-on-incoming.
+ * Each (kind, sound, vibration) combo is its own immutable channel
+ * (Android ignores changes to an existing channel) — see notif-channels.ts.
+ *
+ * Requires `useSettings` hydrated; the headless entry points hydrate it
+ * before any display call. Falls back to sound+vibration ON when the
+ * store isn't hydrated, matching the historical default.
+ */
+async function resolveChannel(kind: NotifKind): Promise<string> {
+  if (!useSettings.getState().hydrated) {
+    await useSettings.getState().hydrate();
+  }
+  const s = useSettings.getState();
+  const sound = kind === 'call' ? s.ringtoneEnabled : s.messageSoundEnabled;
+  const vibration = kind === 'call' ? s.vibrateOnIncoming : s.messageVibrationEnabled;
+  const spec = notifChannelSpec(kind, sound, vibration);
   // Idempotent — re-creating an existing channel is a no-op. Needed
   // because a headless launch may run before MainActivity created it.
-  await notifee.createChannel({
-    id: CHANNEL_ID,
-    name: 'Messages',
-    importance: AndroidImportance.HIGH,
-  });
+  await notifee.createChannel({ ...spec, importance: AndroidImportance.HIGH });
+  return spec.id;
 }
 
 /**
@@ -486,7 +505,7 @@ async function displayMessagingNotification(args: {
    */
   title?: string;
 }): Promise<void> {
-  await ensureChannel();
+  const channel = await resolveChannel('message');
   const myUserId = await loadPersistedUserId();
   // Resolve avatar file paths (not URIs) — the native module loads the
   // bitmaps directly via BitmapFactory.decodeFile, sidestepping the
@@ -528,7 +547,7 @@ async function displayMessagingNotification(args: {
     try {
       const result = await NotifMessaging.display({
         conversationId: args.conversationId,
-        channelId: CHANNEL_ID,
+        channelId: channel,
         peerHandle: args.peerHandle,
         peerAvatarPath: peerAvatarPath ?? null,
         selfAvatarPath: selfAvatarPath ?? null,
@@ -589,7 +608,7 @@ async function displayMessagingNotification(args: {
       sender_id: args.peerHandle,
     },
     android: {
-      channelId: CHANNEL_ID,
+      channelId: channel,
       smallIcon: 'ic_notification',
       // No largeIcon — see displayGenericNotification for the
       // rationale. The peer portrait reaches the user via Person.icon
@@ -629,7 +648,9 @@ async function resolveAvatarPath(userId: string): Promise<string | undefined> {
 
 /** Plain single-line notification — private device / sealed / call. */
 async function displayGenericNotification(data: FcmData): Promise<void> {
-  await ensureChannel();
+  // Calls honor Ringtone/Vibrate-on-incoming; everything else honors the
+  // message Sound/Vibration toggles (#10).
+  const channel = await resolveChannel(data.notify_kind === 'call' ? 'call' : 'message');
   // No `largeIcon`. On Samsung One UI and stock Android a largeIcon
   // paints a second icon on the right side of the notification — not
   // a pattern any messenger app uses, and the user shipped a clear
@@ -647,7 +668,7 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
       ...(data.msg_type ? { msg_type: data.msg_type } : {}),
     },
     android: {
-      channelId: CHANNEL_ID,
+      channelId: channel,
       smallIcon: 'ic_notification',
       pressAction: { id: 'default' },
     },
