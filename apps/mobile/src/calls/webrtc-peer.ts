@@ -44,7 +44,15 @@ class WebRtcCallPeer implements CallPeer {
   ) => void;
   private remoteStreamCb?: (url: string | undefined) => void;
   private startedManager = false;
-  /** Last requested speaker state — re-applied on (re)connect. */
+  /**
+   * Last requested speaker state — re-applied on (re)connect. Initialized
+   * from the media kind in the constructor: video calls default to
+   * speakerphone (you're looking at the screen, phone off the ear), audio /
+   * private calls to the earpiece. This MUST match the orchestrator's
+   * `active.speakerOn = (kind === 'video')` default, or the in-call speaker
+   * button shows ON while InCallManager is still routed to the earpiece —
+   * the user then has to tap twice to sync them (chloro, 2026-06-04).
+   */
   private speakerOn = false;
   private cameraFacing: 'user' | 'environment' = 'user';
   // Phase 5 — audio-level polling.
@@ -72,6 +80,10 @@ class WebRtcCallPeer implements CallPeer {
   private animationFrameCb?: (payload: Uint8Array) => void;
 
   constructor(iceServers: IceServer[], private readonly mediaKind: CallMediaKind = 'audio') {
+    // Speaker default mirrors the orchestrator's `active.speakerOn` so the
+    // UI toggle and the actual audio route agree the instant the call
+    // connects — no double-tap to reconcile.
+    this.speakerOn = mediaKind === 'video';
     this.pc = new RTCPeerConnection({
       iceServers: iceServers.map((s) => ({
         urls: s.urls,
