@@ -70,6 +70,46 @@ function rn(): RnSurface {
   return require('react-native') as RnSurface;
 }
 
+/**
+ * In-flight native permission requests, keyed by permission string. A
+ * second caller arriving while a request is pending joins it instead of
+ * firing its own prompt.
+ *
+ * Why this matters: RN's `PermissionsAndroid` keeps a single
+ * pending-callback slot per permission. Two overlapping `request(perm)`
+ * calls for the same perm leave one promise unresolved forever — it just
+ * hangs. This bit the callee's *first* incoming call: the ring-time
+ * permission warm-up (`warmUpPermissions`) and `accept() → createAnswer()
+ * → getUserMedia` both call `ensureMicPermission()` on a permission-cold
+ * device, so two `request(RECORD_AUDIO)` calls raced; the getUserMedia
+ * one hung, `ensureLocalStream` never resolved, and the call never
+ * answered (no `accept FAILED`, no `local media acquired` — a silent dead
+ * call). A re-dial worked because mic was granted by then, so `check()`
+ * short-circuited and no `request()` fired. Coalescing closes the race
+ * (and collapses any double Open-Settings alert on a shared
+ * `never_ask_again`).
+ */
+const inFlightRequests = new Map<string, Promise<PermissionResult>>();
+
+/**
+ * Run `doRequest` for `perm`, or — if a request for that exact permission
+ * is already in flight — return the existing promise instead of starting a
+ * second one. Pure (no react-native dependency) so the dedupe is unit
+ * testable without the native bridge.
+ */
+export function coalescePermissionRequest(
+  perm: string,
+  doRequest: () => Promise<PermissionResult>,
+): Promise<PermissionResult> {
+  const existing = inFlightRequests.get(perm);
+  if (existing) return existing;
+  const pending = doRequest().finally(() => {
+    inFlightRequests.delete(perm);
+  });
+  inFlightRequests.set(perm, pending);
+  return pending;
+}
+
 async function ensure(kind: PermKind, perm: string): Promise<PermissionResult> {
   const { Platform, PermissionsAndroid } = rn();
   if (Platform.OS !== 'android') return 'granted';
@@ -79,14 +119,16 @@ async function ensure(kind: PermKind, perm: string): Promise<PermissionResult> {
       diag('perm', `${kind}: already granted`);
       return 'granted';
     }
-    const result = await PermissionsAndroid.request(perm);
-    diag('perm', `${kind}: requested`, { result });
-    if (result === PermissionsAndroid.RESULTS.GRANTED) return 'granted';
-    if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
-      showOpenSettingsAlert(kind);
-      return 'never_ask_again';
-    }
-    return 'denied';
+    return await coalescePermissionRequest(perm, async () => {
+      const result = await PermissionsAndroid.request(perm);
+      diag('perm', `${kind}: requested`, { result });
+      if (result === PermissionsAndroid.RESULTS.GRANTED) return 'granted';
+      if (result === PermissionsAndroid.RESULTS.NEVER_ASK_AGAIN) {
+        showOpenSettingsAlert(kind);
+        return 'never_ask_again';
+      }
+      return 'denied';
+    });
   } catch (err) {
     diag('perm', `${kind}: request threw`, { err: String(err) });
     return 'denied';
