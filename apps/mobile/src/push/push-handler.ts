@@ -39,6 +39,7 @@ import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
+import { resolveGroupBannerTitle } from './group-banner-title.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
 import { useSettings } from '../store/settings.js';
 import { notifChannelSpec, type NotifKind } from './notif-channels.js';
@@ -546,10 +547,11 @@ async function displayMessagingNotification(args: {
   let bannerTitle: string | undefined;
   if (args.msgType === 'group') {
     const groupId = args.conversationId.replace(/^group-/, '');
-    const localName = useGroups.getState().byId[groupId]?.name;
-    const serverTitle =
-      args.title && args.title !== '@' + args.peerHandle ? args.title : undefined;
-    bannerTitle = localName || serverTitle || 'speakeasy';
+    bannerTitle = resolveGroupBannerTitle(
+      useGroups.getState().byId[groupId]?.name,
+      args.title,
+      args.peerHandle,
+    );
   } else {
     bannerTitle = args.title ?? '@' + args.peerHandle;
   }
