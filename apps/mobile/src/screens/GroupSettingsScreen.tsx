@@ -36,6 +36,8 @@ import { font, scrim, space, type as typeScale } from '../theme/tokens.js';
 interface Props {
   groupId: string;
   onBack: () => void;
+  /** Open a 1:1 with a member — tapping their row in the roster. */
+  onOpenPeer?: (handle: string) => void;
 }
 
 const NAME_MAX = 30;
@@ -56,7 +58,7 @@ const ROOM_MEMBER_CAP = 50;
  *                                    only; peers don't see "@x left."
  * Each is documented inline at the call site.
  */
-export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElement {
+export function GroupSettingsScreen({ groupId, onBack, onOpenPeer }: Props): React.ReactElement {
   const themed = useColors();
   const myUserId = useIdentity((s) => s.userId);
   const group = useGroups((s) => s.byId[groupId]);
@@ -262,6 +264,7 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
               isCreator={isCreator}
               showRemove={false}
               onRemove={undefined}
+              onOpenPeer={undefined}
             />
           ) : null}
           {otherMembers.map((handle) => (
@@ -272,6 +275,7 @@ export function GroupSettingsScreen({ groupId, onBack }: Props): React.ReactElem
               isCreator={!!group.createdBy && handle === group.createdBy}
               showRemove={isCreator}
               onRemove={() => setRemoveTarget(handle)}
+              onOpenPeer={onOpenPeer}
             />
           ))}
 
@@ -389,6 +393,8 @@ interface MemberRowProps {
   isCreator: boolean;
   showRemove: boolean;
   onRemove: (() => void) | undefined;
+  /** Tap the row (not the remove button) to open a 1:1 with this member. */
+  onOpenPeer: ((handle: string) => void) | undefined;
 }
 
 function MemberRow({
@@ -397,12 +403,20 @@ function MemberRow({
   isCreator,
   showRemove,
   onRemove,
+  onOpenPeer,
 }: MemberRowProps): React.ReactElement {
   const themed = useColors();
   const profile = useProfiles((s) => s.byUserId[handle]);
   const animalId = profile?.selectedAvatarId ?? defaultAnimalForUser(handle);
   return (
-    <View style={[styles.memberRow, { borderBottomColor: themed.divider }]}>
+    // The row opens a 1:1 with this member; the nested "remove" Pressable
+    // captures its own taps. Self has no DM target, so it's not pressable.
+    <Pressable
+      style={[styles.memberRow, { borderBottomColor: themed.divider }]}
+      onPress={isSelf ? undefined : () => onOpenPeer?.(handle)}
+      disabled={isSelf || !onOpenPeer}
+      testID={`group-member-${handle}`}
+    >
       <PortraitTile kind="animal" id={animalId} size={32} />
       <View style={styles.memberBody}>
         <View style={styles.memberHandleLine}>
@@ -440,7 +454,7 @@ function MemberRow({
           </Text>
         </Pressable>
       ) : null}
-    </View>
+    </Pressable>
   );
 }
 
