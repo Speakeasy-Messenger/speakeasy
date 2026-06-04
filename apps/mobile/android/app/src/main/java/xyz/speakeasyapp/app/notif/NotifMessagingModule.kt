@@ -100,6 +100,19 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
 
       val style = NotificationCompat.MessagingStyle(selfPerson)
 
+      // For a group, name the conversation with the room title so the
+      // banner header reads "<Group>", not the latest sender's handle.
+      // MessagingStyle derives its header from the conversation title
+      // when present and otherwise from the most-recent message's Person
+      // — so without these two calls a group banner showed "@sender"
+      // even though setContentTitle(title) carried the room name.
+      // `isGroupConversation = true` is what makes Android actually honor
+      // the conversation title (and keeps each sender labelled per-line).
+      if (msgType == "group") {
+        style.isGroupConversation = true
+        style.conversationTitle = title
+      }
+
       for (i in 0 until messages.size()) {
         val m = messages.getMap(i) ?: continue
         val text = if (m.hasKey("text")) m.getString("text") ?: "" else ""
