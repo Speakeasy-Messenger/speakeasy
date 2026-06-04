@@ -510,6 +510,15 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               : newMessageId()
             : undefined;
 
+        // For group pushes, surface the room's name (plaintext
+        // server-side per spec §schema groups.name) so the notification
+        // reads "<Group> · New message" instead of "@sender · New
+        // message". Looked up once per message, not per recipient.
+        const groupName =
+          msg.msg_type === 'group'
+            ? ((await deps.groups.findById(msg.to))?.name ?? undefined)
+            : undefined;
+
         await Promise.all(
           recipients.map(async (recipientId) => {
             const rowId = directMessageId ?? newMessageId();
@@ -581,6 +590,8 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 // "speakeasy: New message" regardless of recipient
                 // privacy preference.
                 senderId: sealed ? undefined : senderUserId,
+                // Group room name for the banner title (undefined for direct).
+                groupName,
                 // Forward id + ciphertext so the recipient's headless
                 // push handler can decrypt and show the real text.
                 // The server can't read it (E2E); push.fcm-apns gates
