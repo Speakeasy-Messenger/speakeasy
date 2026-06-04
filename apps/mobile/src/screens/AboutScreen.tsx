@@ -118,6 +118,10 @@ export function AboutScreen({
           description={SUPPORT_EMAIL}
           onPress={() => void Linking.openURL(`mailto:${SUPPORT_EMAIL}`)}
         />
+        <Text style={[styles.feedbackNote, { color: themed.slate }]}>
+          Found a bug or have an idea? Message @feedback inside the app — it
+          goes straight to the team, no email needed.
+        </Text>
 
         {/* Alpha-only — surfaces the Diagnostics screen as a regular
             row instead of behind the 7-tap version unlock (which has
@@ -176,6 +180,13 @@ const styles = StyleSheet.create({
     lineHeight: 21,
     paddingHorizontal: space.base,
     paddingBottom: space.lg,
+  },
+  feedbackNote: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 19,
+    paddingHorizontal: space.base,
+    paddingTop: space.s,
   },
   footer: {
     alignItems: 'center',

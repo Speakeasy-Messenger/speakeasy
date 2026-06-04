@@ -197,8 +197,15 @@ export function DisappearingMessageBubble({
 
   const isSent = variant === 'sent';
   const isFailed = isSent && !!sendFailure;
+  // A media-only message (photo/gif/file, no caption) drops the bubble's
+  // text padding so the image fills the bubble edge-to-edge — the bubble
+  // already clips to its radius via `overflow: 'hidden'`. With padding the
+  // photo sat inset behind a chunky bubble margin (rc.40 feedback: "margins
+  // to the photos are too large"). Captioned media keeps the padding.
+  const mediaOnly = !!attachments && attachments.length > 0 && !text;
   const bubbleStyle = [
     styles.base,
+    mediaOnly ? styles.mediaOnly : null,
     isSent ? styles.sent : styles.received,
     // themed.receivedBubble varies with the OS mode; the static
     // `colors.receivedBubble` we used to bake into StyleSheet was
@@ -252,7 +259,7 @@ export function DisappearingMessageBubble({
           there's something to show. Failed bubbles swap the receipt
           for a small "!" — the resend affordance lives below. */}
       {timestamp !== undefined || (isSent && delivered !== undefined) || isFailed ? (
-        <View style={styles.metaRow}>
+        <View style={[styles.metaRow, mediaOnly ? styles.metaRowMediaOnly : null]}>
           {timestamp !== undefined ? (
             <Text
               testID="bubble-time"
@@ -339,6 +346,18 @@ const styles = StyleSheet.create({
     maxWidth: '78%',
     overflow: 'hidden',
     marginVertical: 4,
+  },
+  // Media-only bubble: image fills edge-to-edge (radius clip via the
+  // base `overflow: 'hidden'`). The trailing meta line gets its own
+  // inset (metaRowMediaOnly) so the timestamp isn't jammed in the corner.
+  mediaOnly: {
+    paddingVertical: 0,
+    paddingHorizontal: 0,
+  },
+  metaRowMediaOnly: {
+    paddingHorizontal: space.md,
+    paddingTop: space.xs,
+    paddingBottom: space.sm,
   },
   // Sent bubble keeps its brass colour (mode-invariant) baked in;
   // received bubble's `backgroundColor` is overridden inline at render
