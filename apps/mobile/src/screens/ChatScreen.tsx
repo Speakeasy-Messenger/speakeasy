@@ -15,6 +15,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import notifee from '@notifee/react-native';
+import { clearNotifStack } from '../push/push-handler.js';
 import {
   conversationIdForDirect,
   encodePayload,
@@ -183,6 +184,7 @@ export function ChatScreen({
   // dismisses it; this covers opening the chat any other way.
   useEffect(() => {
     void notifee.cancelNotification(conversationId);
+    void clearNotifStack(conversationId);
   }, [conversationId]);
 
   // BURN.md §5 — feed dissolve. ConvSettings sets

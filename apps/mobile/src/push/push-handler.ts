@@ -382,23 +382,6 @@ function messagesFromNotification(notification: Notification | undefined): MsgSt
   return [];
 }
 
-/**
- * The messages already stacked on the displayed notification for this
- * conversation. Returns [] when none is showing — so once the user
- * opens the chat (which cancels the notification) the next message
- * starts a fresh stack.
- */
-async function existingMessages(conversationId: string): Promise<MsgStyleMsg[]> {
-  try {
-    const shown = await notifee.getDisplayedNotifications();
-    const match = shown.find((n) => n.notification?.id === conversationId);
-    return messagesFromNotification(match?.notification);
-  } catch {
-    /* getDisplayedNotifications can fail headlessly — start fresh */
-    return [];
-  }
-}
-
 /** AsyncStorage key prefix for a conversation's persisted MessagingStyle
  *  stack — see `persistNotifStack`. */
 const NOTIF_STACK_PREFIX = '@speakeasy/notif-stack:';
@@ -429,6 +412,22 @@ async function persistNotifStack(
     );
   } catch {
     /* best-effort — handleInlineReply falls back to the event's style */
+  }
+}
+
+/**
+ * Drop a conversation's persisted stack. Call when its notification is
+ * cancelled (the user opened/read the chat) so the next message starts a
+ * fresh thread instead of re-stacking on already-read messages. The old
+ * notifee-backed `existingMessages` reset implicitly (the cancelled
+ * notification vanished from getDisplayedNotifications); the durable
+ * AsyncStorage stack must be cleared explicitly.
+ */
+export async function clearNotifStack(conversationId: string): Promise<void> {
+  try {
+    await AsyncStorage.removeItem(NOTIF_STACK_PREFIX + conversationId);
+  } catch {
+    /* best-effort */
   }
 }
 
@@ -648,7 +647,12 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       const text = await decryptForNotification(data);
       if (text) {
         const peer = data.sender_id;
-        const prior = await existingMessages(conversationId);
+        // The durable AsyncStorage stack — NOT notifee's
+        // getDisplayedNotifications, which can't see notifications posted
+        // by the native NotifMessaging module, so in the background it
+        // returned [] every time and the thread never stacked (each push
+        // showed one message; the count badge had nothing to expand).
+        const prior = await loadNotifStack(conversationId);
         await displayMessagingNotification({
           conversationId,
           peerHandle: peer,
