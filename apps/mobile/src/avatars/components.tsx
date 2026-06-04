@@ -62,47 +62,87 @@ const BONE = '#F2E9D8';
 const INK = '#14091A';
 
 /**
- * Per-theme contrast outline (#12). The marks hard-code BONE ("white") +
- * INK ("black") with no theme awareness, so BONE shapes vanish on the cream
- * surface (light) and INK shapes vanish on the aubergine (dark).
+ * Per-theme contrast outline (#12). The marks hard-code BRASS, BONE
+ * ("white") + INK ("black") with no theme awareness. BRASS reads cleanly
+ * on BOTH the cream (light) and aubergine (dark) surfaces, so it never
+ * needs an edge. Only the shape whose fill matches the *background* loses
+ * contrast: BONE shapes vanish on cream (light), INK shapes vanish on
+ * aubergine (dark).
  *
- * Fix: render the mark a SECOND time BEHIND the real one, recolored to the
- * theme-contrast color (INK edge in light mode, BONE in dark) with every
- * shape grown by an even stroke — so a uniform hairline pokes out past the
- * real mark's silhouette. Pure fill/stroke (NOT a filter — react-native-svg
- * filters don't paint on Android; NOT a scale — that gives an uneven edge),
- * so it renders everywhere incl. the `toDataURL` notification path.
- * `recolorEdge` clones the mark's element tree (zero per-mark edits):
- *  - real fills (≠ 'none') → edge color; filled-only shapes gain an outward
- *    stroke so they grow evenly.
- *  - strokes (the heron neck, beak, legs) → edge color, widened by EDGE_GROW.
- * Verified visually on the heron via an offline resvg render before shipping.
+ * Fix: render the mark a SECOND time BEHIND the real one, but edge ONLY
+ * the shapes whose fill is the vanishing color for the current mode
+ * (`target`) — recolored to the contrast color (`edgeColor`) and grown by
+ * an even stroke, so a hairline pokes out past those shapes' silhouette.
+ * Every other shape (brass, the already-contrasting color, eyes, interior
+ * details) is dropped from the edge layer. Because the edge sits behind
+ * the real mark, an edge that pokes out only shows where that shape is the
+ * OUTER silhouette — so a brass-bodied animal (octopus, fox, owl) gets no
+ * visible hairline at all (its interior bone/ink details are edged in the
+ * hidden layer but the brass body draws on top and covers them), while a
+ * bone-bodied heron/hare/moth (light) or ink-bodied bear/cat/bat/whale
+ * (dark) gets the outline it needs.
+ *
+ * Pure fill/stroke (NOT a filter — react-native-svg filters don't paint on
+ * Android; NOT a scale — that gives an uneven edge), so it renders
+ * everywhere incl. the `toDataURL` notification path. `recolorEdge` clones
+ * the mark's element tree (zero per-mark edits). Verified visually via an
+ * offline resvg render before shipping.
  */
 const EDGE_GROW = 3;
-function recolorEdge(node: React.ReactNode, color: string): React.ReactNode {
-  if (!React.isValidElement(node)) return node;
+/** Case-insensitive hex compare — marks paint via the BRASS/BONE/INK consts. */
+function sameColor(a: string | undefined, b: string): boolean {
+  return typeof a === 'string' && a.toLowerCase() === b.toLowerCase();
+}
+function recolorEdge(
+  node: React.ReactNode,
+  edgeColor: string,
+  target: string,
+): React.ReactNode {
+  if (!React.isValidElement(node)) return null;
   const p = node.props as {
     fill?: string;
     stroke?: string;
     strokeWidth?: number | string;
     children?: React.ReactNode;
   };
+  const kids =
+    p.children !== undefined
+      ? React.Children.map(p.children, (c) => recolorEdge(c, edgeColor, target))
+      : undefined;
+
   const hasFill = p.fill !== undefined && p.fill !== 'none';
   const hasStroke = p.stroke !== undefined && p.stroke !== 'none';
-  const patch: Record<string, unknown> = {};
-  if (hasFill) patch.fill = color;
-  if (hasStroke) {
-    patch.stroke = color;
-    if (typeof p.strokeWidth === 'number') patch.strokeWidth = p.strokeWidth + EDGE_GROW;
-  } else if (hasFill) {
-    patch.stroke = color;
-    patch.strokeWidth = EDGE_GROW;
-  }
-  if (p.children !== undefined) {
-    const kids = React.Children.map(p.children, (c) => recolorEdge(c, color));
+  const fillMatches = hasFill && sameColor(p.fill, target);
+  // A stroke-only shape (heron neck, mouth line) contributes its silhouette
+  // via the stroke; edge it when that stroke is the vanishing color.
+  const strokeMatches = !hasFill && hasStroke && sameColor(p.stroke, target);
+
+  if (fillMatches) {
+    const patch: Record<string, unknown> = { fill: edgeColor, stroke: edgeColor };
+    patch.strokeWidth =
+      hasStroke && typeof p.strokeWidth === 'number' ? p.strokeWidth + EDGE_GROW : EDGE_GROW;
     return React.cloneElement(node, patch, kids);
   }
-  return React.cloneElement(node, patch);
+  if (strokeMatches) {
+    const patch: Record<string, unknown> = {
+      stroke: edgeColor,
+      strokeWidth: typeof p.strokeWidth === 'number' ? p.strokeWidth + EDGE_GROW : EDGE_GROW,
+    };
+    return React.cloneElement(node, patch, kids);
+  }
+
+  // Non-matching. Structural nodes (groups / fragments / AnimatedG that
+  // carry transforms but no own paint) are KEPT so matching descendants
+  // still draw — their own paint is neutralized. Non-matching leaves
+  // (brass shapes, eyes, the already-contrasting color) are dropped from
+  // the edge layer entirely.
+  if (p.children !== undefined) {
+    const patch: Record<string, unknown> = {};
+    if (hasFill) patch.fill = 'none';
+    if (hasStroke) patch.stroke = 'none';
+    return React.cloneElement(node, patch, kids);
+  }
+  return null;
 }
 
 // ─────────────────────────────────────────────────────────────────────
@@ -1837,6 +1877,7 @@ export function AnimalBody({
   prosody,
   renderForCall,
   edgeColor,
+  edgeTarget,
 }: {
   animalId: string;
   eyeScale: AnimalRenderProps['eyeScale'];
@@ -1853,6 +1894,13 @@ export function AnimalBody({
   renderForCall?: boolean;
   /** #12 contrast outline color, or undefined to skip the edge layer. */
   edgeColor?: string;
+  /**
+   * #12 — the fill color that vanishes into the current background (BONE in
+   * light mode, INK in dark). Only shapes painted this color get an edge;
+   * brass + the already-contrasting color are left alone. Required whenever
+   * `edgeColor` is set.
+   */
+  edgeTarget?: string;
 }): React.ReactElement | null {
   const def = ANIMALS[animalId];
   if (!def) return null;
@@ -1875,7 +1923,7 @@ export function AnimalBody({
   const variant = useCallMask ? 'call' : 'default';
   return (
     <>
-      {edgeColor ? (
+      {edgeColor && edgeTarget ? (
         <EdgeHost
           key={`${animalId}-${variant}-edge`}
           render={render}
@@ -1884,6 +1932,7 @@ export function AnimalBody({
           amplitude={amplitude}
           prosody={prosody}
           color={edgeColor}
+          target={edgeTarget}
         />
       ) : null}
       <RenderHost
@@ -1907,6 +1956,7 @@ export function AnimalBody({
 function EdgeHost({
   render,
   color,
+  target,
   eyeScale,
   mouthScale,
   amplitude,
@@ -1914,10 +1964,11 @@ function EdgeHost({
 }: {
   render: AnimalRender;
   color: string;
+  target: string;
 } & Omit<AnimalRenderProps, 'amplitude'> & {
     amplitude: AnimalRenderProps['amplitude'];
   }): React.ReactElement {
-  return <>{recolorEdge(render({ eyeScale, mouthScale, amplitude, prosody }), color)}</>;
+  return <>{recolorEdge(render({ eyeScale, mouthScale, amplitude, prosody }), color, target)}</>;
 }
 
 function RenderHost({
@@ -1961,10 +2012,14 @@ export function AnimalSvg({
   const zeroAmpRef = React.useRef<Animated.Value | null>(null);
   if (zeroAmpRef.current === null) zeroAmpRef.current = new Animated.Value(0);
   // Per-theme contrast outline (#12) — AnimalBody draws the recolored edge
-  // layer behind the real mark when `edgeColor` is set. See `recolorEdge`.
-  // INK edge on the cream (light) surface; BONE edge on the aubergine (dark).
+  // layer behind the real mark. Only the shapes whose fill is the vanishing
+  // color (`edgeTarget`) get the `edgeColor` hairline; brass is left alone.
+  // Light: BONE shapes vanish on cream → INK edge. Dark: INK shapes vanish
+  // on aubergine → BONE edge. See `recolorEdge`.
   const { mode } = useTheme();
-  const edgeColor = mode === 'dark' ? BONE : INK;
+  const isDark = mode === 'dark';
+  const edgeColor = isDark ? BONE : INK;
+  const edgeTarget = isDark ? INK : BONE;
   if (!ANIMALS[animalId]) return null;
   const amp = amplitude ?? zeroAmpRef.current;
   return (
@@ -1977,6 +2032,7 @@ export function AnimalSvg({
         prosody={prosody}
         renderForCall={renderForCall}
         edgeColor={edgeColor}
+        edgeTarget={edgeTarget}
       />
     </Svg>
   );
