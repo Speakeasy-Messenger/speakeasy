@@ -512,13 +512,18 @@ async function displayMessagingNotification(args: {
   // five failed attempts to coax notifee/Fresco into loading a
   // runtime-cached PNG by URI (file://, data:, content://).
   //
-  // For a group, the conversation icon is the room's own mark
-  // (GroupMarkCacheWarmer caches it under the conversation/group id), not
-  // the sender's portrait — so the banner is identified by the room, like
-  // any messenger. The sender still shows per-line inside MessagingStyle.
-  const conversationAvatarId =
-    args.msgType === 'group' ? args.conversationId : args.peerHandle;
-  const peerAvatarPath = await resolveAvatarPath(conversationAvatarId);
+  // Two distinct icons for a group (chloro's "double group icon" report):
+  //   - CONVERSATION icon (the collapsed banner + the Conversation shortcut)
+  //     = the room's own mark, so the thread is identified by the room.
+  //   - per-MESSAGE Person icon (shown beside each line when expanded) =
+  //     the SENDER's portrait, not the room mark.
+  // For 1:1 both are the peer. The group mark is cached under the
+  // conversation/group id (GroupMarkCacheWarmer); the sender under their id.
+  const peerAvatarPath = await resolveAvatarPath(args.peerHandle);
+  const conversationAvatarPath =
+    args.msgType === 'group'
+      ? await resolveAvatarPath(args.conversationId)
+      : peerAvatarPath;
   const selfAvatarPath = myUserId ? await resolveAvatarPath(myUserId) : undefined;
   // Pre-trim the visible stack to MAX_NOTIF_MESSAGES so the persisted
   // copy + the native call see the same set.
@@ -532,16 +537,22 @@ async function displayMessagingNotification(args: {
   const latest = messages[messages.length - 1];
   // Banner title resolution:
   //   1:1   → server-resolved "@sender" (data.title) or the handle.
-  //   group → server-resolved room name (data.title). If that's missing
-  //           (e.g. a stale pre-fix push), fall back to the locally-known
-  //           room name, then a neutral label — NEVER the sender handle,
-  //           which is what made a group banner read "@sender" twice.
-  let bannerTitle = args.title;
-  if (!bannerTitle && args.msgType === 'group') {
+  //   group → the locally-known ROOM name first (authoritative for what the
+  //           user sees in-app), then the server title — but only if it
+  //           isn't just the sender handle (a stale / mis-resolved push that
+  //           labels the whole room by one member, which is what produced
+  //           the "@chloro" group banner) — then a neutral label. NEVER the
+  //           sender for a group.
+  let bannerTitle: string | undefined;
+  if (args.msgType === 'group') {
     const groupId = args.conversationId.replace(/^group-/, '');
-    bannerTitle = useGroups.getState().byId[groupId]?.name || 'speakeasy';
+    const localName = useGroups.getState().byId[groupId]?.name;
+    const serverTitle =
+      args.title && args.title !== '@' + args.peerHandle ? args.title : undefined;
+    bannerTitle = localName || serverTitle || 'speakeasy';
+  } else {
+    bannerTitle = args.title ?? '@' + args.peerHandle;
   }
-  bannerTitle = bannerTitle ?? '@' + args.peerHandle;
 
   if (NotifMessaging.available()) {
     try {
@@ -550,6 +561,7 @@ async function displayMessagingNotification(args: {
         channelId: channel,
         peerHandle: args.peerHandle,
         peerAvatarPath: peerAvatarPath ?? null,
+        conversationAvatarPath: conversationAvatarPath ?? null,
         selfAvatarPath: selfAvatarPath ?? null,
         withReply: args.withReply,
         title: bannerTitle,

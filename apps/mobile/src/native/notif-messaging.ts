@@ -18,8 +18,14 @@ interface NativeNotifMessagingModule {
     conversationId: string;
     channelId?: string;
     peerHandle: string;
-    /** Absolute filesystem path to the peer's cached avatar PNG. */
+    /** Absolute path to the SENDER's avatar PNG — the per-message Person icon. */
     peerAvatarPath?: string | null;
+    /**
+     * Absolute path to the CONVERSATION icon PNG (the room mark for a group,
+     * the peer for 1:1) — the collapsed banner + Conversation-shortcut icon.
+     * When absent the native side falls back to `peerAvatarPath`.
+     */
+    conversationAvatarPath?: string | null;
     /** Absolute filesystem path to the local user's cached avatar PNG. */
     selfAvatarPath?: string | null;
     withReply: boolean;

@@ -59,6 +59,11 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         ?: throw IllegalArgumentException("peerHandle required")
       val peerAvatarPath = if (args.hasKey("peerAvatarPath") && !args.isNull("peerAvatarPath"))
         args.getString("peerAvatarPath") else null
+      // Conversation icon (room mark for a group, peer for 1:1) — the
+      // collapsed banner + shortcut icon. Falls back to the sender avatar.
+      val conversationAvatarPath =
+        if (args.hasKey("conversationAvatarPath") && !args.isNull("conversationAvatarPath"))
+          args.getString("conversationAvatarPath") else peerAvatarPath
       val selfAvatarPath = if (args.hasKey("selfAvatarPath") && !args.isNull("selfAvatarPath"))
         args.getString("selfAvatarPath") else null
       val withReply = args.getBoolean("withReply")
@@ -71,6 +76,10 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
       val peerBitmap = peerAvatarPath?.let {
         try { BitmapFactory.decodeFile(it) } catch (_: Throwable) { null }
       }
+      val conversationBitmap = if (conversationAvatarPath == peerAvatarPath) peerBitmap
+        else conversationAvatarPath?.let {
+          try { BitmapFactory.decodeFile(it) } catch (_: Throwable) { null }
+        }
       val selfBitmap = selfAvatarPath?.let {
         try { BitmapFactory.decodeFile(it) } catch (_: Throwable) { null }
       }
@@ -84,6 +93,8 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
       // the rounding off to the system, which knows the user's
       // active mask shape and how to backdrop it.
       val peerIcon = peerBitmap?.let { IconCompat.createWithAdaptiveBitmap(it) }
+      val conversationIcon = if (conversationBitmap === peerBitmap) peerIcon
+        else conversationBitmap?.let { IconCompat.createWithAdaptiveBitmap(it) }
       val selfIcon = selfBitmap?.let { IconCompat.createWithAdaptiveBitmap(it) }
 
       val selfPerson = Person.Builder()
@@ -92,10 +103,19 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
         .apply { selfIcon?.let { setIcon(it) } }
         .build()
 
+      // Per-message sender — the icon beside each line when expanded.
       val peerPerson = Person.Builder()
         .setName("@$peerHandle")
         .setKey(peerHandle)
         .apply { peerIcon?.let { setIcon(it) } }
+        .build()
+      // Conversation identity — the collapsed banner + shortcut (LEFT) icon.
+      // For a group this is the room (mark + room-name title); for 1:1 it's
+      // the same as the sender, so the two collapse to one icon.
+      val conversationPerson = Person.Builder()
+        .setName(title)
+        .setKey("conv-$conversationId")
+        .apply { conversationIcon?.let { setIcon(it) } }
         .build()
 
       val style = NotificationCompat.MessagingStyle(selfPerson)
@@ -167,8 +187,8 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
           },
         )
         .setLongLived(true)
-        .setPerson(peerPerson)
-        .apply { peerIcon?.let { setIcon(it) } }
+        .setPerson(conversationPerson)
+        .apply { conversationIcon?.let { setIcon(it) } }
         .setCategories(setOf("xyz.speakeasyapp.app.category.MESSAGE"))
         .build()
       ShortcutManagerCompat.pushDynamicShortcut(reactContext, shortcut)
