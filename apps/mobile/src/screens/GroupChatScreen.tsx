@@ -12,6 +12,7 @@ import {
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import notifee from '@notifee/react-native';
+import { clearNotifStack } from '../push/push-handler.js';
 import { type Attachment, encodePayload, newMessageId, parseMentions } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
@@ -212,6 +213,7 @@ export function GroupChatScreen({
   // notification by conversation id, which for a group is the groupId).
   useEffect(() => {
     void notifee.cancelNotification(groupId);
+    void clearNotifStack(groupId);
   }, [groupId]);
 
   // Phase 2 brand overhaul: groups don't have photos OR custom marks.
