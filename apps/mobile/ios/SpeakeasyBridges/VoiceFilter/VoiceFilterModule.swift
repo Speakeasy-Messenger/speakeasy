@@ -66,6 +66,11 @@ final class VoiceFilterModule: RCTEventEmitter {
   /// the receiver hasn't subscribed yet).
   private var hasListeners = false
 
+  /// The DSP installed by the most recent `wrapTrack`, retained so a
+  /// live `setBypass(false)` can re-engage the same profile after a
+  /// reveal. Cleared on `dispose`. (#13 in-call mask toggle.)
+  private var currentDsp: SampleFilter?
+
   override func startObserving() {
     hasListeners = true
     NotificationCenter.default.addObserver(
@@ -127,7 +132,25 @@ final class VoiceFilterModule: RCTEventEmitter {
     let formantShift = formantSemitones?.floatValue ?? 0.0
     let dsp = VoiceFilterDsp(semitones: shift, formantSemitones: formantShift)
     ActiveFilterHolder.shared.set(dsp)
+    currentDsp = dsp
     resolve(["filteredTrackId": trackId])
+  }
+
+  /// Live mask on/off (#13). `bypassed = true` clears the holder so the
+  /// next captured frame goes through UNFILTERED — the user's real voice
+  /// reaches the encoder. `false` re-installs the retained DSP. No
+  /// re-wrap, no renegotiation: SpeakeasyAudioDevice reads the holder
+  /// per frame. Idempotent; a no-op (still resolves) with no active filter.
+  @objc(setBypass:resolver:rejecter:)
+  func setBypass(_ bypassed: Bool,
+                 resolver resolve: @escaping RCTPromiseResolveBlock,
+                 rejecter reject: @escaping RCTPromiseRejectBlock) {
+    if bypassed {
+      ActiveFilterHolder.shared.set(nil)
+    } else if let dsp = currentDsp {
+      ActiveFilterHolder.shared.set(dsp)
+    }
+    resolve(nil)
   }
 
   @objc(dispose:rejecter:)
@@ -139,6 +162,7 @@ final class VoiceFilterModule: RCTEventEmitter {
     // SpeakeasyAudioDevice's failure-closed mute-on-fail behavior
     // covers any in-flight frames.
     ActiveFilterHolder.shared.set(nil)
+    currentDsp = nil
     resolve(nil)
   }
 }

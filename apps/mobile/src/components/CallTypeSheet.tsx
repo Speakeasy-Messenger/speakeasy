@@ -4,23 +4,24 @@ import Svg, { Circle, Path, Rect } from 'react-native-svg';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 import { useCallCapabilities } from '../store/call-capabilities.js';
-import { isPrivateCallAvailable } from '../native/voice-filter.js';
 
 /**
- * CALLS.md §01 — Call type picker.
+ * CALLS.md §01 — Call type picker (#13 unified entry).
  *
- * Phase 5j Private Call: third row "Private call" lands at position 1
- * (the speakeasy-native default) with a brass 1px border and a brass
- * period on the title. The row only renders when (the peer's capability
- * set includes 'private') AND (this device's native filter reports
- * isPrivateCallAvailable). On a peer who can't answer Private, the
- * row never appears — the brand promise is "the option only shows when
- * it actually works." Both halves are independent: a stale capability
- * cache or a missing native filter both fail closed.
- *
- * Locked design decisions from /plan-design-review (D2–D9): Private
- * first + brass border + brass period + outline cipher-S icon +
- * observational microcopy 'Voice masked. Your animal speaks for you.'
+ * Two rows now: **Call** (audio, masked by default) and **Video**.
+ *  - "Call" carries the speakeasy identity — the outline cipher-S mark,
+ *    a brass period, and the observational microcopy "Voice masked. Your
+ *    animal speaks for you." It does NOT get the old brass BORDER: that
+ *    border existed to out-rank the retired voice/video siblings, and
+ *    with no masked sibling left it's noise (design review DD1). Masking
+ *    is caller-local, so the row always shows — there's nothing about the
+ *    peer to gate on.
+ *  - "Video" is plain, and is HIDDEN when we have FRESH capability data
+ *    saying the peer refuses video (#13 "Refuse video calls"). When the
+ *    cache is stale/absent we show it and let the server enforce
+ *    (a video offer to a refusing peer is rejected with `video_refused`,
+ *    and the caller sees a quiet "No video here." notice with a one-tap
+ *    fall-back to a masked Call).
  */
 
 interface Props {
@@ -28,35 +29,27 @@ interface Props {
   /** Peer being called — capability is looked up against this id. */
   peerUserId: string;
   onClose: () => void;
-  onPickVoice: () => void;
+  /** Masked audio call (the speakeasy default). */
+  onPickCall: () => void;
   onPickVideo: () => void;
-  onPickPrivate: () => void;
 }
 
 export function CallTypeSheet({
   visible,
   peerUserId,
   onClose,
-  onPickVoice,
+  onPickCall,
   onPickVideo,
-  onPickPrivate,
 }: Props): React.ReactElement {
   const themed = useColors();
-  const peerSupportsPrivate = useCallCapabilities((s) =>
-    s.supports(peerUserId, 'private'),
+  // Hide Video only when we have FRESH capability data that excludes it
+  // (the peer refuses video). Stale/absent → show it; the server is the
+  // authoritative gate.
+  const peerSupportsVideo = useCallCapabilities((s) =>
+    s.supports(peerUserId, 'video'),
   );
-  // RC-4 ONLY: bypass the peer-supports check so the Private row
-  // appears even when the callee is on a pre-rc.3 build that didn't
-  // advertise `'private'` in its `supported_call_kinds`. Tightens
-  // back to `peerSupportsPrivate && ...` for any production cut.
-  // Real end-to-end testing still requires the peer on rc.3 because
-  // the server-side fan-out filter (call-router.ts) also gates on
-  // capability — a Private offer to a non-rc.3 peer routes to zero
-  // devices and the caller rings out at the 45s timeout. This
-  // bypass exists so the founder can visually verify the row +
-  // local filter install path before scheduling peer upgrades.
-  void peerSupportsPrivate; // intentionally unused under the bypass
-  const showPrivate = isPrivateCallAvailable();
+  const capsFresh = useCallCapabilities((s) => s.isFresh(peerUserId));
+  const showVideo = !(capsFresh && !peerSupportsVideo);
 
   return (
     <Modal
@@ -89,47 +82,14 @@ export function CallTypeSheet({
           </Text>
 
           <View style={styles.options}>
-            {showPrivate && (
-              <Pressable
-                onPress={() => {
-                  onClose();
-                  onPickPrivate();
-                }}
-                style={({ pressed }) => [
-                  styles.option,
-                  {
-                    backgroundColor: pressed ? themed.soft : themed.pale,
-                    // Brass border (themed.primary) is the brass-tint
-                    // mechanism locked in Pass 5 — uses existing color,
-                    // no new opacity token.
-                    borderColor: themed.primary,
-                  },
-                ]}
-                testID="call-type-private"
-                accessibilityLabel="Private call. Voice masked. Your animal speaks for you."
-                accessibilityHint="Starts a private call where your voice is filtered before reaching the other person."
-              >
-                <View
-                  style={[styles.optionIcon, { borderColor: themed.divider }]}
-                >
-                  <CipherSIcon color={themed.primary} />
-                </View>
-                <View style={styles.optionText}>
-                  <Text style={[styles.optionName, { color: themed.ink }]}>
-                    Private call
-                    <Text style={{ color: themed.primary }}>.</Text>
-                  </Text>
-                  <Text style={[styles.optionDesc, { color: themed.slate }]}>
-                    Voice masked. Your animal speaks for you.
-                  </Text>
-                </View>
-              </Pressable>
-            )}
-
+            {/* Call — masked-by-default audio, the speakeasy identity.
+                Cipher-S + brass period + observational microcopy, but NO
+                brass border (DD1: nothing left to out-rank). Always shown;
+                masking is caller-local. */}
             <Pressable
               onPress={() => {
                 onClose();
-                onPickVoice();
+                onPickCall();
               }}
               style={({ pressed }) => [
                 styles.option,
@@ -138,24 +98,27 @@ export function CallTypeSheet({
                   borderColor: themed.divider,
                 },
               ]}
-              testID="call-type-voice"
-              accessibilityLabel="Voice call. Just voices."
+              testID="call-type-call"
+              accessibilityLabel="Call. Voice masked. Your animal speaks for you."
+              accessibilityHint="Starts a call where your voice is masked before it reaches the other person."
             >
               <View
                 style={[styles.optionIcon, { borderColor: themed.divider }]}
               >
-                <PhoneOutlineIcon color={themed.primary} />
+                <CipherSIcon color={themed.primary} />
               </View>
               <View style={styles.optionText}>
                 <Text style={[styles.optionName, { color: themed.ink }]}>
-                  Voice call
+                  Call
+                  <Text style={{ color: themed.primary }}>.</Text>
                 </Text>
                 <Text style={[styles.optionDesc, { color: themed.slate }]}>
-                  Just voices. Animals stay small.
+                  Voice masked. Your animal speaks for you.
                 </Text>
               </View>
             </Pressable>
 
+            {showVideo && (
             <Pressable
               onPress={() => {
                 onClose();
@@ -185,6 +148,7 @@ export function CallTypeSheet({
                 </Text>
               </View>
             </Pressable>
+            )}
           </View>
 
           <Pressable
@@ -199,20 +163,6 @@ export function CallTypeSheet({
         </View>
       </View>
     </Modal>
-  );
-}
-
-function PhoneOutlineIcon({ color }: { color: string }): React.JSX.Element {
-  return (
-    <Svg width={20} height={20} viewBox="0 0 24 24" fill="none">
-      <Path
-        d="M5 4 L9 4 L11 9 L9 11 Q11 15 13 15 L15 13 L20 15 L20 19 Q15 20 10 16 Q5 11 5 5 Z"
-        stroke={color}
-        strokeWidth={1.6}
-        strokeLinejoin="miter"
-        fill="none"
-      />
-    </Svg>
   );
 }
 

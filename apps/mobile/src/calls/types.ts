@@ -60,6 +60,12 @@ export interface ActiveCall {
   endedReason?: CallEndedReason;
   /** Mute state of the local mic. */
   micMuted: boolean;
+  /**
+   * Masked ('private') calls only (#13): true when the user has REVEALED
+   * their real voice (the filter is bypassed). Default/undefined = masked.
+   * Drives the in-call mask status chip. The reveal is silent to the peer.
+   */
+  maskBypassed?: boolean;
   /** Speakerphone routing toggle (vs earpiece). */
   speakerOn: boolean;
   /**

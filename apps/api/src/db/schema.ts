@@ -44,6 +44,15 @@ export const users = pgTable(
      * 0009_animal_avatars.sql.
      */
     selectedAvatarId: text('selected_avatar_id'),
+    /**
+     * "Refuse video calls" — per-user privacy setting (#13). When true,
+     * the call-router rejects inbound `kind: 'video'` offers before
+     * ringing this user (the caller gets a `video_refused` decline), and
+     * the `/v1/users/:id` capability aggregation drops `'video'` from
+     * `supported_call_kinds` so the caller's sheet hides the Video row.
+     * Audio/masked calls are never affected. Default false (video on).
+     */
+    refuseVideo: boolean('refuse_video').notNull().default(false),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => ({

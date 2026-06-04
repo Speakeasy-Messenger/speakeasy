@@ -34,7 +34,7 @@ import type {
   IceServer,
 } from './types.js';
 import { mediaKindForCall } from './types.js';
-import { FilterError } from '../native/voice-filter.js';
+import { FilterError, setFilterBypass } from '../native/voice-filter.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
@@ -438,6 +438,22 @@ export class CallOrchestrator {
     if (!this.active) return;
     this.peer?.setSpeakerOn(on);
     this.setActive({ ...this.active, speakerOn: on });
+  }
+
+  /**
+   * Live mask on/off for a masked ('private') call (#13). `bypassed=true`
+   * reveals the user's REAL voice to the peer; `false` re-masks. Returns
+   * true only if the native filter actually honored the flip — on an
+   * older native binary without `setBypass` we return false and leave the
+   * mask ON, so we never silently leak the real voice. No-op (false) for
+   * non-masked calls. The reveal is SILENT to the peer (no signal frame).
+   */
+  async setMaskBypassed(bypassed: boolean): Promise<boolean> {
+    if (!this.active || this.active.kind !== 'private') return false;
+    const applied = await setFilterBypass(bypassed);
+    if (!applied) return false;
+    this.setActive({ ...this.active, maskBypassed: bypassed });
+    return true;
   }
 
   /**

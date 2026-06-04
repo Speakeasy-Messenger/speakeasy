@@ -925,9 +925,8 @@ export function ChatScreen({
         visible={callTypeOpen}
         peerUserId={peerId}
         onClose={() => setCallTypeOpen(false)}
-        onPickVoice={() => onStartCall?.(peerId, 'audio')}
+        onPickCall={() => onStartCall?.(peerId, 'private')}
         onPickVideo={() => onStartCall?.(peerId, 'video')}
-        onPickPrivate={() => onStartCall?.(peerId, 'private')}
       />
       <AttachmentSheet
         visible={attachOpen}

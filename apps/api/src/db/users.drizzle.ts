@@ -89,6 +89,7 @@ export class DrizzleUserRepo implements UserRepo {
         publicKey: users.publicKey,
         createdAt: users.createdAt,
         selectedAvatarId: users.selectedAvatarId,
+        refuseVideo: users.refuseVideo,
       })
       .from(users)
       .where(eq(users.id, userId))
@@ -100,6 +101,7 @@ export class DrizzleUserRepo implements UserRepo {
           publicKey: row.publicKey,
           createdAt: row.createdAt,
           selectedAvatarId: row.selectedAvatarId ?? undefined,
+          refuseVideo: row.refuseVideo,
         }
       : undefined;
   }
@@ -120,6 +122,11 @@ export class DrizzleUserRepo implements UserRepo {
       .update(users)
       .set({ selectedAvatarId: animalId ?? null })
       .where(eq(users.id, userId));
+  }
+
+  async setRefuseVideo(userId: string, refuse: boolean): Promise<void> {
+    const db = getDb();
+    await db.update(users).set({ refuseVideo: refuse }).where(eq(users.id, userId));
   }
 
   async deleteUser(userId: string): Promise<void> {

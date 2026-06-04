@@ -6,6 +6,7 @@ interface Stored {
   createdAt: Date;
   deviceToken: string;
   selectedAvatarId?: string;
+  refuseVideo?: boolean;
 }
 
 /** In-memory repo for tests. Not safe for concurrent use across processes. */
@@ -39,6 +40,7 @@ export class InMemoryUserRepo implements UserRepo {
       publicKey: u.publicKey,
       createdAt: u.createdAt,
       selectedAvatarId: u.selectedAvatarId,
+      refuseVideo: u.refuseVideo ?? false,
     };
   }
 
@@ -68,6 +70,12 @@ export class InMemoryUserRepo implements UserRepo {
     const u = this.users.get(userId);
     if (!u) return; // caller's `requireAuth` already proved enrollment
     u.selectedAvatarId = animalId;
+  }
+
+  async setRefuseVideo(userId: string, refuse: boolean): Promise<void> {
+    const u = this.users.get(userId);
+    if (!u) return;
+    u.refuseVideo = refuse;
   }
 
   async deleteUser(userId: string): Promise<void> {

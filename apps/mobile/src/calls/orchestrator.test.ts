@@ -239,6 +239,21 @@ describe('CallOrchestrator', () => {
     expect(h.finishedCallee[0]?.reason).toBe('completed');
   });
 
+  it('setMaskBypassed is a no-op (false) on a non-masked (audio) call', async () => {
+    // #13: the mask toggle only applies to masked ('private') calls. On a
+    // plain audio call it returns false and never flips state.
+    const h = makeOrchHarness();
+    await h.caller.startOutgoing('bob'); // default kind 'audio'
+    const ok = await h.caller.setMaskBypassed(true);
+    expect(ok).toBe(false);
+    expect(h.caller.getActive()?.maskBypassed).toBeUndefined();
+  });
+
+  it('setMaskBypassed returns false when there is no active call', async () => {
+    const h = makeOrchHarness();
+    expect(await h.caller.setMaskBypassed(true)).toBe(false);
+  });
+
   it('callee declines an incoming call', async () => {
     const h = makeOrchHarness();
     await h.caller.startOutgoing('bob');

@@ -12,6 +12,7 @@ import type { PushProvider } from '../push/push.js';
 import type { UserNotifier } from './user-notifier.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { EventLogRepo } from '../db/event-log.js';
+import type { UserRepo } from '../db/users.js';
 
 /**
  * Voice/video call signaling router.
@@ -65,6 +66,12 @@ export interface CallRouterDeps {
    * ICE frames are excluded (one call easily generates 30+).
    */
   eventLog?: EventLogRepo;
+  /**
+   * User repo — read at video-offer time to enforce the callee's
+   * "Refuse video calls" setting (#13). Optional so existing test
+   * harnesses without it keep working (video is then never refused).
+   */
+  users?: UserRepo;
 }
 
 export type CallFrameClient = Extract<
@@ -117,6 +124,30 @@ export async function routeCallFrame(
     const declared = msg.kind;
     if (declared && KNOWN_CALL_KINDS.has(declared as CallKind)) {
       offerKind = declared as CallKind;
+    }
+  }
+
+  // -- refuse-video gate (#13) ----------------------------------------
+  // If the callee has "Refuse video calls" on, reject a video offer
+  // BEFORE any ring / push / buffer: the callee sees nothing, and the
+  // CALLER gets a `video_refused` decline to render the branded "No
+  // video here." notice. Audio/masked ('private') offers are never
+  // gated. Caller-side the sheet already hides the Video row via the
+  // capability aggregation; this is the authoritative enforcement for
+  // a stale caller that offers anyway.
+  if (msg.type === 'call_offer' && offerKind === 'video' && deps.users) {
+    const callee = await deps.users.findById(msg.to);
+    if (callee?.refuseVideo) {
+      deps.userNotifier.notify(senderUserId, {
+        type: 'call_end',
+        from: msg.to,
+        call_id: msg.call_id,
+        reason: 'video_refused',
+      });
+      recordCallRoute(deps, 'call_end', msg.to, msg.call_id, senderUserId, {
+        decision: 'video_refused',
+      });
+      return ok();
     }
   }
 
@@ -213,16 +244,14 @@ export async function routeCallFrame(
     // uniform and matches the manual `for (peer of peerDevices)`
     // semantics for multi-device fan-out.
     //
-    // Private Call: pass `requireCapability` so the notifier (local +
-    // cross-instance) skips peer devices whose declared
-    // `supported_call_kinds` doesn't include 'private'. Without this,
-    // an old device on the same account rings with raw audio, breaking
-    // the brand promise. (Codex tension #1 from /plan-eng-review.)
-    const notifyOpts =
-      msg.type === 'call_offer' && offerKind === 'private'
-        ? { requireCapability: offerKind }
-        : undefined;
-    deps.userNotifier.notify(msg.to, frameToSend, notifyOpts);
+    // #13: NO `requireCapability` gate any more. Masking is caller-local
+    // (the filter alters the caller's own outbound track), so the callee
+    // needs no capability to receive a 'private'/masked call — every one
+    // of the callee's devices should ring. Old devices that can't render
+    // the animal UI fall back to a plain audio call and still hear the
+    // masked voice. (Previously 'private' offers were filtered to
+    // private-capable devices; that gate is gone with the unify.)
+    deps.userNotifier.notify(msg.to, frameToSend);
 
     // Clear any stale buffered offer if the caller hung up while the
     // callee was reconnecting (rare race). Without this, the next
@@ -286,7 +315,8 @@ function recordCallRoute(
       | 'online_cross_instance'
       | 'offline_buffered'
       | 'offline_clear_buffer'
-      | 'offline_drop';
+      | 'offline_drop'
+      | 'video_refused';
     peerInstance?: string;
   },
 ): void {

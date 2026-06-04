@@ -25,6 +25,11 @@ interface SettingsState {
   // Privacy → Calls
   allowIncomingCalls: boolean;
   animateAvatarMouth: boolean;
+  /** "Refuse video calls" (#13). Server-authoritative (the call-router
+   * rejects inbound video offers when on); this is the local cache for
+   * the toggle UI. The PrivacyScreen mirrors changes to the server via
+   * `api.setRefuseVideo` and seeds this from `GET /v1/users/me`. */
+  refuseVideo: boolean;
 
   // Privacy → Findability
   showOnlineStatus: boolean;
@@ -55,6 +60,7 @@ interface SettingsState {
 
   setAllowIncomingCalls: (v: boolean) => void;
   setAnimateAvatarMouth: (v: boolean) => void;
+  setRefuseVideo: (v: boolean) => void;
   setShowOnlineStatus: (v: boolean) => void;
   setInAppNotificationsEnabled: (v: boolean) => void;
   setMessageSoundEnabled: (v: boolean) => void;
@@ -73,6 +79,7 @@ type PersistedShape = Partial<
     | 'hydrated'
     | 'setAllowIncomingCalls'
     | 'setAnimateAvatarMouth'
+    | 'setRefuseVideo'
     | 'setShowOnlineStatus'
     | 'setInAppNotificationsEnabled'
     | 'setMessageSoundEnabled'
@@ -89,6 +96,7 @@ type PersistedShape = Partial<
 const DEFAULTS = {
   allowIncomingCalls: true,
   animateAvatarMouth: true,
+  refuseVideo: false,
   showOnlineStatus: true,
   inAppNotificationsEnabled: true,
   messageSoundEnabled: true,
@@ -111,6 +119,7 @@ function snapshot(s: SettingsState): PersistedShape {
   return {
     allowIncomingCalls: s.allowIncomingCalls,
     animateAvatarMouth: s.animateAvatarMouth,
+    refuseVideo: s.refuseVideo,
     showOnlineStatus: s.showOnlineStatus,
     inAppNotificationsEnabled: s.inAppNotificationsEnabled,
     messageSoundEnabled: s.messageSoundEnabled,
@@ -132,6 +141,10 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
   setAnimateAvatarMouth: (v) => {
     set({ animateAvatarMouth: v });
+    void persist(snapshot(get()));
+  },
+  setRefuseVideo: (v) => {
+    set({ refuseVideo: v });
     void persist(snapshot(get()));
   },
   setShowOnlineStatus: (v) => {
