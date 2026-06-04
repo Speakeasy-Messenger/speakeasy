@@ -135,6 +135,13 @@ export interface CallHistoryEntry {
  */
 export class CallOrchestrator {
   private active?: ActiveCall;
+  /**
+   * When the call entered 'connecting' (SDP exchanged, ICE/DTLS starting).
+   * Used to measure the tech-only setup latency — connecting→connected,
+   * which excludes the callee's human answer time — so the WebRTC latency
+   * levers (#1) have a baseline to tune against. (apps/mobile #1.)
+   */
+  private connectingAt?: number;
   private peer?: CallPeer;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
@@ -890,11 +897,26 @@ export class CallOrchestrator {
 
   private transition(stage: CallStage, patch: Partial<ActiveCall> = {}): void {
     if (!this.active) return;
+    const at = this.now();
+    // #1 call-latency baseline: time the ICE/DTLS establishment
+    // (connecting→connected). This is the tech-only setup latency the
+    // WebRTC levers move — it excludes the callee's human answer time
+    // (which lives in the ringing→connecting gap). Logged on every call
+    // so testers' builds produce a baseline before we tune any lever.
+    if (stage === 'connecting') this.connectingAt = at;
+    if (stage === 'connected' && this.connectingAt != null) {
+      diag('call', 'setup latency: connecting→connected', {
+        iceMs: at - this.connectingAt,
+        kind: this.active.kind,
+        isCaller: this.active.isCaller,
+        callId: this.active.callId,
+      });
+    }
     this.setActive({
       ...this.active,
       ...patch,
       stage,
-      stageEnteredAt: this.now(),
+      stageEnteredAt: at,
     });
   }
 
@@ -930,6 +952,7 @@ export class CallOrchestrator {
 
   private cleanup(): void {
     this.clearRingTimeout();
+    this.connectingAt = undefined;
     this.localIceUnsub?.();
     this.connStateUnsub?.();
     this.animationFrameUnsub?.();
