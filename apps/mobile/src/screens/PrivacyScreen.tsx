@@ -58,9 +58,10 @@ export function PrivacyScreen({
         <SettingsListItem
           kind="toggle"
           title="Show online status"
-          description="When off, you always look offline to others."
+          description="Coming soon — presence isn't tracked yet, so everyone already looks offline."
           value={showOnlineStatus}
           onChange={setShowOnlineStatus}
+          disabled
         />
 
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
