@@ -20,6 +20,8 @@ import React from 'react';
 import { Animated } from 'react-native';
 import Svg, {
   Circle,
+  ClipPath,
+  Defs,
   Ellipse,
   G,
   Line,
@@ -27,6 +29,7 @@ import Svg, {
   Polygon,
   Rect,
 } from 'react-native-svg';
+import { useTheme } from '../theme/ThemeProvider.js';
 import type { AnimalDef, AnimalRender, AnimalRenderProps } from './types.js';
 import { Lynx } from './rares/lynx.js';
 import { Koi } from './rares/koi.js';
@@ -1876,14 +1879,52 @@ export function AnimalSvg({
   // value every paint.
   const zeroAmpRef = React.useRef<Animated.Value | null>(null);
   if (zeroAmpRef.current === null) zeroAmpRef.current = new Animated.Value(0);
+  // Per-theme contrast edge (#12). The marks hard-code BONE ("white") +
+  // INK ("black") with no theme awareness, so BONE shapes vanish on the
+  // cream surface (light) and INK shapes vanish on the aubergine (dark).
+  // Fix: a near-invisible hairline silhouette behind the mark, in the
+  // theme-contrast color — INK edge in light mode, BONE edge in dark mode.
+  // Geometry comes from a ClipPath that REUSES the mark (zero per-mark
+  // edits), scaled up ~4.5% so only the fringe shows behind the real mark.
+  // Tuned to be imperceptible on high-contrast marks (brass fox) and just
+  // enough to define the low-contrast ones. Renders through `toDataURL`
+  // too, so notification PNGs get the edge.
+  const { mode } = useTheme();
+  const edgeColor = mode === 'dark' ? BONE : INK;
+  const reactId = React.useId();
+  const clipId = `sil-${reactId}`;
   if (!ANIMALS[animalId]) return null;
+  const amp = amplitude ?? zeroAmpRef.current;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
+      <Defs>
+        <ClipPath id={clipId}>
+          <G transform="translate(50 50) scale(1.045) translate(-50 -50)">
+            <AnimalBody
+              animalId={animalId}
+              eyeScale={eyeScale}
+              mouthScale={mouthScale}
+              amplitude={amp}
+              prosody={prosody}
+              renderForCall={renderForCall}
+            />
+          </G>
+        </ClipPath>
+      </Defs>
+      <Rect
+        x={0}
+        y={0}
+        width={100}
+        height={100}
+        fill={edgeColor}
+        opacity={0.5}
+        clipPath={`url(#${clipId})`}
+      />
       <AnimalBody
         animalId={animalId}
         eyeScale={eyeScale}
         mouthScale={mouthScale}
-        amplitude={amplitude ?? zeroAmpRef.current}
+        amplitude={amp}
         prosody={prosody}
         renderForCall={renderForCall}
       />
