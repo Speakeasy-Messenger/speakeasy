@@ -683,23 +683,18 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           ciphertext: msg.ciphertext,
           message_id: rowId,
         };
-        // Always fan out live AND push — same rationale as the
-        // direct/group message branch above: the presence gate is
-        // unreliable when the WS close handler doesn't fire, and the
-        // client dedupes by message_id.
+        // Fan out live only — NO push. An SKDM is a protocol control
+        // message (sender-key bootstrap), not a user message. The
+        // headless push handler has no SKDM path (it would just render
+        // a generic "New message" banner), so pushing it produced a
+        // phantom 1:1 notification on every group send (fuertechino
+        // repro 2026-06-04). The SKDM still reaches an offline recipient
+        // two ways: the buffered row above (drains on reconnect, ahead
+        // of the group message it unlocks — see message-router's
+        // "awaiting in-flight SKDM") and the accompanying group
+        // MESSAGE's own push, which wakes the device. So suppressing
+        // the SKDM push loses no delivery, only the spurious banner.
         deps.userNotifier.notify(msg.to, skdmFrame);
-        void deps.push
-          .notifyDelivery({
-            userId: msg.to,
-            conversationId: conversation,
-            msgType: 'direct',
-            // SKDM is the group-key-distribution carrier — sender
-            // identity is fine to surface (member adds member, you
-            // see who added the SKDM that unlocks future group
-            // messages).
-            senderId: senderUserId,
-          })
-          .catch((err) => deps.log.warn({ err, recipientId: msg.to }, 'push notify failed'));
         return;
       }
       case 'call_offer':
