@@ -5,6 +5,9 @@ import { AppBar } from '../components/AppBar.js';
 import { SettingsListItem } from '../components/SettingsListItem.js';
 import { useBlocks } from '../store/blocks.js';
 import { useSettings } from '../store/settings.js';
+import { api } from '../services.js';
+import { getCachedDeviceToken } from '../native/cached-device-token.js';
+import { diag } from '../diag/log.js';
 import { useColors } from '../theme/index.js';
 import { space, type as typeScale } from '../theme/tokens.js';
 
@@ -25,7 +28,25 @@ export function PrivacyScreen({
   const setAnimateAvatarMouth = useSettings((s) => s.setAnimateAvatarMouth);
   const showOnlineStatus = useSettings((s) => s.showOnlineStatus);
   const setShowOnlineStatus = useSettings((s) => s.setShowOnlineStatus);
+  const refuseVideo = useSettings((s) => s.refuseVideo);
+  const setRefuseVideo = useSettings((s) => s.setRefuseVideo);
   const blockedCount = useBlocks((s) => Object.keys(s.byHandle).length);
+
+  // "Refuse video calls" is server-authoritative (the call-router enforces
+  // it). Flip the local toggle optimistically, then mirror to the server.
+  // A failed sync leaves the server on its last value; the next toggle
+  // re-pushes, and `GET /v1/users/me` reseeds on cold start.
+  function onChangeRefuseVideo(v: boolean): void {
+    setRefuseVideo(v);
+    void (async () => {
+      try {
+        const token = await getCachedDeviceToken();
+        if (token) await api.setRefuseVideo(token, v);
+      } catch (err) {
+        diag('settings', 'refuse-video sync failed', { err: String(err) });
+      }
+    })();
+  }
 
   return (
     <SafeAreaView
@@ -51,6 +72,14 @@ export function PrivacyScreen({
           description="Disable if you don't want your animal's mouth tracking your voice."
           value={animateAvatarMouth}
           onChange={setAnimateAvatarMouth}
+        />
+        <SettingsListItem
+          kind="toggle"
+          title="Refuse video calls"
+          description="On: people can't video-call you. They're told you keep video off; you're not notified."
+          value={refuseVideo}
+          onChange={onChangeRefuseVideo}
+          testID="privacy-refuse-video"
         />
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
           FINDABILITY

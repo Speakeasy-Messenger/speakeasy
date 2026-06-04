@@ -221,6 +221,33 @@ export class ApiClient {
   }
 
   /**
+   * Set the caller's "Refuse video calls" flag (#13). Server-authoritative:
+   * when on, the call-router rejects inbound video offers before ringing
+   * (caller gets `video_refused`) and this user stops advertising 'video'
+   * in `supported_call_kinds`. The mobile toggle calls this on change.
+   */
+  async setRefuseVideo(deviceToken: string, refuse: boolean): Promise<void> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/users/me/refuse-video`, {
+      method: 'PUT',
+      headers: {
+        authorization: `Bearer ${deviceToken}`,
+        'content-type': 'application/json',
+      },
+      body: JSON.stringify({ refuse }),
+    });
+    if (res.status !== 204) {
+      let code: string | undefined;
+      try {
+        const j = (await res.json()) as { error?: string };
+        code = j?.error;
+      } catch {
+        /* ignore */
+      }
+      throw new ApiError(res.status, code);
+    }
+  }
+
+  /**
    * Fetch a peer's public-key + their selected animal id. The
    * profiles store calls this to lazy-populate `selectedAvatarId`
    * for rendering remote portrait tiles.
