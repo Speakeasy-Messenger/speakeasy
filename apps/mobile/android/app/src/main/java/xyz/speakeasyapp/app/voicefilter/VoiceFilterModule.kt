@@ -47,6 +47,13 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
 
   override fun getName(): String = NAME
 
+  /**
+   * The DSP installed by the most recent `wrapTrack`, retained so a
+   * live `setBypass(false)` can re-engage the same profile after a
+   * reveal. Cleared on `dispose`. (#13 in-call mask toggle.)
+   */
+  private var currentDsp: VoiceFilterDsp? = null
+
   override fun getConstants(): Map<String, Any> = mapOf(
       // Phase 5j Private Call — exposed to RC testers in 0.7.0-rc.3+.
       // Was gated to `BuildConfig.DEBUG` only; the founder flipped
@@ -84,10 +91,28 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
         formantSemitones = formantShift,
     )
     ActiveFilterHolder.setFilter(dsp)
+    currentDsp = dsp
     val result = Arguments.createMap().apply {
       putString("filteredTrackId", trackId)
     }
     promise.resolve(result)
+  }
+
+  /**
+   * Live mask on/off (#13). `bypassed = true` clears the holder so the
+   * next captured frame goes through UNFILTERED — the user's real voice
+   * reaches the encoder. `false` re-installs the retained DSP. No re-wrap,
+   * no renegotiation: the WebRTC ADM fork simply reads the holder per
+   * frame. Idempotent; a no-op (still resolves) when no filter is active.
+   */
+  @ReactMethod
+  fun setBypass(bypassed: Boolean, promise: Promise) {
+    if (bypassed) {
+      ActiveFilterHolder.setFilter(null)
+    } else {
+      currentDsp?.let { ActiveFilterHolder.setFilter(it) }
+    }
+    promise.resolve(null)
   }
 
   @ReactMethod
@@ -98,6 +123,7 @@ class VoiceFilterModule(reactContext: ReactApplicationContext) :
     // the orchestrator ends the call AND calls dispose; the WebRTC
     // fork's mute-on-fail behavior covers the in-flight frames.
     ActiveFilterHolder.setFilter(null)
+    currentDsp = null
     promise.resolve(null)
   }
 

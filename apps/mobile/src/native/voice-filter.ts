@@ -68,6 +68,18 @@ interface NativeVoiceFilterModule {
   ): Promise<{ filteredTrackId: string }>;
   /** Release filter resources for the active call. Idempotent. */
   dispose(): Promise<void>;
+  /**
+   * Live mask on/off for the active call (#13). `bypassed = true` passes
+   * the raw mic through (the user's REAL voice reaches the peer);
+   * `false` re-engages the mask. Cheap DSP-state flip on the already-
+   * wrapped track — no re-wrap, no renegotiation. Idempotent.
+   *
+   * Optional on the wire: an older native binary without it simply
+   * leaves the JS `setFilterBypass` a no-op (the mask stays on), which
+   * fails safe — we never silently reveal the real voice on a binary
+   * that can't honor the toggle.
+   */
+  setBypass?(bypassed: boolean): Promise<void>;
 }
 
 /**
@@ -160,6 +172,25 @@ export async function wrapTrackWithFilter(
       throw new FilterError(code, String(err));
     }
     throw new FilterError('runtime_unavailable', String(err));
+  }
+}
+
+/**
+ * Live mask on/off for the active call (#13). `bypassed = true` reveals
+ * the user's real voice; `false` re-masks. Returns whether the native
+ * binary actually honored the toggle: `false` means the running binary
+ * has no `setBypass` (older build) so the mask stayed ON — callers MUST
+ * treat that as "could not reveal" and keep the chip in the masked state,
+ * never silently leaking the real voice.
+ */
+export async function setFilterBypass(bypassed: boolean): Promise<boolean> {
+  const native = getNative();
+  if (!native || typeof native.setBypass !== 'function') return false;
+  try {
+    await native.setBypass(bypassed);
+    return true;
+  } catch {
+    return false;
   }
 }
 

@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Alert, Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import InCallManager from 'react-native-incall-manager';
 import {
@@ -65,6 +65,41 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   const ownProfile = useProfiles((s) =>
     myUserId ? s.byUserId[myUserId] : undefined,
   );
+
+  // #13 in-call mask control. Re-masking returns to the safe state, so
+  // it's instant + unconfirmed. Revealing the real voice is a deliberate,
+  // confirmed action. The reveal is SILENT to the peer (no signal frame);
+  // if the native filter can't honor the bypass we keep the mask ON and
+  // tell the user, never leaking the real voice.
+  function onTapMask(): void {
+    if (!active) return;
+    if (active.maskBypassed) {
+      void orchestrator.setMaskBypassed(false);
+      return;
+    }
+    Alert.alert(
+      'Drop the mask?',
+      'They’ll hear your real voice from here on. Your animal stops speaking for you.',
+      [
+        { text: 'Stay masked', style: 'cancel' },
+        {
+          text: 'Reveal my voice',
+          style: 'destructive',
+          onPress: () => {
+            void (async () => {
+              const ok = await orchestrator.setMaskBypassed(true);
+              if (!ok) {
+                Alert.alert(
+                  'Couldn’t reveal',
+                  'Your voice stays masked on this device.',
+                );
+              }
+            })();
+          },
+        },
+      ],
+    );
+  }
   const peerAnimalId =
     peerProfile?.selectedAvatarId ??
     (active ? defaultAnimalForUser(active.peerUserId) : 'fox');
@@ -448,6 +483,44 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
         </View>
       ) : null}
 
+      {/* #13 mask status chip — masked calls only. Always-legible state
+          (DD2): "Voice masked" → warning-toned "Real voice" once revealed.
+          Sits ABOVE the round control row so it never reads as a casual
+          peer of mute/speaker. */}
+      {active.kind === 'private' ? (
+        <Pressable
+          testID="call-mask-chip"
+          onPress={onTapMask}
+          style={[
+            styles.maskChip,
+            {
+              backgroundColor: themed.pale,
+              borderColor: active.maskBypassed
+                ? callPalette.decline
+                : themed.primary,
+            },
+          ]}
+          accessibilityLabel={
+            active.maskBypassed
+              ? 'Your real voice is going out. Double-tap to mask it again.'
+              : 'Voice masked. Double-tap to reveal your real voice.'
+          }
+        >
+          {active.maskBypassed ? (
+            <Text style={[styles.maskChipText, { color: callPalette.decline }]}>
+              ⚠ Real voice
+            </Text>
+          ) : (
+            <>
+              <CipherS size={14} color={themed.primary} />
+              <Text style={[styles.maskChipText, { color: themed.primary }]}>
+                Voice masked
+              </Text>
+            </>
+          )}
+        </Pressable>
+      ) : null}
+
       <View style={styles.controls}>
         <Pressable
           testID="call-mute"
@@ -749,6 +822,22 @@ const styles = StyleSheet.create({
     letterSpacing: typeScale.meta.size * typeScale.meta.letterSpacingEm,
   },
   // Sharp 64×64 squares (no pill) — call controls follow brand restraint.
+  maskChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    alignSelf: 'center',
+    gap: 6,
+    paddingHorizontal: 12,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderRadius: 16,
+    marginBottom: space.md,
+  },
+  maskChipText: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    letterSpacing: 0.2,
+  },
   controls: {
     flexDirection: 'row',
     justifyContent: 'space-around',
