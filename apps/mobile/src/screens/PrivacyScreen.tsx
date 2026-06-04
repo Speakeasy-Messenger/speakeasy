@@ -16,7 +16,8 @@ interface Props {
   onOpenBlockList: () => void;
 }
 
-/** SETTINGS.md §4 — three sections (Calls / Findability / Blocked). */
+/** SETTINGS.md §4 — Calls / Blocked. (Findability's "Show online status"
+ * was cut: a concealment-first app deliberately doesn't broadcast presence.) */
 export function PrivacyScreen({
   onBack,
   onOpenBlockList,
@@ -26,8 +27,6 @@ export function PrivacyScreen({
   const setAllowIncomingCalls = useSettings((s) => s.setAllowIncomingCalls);
   const animateAvatarMouth = useSettings((s) => s.animateAvatarMouth);
   const setAnimateAvatarMouth = useSettings((s) => s.setAnimateAvatarMouth);
-  const showOnlineStatus = useSettings((s) => s.showOnlineStatus);
-  const setShowOnlineStatus = useSettings((s) => s.setShowOnlineStatus);
   const refuseVideo = useSettings((s) => s.refuseVideo);
   const setRefuseVideo = useSettings((s) => s.setRefuseVideo);
   const blockedCount = useBlocks((s) => Object.keys(s.byHandle).length);
@@ -80,17 +79,6 @@ export function PrivacyScreen({
           value={refuseVideo}
           onChange={onChangeRefuseVideo}
           testID="privacy-refuse-video"
-        />
-        <Text style={[styles.sectionLabel, { color: themed.slate }]}>
-          FINDABILITY
-        </Text>
-        <SettingsListItem
-          kind="toggle"
-          title="Show online status"
-          description="Coming soon — presence isn't tracked yet, so everyone already looks offline."
-          value={showOnlineStatus}
-          onChange={setShowOnlineStatus}
-          disabled
         />
 
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
