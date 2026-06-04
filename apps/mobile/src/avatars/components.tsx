@@ -20,9 +20,14 @@ import React from 'react';
 import { Animated } from 'react-native';
 import Svg, {
   Circle,
-  ClipPath,
   Defs,
   Ellipse,
+  FeComposite,
+  FeFlood,
+  FeMerge,
+  FeMergeNode,
+  FeMorphology,
+  Filter,
   G,
   Line,
   Path,
@@ -1882,52 +1887,57 @@ export function AnimalSvg({
   // Per-theme contrast edge (#12). The marks hard-code BONE ("white") +
   // INK ("black") with no theme awareness, so BONE shapes vanish on the
   // cream surface (light) and INK shapes vanish on the aubergine (dark).
-  // Fix: a near-invisible hairline silhouette behind the mark, in the
-  // theme-contrast color — INK edge in light mode, BONE edge in dark mode.
-  // Geometry comes from a ClipPath that REUSES the mark (zero per-mark
-  // edits), scaled up ~4.5% so only the fringe shows behind the real mark.
-  // Tuned to be imperceptible on high-contrast marks (brass fox) and just
-  // enough to define the low-contrast ones. Renders through `toDataURL`
-  // too, so notification PNGs get the edge.
+  //
+  // Fix: an EVEN-WIDTH outline around the mark's silhouette, in the
+  // theme-contrast color (INK in light mode, BONE in dark mode), via an
+  // SVG dilate filter — `feMorphology(dilate)` grows the mark's alpha
+  // uniformly in every direction (so thin parts like the heron neck and
+  // octopus legs get the SAME hairline as fat parts), floods it with the
+  // edge color, and draws the real mark back on top. One filter, zero
+  // per-mark edits, renders through `toDataURL` too.
+  //
+  // (Replaces the rc.47 scale-up "sticker" silhouette, which produced an
+  // UNEVEN, directional edge — scaling from center can't make a uniform
+  // outline — and used React.useId() colon-ids that broke `url(#…)`
+  // references and cross-clipped different animals in the list.)
   const { mode } = useTheme();
   const edgeColor = mode === 'dark' ? BONE : INK;
-  const reactId = React.useId();
-  const clipId = `sil-${reactId}`;
+  // Valid, unique filter id. useId() returns colon-bearing strings (":r0:")
+  // that are illegal in an SVG id / `url(#…)` reference — strip to a safe
+  // charset so each avatar's filter resolves to ITS OWN definition.
+  const safeId = React.useId().replace(/[^a-zA-Z0-9]/g, '');
+  const edgeFilterId = `avedge-${safeId}`;
   if (!ANIMALS[animalId]) return null;
   const amp = amplitude ?? zeroAmpRef.current;
   return (
     <Svg width={size} height={size} viewBox="0 0 100 100">
       <Defs>
-        <ClipPath id={clipId}>
-          <G transform="translate(50 50) scale(1.045) translate(-50 -50)">
-            <AnimalBody
-              animalId={animalId}
-              eyeScale={eyeScale}
-              mouthScale={mouthScale}
-              amplitude={amp}
-              prosody={prosody}
-              renderForCall={renderForCall}
-            />
-          </G>
-        </ClipPath>
+        {/* Region padded so the dilated edge isn't clipped at the bounds. */}
+        <Filter id={edgeFilterId} x="-15%" y="-15%" width="130%" height="130%">
+          <FeMorphology
+            in="SourceAlpha"
+            operator="dilate"
+            radius={1.4}
+            result="dilated"
+          />
+          <FeFlood floodColor={edgeColor} floodOpacity={0.55} result="flood" />
+          <FeComposite in="flood" in2="dilated" operator="in" result="edge" />
+          <FeMerge>
+            <FeMergeNode in="edge" />
+            <FeMergeNode in="SourceGraphic" />
+          </FeMerge>
+        </Filter>
       </Defs>
-      <Rect
-        x={0}
-        y={0}
-        width={100}
-        height={100}
-        fill={edgeColor}
-        opacity={0.5}
-        clipPath={`url(#${clipId})`}
-      />
-      <AnimalBody
-        animalId={animalId}
-        eyeScale={eyeScale}
-        mouthScale={mouthScale}
-        amplitude={amp}
-        prosody={prosody}
-        renderForCall={renderForCall}
-      />
+      <G filter={`url(#${edgeFilterId})`}>
+        <AnimalBody
+          animalId={animalId}
+          eyeScale={eyeScale}
+          mouthScale={mouthScale}
+          amplitude={amp}
+          prosody={prosody}
+          renderForCall={renderForCall}
+        />
+      </G>
     </Svg>
   );
 }
