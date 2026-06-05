@@ -547,11 +547,24 @@ async function displayMessagingNotification(args: {
   let bannerTitle: string | undefined;
   if (args.msgType === 'group') {
     const groupId = args.conversationId.replace(/^group-/, '');
-    bannerTitle = resolveGroupBannerTitle(
-      useGroups.getState().byId[groupId]?.name,
-      args.title,
-      args.peerHandle,
-    );
+    const group = useGroups.getState().byId[groupId];
+    bannerTitle = resolveGroupBannerTitle(group?.name, args.title, args.peerHandle, {
+      members: group?.members,
+      selfId: myUserId ?? undefined,
+    });
+    // The group banner title kept resolving to a member handle / wrong
+    // value in the field; this names the exact inputs so the next repro
+    // says WHY (missing local name on a non-creator device vs key miss vs
+    // a stale server title). groupHit = did this headless store even know
+    // the room. (2026-06-05)
+    diag('push-bg', 'group banner title resolved', {
+      groupId,
+      groupHit: !!group,
+      localName: group?.name ?? null,
+      serverTitle: args.title ?? null,
+      sender: args.peerHandle,
+      resolved: bannerTitle,
+    });
   } else {
     bannerTitle = args.title ?? '@' + args.peerHandle;
   }

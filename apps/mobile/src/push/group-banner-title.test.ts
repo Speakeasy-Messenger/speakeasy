@@ -43,4 +43,31 @@ describe('resolveGroupBannerTitle', () => {
     expect(resolveGroupBannerTitle(undefined, undefined, 'chloro')).toBe('speakeasy');
     expect(resolveGroupBannerTitle('', '', 'chloro')).toBe('speakeasy');
   });
+
+  it('derives a "Room with @…" label from members when no name reached this device', () => {
+    expect(
+      resolveGroupBannerTitle(undefined, undefined, 'bananaman6', {
+        members: ['lunchbox', 'bananaman6', 'fuertechino'],
+        selfId: 'lunchbox',
+      }),
+    ).toBe('Room with @bananaman6, @fuertechino');
+  });
+
+  it('prefers a real name over the member-derived fallback', () => {
+    expect(
+      resolveGroupBannerTitle('Suckdix', undefined, 'bananaman6', {
+        members: ['lunchbox', 'bananaman6'],
+        selfId: 'lunchbox',
+      }),
+    ).toBe('Suckdix');
+  });
+
+  it('caps the derived label at 3 members', () => {
+    expect(
+      resolveGroupBannerTitle(undefined, undefined, 'x', {
+        members: ['a', 'b', 'c', 'd', 'e'],
+        selfId: 'self',
+      }),
+    ).toBe('Room with @a, @b, @c');
+  });
 });
