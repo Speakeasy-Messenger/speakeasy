@@ -188,6 +188,9 @@ async function deliverBuffered(
         message_id: m.id,
         msg_type: m.msgType,
         conversation_id: m.conversation,
+        // Original relay time, so a backlog draining all at once keeps each
+        // message's real timestamp instead of collapsing onto "now".
+        sent_at: m.createdAt.getTime(),
       });
     }
   }
@@ -562,6 +565,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               message_id: rowId,
               msg_type: msg.msg_type,
               conversation_id: conversation,
+              // Server send time. For live delivery this ≈ the recipient's
+              // receive time, but stamping it server-side keeps the bubble
+              // timestamp consistent with the buffered-drain path and
+              // immune to client clock skew.
+              sent_at: Date.now(),
             };
             // Always fan out live AND fire a notify-only push. The
             // previous `onlineSomewhere ? notify : push` gate relied

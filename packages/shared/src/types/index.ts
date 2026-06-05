@@ -186,6 +186,16 @@ export type WsServerMsg =
        * already knows its conversations.
        */
       conversation_id: string;
+      /**
+       * Server-authoritative send time, epoch ms (the relay row's
+       * `created_at`). The recipient uses this for the bubble's displayed
+       * timestamp instead of its own receive clock — without it, a backlog
+       * that drains all at once on reconnect stamps every message with the
+       * same "now", so a day of history collapses onto one timestamp
+       * (bananaman 2026-06-05). Optional for back-compat with pre-rc.51
+       * servers; the client falls back to its receive time when absent.
+       */
+      sent_at?: number;
     }
   | { type: 'delivered'; message_id: MessageId }
   /**

@@ -419,7 +419,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 isSelf: senderId === deps.myUserId,
                 textLen: bubble.length,
               });
-              const inboundSentAt = Date.now();
+              // Prefer the server's authoritative send time so a backlog
+              // draining all at once keeps each message's real timestamp
+              // instead of collapsing onto "now" (bananaman 2026-06-05).
+              // Falls back to receive time for pre-rc.51 servers.
+              const inboundSentAt = frame.sent_at ?? Date.now();
               try {
                 deps.addToConversation(conversationId, {
                   id: frame.message_id,
@@ -541,7 +545,9 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                   attachments: groupAttachments,
                   mentions: groupMentions,
                   kind: 'group',
-                  sentAt: Date.now(),
+                  // Server send time so a backlog drain keeps real
+                  // per-message timestamps (bananaman 2026-06-05).
+                  sentAt: frame.sent_at ?? Date.now(),
                   stage: 'sent',
                 });
                 diag('router', 'group: addToConversation OK', {
