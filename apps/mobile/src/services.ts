@@ -58,6 +58,17 @@ export const pushNotifications: PushNotificationService = new NativePushNotifica
 
 let _ws: SpeakeasyWsClient | undefined;
 
+/**
+ * Return the existing WS singleton WITHOUT creating one. Used by the
+ * background call-push handler to pre-warm the connection only when the
+ * app is already alive (so its orchestrator is wired to receive the
+ * offer); a fresh headless context has no `_ws` and we let the
+ * foreground bring it up normally.
+ */
+export function peekWsClient(): SpeakeasyWsClient | undefined {
+  return _ws;
+}
+
 export function getWsClient(
   getToken: (opts?: { forceRefresh?: boolean }) => Promise<string>,
 ): SpeakeasyWsClient {

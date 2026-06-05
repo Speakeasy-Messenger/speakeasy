@@ -45,7 +45,7 @@ import { useSettings } from '../store/settings.js';
 import { notifChannelSpec, type NotifKind } from './notif-channels.js';
 import { useIdentity } from '../store/identity.js';
 import { useCalls } from '../store/calls.js';
-import { api, signalProtocol, groupMessaging, getWsClient } from '../services.js';
+import { api, signalProtocol, groupMessaging, getWsClient, peekWsClient } from '../services.js';
 import { makeGroupOrchestrator } from '../crypto/group-orchestration.js';
 import { b64ToBytes, utf8FromBytes } from '../utils/bytes.js';
 import {
@@ -980,6 +980,35 @@ export async function handleInlineReplyFromData(args: {
   }
 }
 
+/**
+ * Pre-warm the WS for an incoming call so the offer lands before the
+ * user taps the notification. Only warms an ALREADY-CREATED client —
+ * i.e. the app is alive in the background and its orchestrator is still
+ * subscribed to receive the offer (which then sets `incoming_ringing`,
+ * so the call is already ringing the instant the user foregrounds). In
+ * a fresh headless context there's no `_ws` and no orchestrator, so we
+ * no-op and let the foreground bring the WS up normally. Best-effort:
+ * never throws into the message handler.
+ */
+async function prewarmWsForIncomingCall(): Promise<void> {
+  try {
+    const ws = peekWsClient();
+    if (!ws) return;
+    const st = ws.getState();
+    if (st === 'authed' || st === 'authenticating' || st === 'connecting') {
+      return; // already warm / warming
+    }
+    diag('push-bg', 'call push — pre-warming WS for fast pickup', { state: st });
+    ws.connect();
+    await ws.waitForAuthed(8000);
+    diag('push-bg', 'call push — WS warmed (offer can arrive now)', {});
+  } catch (err) {
+    diag('push-bg', 'call push — WS prewarm failed (continuing)', {
+      err: String(err),
+    });
+  }
+}
+
 // ---------------------------------------------------------------------------
 // TOP-LEVEL HANDLER REGISTRATION (Android only)
 // CRITICAL: This MUST execute at module load, not in a function.
@@ -1001,7 +1030,15 @@ if (Platform.OS === 'android') {
       diag('push-bg', 'incomplete FCM data — skipping', { data });
       return;
     }
+    // For a CALL wake-push, start warming the WS NOW — in parallel with
+    // showing the notification — so the call_offer is delivered over the
+    // (background-closed) WS while the user is still reaching for the
+    // notification. Without this the WS only reconnects on tap/foreground
+    // and the offer lands ~3.8s later (rc.54 trace: tap→ring ~4.6s).
+    const warming =
+      data.notify_kind === 'call' ? prewarmWsForIncomingCall() : undefined;
     await displayPushNotification(data);
+    await warming;
   });
 
   // Notification taps that land while the app is backgrounded/quit.
