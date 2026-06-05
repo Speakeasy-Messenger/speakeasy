@@ -36,6 +36,17 @@ const MOUTH_OPEN_FLOOR = 1.55;
 const MOUTH_OPEN_GAIN = 2.4;
 
 /**
+ * Loudness that fully opens the mouth. The `amplitude` prop driving the
+ * mouth is the peer's WebRTC `audioLevel` (RMS from getStats), NOT the
+ * prosody channel — and real speech sits low in it (~0.05–0.15). The
+ * rc.54 mouth used PROSODY_FULL.amplitude (0.35) as its ceiling, so
+ * normal talking only cracked the mouth ~15 % open ("does the mouth even
+ * move?"). 0.18 makes ordinary speech clearly open + modulate, hitting
+ * full open only on loud/emphatic peaks. Decoupled from the prosody
+ * channels on purpose — different signal, different scale. */
+const MOUTH_LOUDNESS_FULL = 0.18;
+
+/**
  * Prosody-channel EXPANSION (rc.* — fixes "faces don't emote on
  * real calls"). Real-call prosody is heavily compressed vs the [0,1]
  * the per-animal interpolations assume: measured on a real 3-min clip,
@@ -222,7 +233,7 @@ export function AvatarRenderer({
   // channels (real p90 ≈ 0.21), so a [0,1] input barely cracked the
   // mouth open. See PROSODY_FULL.amplitude.
   const mouthScale = source.interpolate({
-    inputRange: [0, PROSODY_FULL.amplitude],
+    inputRange: [0, MOUTH_LOUDNESS_FULL],
     outputRange: [1.0, mouthOpenMax],
     extrapolate: 'clamp',
   });
