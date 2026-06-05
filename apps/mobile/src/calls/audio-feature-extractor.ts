@@ -158,6 +158,26 @@ export interface NormalizedFeatures {
    * (ear flicks, feather settles, tail twitches). Smoothed.
    */
   activity: number;
+  /**
+   * [0, 1] — UN-smoothed instantaneous loudness (raw window RMS),
+   * the same value the followers low-pass into `loudness`. Optional:
+   * present on the production path, absent when a caller hand-builds
+   * features (older tests). Exists for the `AcousticEventDetector`,
+   * whose laugh/gasp rules key on *transients* that the loudness
+   * follower deliberately smooths away — a giggle's amplitude bursts
+   * and a gasp's sharp jump survive here but not in `loudness`. NOT
+   * shipped on the wire (sender-side only).
+   */
+  loudnessFast?: number;
+  /**
+   * Instantaneous voicedness (raw `pitchHz > 0 && rms > gate`) before
+   * any smoothing. Optional, same provenance as `loudnessFast`. The
+   * laugh detector counts voiced↔unvoiced flips; the smoothed
+   * `loudness`/`pitchNorm` latch the voiced state on, erasing the
+   * rapid flips a laugh is made of, so the detector needs this raw
+   * flag to see the cadence. NOT shipped on the wire.
+   */
+  voicedInstant?: boolean;
 }
 
 /**
@@ -332,6 +352,12 @@ export class AudioFeatureExtractor {
         Math.abs(smoothedTrend) < PITCH_TREND_DEADBAND ? 0 : smoothedTrend,
       expressiveness: this.expressivenessFollower.push(expressivenessInstant),
       activity: this.activityFollower.push(activityInstant),
+      // Transient tap for the event detector — the raw, pre-follower
+      // loudness + voicedness. The continuous channels above are
+      // smoothed (right for steady motion); these preserve the sharp
+      // bursts/jumps the laugh + gasp rules need. Not wire fields.
+      loudnessFast: raw.loudness,
+      voicedInstant: voicedNow,
     };
   }
 

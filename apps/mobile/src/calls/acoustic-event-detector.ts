@@ -42,24 +42,47 @@ const HISTORY_WINDOWS = 30;
 
 /** Detection thresholds for each event class. Tuned empirically;
  *  conservative on precision (better to miss a laugh than to
- *  hallucinate one mid-sentence). */
-const LAUGH_MIN_VOICED_TRANSITIONS = 5; // ≥ 5 voicedness flips in 1 s = giggle cadence
-const LAUGH_MIN_AMPLITUDE = 0.25;       // not a whisper
+ *  hallucinate one mid-sentence).
+ *
+ *  rc.* recalibration: the original absolute values were set against a
+ *  hotter, less-smoothed feature scale than the pipeline actually
+ *  ships. Replaying a real 3-minute call through the production
+ *  pipeline, every event's binding gate was UNREACHABLE — loudness
+ *  jumps capped at 0.26 (vs a 0.4 gate), smoothed pitchTrend at ±0.07
+ *  (vs ∓0.3 gates), and the laugh cadence read 0 transitions because
+ *  smoothing latches the voiced flag on. Two fixes paired: (1) the
+ *  detector now keys laugh/gasp on the transient tap (`loudnessFast` /
+ *  `voicedInstant`) so the bursts survive, and (2) the loudness/pitch
+ *  gates below are pulled in to the real signal's range. The detector
+ *  unit tests (which use exaggerated synthetic deltas) still pass — and
+ *  the cooldown still caps firing at ~1 event / 2 s, so a looser gate
+ *  can't produce a thrash of overlays. */
+// A giggle's "ha-ha-ha" produces a FASTER voiced/unvoiced flip rate
+// than ordinary syllabic speech (~4–7 syllables/s, with continuous
+// voicing across vowels → fewer full unvoiced gaps). On the raw
+// `voicedInstant` tap, normal speech runs ~4–8 flips/s; a laugh ~10–16.
+// 10 separates them. (Set against the smoothed flag this was 5, but the
+// smoothed flag latched on and read ~0 — see threshold note above.)
+const LAUGH_MIN_VOICED_TRANSITIONS = 10; // ≥ 10 raw voiced flips in 1 s = giggle cadence
+const LAUGH_MIN_AMPLITUDE = 0.1;        // above whisper, on the transient (raw) loudness
 const SIGH_MIN_DURATION_WINDOWS = 12;   // ≥ 400 ms sustained
-const SIGH_PITCH_TREND_THRESHOLD = -0.3;
+const SIGH_PITCH_TREND_THRESHOLD = -0.15; // just past the ±0.12 trend deadband
 const SIGH_MIN_PRE_SILENCE_WINDOWS = 6; // ≥ 200 ms quiet before
-const GASP_LOUDNESS_JUMP = 0.4;         // 2-window amplitude delta
+const GASP_LOUDNESS_JUMP = 0.2;         // 2-window delta on the transient (raw) loudness
 const GASP_PITCH_TREND_THRESHOLD = 0.3;
 const HMM_MIN_DURATION_WINDOWS = 12;    // ≥ 400 ms sustained
-const HMM_MAX_ZCR = 0.35;                // closed-mouth (low fricative content)
+const HMM_MAX_ZCR = 0.4;                  // closed-mouth (low fricative content)
 const HMM_MIN_LOUDNESS = 0.1;            // audible
 const HMM_MAX_PITCH_VARIANCE = 0.15;     // sustained note, not phonemic speech
 
 interface HistoryEntry {
   loudness: number;
+  /** Transient (pre-smoothing) loudness — what laugh/gasp inspect.
+   *  Falls back to `loudness` when the producer didn't supply it. */
+  loudnessFast: number;
   pitchNorm: number;
   zcrNorm: number;
-  voiced: boolean; // shorthand: pitchNorm > 0 AND loudness > gate
+  voiced: boolean; // raw instantaneous voicedness when available, else smoothed shorthand
 }
 
 export class AcousticEventDetector {
@@ -91,9 +114,17 @@ export class AcousticEventDetector {
    * Call at the same 30 Hz cadence as `AudioFeatureExtractor.push`.
    */
   push(features: NormalizedFeatures, featuresReady = true): AcousticEvent {
-    const voiced = features.pitchNorm > 0 && features.loudness > 0.02;
+    // Prefer the transient tap (raw loudness + raw voicedness) when the
+    // producer supplies it: smoothing erases the laugh cadence and gasp
+    // jump these rules detect. Fall back to the smoothed values + the
+    // derived voiced shorthand so hand-built features (tests) still work.
+    const loudnessFast = features.loudnessFast ?? features.loudness;
+    const voiced =
+      features.voicedInstant ??
+      (features.pitchNorm > 0 && features.loudness > 0.02);
     const entry: HistoryEntry = {
       loudness: features.loudness,
+      loudnessFast,
       pitchNorm: features.pitchNorm,
       zcrNorm: features.zcrNorm,
       voiced,
@@ -162,8 +193,10 @@ export class AcousticEventDetector {
     if (this.silenceRunLength === 0 && this.voicedRunLength > 6) {
       return undefined;
     }
-    const now = this.history[this.history.length - 1]!.loudness;
-    const twoAgo = this.history[this.history.length - 3]!.loudness;
+    // Transient loudness — a gasp's jump is sharp and the follower
+    // would smear it below the gate.
+    const now = this.history[this.history.length - 1]!.loudnessFast;
+    const twoAgo = this.history[this.history.length - 3]!.loudnessFast;
     if (now - twoAgo < GASP_LOUDNESS_JUMP) return undefined;
     if (features.pitchTrend < GASP_PITCH_TREND_THRESHOLD) return undefined;
     // Gasps are short — the `voicedRunLength > 6 && silenceRunLength === 0`
@@ -186,7 +219,9 @@ export class AcousticEventDetector {
       const prev = this.history[i - 1]!;
       const cur = this.history[i]!;
       if (prev.voiced !== cur.voiced) transitions += 1;
-      amplitudeSum += cur.loudness;
+      // Transient loudness — a laugh's bursts average higher here than
+      // in the follower-smoothed channel.
+      amplitudeSum += cur.loudnessFast;
     }
     const avgAmplitude = amplitudeSum / (this.history.length - 1);
     if (transitions < LAUGH_MIN_VOICED_TRANSITIONS) return undefined;

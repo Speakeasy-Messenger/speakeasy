@@ -29,6 +29,14 @@ import { useReducedMotion } from '../a11y/useReducedMotion.js';
  *    enum is gone — continuous-feature → motion mapping replaced it.
  */
 
+/** Mouth-open legibility (see `mouthScale` below). FLOOR is the minimum
+ *  full-loudness mouth scale every animal gets; GAIN amplifies each
+ *  animal's tuned `scaleMax` headroom above 1.0. With FLOOR 1.4 / GAIN
+ *  2.0 the old 1.0–1.22 range maps to ~1.4–1.45 — a clear opening
+ *  rather than a flit. */
+const MOUTH_OPEN_FLOOR = 1.4;
+const MOUTH_OPEN_GAIN = 2.0;
+
 interface Props {
   animalId: string;
   size: number;
@@ -124,20 +132,26 @@ export function AvatarRenderer({
     let cancelled = false;
     let timeout: ReturnType<typeof setTimeout> | undefined;
     function schedule() {
-      const delay = 4000 + Math.random() * 3000; // 4000–7000 ms
+      // Slightly tighter cadence than the old 4–7 s, and a fuller blink:
+      // the previous 50 ms-down/50 ms-up flick to 0.05 was so quick (and
+      // never fully shut) that it read as "no blink at all." Close all
+      // the way to 0, hold ~70 ms, then open on a softer curve — ~320 ms
+      // total, which actually registers as an eye blink.
+      const delay = 3200 + Math.random() * 2800; // 3200–6000 ms
       timeout = setTimeout(() => {
         if (cancelled) return;
         Animated.sequence([
           Animated.timing(blink, {
-            toValue: 0.05,
-            duration: 50,
+            toValue: 0,
+            duration: 110,
             easing: Easing.out(Easing.quad),
             useNativeDriver: false,
           }),
+          Animated.delay(70),
           Animated.timing(blink, {
             toValue: 1,
-            duration: 50,
-            easing: Easing.in(Easing.quad),
+            duration: 150,
+            easing: Easing.inOut(Easing.quad),
             useNativeDriver: false,
           }),
         ]).start(() => {
@@ -165,9 +179,22 @@ export function AvatarRenderer({
   // driver. Re-using the same ref across renders prevents spurious
   // unmounts of the SVG tree on every parent re-render.
   const source = useAmplitudeSource(amplitude);
+  // The per-animal `scaleMax` was tuned timidly (1.0–1.22): an ≤18 %
+  // stretch of a small mouth shape reads as a "flit," not an opening,
+  // and `octopus` was 1.0 (the mouth could not move at all). Amplify
+  // the open range centrally so a loud vowel visibly opens the mouth,
+  // with a floor that gives every animal — including the 1.0 / 1.06
+  // outliers — a legible open pose. Tunable; worth an on-device pass to
+  // confirm no shape distorts at the wider range. Per-animal caps can
+  // be reintroduced here later if one does.
+  const tunedMax = def?.meta.audioResponse.scaleMax ?? 1;
+  const mouthOpenMax = Math.max(
+    MOUTH_OPEN_FLOOR,
+    1 + (tunedMax - 1) * MOUTH_OPEN_GAIN,
+  );
   const mouthScale = source.interpolate({
     inputRange: [0, 1],
-    outputRange: [1.0, def?.meta.audioResponse.scaleMax ?? 1],
+    outputRange: [1.0, mouthOpenMax],
   });
 
   if (!def) {

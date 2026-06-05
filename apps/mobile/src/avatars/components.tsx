@@ -851,9 +851,18 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] })
     : 1;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
+    <AnimatedG translateY={recoil}>
       <AnimatedG originX={28} originY={30} rotation={leftEarRot}>
         <Polygon points="18,8 38,8 28,32" fill={BRASS} />
         <Polygon points="24,16 32,16 28,28" fill={INK} />
@@ -877,42 +886,71 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="58,33 74,36 74,40 58,38" fill={INK} />
       </AnimatedG>
 
-      <Eyes leftPivot={{ x: 34, y: 48 }} rightPivot={{ x: 66, y: 48 }} scale={eyeScale}>
-        <G>
-          <Ellipse cx={34} cy={48} rx={8} ry={8} fill={BONE} />
-          <Ellipse cx={34} cy={48} rx={4} ry={4} fill={INK} />
-          <Circle cx={36} cy={46} r={1.3} fill={BONE} />
-        </G>
-        <G>
-          <Ellipse cx={66} cy={48} rx={8} ry={8} fill={BONE} />
-          <Ellipse cx={66} cy={48} rx={4} ry={4} fill={INK} />
-          <Circle cx={68} cy={46} r={1.3} fill={BONE} />
-        </G>
-      </Eyes>
+      <AnimatedG originX={50} originY={48} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 34, y: 48 }} rightPivot={{ x: 66, y: 48 }} scale={eyeScale}>
+          <G>
+            <Ellipse cx={34} cy={48} rx={8} ry={8} fill={BONE} />
+            <Ellipse cx={34} cy={48} rx={4} ry={4} fill={INK} />
+            <Circle cx={36} cy={46} r={1.3} fill={BONE} />
+          </G>
+          <G>
+            <Ellipse cx={66} cy={48} rx={8} ry={8} fill={BONE} />
+            <Ellipse cx={66} cy={48} rx={4} ry={4} fill={INK} />
+            <Circle cx={68} cy={46} r={1.3} fill={BONE} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       <AnimatedG originX={50} originY={70} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 70 }} scale={mouthScale} axis="y">
           <Path d="M40,68 Q50,76 60,68 L57,72 Q50,76 43,72 Z" fill={INK} />
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
 const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const exprSrc = prosody?.expressiveness;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const activitySrc = prosody?.activity;
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -2] })
     : 0;
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1.15] })
     : 1;
+  // Owls swivel — tilt the whole head on pitch trend.
+  const headTilt = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [9, 0, -9] })
+    : 0;
+  // Ear tufts perk up and fan with articulation rate (activity channel).
+  const leftTuftRot = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -12] })
+    : 0;
+  const rightTuftRot = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 12] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
-      <Polygon points="20,18 32,18 27,5" fill={BRASS} />
-      <Polygon points="68,18 80,18 73,5" fill={BRASS} />
+    <AnimatedG translateY={recoil}>
+    <AnimatedG originX={50} originY={50} rotation={headTilt}>
+      <AnimatedG originX={27} originY={18} rotation={leftTuftRot}>
+        <Polygon points="20,18 32,18 27,5" fill={BRASS} />
+      </AnimatedG>
+      <AnimatedG originX={73} originY={18} rotation={rightTuftRot}>
+        <Polygon points="68,18 80,18 73,5" fill={BRASS} />
+      </AnimatedG>
       <Path
         d="M18,22 Q18,18 30,18 L70,18 Q82,18 82,22 L82,76 Q82,90 50,90 Q18,90 18,76 Z"
         fill={BRASS}
@@ -925,18 +963,20 @@ const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="56,28 74,30 74,34 56,32" fill={INK} />
       </AnimatedG>
 
-      <Eyes leftPivot={{ x: 36, y: 46 }} rightPivot={{ x: 64, y: 46 }} scale={eyeScale}>
-        <G>
-          <Circle cx={36} cy={46} r={11} fill={INK} />
-          <Circle cx={36} cy={46} r={4} fill={BRASS} />
-          <Circle cx={38} cy={43} r={1.5} fill={BONE} />
-        </G>
-        <G>
-          <Circle cx={64} cy={46} r={11} fill={INK} />
-          <Circle cx={64} cy={46} r={4} fill={BRASS} />
-          <Circle cx={66} cy={43} r={1.5} fill={BONE} />
-        </G>
-      </Eyes>
+      <AnimatedG originX={50} originY={46} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 36, y: 46 }} rightPivot={{ x: 64, y: 46 }} scale={eyeScale}>
+          <G>
+            <Circle cx={36} cy={46} r={11} fill={INK} />
+            <Circle cx={36} cy={46} r={4} fill={BRASS} />
+            <Circle cx={38} cy={43} r={1.5} fill={BONE} />
+          </G>
+          <G>
+            <Circle cx={64} cy={46} r={11} fill={INK} />
+            <Circle cx={64} cy={46} r={4} fill={BRASS} />
+            <Circle cx={66} cy={43} r={1.5} fill={BONE} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       {/* Beak — bigger downward triangle, X-scale on mouthShape */}
       <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
@@ -944,43 +984,65 @@ const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Polygon points="42,60 58,60 50,72" fill={BRASS} />
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
+    </AnimatedG>
   );
 };
 
 const PigeonCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const activitySrc = prosody?.activity;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const exprSrc = prosody?.expressiveness;
   const bodyDy = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -3] })
     : 0;
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.2] })
     : 1;
+  // Pigeons bob — tilt the whole head on pitch trend.
+  const headTilt = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [8, 0, -8] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
+    <AnimatedG translateY={recoil}>
     <AnimatedG translateY={bodyDy}>
-      {/* Dome head, both eyes visible (re-pose from profile → ¾) */}
-      <Ellipse cx={50} cy={50} rx={32} ry={28} fill={INK} />
-      {/* BRASS sheen along the upper head — classic pigeon iridescence cue */}
-      <Path d="M22,42 Q50,30 78,42 Q78,46 50,38 Q22,46 22,42 Z" fill={BRASS} opacity={0.35} />
+      <AnimatedG originX={50} originY={50} rotation={headTilt}>
+        {/* Dome head, both eyes visible (re-pose from profile → ¾) */}
+        <Ellipse cx={50} cy={50} rx={32} ry={28} fill={INK} />
+        {/* BRASS sheen along the upper head — classic pigeon iridescence cue */}
+        <Path d="M22,42 Q50,30 78,42 Q78,46 50,38 Q22,46 22,42 Z" fill={BRASS} opacity={0.35} />
 
-      <Eyes leftPivot={{ x: 38, y: 46 }} rightPivot={{ x: 62, y: 46 }} scale={eyeScale}>
-        <G>
-          <Ellipse cx={38} cy={46} rx={5} ry={5} fill={BRASS} />
-          <Ellipse cx={38} cy={46} rx={2} ry={2} fill={INK} />
-        </G>
-        <G>
-          <Ellipse cx={62} cy={46} rx={5} ry={5} fill={BRASS} />
-          <Ellipse cx={62} cy={46} rx={2} ry={2} fill={INK} />
-        </G>
-      </Eyes>
+        <AnimatedG originX={50} originY={46} scale={eyeWiden}>
+          <Eyes leftPivot={{ x: 38, y: 46 }} rightPivot={{ x: 62, y: 46 }} scale={eyeScale}>
+            <G>
+              <Ellipse cx={38} cy={46} rx={5} ry={5} fill={BRASS} />
+              <Ellipse cx={38} cy={46} rx={2} ry={2} fill={INK} />
+            </G>
+            <G>
+              <Ellipse cx={62} cy={46} rx={5} ry={5} fill={BRASS} />
+              <Ellipse cx={62} cy={46} rx={2} ry={2} fill={INK} />
+            </G>
+          </Eyes>
+        </AnimatedG>
 
-      <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
-          <Polygon points="44,60 56,60 50,68" fill={BRASS} />
-        </Mouth>
+        <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
+          <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
+            <Polygon points="44,60 56,60 50,68" fill={BRASS} />
+          </Mouth>
+        </AnimatedG>
       </AnimatedG>
+    </AnimatedG>
     </AnimatedG>
   );
 };
@@ -1001,16 +1063,37 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.2] })
     : 1;
+  // Ears twitch — splay sideways with articulation rate (activity channel).
+  const activitySrc = prosody?.activity;
+  const leftEarTwitch = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
+    : 0;
+  const rightEarTwitch = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
-      <AnimatedG originX={38.5} originY={44} rotation={leftEarRot}>
-        <Rect x={33} y={6} width={11} height={38} rx={5} fill={BONE} />
-        <Rect x={36} y={12} width={5} height={26} rx={2} fill={BRASS} />
+    <AnimatedG translateY={recoil}>
+      <AnimatedG originX={38.5} originY={44} rotation={leftEarTwitch}>
+        <AnimatedG originX={38.5} originY={44} rotation={leftEarRot}>
+          <Rect x={33} y={6} width={11} height={38} rx={5} fill={BONE} />
+          <Rect x={36} y={12} width={5} height={26} rx={2} fill={BRASS} />
+        </AnimatedG>
       </AnimatedG>
-      <AnimatedG originX={61.5} originY={44} rotation={rightEarRot}>
-        <Rect x={56} y={6} width={11} height={38} rx={5} fill={BONE} />
-        <Rect x={59} y={12} width={5} height={26} rx={2} fill={BRASS} />
+      <AnimatedG originX={61.5} originY={44} rotation={rightEarTwitch}>
+        <AnimatedG originX={61.5} originY={44} rotation={rightEarRot}>
+          <Rect x={56} y={6} width={11} height={38} rx={5} fill={BONE} />
+          <Rect x={59} y={12} width={5} height={26} rx={2} fill={BRASS} />
+        </AnimatedG>
       </AnimatedG>
       <Ellipse cx={50} cy={60} rx={30} ry={28} fill={BONE} />
 
@@ -1022,38 +1105,60 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="56,48 72,50 72,53 56,52" fill={INK} />
       </AnimatedG>
 
-      <Eyes leftPivot={{ x: 36, y: 58 }} rightPivot={{ x: 64, y: 58 }} scale={eyeScale}>
-        <G>
-          <Circle cx={36} cy={58} r={7} fill={INK} />
-          <Circle cx={38} cy={56} r={1.5} fill={BONE} />
-        </G>
-        <G>
-          <Circle cx={64} cy={58} r={7} fill={INK} />
-          <Circle cx={66} cy={56} r={1.5} fill={BONE} />
-        </G>
-      </Eyes>
+      <AnimatedG originX={50} originY={58} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 36, y: 58 }} rightPivot={{ x: 64, y: 58 }} scale={eyeScale}>
+          <G>
+            <Circle cx={36} cy={58} r={7} fill={INK} />
+            <Circle cx={38} cy={56} r={1.5} fill={BONE} />
+          </G>
+          <G>
+            <Circle cx={64} cy={58} r={7} fill={INK} />
+            <Circle cx={66} cy={56} r={1.5} fill={BONE} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       <AnimatedG originX={50} originY={74} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 74 }} scale={mouthScale} axis="y">
           <Path d="M44,72 Q50,80 56,72 L54,76 Q50,80 46,76 Z" fill={INK} />
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
 const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const exprSrc = prosody?.expressiveness;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const activitySrc = prosody?.activity;
   const browScale = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
     : 1;
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.15] })
     : 1;
+  // Proud head + antlers tip with the peer's pitch trend.
+  const headTilt = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [8, 0, -8] })
+    : 0;
+  // Cheek patches flush with articulation rate (activity channel).
+  const cheekOpacity = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
+    <AnimatedG translateY={recoil}>
+    <AnimatedG originX={50} originY={60} rotation={headTilt}>
       {/* Antlers — preserved from default */}
       <Path
         d="M30,28 L24,12 M30,28 L18,22 M30,28 L34,8"
@@ -1072,6 +1177,11 @@ const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
       <Path d="M28,30 L72,30 L66,68 L50,92 L34,68 Z" fill={BRASS} />
       <Path d="M40,62 L60,62 L50,86 Z" fill={BONE} />
 
+      <AnimatedG opacity={cheekOpacity}>
+        <Ellipse cx={32} cy={58} rx={5} ry={3} fill={BONE} />
+        <Ellipse cx={68} cy={58} rx={5} ry={3} fill={BONE} />
+      </AnimatedG>
+
       <AnimatedG originX={38} originY={40} scaleY={browScale}>
         <Polygon points="30,40 46,38 46,42 30,43" fill={INK} />
       </AnimatedG>
@@ -1079,63 +1189,107 @@ const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="54,38 70,40 70,43 54,42" fill={INK} />
       </AnimatedG>
 
-      <Eyes leftPivot={{ x: 38, y: 50 }} rightPivot={{ x: 62, y: 50 }} scale={eyeScale}>
-        <G>
-          <Ellipse cx={38} cy={50} rx={6} ry={6} fill={INK} />
-          <Circle cx={40} cy={48} r={1.3} fill={BONE} />
-        </G>
-        <G>
-          <Ellipse cx={62} cy={50} rx={6} ry={6} fill={INK} />
-          <Circle cx={64} cy={48} r={1.3} fill={BONE} />
-        </G>
-      </Eyes>
+      <AnimatedG originX={50} originY={50} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 38, y: 50 }} rightPivot={{ x: 62, y: 50 }} scale={eyeScale}>
+          <G>
+            <Ellipse cx={38} cy={50} rx={6} ry={6} fill={INK} />
+            <Circle cx={40} cy={48} r={1.3} fill={BONE} />
+          </G>
+          <G>
+            <Ellipse cx={62} cy={50} rx={6} ry={6} fill={INK} />
+            <Circle cx={64} cy={48} r={1.3} fill={BONE} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       <AnimatedG originX={50} originY={70} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 70 }} scale={mouthScale} axis="y">
           <Path d="M42,68 Q50,76 58,68 L55,72 Q50,76 45,72 Z" fill={INK} />
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
+    </AnimatedG>
   );
 };
 
 const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const exprSrc = prosody?.expressiveness;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const activitySrc = prosody?.activity;
   const bodyRot = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 3] })
     : 0;
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.15] })
     : 1;
+  // Whole head rolls with the peer's pitch trend.
+  const headTilt = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [7, 0, -7] })
+    : 0;
+  // Blowhole spout puffs with articulation rate (activity channel).
+  const spoutOpacity = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Brow ridge lifts with expressiveness.
+  const browDy = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -2] })
+    : 0;
+  // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <AnimatedG originX={50} originY={50} rotation={bodyRot}>
-      {/* Stylized whale head — emerging from below */}
-      <Path
-        d="M10,40 Q15,20 50,20 Q85,20 90,40 Q90,72 50,80 Q10,72 10,40 Z"
-        fill={INK}
-      />
-      {/* White belly cue */}
-      <Path d="M22,52 Q50,68 78,52 Q78,72 50,76 Q22,72 22,52 Z" fill={BONE} />
+    <AnimatedG translateY={recoil}>
+    <AnimatedG originX={50} originY={50} rotation={headTilt}>
+      <AnimatedG originX={50} originY={50} rotation={bodyRot}>
+        {/* Blowhole spout — puffs with activity */}
+        <AnimatedG opacity={spoutOpacity}>
+          <Path d="M48,20 Q44,8 40,4" stroke={BONE} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+          <Path d="M52,20 Q56,8 60,4" stroke={BONE} strokeWidth={2.5} fill="none" strokeLinecap="round" />
+        </AnimatedG>
 
-      <Eyes leftPivot={{ x: 36, y: 42 }} rightPivot={{ x: 64, y: 42 }} scale={eyeScale}>
-        <G>
-          <Ellipse cx={36} cy={42} rx={5} ry={5} fill={BRASS} />
-          <Ellipse cx={36} cy={42} rx={2} ry={2} fill={INK} />
-        </G>
-        <G>
-          <Ellipse cx={64} cy={42} rx={5} ry={5} fill={BRASS} />
-          <Ellipse cx={64} cy={42} rx={2} ry={2} fill={INK} />
-        </G>
-      </Eyes>
+        {/* Stylized whale head — emerging from below */}
+        <Path
+          d="M10,40 Q15,20 50,20 Q85,20 90,40 Q90,72 50,80 Q10,72 10,40 Z"
+          fill={INK}
+        />
+        {/* White belly cue */}
+        <Path d="M22,52 Q50,68 78,52 Q78,72 50,76 Q22,72 22,52 Z" fill={BONE} />
 
-      {/* Wide smile-arc mouth */}
-      <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
-          <Path d="M28,60 Q50,72 72,60 L70,64 Q50,74 30,64 Z" fill={INK} />
-        </Mouth>
+        {/* Brow ridge — lifts with expressiveness */}
+        <AnimatedG translateY={browDy}>
+          <Polygon points="28,34 40,32 40,35 28,37" fill={BONE} />
+          <Polygon points="60,32 72,34 72,37 60,35" fill={BONE} />
+        </AnimatedG>
+
+        <AnimatedG originX={50} originY={42} scale={eyeWiden}>
+          <Eyes leftPivot={{ x: 36, y: 42 }} rightPivot={{ x: 64, y: 42 }} scale={eyeScale}>
+            <G>
+              <Ellipse cx={36} cy={42} rx={5} ry={5} fill={BRASS} />
+              <Ellipse cx={36} cy={42} rx={2} ry={2} fill={INK} />
+            </G>
+            <G>
+              <Ellipse cx={64} cy={42} rx={5} ry={5} fill={BRASS} />
+              <Ellipse cx={64} cy={42} rx={2} ry={2} fill={INK} />
+            </G>
+          </Eyes>
+        </AnimatedG>
+
+        {/* Wide smile-arc mouth */}
+        <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
+          <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
+            <Path d="M28,60 Q50,72 72,60 L70,64 Q50,74 30,64 Z" fill={INK} />
+          </Mouth>
+        </AnimatedG>
       </AnimatedG>
+    </AnimatedG>
     </AnimatedG>
   );
 };
@@ -1143,6 +1297,8 @@ const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const activitySrc = prosody?.activity;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const exprSrc = prosody?.expressiveness;
   const leftWingRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -10] })
     : 0;
@@ -1152,49 +1308,89 @@ const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] })
     : 1;
+  // Feathery antennae sweep with the peer's pitch trend.
+  const leftAntennaRot = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
+    : 0;
+  const rightAntennaRot = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-10, 0, 10] })
+    : 0;
+  // Wings flare wider as the peer's voice gets more animated (expressiveness).
+  const wingFlare = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.92, 1.12] })
+    : 1;
+  // Brow lifts with expressiveness.
+  const browDy = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -1.5] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
-      {/* Antennae */}
-      <Path d="M44,30 Q38,18 30,14" stroke={INK} strokeWidth={1.5} fill="none" />
-      <Path d="M56,30 Q62,18 70,14" stroke={INK} strokeWidth={1.5} fill="none" />
-
-      {/* Wings — rotated back from face center, expose real face */}
-      <AnimatedG originX={50} originY={50} rotation={leftWingRot}>
-        <Path d="M44,40 L14,30 L8,52 L44,62 Z" fill={BRASS} />
-        <Path d="M44,62 L18,68 L26,84 L44,76 Z" fill={BONE} />
+    <AnimatedG translateY={recoil}>
+      {/* Antennae — sweep on pitch trend */}
+      <AnimatedG originX={44} originY={30} rotation={leftAntennaRot}>
+        <Path d="M44,30 Q38,18 30,14" stroke={INK} strokeWidth={1.5} fill="none" />
       </AnimatedG>
-      <AnimatedG originX={50} originY={50} rotation={rightWingRot}>
-        <Path d="M56,40 L86,30 L92,52 L56,62 Z" fill={BRASS} />
-        <Path d="M56,62 L82,68 L74,84 L56,76 Z" fill={BONE} />
+      <AnimatedG originX={56} originY={30} rotation={rightAntennaRot}>
+        <Path d="M56,30 Q62,18 70,14" stroke={INK} strokeWidth={1.5} fill="none" />
+      </AnimatedG>
+
+      {/* Wings — rotated back from face center, expose real face; flare on expressiveness */}
+      <AnimatedG originX={50} originY={50} scale={wingFlare}>
+        <AnimatedG originX={50} originY={50} rotation={leftWingRot}>
+          <Path d="M44,40 L14,30 L8,52 L44,62 Z" fill={BRASS} />
+          <Path d="M44,62 L18,68 L26,84 L44,76 Z" fill={BONE} />
+        </AnimatedG>
+        <AnimatedG originX={50} originY={50} rotation={rightWingRot}>
+          <Path d="M56,40 L86,30 L92,52 L56,62 Z" fill={BRASS} />
+          <Path d="M56,62 L82,68 L74,84 L56,76 Z" fill={BONE} />
+        </AnimatedG>
       </AnimatedG>
 
       {/* Centered body + face */}
       <Ellipse cx={50} cy={56} rx={8} ry={20} fill={INK} />
 
-      <Eyes leftPivot={{ x: 45, y: 44 }} rightPivot={{ x: 55, y: 44 }} scale={eyeScale}>
-        <G>
-          <Circle cx={45} cy={44} r={3.5} fill={BONE} />
-          <Circle cx={45} cy={44} r={1.5} fill={INK} />
-        </G>
-        <G>
-          <Circle cx={55} cy={44} r={3.5} fill={BONE} />
-          <Circle cx={55} cy={44} r={1.5} fill={INK} />
-        </G>
-      </Eyes>
+      {/* Brow — tiny wedges lift with expressiveness */}
+      <AnimatedG translateY={browDy}>
+        <Polygon points="41,39 47,38 47,40 41,41" fill={INK} />
+        <Polygon points="53,38 59,39 59,41 53,40" fill={INK} />
+      </AnimatedG>
+
+      <AnimatedG originX={50} originY={44} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 45, y: 44 }} rightPivot={{ x: 55, y: 44 }} scale={eyeScale}>
+          <G>
+            <Circle cx={45} cy={44} r={3.5} fill={BONE} />
+            <Circle cx={45} cy={44} r={1.5} fill={INK} />
+          </G>
+          <G>
+            <Circle cx={55} cy={44} r={3.5} fill={BONE} />
+            <Circle cx={55} cy={44} r={1.5} fill={INK} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       <AnimatedG originX={50} originY={56} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 56 }} scale={mouthScale} axis="y">
           <Ellipse cx={50} cy={56} rx={3} ry={2} fill={BONE} />
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
 const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const exprSrc = prosody?.expressiveness;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const activitySrc = prosody?.activity;
   const swayLeft = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
     : 0;
@@ -1204,15 +1400,27 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1.15] })
     : 1;
+  // Soft-bodied mantle leans with the peer's pitch trend — rising vs falling pitch tips the head.
+  const mantleTilt = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
+    : 0;
+  // Articulation rate flushes the cheek patches — pulses with activity.
+  const cheekOpacity = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] })
+    : 0;
+  // Eyes widen as the peer's voice gets more emotionally animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
-      {/* Larger mantle for call view */}
-      <Path
-        d="M16,38 Q16,14 50,14 Q84,14 84,38 L84,58 Q84,62 80,62 L20,62 Q16,62 16,58 Z"
-        fill={BRASS}
-      />
-
+    <AnimatedG translateY={recoil}>
+      {/* Tentacles stay anchored to the canvas; only the mantle/head tilts on pitch. */}
       <AnimatedG originX={50} originY={62} rotation={swayLeft}>
         <Path d="M22,62 Q16,75 26,90" stroke={BRASS} strokeWidth={5} fill="none" strokeLinecap="round" />
         <Path d="M34,62 Q30,80 42,92" stroke={BRASS} strokeWidth={5} fill="none" strokeLinecap="round" />
@@ -1224,24 +1432,40 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Path d="M78,62 Q84,75 74,90" stroke={BRASS} strokeWidth={5} fill="none" strokeLinecap="round" />
       </AnimatedG>
 
-      <Eyes leftPivot={{ x: 38, y: 36 }} rightPivot={{ x: 62, y: 36 }} scale={eyeScale}>
-        <G>
-          <Circle cx={38} cy={36} r={6} fill={INK} />
-          <Circle cx={40} cy={34} r={1.5} fill={BONE} />
-        </G>
-        <G>
-          <Circle cx={62} cy={36} r={6} fill={INK} />
-          <Circle cx={64} cy={34} r={1.5} fill={BONE} />
-        </G>
-      </Eyes>
+      <AnimatedG originX={50} originY={48} rotation={mantleTilt}>
+        {/* Larger mantle for call view */}
+        <Path
+          d="M16,38 Q16,14 50,14 Q84,14 84,38 L84,58 Q84,62 80,62 L20,62 Q16,62 16,58 Z"
+          fill={BRASS}
+        />
 
-      {/* Mouth — small smile on the mantle */}
-      <AnimatedG originX={50} originY={50} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 50 }} scale={mouthScale} axis="y">
-          <Path d="M42,48 Q50,54 58,48 L56,52 Q50,55 44,52 Z" fill={INK} />
-        </Mouth>
+        {/* Cheek flush — pulses with articulation rate (activity channel) */}
+        <AnimatedG opacity={cheekOpacity}>
+          <Ellipse cx={30} cy={46} rx={6} ry={4} fill={INK} />
+          <Ellipse cx={70} cy={46} rx={6} ry={4} fill={INK} />
+        </AnimatedG>
+
+        <AnimatedG originX={50} originY={36} scale={eyeWiden}>
+          <Eyes leftPivot={{ x: 38, y: 36 }} rightPivot={{ x: 62, y: 36 }} scale={eyeScale}>
+            <G>
+              <Circle cx={38} cy={36} r={6} fill={INK} />
+              <Circle cx={40} cy={34} r={1.5} fill={BONE} />
+            </G>
+            <G>
+              <Circle cx={62} cy={36} r={6} fill={INK} />
+              <Circle cx={64} cy={34} r={1.5} fill={BONE} />
+            </G>
+          </Eyes>
+        </AnimatedG>
+
+        {/* Mouth — small smile on the mantle */}
+        <AnimatedG originX={50} originY={50} scaleX={mouthShapeX}>
+          <Mouth pivot={{ x: 50, y: 50 }} scale={mouthScale} axis="y">
+            <Path d="M42,48 Q50,54 58,48 L56,52 Q50,55 44,52 Z" fill={INK} />
+          </Mouth>
+        </AnimatedG>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
@@ -1249,6 +1473,7 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
   const shapeSrc = prosody?.mouthShape;
+  const activitySrc = prosody?.activity;
   const headTx = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-3, 0, 4] })
     : 0;
@@ -1258,15 +1483,34 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.3] })
     : 1;
+  // Nuchal crest plume raises with articulation rate (activity channel).
+  const crestRot = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -22] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-figure flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
+    <AnimatedG translateY={recoil}>
       {/* Body — smaller, bottom-left; keeps the heron silhouette */}
       <Ellipse cx={32} cy={84} rx={12} ry={7} fill={BONE} />
       {/* Neck — shorter; still an S-curve cue */}
       <Path d="M36,78 Q44,62 50,46" stroke={BONE} strokeWidth={9} fill="none" strokeLinecap="round" />
 
       <AnimatedG translateX={headTx}>
+        {/* Nuchal crest — trailing plume off the back of the head, lifts on activity */}
+        <AnimatedG originX={70} originY={20} rotation={crestRot}>
+          <Path d="M70,20 Q84,14 92,8" stroke={BONE} strokeWidth={3} fill="none" strokeLinecap="round" />
+          <Path d="M70,22 Q86,18 95,14" stroke={BONE} strokeWidth={3} fill="none" strokeLinecap="round" />
+        </AnimatedG>
+
         {/* Enlarged head — ¾ portrait, two visible eyes */}
         <Ellipse cx={56} cy={36} rx={28} ry={26} fill={BONE} />
 
@@ -1275,16 +1519,18 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Polygon points="62,18 76,22 76,26 62,22" fill={INK} />
         </AnimatedG>
 
-        <Eyes leftPivot={{ x: 46, y: 36 }} rightPivot={{ x: 66, y: 36 }} scale={eyeScale}>
-          <G>
-            <Ellipse cx={46} cy={36} rx={6} ry={6} fill={INK} />
-            <Circle cx={47.5} cy={34.5} r={1.2} fill={BONE} />
-          </G>
-          <G>
-            <Ellipse cx={66} cy={36} rx={6} ry={6} fill={INK} />
-            <Circle cx={67.5} cy={34.5} r={1.2} fill={BONE} />
-          </G>
-        </Eyes>
+        <AnimatedG originX={56} originY={36} scale={eyeWiden}>
+          <Eyes leftPivot={{ x: 46, y: 36 }} rightPivot={{ x: 66, y: 36 }} scale={eyeScale}>
+            <G>
+              <Ellipse cx={46} cy={36} rx={6} ry={6} fill={INK} />
+              <Circle cx={47.5} cy={34.5} r={1.2} fill={BONE} />
+            </G>
+            <G>
+              <Ellipse cx={66} cy={36} rx={6} ry={6} fill={INK} />
+              <Circle cx={67.5} cy={34.5} r={1.2} fill={BONE} />
+            </G>
+          </Eyes>
+        </AnimatedG>
 
         {/* Beak repositioned below the face */}
         <AnimatedG originX={56} originY={56} scaleX={mouthShapeX}>
@@ -1293,7 +1539,7 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           </Mouth>
         </AnimatedG>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
@@ -1301,6 +1547,7 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
   const shapeSrc = prosody?.mouthShape;
+  const activitySrc = prosody?.activity;
   const headRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-5, 0, 5] })
     : 0;
@@ -1310,13 +1557,31 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.15] })
     : 1;
+  // Rounded ears perk with articulation rate (activity channel).
+  const earPerk = activitySrc
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [1, 1.2] })
+    : 1;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
+    <AnimatedG translateY={recoil}>
     <AnimatedG originX={50} originY={50} rotation={headRot}>
-      <Circle cx={26} cy={24} r={11} fill={INK} />
-      <Circle cx={74} cy={24} r={11} fill={INK} />
-      <Circle cx={26} cy={24} r={5} fill={BRASS} />
-      <Circle cx={74} cy={24} r={5} fill={BRASS} />
+      <AnimatedG originX={26} originY={24} scale={earPerk}>
+        <Circle cx={26} cy={24} r={11} fill={INK} />
+        <Circle cx={26} cy={24} r={5} fill={BRASS} />
+      </AnimatedG>
+      <AnimatedG originX={74} originY={24} scale={earPerk}>
+        <Circle cx={74} cy={24} r={11} fill={INK} />
+        <Circle cx={74} cy={24} r={5} fill={BRASS} />
+      </AnimatedG>
       <Ellipse cx={50} cy={56} rx={34} ry={32} fill={INK} />
 
       <AnimatedG originX={38} originY={44} scaleY={browScale}>
@@ -1326,18 +1591,20 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="54,42 70,44 70,47 54,46" fill={BONE} />
       </AnimatedG>
 
-      <Eyes leftPivot={{ x: 38, y: 52 }} rightPivot={{ x: 62, y: 52 }} scale={eyeScale}>
-        <G>
-          <Circle cx={38} cy={52} r={7} fill={BONE} />
-          <Circle cx={38} cy={52} r={3} fill={INK} />
-          <Circle cx={39.5} cy={50.5} r={1} fill={BONE} />
-        </G>
-        <G>
-          <Circle cx={62} cy={52} r={7} fill={BONE} />
-          <Circle cx={62} cy={52} r={3} fill={INK} />
-          <Circle cx={63.5} cy={50.5} r={1} fill={BONE} />
-        </G>
-      </Eyes>
+      <AnimatedG originX={50} originY={52} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 38, y: 52 }} rightPivot={{ x: 62, y: 52 }} scale={eyeScale}>
+          <G>
+            <Circle cx={38} cy={52} r={7} fill={BONE} />
+            <Circle cx={38} cy={52} r={3} fill={INK} />
+            <Circle cx={39.5} cy={50.5} r={1} fill={BONE} />
+          </G>
+          <G>
+            <Circle cx={62} cy={52} r={7} fill={BONE} />
+            <Circle cx={62} cy={52} r={3} fill={INK} />
+            <Circle cx={63.5} cy={50.5} r={1} fill={BONE} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       {/* Snout — BONE muzzle with INK posable mouth */}
       <Ellipse cx={50} cy={70} rx={16} ry={11} fill={BONE} />
@@ -1347,6 +1614,7 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         </Mouth>
       </AnimatedG>
     </AnimatedG>
+    </AnimatedG>
   );
 };
 
@@ -1354,6 +1622,7 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
   const shapeSrc = prosody?.mouthShape;
+  const exprSrc = prosody?.expressiveness;
   const leftEarRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [15, 0, -10] })
     : 0;
@@ -1366,29 +1635,58 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1.15] })
     : 1;
+  // Ears perk taller as the peer's voice gets more animated (expressiveness).
+  const earPerk = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.2] })
+    : 1;
+  // Brow lifts with expressiveness.
+  const browDy = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -2] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
-      <AnimatedG originX={25} originY={32} rotation={leftEarRot}>
-        <Polygon points="14,32 30,8 36,32" fill={INK} />
-        <Polygon points="22,28 30,15 32,28" fill={BRASS} />
+    <AnimatedG translateY={recoil}>
+      <AnimatedG originX={25} originY={32} scaleY={earPerk}>
+        <AnimatedG originX={25} originY={32} rotation={leftEarRot}>
+          <Polygon points="14,32 30,8 36,32" fill={INK} />
+          <Polygon points="22,28 30,15 32,28" fill={BRASS} />
+        </AnimatedG>
       </AnimatedG>
-      <AnimatedG originX={75} originY={32} rotation={rightEarRot}>
-        <Polygon points="64,32 70,8 86,32" fill={INK} />
-        <Polygon points="68,28 70,15 78,28" fill={BRASS} />
+      <AnimatedG originX={75} originY={32} scaleY={earPerk}>
+        <AnimatedG originX={75} originY={32} rotation={rightEarRot}>
+          <Polygon points="64,32 70,8 86,32" fill={INK} />
+          <Polygon points="68,28 70,15 78,28" fill={BRASS} />
+        </AnimatedG>
       </AnimatedG>
       <Ellipse cx={50} cy={56} rx={36} ry={32} fill={INK} />
 
-      <Eyes leftPivot={{ x: 36, y: 50 }} rightPivot={{ x: 64, y: 50 }} scale={eyeScale}>
-        <G>
-          <Path d="M26,50 Q36,42 46,50 Q36,58 26,50 Z" fill={BRASS} />
-          <Ellipse cx={36} cy={50} rx={2} ry={5} fill={INK} />
-        </G>
-        <G>
-          <Path d="M54,50 Q64,42 74,50 Q64,58 54,50 Z" fill={BRASS} />
-          <Ellipse cx={64} cy={50} rx={2} ry={5} fill={INK} />
-        </G>
-      </Eyes>
+      {/* Brow — lifts with expressiveness */}
+      <AnimatedG translateY={browDy}>
+        <Polygon points="28,42 44,40 44,43 28,44" fill={BONE} />
+        <Polygon points="56,40 72,42 72,44 56,43" fill={BONE} />
+      </AnimatedG>
+
+      <AnimatedG originX={50} originY={50} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 36, y: 50 }} rightPivot={{ x: 64, y: 50 }} scale={eyeScale}>
+          <G>
+            <Path d="M26,50 Q36,42 46,50 Q36,58 26,50 Z" fill={BRASS} />
+            <Ellipse cx={36} cy={50} rx={2} ry={5} fill={INK} />
+          </G>
+          <G>
+            <Path d="M54,50 Q64,42 74,50 Q64,58 54,50 Z" fill={BRASS} />
+            <Ellipse cx={64} cy={50} rx={2} ry={5} fill={INK} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       {/* Whiskers — splay outward on activity */}
       <AnimatedG originX={50} originY={68} scaleX={whiskerSpread}>
@@ -1405,13 +1703,15 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Path d="M42,72 Q50,78 58,72 L55,75 Q50,78 45,75 Z" fill={BRASS} />
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
 const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const activitySrc = prosody?.activity;
   const shapeSrc = prosody?.mouthShape;
+  const trendSrc = prosody?.pitchTrend;
+  const exprSrc = prosody?.expressiveness;
   const leftWingRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 14] })
     : 0;
@@ -1421,9 +1721,33 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.2] })
     : 1;
+  // Big ears swivel with the peer's pitch trend.
+  const leftEarRot = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
+    : 0;
+  const rightEarRot = trendSrc
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-10, 0, 10] })
+    : 0;
+  // Ears perk taller as the peer's voice gets more animated (expressiveness).
+  const earPerk = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
+    : 1;
+  // Brow lifts with expressiveness.
+  const browDy = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -1.5] })
+    : 0;
+  // Eyes widen as the peer's voice gets more animated.
+  const eyeWiden = exprSrc
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
+    : 1;
+  // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
+  const ampSrc = prosody?.amplitude;
+  const recoil = ampSrc
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    : 0;
 
   return (
-    <>
+    <AnimatedG translateY={recoil}>
       <AnimatedG originX={50} originY={50} rotation={leftWingRot}>
         <Path d="M50,46 L20,28 L6,40 L18,46 L6,54 L24,58 L50,52 Z" fill={INK} />
       </AnimatedG>
@@ -1432,19 +1756,35 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
       </AnimatedG>
 
       <Ellipse cx={50} cy={52} rx={18} ry={17} fill={INK} />
-      <Polygon points="40,36 46,24 48,40" fill={INK} />
-      <Polygon points="52,40 54,24 60,36" fill={INK} />
+      <AnimatedG originX={44} originY={40} rotation={leftEarRot}>
+        <AnimatedG originX={44} originY={40} scaleY={earPerk}>
+          <Polygon points="40,36 46,24 48,40" fill={INK} />
+        </AnimatedG>
+      </AnimatedG>
+      <AnimatedG originX={56} originY={40} rotation={rightEarRot}>
+        <AnimatedG originX={56} originY={40} scaleY={earPerk}>
+          <Polygon points="52,40 54,24 60,36" fill={INK} />
+        </AnimatedG>
+      </AnimatedG>
 
-      <Eyes leftPivot={{ x: 43, y: 50 }} rightPivot={{ x: 57, y: 50 }} scale={eyeScale}>
-        <G>
-          <Circle cx={43} cy={50} r={5} fill={BRASS} />
-          <Circle cx={43} cy={50} r={2} fill={INK} />
-        </G>
-        <G>
-          <Circle cx={57} cy={50} r={5} fill={BRASS} />
-          <Circle cx={57} cy={50} r={2} fill={INK} />
-        </G>
-      </Eyes>
+      {/* Brow — lifts with expressiveness */}
+      <AnimatedG translateY={browDy}>
+        <Polygon points="38,44 47,43 47,45 38,46" fill={BRASS} />
+        <Polygon points="53,43 62,44 62,46 53,45" fill={BRASS} />
+      </AnimatedG>
+
+      <AnimatedG originX={50} originY={50} scale={eyeWiden}>
+        <Eyes leftPivot={{ x: 43, y: 50 }} rightPivot={{ x: 57, y: 50 }} scale={eyeScale}>
+          <G>
+            <Circle cx={43} cy={50} r={5} fill={BRASS} />
+            <Circle cx={43} cy={50} r={2} fill={INK} />
+          </G>
+          <G>
+            <Circle cx={57} cy={50} r={5} fill={BRASS} />
+            <Circle cx={57} cy={50} r={2} fill={INK} />
+          </G>
+        </Eyes>
+      </AnimatedG>
 
       {/* Posable mouth with fangs */}
       <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
@@ -1456,7 +1796,7 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           </G>
         </Mouth>
       </AnimatedG>
-    </>
+    </AnimatedG>
   );
 };
 
