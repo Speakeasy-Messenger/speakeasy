@@ -18,6 +18,7 @@ import {
   usePeerAnimation,
 } from '../store/peer-animation.js';
 import { useProfiles } from '../store/profiles.js';
+import { refreshProfile } from '../store/refresh-profile.js';
 import { useSettings } from '../store/settings.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, motion, type as typeScale } from '../theme/tokens.js';
@@ -65,6 +66,13 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   const ownProfile = useProfiles((s) =>
     myUserId ? s.byUserId[myUserId] : undefined,
   );
+
+  // Force-refresh the peer's avatar on entering the call so a recently-
+  // changed one shows immediately, not after the cache TTL expires.
+  const peerUserId = active?.peerUserId;
+  useEffect(() => {
+    if (peerUserId) void refreshProfile(peerUserId, true);
+  }, [peerUserId]);
 
   // #13 in-call mask control. Re-masking returns to the safe state, so
   // it's instant + unconfirmed. Revealing the real voice is a deliberate,

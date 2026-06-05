@@ -15,7 +15,11 @@ import { create } from 'zustand';
 
 const STORAGE_KEY = 'speakeasy.profiles.v2';
 
-const TTL_MS = 24 * 60 * 60 * 1000; // re-fetch a peer's profile at most once a day
+// Re-fetch a peer's profile at most once an hour. Was 24h, but that
+// meant an avatar change took up to a day to propagate to contacts
+// (rc.56 report). Call screens additionally force-refresh on mount
+// (see refresh-profile.ts) so the most visible surface is never stale.
+const TTL_MS = 60 * 60 * 1000;
 
 export interface PeerProfile {
   /** Animal id from the launch set, or undefined if the peer hasn't

@@ -6,6 +6,7 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
 import { useCalls } from '../store/calls.js';
 import { useProfiles } from '../store/profiles.js';
+import { refreshProfile } from '../store/refresh-profile.js';
 import { font, space, type as typeScale } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
@@ -71,6 +72,12 @@ export function IncomingCallScreen({
     const t = setTimeout(() => onCancelConnecting?.(), 15000);
     return () => clearTimeout(t);
   }, [showConnecting, onCancelConnecting]);
+
+  // Force-refresh the caller's avatar so a recently-changed one shows
+  // (the cache TTL would otherwise leave it stale).
+  useEffect(() => {
+    if (peerId) void refreshProfile(peerId, true);
+  }, [peerId]);
 
   if (!peerId) {
     return null;

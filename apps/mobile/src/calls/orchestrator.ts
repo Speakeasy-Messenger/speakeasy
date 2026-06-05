@@ -985,27 +985,44 @@ export class CallOrchestrator {
       endedReason: reason,
       stageEnteredAt: endedAt,
     };
-    // Dismiss the call UI IMMEDIATELY on End. Previously the order was
-    // onCallFinished() (history persist) + cleanup() (peer.close() +
-    // voice-filter dispose) BEFORE clearing `active`, so the user waited
-    // ~0.3–0.5s between tapping End and the screen leaving (rc.54
-    // internal-test report). Clear `active` first so the screen unmounts
-    // this frame; do the bookkeeping + WebRTC teardown right after, off
-    // the critical path. Both read the captured `ended` snapshot, not
-    // `this.active`, so order doesn't affect correctness.
+    // TEARDOWN ORDER IS LOAD-BEARING (rc.56 caller-hangup crash): close
+    // the WebRTC peer + free the mic FIRST, THEN unmount the CallScreen.
+    // The rc.55 "instant dismiss" reorder cleared `active` (unmounting
+    // the screen + its live remote-stream RTCView) BEFORE peer.close(),
+    // and closing a stream a just-unmounted view still referenced
+    // crashed react-native-webrtc natively — the app died right after
+    // hangup, so the call_end never left the wire and the peer's call
+    // hung until they ended it themselves. Peer-close-before-unmount is
+    // the known-good sequence. Every dep is wrapped so a JS throw in one
+    // can't strand the rest or escape hangup().
+    this.setActive(ended);
+    try {
+      this.deps.onCallFinished({
+        callId: ended.callId,
+        peerUserId: ended.peerUserId,
+        isCaller: ended.isCaller,
+        startedAt,
+        endedAt,
+        durationSec: connectedAt ? Math.round((endedAt - connectedAt) / 1000) : 0,
+        reason,
+        kind: ended.kind,
+      });
+    } catch (err) {
+      diag('call', 'onCallFinished threw (continuing teardown)', { err: String(err) });
+    }
+    try {
+      this.cleanup();
+    } catch (err) {
+      diag('call', 'cleanup threw (continuing teardown)', { err: String(err) });
+    }
+    // Now dismiss — the peer/stream is already torn down, so unmounting
+    // the RTCView can't race the native close.
     this.active = undefined;
-    this.deps.onStateChange(undefined);
-    this.deps.onCallFinished({
-      callId: ended.callId,
-      peerUserId: ended.peerUserId,
-      isCaller: ended.isCaller,
-      startedAt,
-      endedAt,
-      durationSec: connectedAt ? Math.round((endedAt - connectedAt) / 1000) : 0,
-      reason,
-      kind: ended.kind,
-    });
-    this.cleanup();
+    try {
+      this.deps.onStateChange(undefined);
+    } catch (err) {
+      diag('call', 'onStateChange threw', { err: String(err) });
+    }
   }
 
   private cleanup(): void {
