@@ -359,20 +359,38 @@ describe('PUT /v1/groups/:id/name', () => {
     await app.close();
   });
 
-  it('rejects non-creator and invalid names', async () => {
+  it('any member (not just the creator) can rename', async () => {
     const { app, repo } = await makeApp();
     await repo.create({ groupId: 'grp-rename2', createdBy: 'alice', name: 'Old' });
     await repo.addMember({ groupId: 'grp-rename2', userId: 'bob', addedBy: 'alice' });
-    const nonCreator = await app.inject({
+    // bob is a member but not the creator — the old gate stranded his
+    // rename local-only; now it syncs (2026-06-05).
+    const memberRename = await app.inject({
       method: 'PUT',
       url: '/v1/groups/grp-rename2/name',
       headers: callerHeader('bob'),
+      payload: { name: 'Bob Renamed It' },
+    });
+    expect(memberRename.statusCode).toBe(200);
+    expect(memberRename.json()).toMatchObject({ name: 'Bob Renamed It' });
+    await app.close();
+  });
+
+  it('rejects an outsider (non-member) and invalid names', async () => {
+    const { app, repo } = await makeApp();
+    await repo.create({ groupId: 'grp-rename3', createdBy: 'alice', name: 'Old' });
+    await repo.addMember({ groupId: 'grp-rename3', userId: 'bob', addedBy: 'alice' });
+    const outsider = await app.inject({
+      method: 'PUT',
+      url: '/v1/groups/grp-rename3/name',
+      headers: callerHeader('mallory'),
       payload: { name: 'Nope' },
     });
-    expect(nonCreator.statusCode).toBe(403);
+    expect(outsider.statusCode).toBe(403);
+    expect(outsider.json().error).toBe('not_member');
     const invalid = await app.inject({
       method: 'PUT',
-      url: '/v1/groups/grp-rename2/name',
+      url: '/v1/groups/grp-rename3/name',
       headers: callerHeader('alice'),
       payload: { name: ' '.repeat(4) },
     });

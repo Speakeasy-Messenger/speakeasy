@@ -84,8 +84,16 @@ export async function registerGroupRoutes(
       if (!name) return reply.code(400).send({ error: 'invalid_name' });
       const summary = await opts.repo.findById(groupId);
       if (!summary) return reply.code(404).send({ error: 'group_missing' });
-      if (summary.createdBy !== callerId) {
-        return reply.code(403).send({ error: 'not_creator' });
+      // ANY member may rename — not just the creator. Small E2E rooms work
+      // like Signal/WhatsApp where anyone in the room can edit its name.
+      // The old creator-only gate silently stranded renames by non-creators
+      // LOCAL-only: the user saw the new name in-app while the server (and
+      // therefore every other member's metadata + the group push's
+      // `data.title`) kept the stale one — the "@chloro/Suckdix" notif
+      // mismatch (2026-06-05). A bot-/script-created room has a `createdBy`
+      // no human will match, so creator-only made rename impossible there.
+      if (!(await opts.repo.isMember(groupId, callerId))) {
+        return reply.code(403).send({ error: 'not_member' });
       }
       const updated = await opts.repo.setName({ groupId, name });
       if (updated === 'group_missing') {
