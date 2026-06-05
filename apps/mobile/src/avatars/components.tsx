@@ -858,7 +858,7 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -939,7 +939,7 @@ const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1011,7 +1011,7 @@ const PigeonCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1078,7 +1078,7 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1153,7 +1153,7 @@ const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1242,7 +1242,7 @@ const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1330,7 +1330,7 @@ const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1415,7 +1415,7 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1494,7 +1494,7 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-figure flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1568,7 +1568,7 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1650,7 +1650,7 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (
@@ -1743,7 +1743,7 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
-    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -3] })
+    ? ampSrc.interpolate({ inputRange: [0, 0.6, 1], outputRange: [0, 0, -9] })
     : 0;
 
   return (

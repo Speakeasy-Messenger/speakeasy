@@ -31,11 +31,36 @@ import { useReducedMotion } from '../a11y/useReducedMotion.js';
 
 /** Mouth-open legibility (see `mouthScale` below). FLOOR is the minimum
  *  full-loudness mouth scale every animal gets; GAIN amplifies each
- *  animal's tuned `scaleMax` headroom above 1.0. With FLOOR 1.4 / GAIN
- *  2.0 the old 1.0–1.22 range maps to ~1.4–1.45 — a clear opening
- *  rather than a flit. */
-const MOUTH_OPEN_FLOOR = 1.4;
-const MOUTH_OPEN_GAIN = 2.0;
+ *  animal's tuned `scaleMax` headroom above 1.0. */
+const MOUTH_OPEN_FLOOR = 1.55;
+const MOUTH_OPEN_GAIN = 2.4;
+
+/**
+ * Prosody-channel EXPANSION (rc.* — fixes "faces don't emote on
+ * real calls"). Real-call prosody is heavily compressed vs the [0,1]
+ * the per-animal interpolations assume: measured on a real 3-min clip,
+ * amplitude p90 ≈ 0.21, mouthShape p90 ≈ 0.20, expressiveness p90 ≈
+ * 0.62, activity p90 ≈ 0.95. Feeding those raw into a `[0,1]` →
+ * interpolation drives motion at ~20–60 % of its range — and anything
+ * gated above ~0.3 (the yell recoil at 0.6) never fires at all. The
+ * synthetic eval corpus spanned the full [0,1], so the harness never
+ * saw this. We map each channel from its real "loud/animated" ceiling
+ * onto [0,1] (signed for pitchTrend) so ordinary expressive speech
+ * drives the full motion range. Tunable per channel.
+ */
+const PROSODY_FULL = {
+  amplitude: 0.35,
+  mouthShape: 0.3,
+  expressiveness: 0.6,
+  activity: 0.85,
+  pitchTrend: 0.4, // signed magnitude
+} as const;
+const expand01 = (v: number, full: number): number =>
+  v <= 0 ? 0 : v >= full ? 1 : v / full;
+const expandSigned = (v: number, full: number): number => {
+  const s = v / full;
+  return s > 1 ? 1 : s < -1 ? -1 : s;
+};
 
 interface Props {
   animalId: string;
@@ -192,9 +217,14 @@ export function AvatarRenderer({
     MOUTH_OPEN_FLOOR,
     1 + (tunedMax - 1) * MOUTH_OPEN_GAIN,
   );
+  // Drive the full open by the realistic loudness ceiling, not 1.0 —
+  // the `amplitude` prop is the same compressed loudness as the prosody
+  // channels (real p90 ≈ 0.21), so a [0,1] input barely cracked the
+  // mouth open. See PROSODY_FULL.amplitude.
   const mouthScale = source.interpolate({
-    inputRange: [0, 1],
+    inputRange: [0, PROSODY_FULL.amplitude],
     outputRange: [1.0, mouthOpenMax],
+    extrapolate: 'clamp',
   });
 
   if (!def) {
@@ -257,7 +287,18 @@ function useProsodyAnimatedValues(
   prosody: ProsodyState | undefined,
   reducedMotion: boolean,
 ): AnimatedProsody {
-  const snapshot = prosody ?? NEUTRAL_PROSODY;
+  // Expand the compressed real-call channels onto [0,1] BEFORE they
+  // drive the per-animal interpolations — see PROSODY_FULL. Without
+  // this the renders only ever see the bottom fifth of their input.
+  const raw = prosody ?? NEUTRAL_PROSODY;
+  const snapshot: ProsodyState = {
+    ...raw,
+    amplitude: expand01(raw.amplitude, PROSODY_FULL.amplitude),
+    mouthShape: expand01(raw.mouthShape, PROSODY_FULL.mouthShape),
+    expressiveness: expand01(raw.expressiveness, PROSODY_FULL.expressiveness),
+    activity: expand01(raw.activity, PROSODY_FULL.activity),
+    pitchTrend: expandSigned(raw.pitchTrend, PROSODY_FULL.pitchTrend),
+  };
   const amplitude = useRef(new Animated.Value(snapshot.amplitude)).current;
   const pitchNorm = useRef(new Animated.Value(snapshot.pitchNorm)).current;
   const zcrNorm = useRef(new Animated.Value(snapshot.zcrNorm)).current;
