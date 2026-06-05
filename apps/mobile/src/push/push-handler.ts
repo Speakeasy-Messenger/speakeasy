@@ -26,8 +26,10 @@ import { useEffect, useRef } from 'react';
 import { AppState, Platform } from 'react-native';
 import messaging, { FirebaseMessagingTypes } from '@react-native-firebase/messaging';
 import notifee, {
+  AndroidCategory,
   AndroidImportance,
   AndroidStyle,
+  AndroidVisibility,
   EventType,
   type Notification,
 } from '@notifee/react-native';
@@ -116,6 +118,7 @@ type NavTarget =
        * render meaningfully. Resolved at consume time only.
        */
       kind: 'call-live';
+      conversationId: string;
     }
   | {
       /**
@@ -126,6 +129,7 @@ type NavTarget =
        */
       kind: 'call-stale';
       peerId: string;
+      conversationId: string;
     }
   | {
       /**
@@ -138,6 +142,7 @@ type NavTarget =
        */
       kind: 'call-connecting';
       peerId: string;
+      conversationId: string;
     };
 
 const TAP_TARGET_KEY = '@speakeasy/push-tap-target';
@@ -317,7 +322,7 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
       (!peerId || live.peerUserId === peerId);
 
     if (isLive) {
-      return { kind: 'call-live' };
+      return { kind: 'call-live', conversationId };
     }
     if (peerId && ageMs < CALL_STALENESS_MS) {
       // Fresh push, but the offer hasn't arrived over the cold-
@@ -329,7 +334,7 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
         ageMs,
         liveStage: live?.stage,
       });
-      return { kind: 'call-connecting', peerId };
+      return { kind: 'call-connecting', peerId, conversationId };
     }
     if (peerId) {
       diag('push-nav', 'call push stale — routing to chat instead', {
@@ -337,7 +342,7 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
         ageMs,
         liveStage: live?.stage,
       });
-      return { kind: 'call-stale', peerId };
+      return { kind: 'call-stale', peerId, conversationId };
     }
     // Can't even identify the peer → silently drop. The conversation
     // entry will appear once any signaling/message arrives over WS.
@@ -727,6 +732,58 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
 }
 
 /**
+ * Full-screen incoming-call notification. Unlike the plain banner that
+ * `displayGenericNotification` posts, this uses `category: CALL` +
+ * `fullScreenAction`, which on Android presents a full-screen ringing UI
+ * over the lock screen (when the device is locked) and a high-priority
+ * heads-up banner otherwise. This is what makes an incoming call actually
+ * *ring* prominently rather than slide in as a quiet banner the user
+ * notices minutes later as a "missed call" (#5).
+ *
+ * Requirements wired for this to take effect on device:
+ *   - `USE_FULL_SCREEN_INTENT` permission (AndroidManifest) — auto-granted
+ *     to apps that post CATEGORY_CALL notifications.
+ *   - MainActivity `showWhenLocked` + `turnScreenOn` so the full-screen
+ *     intent's launch shows over the keyguard.
+ *   - A HIGH-importance channel (the 'call' channel already is).
+ *
+ * The `fullScreenAction`/`pressAction` both launch MainActivity (singleTask);
+ * the existing push-navigation drains the persisted tap target and routes to
+ * the incoming-call / connecting screen. If full-screen launch is blocked
+ * (e.g. permission ungranted on Android 14), it gracefully degrades to the
+ * heads-up banner — strictly louder than the previous generic banner, never
+ * quieter, so this can't regress the current behavior.
+ */
+async function displayCallNotification(data: FcmData): Promise<void> {
+  const channel = await resolveChannel('call');
+  await notifee.displayNotification({
+    id: data.conversation_id,
+    title: data.title ?? 'speakeasy',
+    body: data.body ?? 'Incoming call',
+    data: {
+      conversation_id: data.conversation_id ?? '',
+      notify_kind: 'call',
+    },
+    android: {
+      channelId: channel,
+      smallIcon: 'ic_notification',
+      category: AndroidCategory.CALL,
+      importance: AndroidImportance.HIGH,
+      visibility: AndroidVisibility.PUBLIC,
+      // NOT `ongoing` — a call routes to the IncomingCall screen, not the
+      // Chat screen, so nothing in the existing dismissal path cancels a
+      // sticky call notification (ChatScreen cancels by conversationId on
+      // open; calls never open it). An ongoing banner would linger
+      // un-swipeable. Keep it auto-cancel like the prior generic banner —
+      // routeTarget() also cancels it by id the moment the call screen
+      // shows — and rely on `fullScreenAction` for the prominent ring.
+      pressAction: { id: 'default', launchActivity: 'default' },
+      fullScreenAction: { id: 'default', launchActivity: 'default' },
+    },
+  });
+}
+
+/**
  * Render the notification for an inbound FCM data message. For 'rich'
  * recipients the server forwards the ciphertext — decrypt it on-device
  * and stack it in a MessagingStyle notification with an inline reply.
@@ -791,6 +848,12 @@ async function displayPushNotification(data: FcmData): Promise<void> {
         err: String(err),
       });
     }
+  }
+  // Calls get the full-screen ringing notification; everything else the
+  // plain banner. (Message ciphertext already handled above and returned.)
+  if (data.notify_kind === 'call') {
+    await displayCallNotification(data);
+    return;
   }
   await displayGenericNotification(data);
 }
@@ -1093,6 +1156,24 @@ export function unregisterForegroundMessageHandler(): void {
 // NAVIGATION
 // ---------------------------------------------------------------------------
 
+/**
+ * Dismiss the full-screen call notification (posted by
+ * `displayCallNotification`, id = conversationId) once the user lands on
+ * the call screen. Calls never open ChatScreen, which is the only place
+ * that otherwise cancels a notification by conversationId — so without
+ * this an answered/handled call would leave its ring banner up.
+ */
+async function cancelCallNotification(target: {
+  conversationId: string;
+}): Promise<void> {
+  if (!target.conversationId) return;
+  try {
+    await notifee.cancelNotification(target.conversationId);
+  } catch (err) {
+    diag('push-nav', 'cancel call notification failed', { err: String(err) });
+  }
+}
+
 async function routeTarget(
   navRef: React.RefObject<NavigationContainerRef<RootStack> | null>,
   target: NavTarget,
@@ -1102,12 +1183,15 @@ async function routeTarget(
     case 'call-live':
       // IncomingCallScreen reads from useCalls.active — it will render
       // because we verified active.stage === 'incoming_ringing'.
+      void cancelCallNotification(target);
       navRef.current?.navigate('IncomingCall');
       return;
     case 'call-stale':
+      void cancelCallNotification(target);
       navRef.current?.navigate('Chat', { peerId: target.peerId });
       return;
     case 'call-connecting':
+      void cancelCallNotification(target);
       navRef.current?.navigate('IncomingCall', { connectingPeerId: target.peerId });
       return;
     case 'group':
