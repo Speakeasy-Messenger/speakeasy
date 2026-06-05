@@ -71,7 +71,7 @@ export type RootStack = {
   DeleteAccount: undefined;
   About: undefined;
   Call: undefined;
-  IncomingCall: undefined;
+  IncomingCall: { connectingPeerId?: string } | undefined;
   /** Full text of a long message, reached via "See more" in a bubble. */
   FullMessage: { text: string };
 };
@@ -340,15 +340,17 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                   name="IncomingCall"
                   options={{ presentation: 'fullScreenModal', gestureEnabled: false }}
                 >
-                  {({ navigation }: NativeStackScreenProps<RootStack, 'IncomingCall'>) => (
+                  {({ navigation, route }: NativeStackScreenProps<RootStack, 'IncomingCall'>) => (
                     <IncomingCallScreen
                       orchestrator={callOrchestrator}
+                      connectingPeerId={route.params?.connectingPeerId}
                       onResolved={() => {
                         // After accept → CallScreen; after decline → pop back.
                         // We always replace to Call; if it dismissed itself
                         // already (decline) the dismiss is a no-op effect.
                         navigation.replace('Call');
                       }}
+                      onCancelConnecting={() => navigation.goBack()}
                     />
                   )}
                 </Stack.Screen>

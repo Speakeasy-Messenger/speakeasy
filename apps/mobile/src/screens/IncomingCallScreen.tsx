@@ -1,4 +1,4 @@
-import React from 'react';
+import React, { useEffect } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Handle } from '../components/Handle.js';
@@ -14,6 +14,16 @@ interface Props {
   orchestrator: CallOrchestrator;
   /** Called once the user has either accepted or declined. */
   onResolved: () => void;
+  /**
+   * Set when arriving from a tapped call push whose offer hasn't landed
+   * over the (cold-reconnecting) WS yet. We render a "Connecting…"
+   * placeholder for this peer instead of nothing; once the offer lands
+   * and `active` populates, the normal incoming-call UI takes over.
+   */
+  connectingPeerId?: string;
+  /** Dismiss the connecting placeholder (user cancelled, or it timed
+   *  out because the offer never arrived). */
+  onCancelConnecting?: () => void;
 }
 
 // Brass-button text is always dark — on the brass fill, the cream
@@ -37,19 +47,76 @@ const BRASS_BTN_INK = '#14091A';
  * palette via `useColors().primary` so the action surfaces stay
  * consistent across modes.
  */
-export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
+export function IncomingCallScreen({
+  orchestrator,
+  onResolved,
+  connectingPeerId,
+  onCancelConnecting,
+}: Props) {
   const themed = useColors();
   const active = useCalls((s) => s.active);
+  const ringing = active?.stage === 'incoming_ringing' ? active : undefined;
+  // Peer is the live caller when ringing, else the pending push peer.
+  const peerId = ringing?.peerUserId ?? connectingPeerId;
   const peerProfile = useProfiles((s) =>
-    active ? s.byUserId[active.peerUserId] : undefined,
+    peerId ? s.byUserId[peerId] : undefined,
   );
 
-  if (!active || active.stage !== 'incoming_ringing') {
+  // Connecting placeholder shows only while we have a pending peer and
+  // no live ringing call yet. Auto-dismiss if the offer never arrives
+  // (stale push / call already ended) so the user can't get stuck.
+  const showConnecting = !ringing && !!connectingPeerId;
+  useEffect(() => {
+    if (!showConnecting) return undefined;
+    const t = setTimeout(() => onCancelConnecting?.(), 15000);
+    return () => clearTimeout(t);
+  }, [showConnecting, onCancelConnecting]);
+
+  if (!peerId) {
     return null;
   }
-
   const animalId =
-    peerProfile?.selectedAvatarId ?? defaultAnimalForUser(active.peerUserId);
+    peerProfile?.selectedAvatarId ?? defaultAnimalForUser(peerId);
+
+  if (showConnecting) {
+    return (
+      <SafeAreaView
+        style={[styles.root, { backgroundColor: themed.cream }]}
+        testID="incoming-call-connecting"
+      >
+        <View style={styles.body}>
+          <Text style={[styles.eyebrow, { color: themed.primary }]}>
+            PRIVATE CALL · CONNECTING
+          </Text>
+          <View
+            style={[
+              styles.portraitTile,
+              { backgroundColor: themed.pale, borderColor: themed.divider },
+            ]}
+          >
+            <AvatarRenderer animalId={animalId} size={Math.round(140 * 0.78)} />
+          </View>
+          <View style={styles.handleRow}>
+            <Handle value={peerId} variant="display" color={themed.ink} />
+          </View>
+          <Text style={[styles.sub, { color: themed.slate }]}>connecting…</Text>
+        </View>
+        <View style={styles.actions}>
+          <Pressable
+            testID="incoming-connecting-cancel"
+            onPress={() => onCancelConnecting?.()}
+            style={[styles.btnDecline, { borderColor: themed.divider }]}
+          >
+            <Text style={[styles.btnDeclineText, { color: themed.ink }]}>Cancel</Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    );
+  }
+
+  if (!ringing) {
+    return null;
+  }
 
   // Per-kind eyebrow + sub-line. Private extends the existing grammar
   // ('VOICE CALL · INCOMING' → 'PRIVATE CALL · INCOMING') rather than
@@ -59,7 +126,7 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
   // would read as an anonymous spam ring (rejected option B in D3).
   let eyebrow: string;
   let subLine: string;
-  switch (active.kind) {
+  switch (ringing.kind) {
     case 'video':
       eyebrow = 'VIDEO CALL · INCOMING';
       subLine = 'wants to video-call';
@@ -94,7 +161,7 @@ export function IncomingCallScreen({ orchestrator, onResolved }: Props) {
           <AvatarRenderer animalId={animalId} size={Math.round(140 * 0.78)} />
         </View>
         <View style={styles.handleRow}>
-          <Handle value={active.peerUserId} variant="display" color={themed.ink} />
+          <Handle value={ringing.peerUserId} variant="display" color={themed.ink} />
         </View>
         <Text style={[styles.sub, { color: themed.slate }]} testID="incoming-sub">
           {subLine}

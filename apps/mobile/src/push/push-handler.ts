@@ -126,6 +126,18 @@ type NavTarget =
        */
       kind: 'call-stale';
       peerId: string;
+    }
+  | {
+      /**
+       * Fresh call push tapped BEFORE the WS-delivered offer arrived
+       * (the WS was closed for background push routing and is mid cold
+       * reconnect — ~4 s on the rc.54 trace). Show IncomingCall in a
+       * "Connecting…" state for the peer immediately; it becomes the
+       * live incoming call the moment the offer lands (`active`
+       * populates). Beats dropping the user in Chat for ~4 s.
+       */
+      kind: 'call-connecting';
+      peerId: string;
     };
 
 const TAP_TARGET_KEY = '@speakeasy/push-tap-target';
@@ -306,6 +318,18 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
 
     if (isLive) {
       return { kind: 'call-live' };
+    }
+    if (peerId && ageMs < CALL_STALENESS_MS) {
+      // Fresh push, but the offer hasn't arrived over the cold-
+      // reconnecting WS yet. This is "connecting", NOT "stale" — show
+      // the call screen immediately instead of dropping the user in
+      // Chat for the ~4 s the reconnect takes.
+      diag('push-nav', 'call push fresh — showing connecting screen', {
+        conversationId,
+        ageMs,
+        liveStage: live?.stage,
+      });
+      return { kind: 'call-connecting', peerId };
     }
     if (peerId) {
       diag('push-nav', 'call push stale — routing to chat instead', {
@@ -1045,6 +1069,9 @@ async function routeTarget(
       return;
     case 'call-stale':
       navRef.current?.navigate('Chat', { peerId: target.peerId });
+      return;
+    case 'call-connecting':
+      navRef.current?.navigate('IncomingCall', { connectingPeerId: target.peerId });
       return;
     case 'group':
       navRef.current?.navigate('GroupChat', { groupId: target.groupId });

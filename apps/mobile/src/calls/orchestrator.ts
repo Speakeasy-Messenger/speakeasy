@@ -985,7 +985,16 @@ export class CallOrchestrator {
       endedReason: reason,
       stageEnteredAt: endedAt,
     };
-    this.setActive(ended);
+    // Dismiss the call UI IMMEDIATELY on End. Previously the order was
+    // onCallFinished() (history persist) + cleanup() (peer.close() +
+    // voice-filter dispose) BEFORE clearing `active`, so the user waited
+    // ~0.3–0.5s between tapping End and the screen leaving (rc.54
+    // internal-test report). Clear `active` first so the screen unmounts
+    // this frame; do the bookkeeping + WebRTC teardown right after, off
+    // the critical path. Both read the captured `ended` snapshot, not
+    // `this.active`, so order doesn't affect correctness.
+    this.active = undefined;
+    this.deps.onStateChange(undefined);
     this.deps.onCallFinished({
       callId: ended.callId,
       peerUserId: ended.peerUserId,
@@ -997,11 +1006,6 @@ export class CallOrchestrator {
       kind: ended.kind,
     });
     this.cleanup();
-    // Clear `active` after onStateChange has seen the `ended` snapshot
-    // so the UI can render "Call ended" briefly before the screen
-    // dismisses itself.
-    this.active = undefined;
-    this.deps.onStateChange(undefined);
   }
 
   private cleanup(): void {
