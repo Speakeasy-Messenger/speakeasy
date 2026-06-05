@@ -244,7 +244,12 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
     lastEndedReason === 'peer_filter_failure';
   useEffect(() => {
     if (!active && !isFilterFailure) {
-      const t = setTimeout(onClosed, 1200);
+      // Dismiss quickly after a call ends. This was 1200ms, which made a
+      // user-initiated hangup feel broken — the call screen lingered 1.2s
+      // after tapping End, so testers re-called thinking it failed (the
+      // call_end itself propagates + ends both sides in ~0.3s). 300ms
+      // keeps a brief "ended" beat without the dead wait.
+      const t = setTimeout(onClosed, 300);
       return () => clearTimeout(t);
     }
   }, [active, isFilterFailure, onClosed]);
