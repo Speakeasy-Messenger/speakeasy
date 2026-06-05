@@ -238,15 +238,22 @@ export function GroupChatScreen({
           ),
         );
       }
-      const dissolveAt = ttlMs - elapsedMs;
-      if (dissolveAt > 0 && (m.stage === 'sent' || m.stage === 'seen')) {
-        timers.push(
-          setTimeout(() => setStage(groupId, m.id, 'disappearing'), dissolveAt),
-          setTimeout(() => setStage(groupId, m.id, 'almost-gone'), dissolveAt + 600),
-          setTimeout(() => setStage(groupId, m.id, 'gone'), dissolveAt + 1200),
-          setTimeout(() => remove(groupId, m.id), dissolveAt + 1600),
-        );
-      }
+      // Dissolve → remove. `ttlMs - elapsedMs` is when the dissolve STARTS;
+      // it goes negative once a message is past its TTL. Clamp to 0 and
+      // ALWAYS schedule the tail (incl. `remove`) so a message that expired
+      // while the app was closed — or whose dissolve started last session
+      // and persisted mid-stage ('disappearing'/'almost-gone'/'gone') —
+      // still completes and is removed, instead of sticking half-faded
+      // forever (bananaman 2026-06-05). The old guard only scheduled
+      // removal for 'sent'/'seen' messages with a positive countdown, which
+      // orphaned both cases.
+      const dissolveAt = Math.max(ttlMs - elapsedMs, 0);
+      timers.push(
+        setTimeout(() => setStage(groupId, m.id, 'disappearing'), dissolveAt),
+        setTimeout(() => setStage(groupId, m.id, 'almost-gone'), dissolveAt + 600),
+        setTimeout(() => setStage(groupId, m.id, 'gone'), dissolveAt + 1200),
+        setTimeout(() => remove(groupId, m.id), dissolveAt + 1600),
+      );
     }
     return () => timers.forEach(clearTimeout);
   }, [messages, groupId, ttlSecondsFor, setStage, remove]);

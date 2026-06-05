@@ -305,15 +305,18 @@ export function ChatScreen({
           ),
         );
       }
-      const dissolveAt = ttlMs - elapsedMs;
-      if (dissolveAt > 0 && (m.stage === 'sent' || m.stage === 'seen')) {
-        timers.push(
-          setTimeout(() => setStage(conversationId, m.id, 'disappearing'), dissolveAt),
-          setTimeout(() => setStage(conversationId, m.id, 'almost-gone'), dissolveAt + 600),
-          setTimeout(() => setStage(conversationId, m.id, 'gone'), dissolveAt + 1200),
-          setTimeout(() => remove(conversationId, m.id), dissolveAt + 1600),
-        );
-      }
+      // Clamp to 0 and ALWAYS schedule the tail so a message that expired
+      // while the app was closed — or whose dissolve started last session
+      // and persisted mid-stage — still completes and is removed, instead
+      // of sticking half-faded forever (bananaman 2026-06-05). See the
+      // GroupChatScreen TTL engine for the full rationale.
+      const dissolveAt = Math.max(ttlMs - elapsedMs, 0);
+      timers.push(
+        setTimeout(() => setStage(conversationId, m.id, 'disappearing'), dissolveAt),
+        setTimeout(() => setStage(conversationId, m.id, 'almost-gone'), dissolveAt + 600),
+        setTimeout(() => setStage(conversationId, m.id, 'gone'), dissolveAt + 1200),
+        setTimeout(() => remove(conversationId, m.id), dissolveAt + 1600),
+      );
     }
     return () => timers.forEach(clearTimeout);
   }, [messages, conversationId, ttlSecondsFor, setStage, remove]);
