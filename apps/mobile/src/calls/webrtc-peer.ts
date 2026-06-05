@@ -7,6 +7,7 @@ import {
   type MediaStreamTrack,
 } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
+import { DeviceEventEmitter, type EmitterSubscription } from 'react-native';
 import type {
   CallAnswerPayload,
   CallIceCandidate,
@@ -54,6 +55,19 @@ class WebRtcCallPeer implements CallPeer {
    * the user then has to tap twice to sync them (chloro, 2026-06-04).
    */
   private speakerOn = false;
+  /**
+   * Whether a wired headset is currently plugged in. Tracked because
+   * InCallManager's `setForceSpeakerphoneOn` sets `userSelectedAudioDevice`
+   * (SPEAKER_PHONE / EARPIECE), which the native `getPreferredAudioDevice`
+   * checks *before* WIRED_HEADSET — so a forced route silently overrides a
+   * headset plugged in mid-call (the "stayed on speakerphone after I put
+   * headphones on" bug). When this is true we route to the headset instead
+   * of honoring `speakerOn`; on unplug we restore the user's `speakerOn`
+   * preference. Seeded from `getIsWiredHeadsetPluggedIn()` at start and kept
+   * live via the native `WiredHeadset` DeviceEventEmitter event.
+   */
+  private headsetPlugged = false;
+  private headsetSub?: EmitterSubscription;
   private cameraFacing: 'user' | 'environment' = 'user';
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
@@ -397,7 +411,68 @@ class WebRtcCallPeer implements CallPeer {
   setSpeakerOn(on: boolean): void {
     this.speakerOn = on;
     diag('webrtc', 'setSpeakerOn', { on });
-    InCallManager.setForceSpeakerphoneOn(on);
+    this.applyAudioRoute();
+  }
+
+  /**
+   * Apply the intended audio route, honoring a plugged-in wired headset
+   * above the `speakerOn` preference. Without this, forcing speaker (or
+   * earpiece) pins `userSelectedAudioDevice` in InCallManager, which wins
+   * over WIRED_HEADSET in the native route-preference order — so a headset
+   * plugged in mid-call is ignored. When a headset is present we explicitly
+   * `chooseAudioRoute('WIRED_HEADSET')`; otherwise we honor `speakerOn`.
+   */
+  private applyAudioRoute(): void {
+    if (!this.startedManager) return;
+    if (this.headsetPlugged) {
+      // chooseAudioRoute is async (returns a Promise) but we don't await —
+      // it's fire-and-forget routing, same as setForceSpeakerphoneOn.
+      void Promise.resolve(InCallManager.chooseAudioRoute('WIRED_HEADSET')).catch(
+        (err: unknown) => {
+          diag('webrtc', 'chooseAudioRoute headset error', { err: String(err) });
+        },
+      );
+      diag('webrtc', 'audio route -> wired headset', {});
+    } else {
+      InCallManager.setForceSpeakerphoneOn(this.speakerOn);
+      diag('webrtc', 'audio route -> speaker pref', { speakerOn: this.speakerOn });
+    }
+  }
+
+  /**
+   * Subscribe to native wired-headset plug/unplug events so audio reroutes
+   * live. The native module emits `WiredHeadset` with `{ isPlugged }` from a
+   * BroadcastReceiver on ACTION_HEADSET_PLUG (Android). On iOS the same
+   * event name is emitted from the route-change observer. Idempotent.
+   */
+  private subscribeHeadset(): void {
+    if (this.headsetSub) return;
+    this.headsetSub = DeviceEventEmitter.addListener(
+      'WiredHeadset',
+      (data: { isPlugged?: boolean } | undefined) => {
+        const plugged = !!data?.isPlugged;
+        if (plugged === this.headsetPlugged) return;
+        this.headsetPlugged = plugged;
+        diag('webrtc', 'WiredHeadset event', { plugged });
+        this.applyAudioRoute();
+      },
+    );
+    // Seed the current state — a headset already plugged in at call start
+    // won't fire a plug event, and forcing earpiece/speaker would otherwise
+    // override it.
+    void Promise.resolve(InCallManager.getIsWiredHeadsetPluggedIn())
+      .then((res: { isWiredHeadsetPluggedIn?: boolean } | boolean) => {
+        const plugged =
+          typeof res === 'boolean' ? res : !!res?.isWiredHeadsetPluggedIn;
+        if (plugged !== this.headsetPlugged) {
+          this.headsetPlugged = plugged;
+          diag('webrtc', 'headset seeded at start', { plugged });
+          this.applyAudioRoute();
+        }
+      })
+      .catch((err: unknown) => {
+        diag('webrtc', 'getIsWiredHeadsetPluggedIn error', { err: String(err) });
+      });
   }
 
   close(): void {
@@ -424,6 +499,10 @@ class WebRtcCallPeer implements CallPeer {
       this.pc.close();
     } catch (err) {
       diag('webrtc', 'close error', { err: String(err) });
+    }
+    if (this.headsetSub) {
+      this.headsetSub.remove();
+      this.headsetSub = undefined;
     }
     if (this.startedManager) {
       InCallManager.stop({});
@@ -600,9 +679,13 @@ class WebRtcCallPeer implements CallPeer {
     // user's mute / speaker controls in CallScreen still flip
     // `setForceSpeakerphoneOn(true|false)` on demand.
     InCallManager.start({ media: 'audio', auto: true });
-    InCallManager.setForceSpeakerphoneOn(this.speakerOn);
-    InCallManager.setKeepScreenOn(true);
     this.startedManager = true;
+    InCallManager.setKeepScreenOn(true);
+    // Listen for headset plug/unplug and seed the current state BEFORE
+    // applying the route, so a headset already plugged in wins over the
+    // speaker/earpiece preference.
+    this.subscribeHeadset();
+    this.applyAudioRoute();
     diag('webrtc', 'InCallManager started', { speakerOn: this.speakerOn });
   }
 
@@ -618,9 +701,10 @@ class WebRtcCallPeer implements CallPeer {
    */
   private reassertAudioRoute(): void {
     if (!this.startedManager) return;
-    InCallManager.setForceSpeakerphoneOn(this.speakerOn);
+    this.applyAudioRoute();
     diag('webrtc', 'audio route re-asserted (connected)', {
       speakerOn: this.speakerOn,
+      headsetPlugged: this.headsetPlugged,
     });
   }
 
