@@ -172,6 +172,90 @@ function Eyes({
   );
 }
 
+/**
+ * Expressive eyes (rc.58 redesign). The old per-animal eyes only blinked
+ * on a timer + scaled uniformly ("eyeWiden") — which read as "no eye
+ * movement". These EYES CHANGE SHAPE with the peer's voice, the single
+ * biggest expressivity win:
+ *  - blow WIDE with loudness (yell / surprise),
+ *  - squint into a happy upward arch when the voice is animated
+ *    (cross-faded over the open eye),
+ *  - DROOP when pitch falls (winding down / sad),
+ * while the timer blink still multiplies the open-eye height. Pure SVG
+ * helper (no hooks) so it stays inside the AnimalBody invariant; drop it
+ * in where an animal's `<Eyes>` block was. All channels are the already-
+ * expanded prosody Animated values (see AvatarRenderer PROSODY_FULL), so
+ * ordinary speech drives the full range.
+ */
+function ExprEyes({
+  leftCx,
+  rightCx,
+  cy,
+  r = 8,
+  blink,
+  prosody,
+}: {
+  leftCx: number;
+  rightCx: number;
+  cy: number;
+  r?: number;
+  blink: AnimalRenderProps['eyeScale'];
+  prosody?: AnimalRenderProps['prosody'];
+}): React.ReactElement {
+  const amp = prosody?.amplitude;
+  const trend = prosody?.pitchTrend;
+
+  // CONTINUOUS: eyes blow wide with loudness (yell / emphasis), sink on a
+  // gasp. Smooth, every-frame — this is the "eyes actually move" signal.
+  const wideScale = amp
+    ? amp.interpolate({ inputRange: [0.45, 1], outputRange: [1, 1.5], extrapolate: 'clamp' })
+    : 1;
+  const droopY = trend
+    ? trend.interpolate({ inputRange: [-1, -0.15, 0], outputRange: [3.5, 0, 0], extrapolate: 'clamp' })
+    : 0;
+  // DISCRETE: only a real laugh squints the eyes shut into a happy arch —
+  // expressiveness ("animated voice") is NOT happiness, so we drive this
+  // off the acoustic event, not a continuous channel. Sticky for the
+  // event's ~1.5s lifetime (the receiver holds event/eventAt). Snap is
+  // fine — laughs are punchy.
+  const happy = prosody?.event === 'laugh';
+  const happyOp = happy ? 1 : 0;
+  const openOp = happy ? 0 : 1;
+  // Open-eye vertical scale = blink × wide. Blink still fully closes the
+  // eye; loudness makes the open eye taller.
+  const openScaleY =
+    typeof blink === 'number' ? blink : Animated.multiply(blink, wideScale);
+
+  const renderEye = (cx: number, hiSign: number): React.ReactElement => (
+    <>
+      {/* OPEN eye — sclera + pupil + glint; taller when loud, sinks when sad. */}
+      <AnimatedG opacity={openOp}>
+        <AnimatedG originX={cx} originY={cy} scaleY={openScaleY} translateY={droopY}>
+          <Ellipse cx={cx} cy={cy} rx={r} ry={r} fill={BONE} />
+          <Ellipse cx={cx} cy={cy + 0.5} rx={r * 0.5} ry={r * 0.5} fill={INK} />
+          <Circle cx={cx + 1.4 * hiSign} cy={cy - 1.4} r={1.3} fill={BONE} />
+        </AnimatedG>
+      </AnimatedG>
+      {/* HAPPY squint — upward arch, crossfaded in over the open eye. */}
+      <AnimatedPath
+        d={`M ${cx - r * 1.1} ${cy + 2} Q ${cx} ${cy - r * 0.9} ${cx + r * 1.1} ${cy + 2}`}
+        stroke={INK}
+        strokeWidth={3.2}
+        strokeLinecap="round"
+        fill="none"
+        opacity={happyOp}
+      />
+    </>
+  );
+
+  return (
+    <>
+      {renderEye(leftCx, 1)}
+      {renderEye(rightCx, -1)}
+    </>
+  );
+}
+
 function Mouth({
   pivot,
   scale,
@@ -851,10 +935,6 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const mouthShapeX = shapeSrc
     ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] })
     : 1;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -886,20 +966,7 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="58,33 74,36 74,40 58,38" fill={INK} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={48} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 34, y: 48 }} rightPivot={{ x: 66, y: 48 }} scale={eyeScale}>
-          <G>
-            <Ellipse cx={34} cy={48} rx={8} ry={8} fill={BONE} />
-            <Ellipse cx={34} cy={48} rx={4} ry={4} fill={INK} />
-            <Circle cx={36} cy={46} r={1.3} fill={BONE} />
-          </G>
-          <G>
-            <Ellipse cx={66} cy={48} rx={8} ry={8} fill={BONE} />
-            <Ellipse cx={66} cy={48} rx={4} ry={4} fill={INK} />
-            <Circle cx={68} cy={46} r={1.3} fill={BONE} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={34} rightCx={66} cy={48} r={8} blink={eyeScale} prosody={prosody} />
 
       <AnimatedG originX={50} originY={70} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 70 }} scale={mouthScale} axis="y">
@@ -932,10 +999,6 @@ const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const rightTuftRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 12] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -963,20 +1026,7 @@ const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="56,28 74,30 74,34 56,32" fill={INK} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={46} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 36, y: 46 }} rightPivot={{ x: 64, y: 46 }} scale={eyeScale}>
-          <G>
-            <Circle cx={36} cy={46} r={11} fill={INK} />
-            <Circle cx={36} cy={46} r={4} fill={BRASS} />
-            <Circle cx={38} cy={43} r={1.5} fill={BONE} />
-          </G>
-          <G>
-            <Circle cx={64} cy={46} r={11} fill={INK} />
-            <Circle cx={64} cy={46} r={4} fill={BRASS} />
-            <Circle cx={66} cy={43} r={1.5} fill={BONE} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={36} rightCx={64} cy={46} r={11} blink={eyeScale} prosody={prosody} />
 
       {/* Beak — bigger downward triangle, X-scale on mouthShape */}
       <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
@@ -1004,10 +1054,6 @@ const PigeonCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const headTilt = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [8, 0, -8] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1023,18 +1069,7 @@ const PigeonCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         {/* BRASS sheen along the upper head — classic pigeon iridescence cue */}
         <Path d="M22,42 Q50,30 78,42 Q78,46 50,38 Q22,46 22,42 Z" fill={BRASS} opacity={0.35} />
 
-        <AnimatedG originX={50} originY={46} scale={eyeWiden}>
-          <Eyes leftPivot={{ x: 38, y: 46 }} rightPivot={{ x: 62, y: 46 }} scale={eyeScale}>
-            <G>
-              <Ellipse cx={38} cy={46} rx={5} ry={5} fill={BRASS} />
-              <Ellipse cx={38} cy={46} rx={2} ry={2} fill={INK} />
-            </G>
-            <G>
-              <Ellipse cx={62} cy={46} rx={5} ry={5} fill={BRASS} />
-              <Ellipse cx={62} cy={46} rx={2} ry={2} fill={INK} />
-            </G>
-          </Eyes>
-        </AnimatedG>
+        <ExprEyes leftCx={38} rightCx={62} cy={46} r={5} blink={eyeScale} prosody={prosody} />
 
         <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
           <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
@@ -1071,10 +1106,6 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const rightEarTwitch = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1105,18 +1136,7 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="56,48 72,50 72,53 56,52" fill={INK} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={58} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 36, y: 58 }} rightPivot={{ x: 64, y: 58 }} scale={eyeScale}>
-          <G>
-            <Circle cx={36} cy={58} r={7} fill={INK} />
-            <Circle cx={38} cy={56} r={1.5} fill={BONE} />
-          </G>
-          <G>
-            <Circle cx={64} cy={58} r={7} fill={INK} />
-            <Circle cx={66} cy={56} r={1.5} fill={BONE} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={36} rightCx={64} cy={58} r={7} blink={eyeScale} prosody={prosody} />
 
       <AnimatedG originX={50} originY={74} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 74 }} scale={mouthScale} axis="y">
@@ -1146,10 +1166,6 @@ const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const cheekOpacity = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.45] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1189,18 +1205,7 @@ const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="54,38 70,40 70,43 54,42" fill={INK} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={50} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 38, y: 50 }} rightPivot={{ x: 62, y: 50 }} scale={eyeScale}>
-          <G>
-            <Ellipse cx={38} cy={50} rx={6} ry={6} fill={INK} />
-            <Circle cx={40} cy={48} r={1.3} fill={BONE} />
-          </G>
-          <G>
-            <Ellipse cx={62} cy={50} rx={6} ry={6} fill={INK} />
-            <Circle cx={64} cy={48} r={1.3} fill={BONE} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={38} rightCx={62} cy={50} r={6} blink={eyeScale} prosody={prosody} />
 
       <AnimatedG originX={50} originY={70} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 70 }} scale={mouthScale} axis="y">
@@ -1231,10 +1236,6 @@ const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const spoutOpacity = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.6] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Brow ridge lifts with expressiveness.
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -2] })
@@ -1269,18 +1270,7 @@ const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Polygon points="60,32 72,34 72,37 60,35" fill={BONE} />
         </AnimatedG>
 
-        <AnimatedG originX={50} originY={42} scale={eyeWiden}>
-          <Eyes leftPivot={{ x: 36, y: 42 }} rightPivot={{ x: 64, y: 42 }} scale={eyeScale}>
-            <G>
-              <Ellipse cx={36} cy={42} rx={5} ry={5} fill={BRASS} />
-              <Ellipse cx={36} cy={42} rx={2} ry={2} fill={INK} />
-            </G>
-            <G>
-              <Ellipse cx={64} cy={42} rx={5} ry={5} fill={BRASS} />
-              <Ellipse cx={64} cy={42} rx={2} ry={2} fill={INK} />
-            </G>
-          </Eyes>
-        </AnimatedG>
+        <ExprEyes leftCx={36} rightCx={64} cy={42} r={5} blink={eyeScale} prosody={prosody} />
 
         {/* Wide smile-arc mouth */}
         <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
@@ -1323,10 +1313,6 @@ const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -1.5] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1364,18 +1350,7 @@ const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="53,38 59,39 59,41 53,40" fill={INK} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={44} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 45, y: 44 }} rightPivot={{ x: 55, y: 44 }} scale={eyeScale}>
-          <G>
-            <Circle cx={45} cy={44} r={3.5} fill={BONE} />
-            <Circle cx={45} cy={44} r={1.5} fill={INK} />
-          </G>
-          <G>
-            <Circle cx={55} cy={44} r={3.5} fill={BONE} />
-            <Circle cx={55} cy={44} r={1.5} fill={INK} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={45} rightCx={55} cy={44} r={3.5} blink={eyeScale} prosody={prosody} />
 
       <AnimatedG originX={50} originY={56} scaleX={mouthShapeX}>
         <Mouth pivot={{ x: 50, y: 56 }} scale={mouthScale} axis="y">
@@ -1408,10 +1383,6 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const cheekOpacity = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.5] })
     : 0;
-  // Eyes widen as the peer's voice gets more emotionally animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1445,18 +1416,7 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Ellipse cx={70} cy={46} rx={6} ry={4} fill={INK} />
         </AnimatedG>
 
-        <AnimatedG originX={50} originY={36} scale={eyeWiden}>
-          <Eyes leftPivot={{ x: 38, y: 36 }} rightPivot={{ x: 62, y: 36 }} scale={eyeScale}>
-            <G>
-              <Circle cx={38} cy={36} r={6} fill={INK} />
-              <Circle cx={40} cy={34} r={1.5} fill={BONE} />
-            </G>
-            <G>
-              <Circle cx={62} cy={36} r={6} fill={INK} />
-              <Circle cx={64} cy={34} r={1.5} fill={BONE} />
-            </G>
-          </Eyes>
-        </AnimatedG>
+        <ExprEyes leftCx={38} rightCx={62} cy={36} r={6} blink={eyeScale} prosody={prosody} />
 
         {/* Mouth — small smile on the mantle */}
         <AnimatedG originX={50} originY={50} scaleX={mouthShapeX}>
@@ -1487,10 +1447,6 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const crestRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -22] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-figure flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1519,18 +1475,7 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
           <Polygon points="62,18 76,22 76,26 62,22" fill={INK} />
         </AnimatedG>
 
-        <AnimatedG originX={56} originY={36} scale={eyeWiden}>
-          <Eyes leftPivot={{ x: 46, y: 36 }} rightPivot={{ x: 66, y: 36 }} scale={eyeScale}>
-            <G>
-              <Ellipse cx={46} cy={36} rx={6} ry={6} fill={INK} />
-              <Circle cx={47.5} cy={34.5} r={1.2} fill={BONE} />
-            </G>
-            <G>
-              <Ellipse cx={66} cy={36} rx={6} ry={6} fill={INK} />
-              <Circle cx={67.5} cy={34.5} r={1.2} fill={BONE} />
-            </G>
-          </Eyes>
-        </AnimatedG>
+        <ExprEyes leftCx={46} rightCx={66} cy={36} r={6} blink={eyeScale} prosody={prosody} />
 
         {/* Beak repositioned below the face */}
         <AnimatedG originX={56} originY={56} scaleX={mouthShapeX}>
@@ -1561,10 +1506,6 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const earPerk = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [1, 1.2] })
     : 1;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1591,20 +1532,7 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="54,42 70,44 70,47 54,46" fill={BONE} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={52} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 38, y: 52 }} rightPivot={{ x: 62, y: 52 }} scale={eyeScale}>
-          <G>
-            <Circle cx={38} cy={52} r={7} fill={BONE} />
-            <Circle cx={38} cy={52} r={3} fill={INK} />
-            <Circle cx={39.5} cy={50.5} r={1} fill={BONE} />
-          </G>
-          <G>
-            <Circle cx={62} cy={52} r={7} fill={BONE} />
-            <Circle cx={62} cy={52} r={3} fill={INK} />
-            <Circle cx={63.5} cy={50.5} r={1} fill={BONE} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={38} rightCx={62} cy={52} r={7} blink={eyeScale} prosody={prosody} />
 
       {/* Snout — BONE muzzle with INK posable mouth */}
       <Ellipse cx={50} cy={70} rx={16} ry={11} fill={BONE} />
@@ -1643,10 +1571,6 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -2] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1675,18 +1599,7 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="56,40 72,42 72,44 56,43" fill={BONE} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={50} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 36, y: 50 }} rightPivot={{ x: 64, y: 50 }} scale={eyeScale}>
-          <G>
-            <Path d="M26,50 Q36,42 46,50 Q36,58 26,50 Z" fill={BRASS} />
-            <Ellipse cx={36} cy={50} rx={2} ry={5} fill={INK} />
-          </G>
-          <G>
-            <Path d="M54,50 Q64,42 74,50 Q64,58 54,50 Z" fill={BRASS} />
-            <Ellipse cx={64} cy={50} rx={2} ry={5} fill={INK} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={36} rightCx={64} cy={50} r={8} blink={eyeScale} prosody={prosody} />
 
       {/* Whiskers — splay outward on activity */}
       <AnimatedG originX={50} originY={68} scaleX={whiskerSpread}>
@@ -1736,10 +1649,6 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -1.5] })
     : 0;
-  // Eyes widen as the peer's voice gets more animated.
-  const eyeWiden = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.85, 1.3] })
-    : 1;
   // Whole-body flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -1773,18 +1682,7 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Polygon points="53,43 62,44 62,46 53,45" fill={BRASS} />
       </AnimatedG>
 
-      <AnimatedG originX={50} originY={50} scale={eyeWiden}>
-        <Eyes leftPivot={{ x: 43, y: 50 }} rightPivot={{ x: 57, y: 50 }} scale={eyeScale}>
-          <G>
-            <Circle cx={43} cy={50} r={5} fill={BRASS} />
-            <Circle cx={43} cy={50} r={2} fill={INK} />
-          </G>
-          <G>
-            <Circle cx={57} cy={50} r={5} fill={BRASS} />
-            <Circle cx={57} cy={50} r={2} fill={INK} />
-          </G>
-        </Eyes>
-      </AnimatedG>
+      <ExprEyes leftCx={43} rightCx={57} cy={50} r={5} blink={eyeScale} prosody={prosody} />
 
       {/* Posable mouth with fangs */}
       <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
