@@ -196,6 +196,7 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
 // hold — correct)? Logged every ~2s; a drop to 0 pinpoints a freeze.
 let _apfCount = 0;
 let _apfLastLog = 0;
+let _apfLastApply = 0;
 
 export default function App() {
   const userId = useIdentity((s) => s.userId);
@@ -691,8 +692,20 @@ export default function App() {
             _apfCount = 0;
             _apfLastLog = _now;
           }
-          const prev = usePeerAnimation.getState().byPeerId[peerUserId];
           const isNewEvent = frame.event !== 'none';
+          // THROTTLE the store write (and thus the call-screen re-render
+          // it triggers) to ~10Hz. The data channel delivers 20Hz, and
+          // every write re-renders the avatar + fires JS-driver SVG
+          // animations; over a sustained call that saturated the JS
+          // thread (frozen face + an unresponsive Hang Up button — the
+          // rc.61 report: frames kept arriving at 20/s but the UI was
+          // wedged). A NEW acoustic event always applies immediately so
+          // a laugh/gasp never gets dropped; the 60ms ease in
+          // useProsodyAnimatedValues smooths the lower continuous rate.
+          const nowMs = Date.now();
+          if (!isNewEvent && nowMs - _apfLastApply < 95) return;
+          _apfLastApply = nowMs;
+          const prev = usePeerAnimation.getState().byPeerId[peerUserId];
           usePeerAnimation.getState().set(peerUserId, {
             amplitude: frame.amplitude,
             pitchNorm: frame.pitchNorm,
