@@ -190,6 +190,13 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
   }
 }
 
+// rc.* diag: throttled peer-animation-frame-rate counter. "Face moved
+// for a bit then stopped" → did the data-channel frames STOP arriving
+// (bug), or did the peer just go quiet (frames keep coming, values
+// hold — correct)? Logged every ~2s; a drop to 0 pinpoints a freeze.
+let _apfCount = 0;
+let _apfLastLog = 0;
+
 export default function App() {
   const userId = useIdentity((s) => s.userId);
   const deviceToken = useIdentity((s) => s.deviceToken);
@@ -628,7 +635,19 @@ export default function App() {
         api,
         peerFactory: reactNativeWebRtcPeerFactory,
         getDeviceToken: getToken,
-        send: (frame) => ws.enqueueSend(frame),
+        send: (frame) => {
+          // rc.* diag: confirm call signaling (esp. call_end on hangup)
+          // actually leaves the device + the socket is authed when it
+          // does. A call_end queued while the WS isn't authed is the
+          // suspect for "I hung up but the peer's call stayed up".
+          if (typeof frame.type === 'string' && frame.type.startsWith('call_')) {
+            diag('call', 'wire send', {
+              type: frame.type,
+              wsState: ws.getState(),
+            });
+          }
+          ws.enqueueSend(frame);
+        },
         ensureSessionWithPeer,
         onStateChange: (call) => useCalls.getState().setActive(call),
         onCallFinished: (entry) => {
@@ -662,6 +681,16 @@ export default function App() {
           // frames lets the animation run to completion; the next
           // real event lands with a fresh `Date.now()` and the
           // hook re-fires.
+          _apfCount += 1;
+          const _now = Date.now();
+          if (_now - _apfLastLog > 2000) {
+            diag('anim', 'peer frames', {
+              perSec: Math.round(_apfCount / ((_now - _apfLastLog) / 1000)),
+              peerUserId,
+            });
+            _apfCount = 0;
+            _apfLastLog = _now;
+          }
           const prev = usePeerAnimation.getState().byPeerId[peerUserId];
           const isNewEvent = frame.event !== 'none';
           usePeerAnimation.getState().set(peerUserId, {
