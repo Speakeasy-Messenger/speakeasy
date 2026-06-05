@@ -174,9 +174,17 @@ class NotifMessagingModule(private val reactContext: ReactApplicationContext) :
       // pre-API-30 the shortcut is benign and the `setLargeIcon` fallback
       // below paints the avatar.
       val shortcutId = "conv-${conversationId}"
+      // The Conversation-promotion header (Samsung One UI + AOSP) takes the
+      // conversation NAME from the shortcut's label, NOT from
+      // MessagingStyle.conversationTitle — so for a group the label must be
+      // the ROOM name, or the collapsed banner shows the latest sender's
+      // handle even though conversationTitle is correctly set ("Suckdixx"
+      // resolved in JS but rendered "@bananaman6", fuertechino rc.51
+      // 2026-06-05). 1:1 keeps the peer handle.
+      val shortcutLabel = if (msgType == "group") title else "@$peerHandle"
       val shortcut = ShortcutInfoCompat.Builder(reactContext, shortcutId)
-        .setShortLabel("@$peerHandle")
-        .setLongLabel("@$peerHandle")
+        .setShortLabel(shortcutLabel)
+        .setLongLabel(shortcutLabel)
         .setIntent(
           Intent(reactContext, MainActivity::class.java).apply {
             action = Intent.ACTION_VIEW
