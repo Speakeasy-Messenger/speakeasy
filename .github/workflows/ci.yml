@@ -36,20 +36,52 @@ jobs:
       - name: Test
         run: npm run test
 
-  # Deploy the API to Fly on every push to `main`. Gated by the `build`
-  # job, so a failing typecheck/lint/test blocks the deploy. PR runs
-  # skip this job entirely (the `if` predicate).
+  # Detect whether this push touched anything that goes into the API image
+  # or its deploy. A monorepo `main` carries BOTH mobile and server commits;
+  # a mobile-only push must NOT redeploy the API, because the Fly rolling
+  # restart drops every live WS connection and briefly 401s auth / push-
+  # token registration for connected devices. (Observed: ~a dozen mobile-
+  # only avatar pushes each triggered a restart, which is what disrupted a
+  # tester's real-time message delivery + push registration.)
+  changes:
+    needs: build
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    outputs:
+      api: ${{ steps.filter.outputs.api }}
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          # Allow-list of everything baked into the API image / deploy.
+          # Broad on purpose (errs toward deploying) so a real server
+          # change is never silently skipped; only apps/mobile/** (and
+          # docs / mobile-release workflows) fall through to "no deploy".
+          filters: |
+            api:
+              - 'apps/api/**'
+              - 'packages/**'
+              - 'infra/**'
+              - 'package.json'
+              - 'package-lock.json'
+              - 'tsconfig*.json'
+              - '.github/workflows/ci.yml'
+
+  # Deploy the API to Fly when a push to `main` changed API-relevant paths
+  # (see `changes`). Gated by `build`, so a failing typecheck/lint/test
+  # blocks the deploy. PR runs and mobile-only pushes skip it.
   #
-  # Why on every push and not on tag: the server has no version coupling
-  # — `apps/api` does not read git tags, and we want main to track
-  # production continuously. Mobile keeps its tag-driven APK release
-  # workflow (`release.yml`); server prod = HEAD of main.
+  # Why path-gated and not on tag: the server has no version coupling —
+  # `apps/api` does not read git tags, and we want main to track production
+  # continuously. Mobile keeps its tag-driven APK release workflow
+  # (`release.yml`); server prod = HEAD of main's API code.
   #
   # Manual rollback: `flyctl deploy --image registry.fly.io/speakeasy-api-1:<previous-deployment-id> --config infra/fly/api.toml`.
   # Previous deployment IDs are visible in `flyctl releases --app speakeasy-api-1`.
   deploy-api:
-    needs: build
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    needs: [build, changes]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main' && needs.changes.outputs.api == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     # Avoid two main-pushes deploying at the same time (later commit
