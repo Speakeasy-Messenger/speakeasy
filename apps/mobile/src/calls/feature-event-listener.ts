@@ -154,11 +154,24 @@ export function attachFeatureEventListener(
     // hmm at call start when zcrNorm transitions from its 0.5
     // pre-calibration placeholder into the real post-calibration
     // scaling). See `AcousticEventDetector.push` doc.
+    const detected = eventDetector.push(features, extractor.isCalibrated);
+    // Log the laugh-detector's feature snapshot whenever it actually
+    // fires a laugh — this is the on-device ground truth for tuning the
+    // LAUGH_* thresholds (periodicity / peak / zcr / pitch) against real
+    // captures instead of synthetic estimates. Cheap: ~once per 2 s max
+    // (the detector's cooldown), only on a laugh.
+    if (detected === 'laugh' && eventDetector.laughStats) {
+      const s = eventDetector.laughStats;
+      diag('call', 'laugh detected', {
+        periodicity: Math.round(s.periodicity * 100) / 100,
+        peak: Math.round(s.peak * 100) / 100,
+        avgZcr: Math.round(s.avgZcr * 100) / 100,
+        avgVoicedPitch: Math.round(s.avgVoicedPitch * 100) / 100,
+      });
+    }
     // Latch the detection across a short burst so the unreliable data
     // channel delivers at least one copy (see EventLatch).
-    const event = eventLatch.push(
-      eventDetector.push(features, extractor.isCalibrated),
-    );
+    const event = eventLatch.push(detected);
     // Hand off to the orchestrator — sendAnimationFrame encodes the
     // 10-byte payload + ships over the data channel. The receiver
     // decodes via `decodeAnimationFrame` and pushes into

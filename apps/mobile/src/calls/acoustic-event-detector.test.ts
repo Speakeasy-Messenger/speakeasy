@@ -75,58 +75,99 @@ describe('AcousticEventDetector — defaults', () => {
   });
 });
 
-describe('laugh detection', () => {
-  it('fires on rapidly alternating voiced/silent windows with moderate volume', () => {
+describe('laugh detection (rhythm-based, rc.81)', () => {
+  // A laugh window: notes ~75 ms (≈2 windows) repeated every ~210 ms
+  // (≈6 windows) — a regular ~4.7 Hz amplitude rhythm — loud, breathy
+  // (elevated ZCR), with high pitch on the voiced notes.
+  function laughWindow(i: number): NormalizedFeatures {
+    const phase = i % 6; // 6-window period ≈ 200 ms
+    const onNote = phase < 2; // ~66 ms note
+    return features({
+      loudness: onNote ? 0.45 : 0.03,
+      loudnessFast: onNote ? 0.45 : 0.03,
+      pitchNorm: onNote ? 0.8 : 0, // high F0 when voiced
+      zcrNorm: onNote ? 0.62 : 0.5, // breathy
+      voicedInstant: onNote,
+    });
+  }
+
+  it('fires on the laugh rhythm — loud, regular ~4.7 Hz bursts, breathy/high-pitched', () => {
     const detector = new AcousticEventDetector();
     let fired = false;
     for (let i = 0; i < 30; i++) {
-      const voiced = i % 2 === 0;
-      const result = detector.push(
-        features({
-          loudness: voiced ? 0.5 : 0,
-          pitchNorm: voiced ? 0.5 : 0,
-          pitchTrend: 0.2,
-        }),
-      );
-      if (result === 'laugh') fired = true;
+      if (detector.push(laughWindow(i)) === 'laugh') fired = true;
     }
     expect(fired).toBe(true);
   });
 
-  it('does NOT fire when the alternation is too quiet (whispered laugh below threshold)', () => {
+  it('does NOT fire when the rhythm is too quiet (whispered laugh below peak gate)', () => {
     const detector = new AcousticEventDetector();
+    let fired = false;
     for (let i = 0; i < 30; i++) {
-      const voiced = i % 2 === 0;
-      const result = detector.push(
+      const phase = i % 6;
+      const onNote = phase < 2;
+      const r = detector.push(
         features({
-          loudness: voiced ? 0.08 : 0,
-          pitchNorm: voiced ? 0.5 : 0,
+          loudness: onNote ? 0.06 : 0.01,
+          loudnessFast: onNote ? 0.06 : 0.01, // below LAUGH_MIN_PEAK_LOUDNESS
+          pitchNorm: onNote ? 0.8 : 0,
+          zcrNorm: onNote ? 0.62 : 0.5,
+          voicedInstant: onNote,
         }),
       );
-      expect(result).toBe('none');
+      if (r === 'laugh') fired = true;
     }
+    expect(fired).toBe(false);
   });
 
-  it('respects the cooldown — fires once per sustained laugh, not every window', () => {
+  it('does NOT fire on irregular / choppy speech (the old detector false-fired here)', () => {
+    const detector = new AcousticEventDetector();
+    // Short voiced words with irregular gaps — many voiced transitions
+    // (what tripped the old flip-counter) but NO regular rhythm, normal
+    // ZCR, mid pitch.
+    const lengths = [2, 1, 3, 1, 2, 1, 2, 3, 1, 2];
+    let i = 0;
+    let fired = false;
+    for (let w = 0; w < lengths.length && i < 60; w++) {
+      for (let k = 0; k < lengths[w]! && i < 60; k++, i++) {
+        if (
+          detector.push(
+            features({
+              loudness: 0.16,
+              loudnessFast: 0.16,
+              pitchNorm: 0.42,
+              zcrNorm: 0.46,
+              voicedInstant: true,
+            }),
+          ) === 'laugh'
+        ) {
+          fired = true;
+        }
+      }
+      // irregular gap
+      const gap = (w % 2) + 1;
+      for (let k = 0; k < gap && i < 60; k++, i++) {
+        if (
+          detector.push(
+            features({ loudness: 0.02, loudnessFast: 0.02, voicedInstant: false }),
+          ) === 'laugh'
+        ) {
+          fired = true;
+        }
+      }
+    }
+    expect(fired).toBe(false);
+  });
+
+  it('respects the cooldown — fires at most once per ~2 s of sustained laughter', () => {
     const detector = new AcousticEventDetector();
     const fires: string[] = [];
-    // Run 4 seconds of laugh cadence at 30 Hz = 120 windows.
     for (let i = 0; i < 120; i++) {
-      const voiced = i % 2 === 0;
-      const result = detector.push(
-        features({
-          loudness: voiced ? 0.5 : 0,
-          pitchNorm: voiced ? 0.5 : 0,
-          pitchTrend: 0.2,
-        }),
-      );
+      const result = detector.push(laughWindow(i));
       if (result !== 'none') fires.push(result);
     }
-    // 4 seconds with a ~2 s cooldown → at most 2 fires.
     expect(fires.length).toBeGreaterThan(0);
-    expect(fires.length).toBeLessThanOrEqual(2);
-    // All fires should be 'laugh' (no other event has these
-    // preconditions).
+    expect(fires.length).toBeLessThanOrEqual(2); // ~4 s / 2 s cooldown
     expect(fires.every((e) => e === 'laugh')).toBe(true);
   });
 });
@@ -334,13 +375,16 @@ describe('featuresReady gate', () => {
 describe('reset()', () => {
   it('clears history + cooldown so a new call starts clean', () => {
     const detector = new AcousticEventDetector();
-    // Trigger a laugh.
-    for (let i = 0; i < 20; i++) {
+    // Trigger a laugh (regular ~4.7 Hz loud breathy rhythm).
+    for (let i = 0; i < 24; i++) {
+      const onNote = i % 6 < 2;
       detector.push(
         features({
-          loudness: i % 2 === 0 ? 0.5 : 0,
-          pitchNorm: i % 2 === 0 ? 0.5 : 0,
-          pitchTrend: 0.2,
+          loudness: onNote ? 0.45 : 0.03,
+          loudnessFast: onNote ? 0.45 : 0.03,
+          pitchNorm: onNote ? 0.8 : 0,
+          zcrNorm: onNote ? 0.62 : 0.5,
+          voicedInstant: onNote,
         }),
       );
     }

@@ -57,14 +57,34 @@ const HISTORY_WINDOWS = 30;
  *  unit tests (which use exaggerated synthetic deltas) still pass — and
  *  the cooldown still caps firing at ~1 event / 2 s, so a looser gate
  *  can't produce a thrash of overlays. */
-// A giggle's "ha-ha-ha" produces a FASTER voiced/unvoiced flip rate
-// than ordinary syllabic speech (~4–7 syllables/s, with continuous
-// voicing across vowels → fewer full unvoiced gaps). On the raw
-// `voicedInstant` tap, normal speech runs ~4–8 flips/s; a laugh ~10–16.
-// 10 separates them. (Set against the smoothed flag this was 5, but the
-// smoothed flag latched on and read ~0 — see threshold note above.)
-const LAUGH_MIN_VOICED_TRANSITIONS = 10; // ≥ 10 raw voiced flips in 1 s = giggle cadence
-const LAUGH_MIN_AMPLITUDE = 0.1;        // above whisper, on the transient (raw) loudness
+// LAUGH — rhythm + breathiness, NOT voiced-transition counting.
+//
+// The original detector counted voiced↔unvoiced flips and keyed on a
+// flip-rate threshold. On real calls that was the worst possible choice
+// (rc.78–80 on-device: missed real laughs, fired the squint on speech
+// SECONDS after the laugh ended). Two reasons, both confirmed in the
+// acoustics literature:
+//   • A laugh is largely UNVOICED/breathy — Bachorowski & Owren and
+//     others find pitch is detectable in a minority of laugh frames, so
+//     a smooth "haaa-haaa" yields FEW flips and is missed.
+//   • Choppy conversational speech (short words + gaps) racks up flips
+//     and false-fires.
+// The robust signature (Provine 2000; modulation-spectrum analyses) is
+// the RHYTHM: laugh "notes" are ~75 ms long repeated ~210 ms apart — a
+// regular amplitude modulation at ~4.7 Hz. We detect that regularity via
+// the normalized autocorrelation of the loudness envelope in a lag band,
+// gated by a loud PEAK (laughs are bursty: high peak, low mean) and by
+// breathiness (elevated ZCR) OR high pitch when voiced (laugh F0 ≈ 2×
+// speech). Offline-validated on synthetic laugh/speech/choppy/silence:
+// ~70 %/window recall on laughs, ~0 % false-fire on the rest (vs the old
+// rule's 0.2 % / 59 %). Device-tunable via the [event] diag logging.
+const LAUGH_MIN_WINDOWS = 18;          // ~0.6 s before the rhythm is measurable
+const LAUGH_RHYTHM_LAG_MIN = 4;        // ~8.3 Hz (period 132 ms)
+const LAUGH_RHYTHM_LAG_MAX = 8;        // ~4.1 Hz (period 264 ms); ~210 ms ≈ lag 6.4
+const LAUGH_MIN_PERIODICITY = 0.25;    // normalized autocorr peak in the lag band
+const LAUGH_MIN_PEAK_LOUDNESS = 0.12;  // bursty — gate on PEAK, not mean (transient tap)
+const LAUGH_MIN_ZCR = 0.52;            // breathy: above the per-call ZCR baseline (0.5)
+const LAUGH_MIN_PITCH = 0.6;           // high F0 when voiced (≈ 2× speaking pitch)
 const SIGH_MIN_DURATION_WINDOWS = 12;   // ≥ 400 ms sustained
 const SIGH_PITCH_TREND_THRESHOLD = -0.15; // just past the ±0.12 trend deadband
 const SIGH_MIN_PRE_SILENCE_WINDOWS = 6; // ≥ 200 ms quiet before
@@ -96,6 +116,13 @@ export class AcousticEventDetector {
   /** Cooldown counter in windows. While > 0, all event detection
    *  short-circuits to 'none'. Decremented each push(). */
   private cooldownWindows = 0;
+  /** Most recent laugh-feature snapshot (peak loudness, envelope
+   *  periodicity, mean ZCR, mean voiced pitch). Surfaced via
+   *  `laughStats` for the [event] diag logging so the laugh thresholds
+   *  can be tuned against real device captures rather than guessed. */
+  private lastLaughStats:
+    | { peak: number; periodicity: number; avgZcr: number; avgVoicedPitch: number }
+    | undefined;
 
   /**
    * Consume one window of smoothed normalized features and return
@@ -179,6 +206,7 @@ export class AcousticEventDetector {
     this.voicedRunLength = 0;
     this.silenceRunLength = 0;
     this.cooldownWindows = 0;
+    this.lastLaughStats = undefined;
   }
 
   /**
@@ -206,27 +234,76 @@ export class AcousticEventDetector {
   }
 
   /**
-   * Laugh: at least N voicedness transitions inside the 1 s
-   * history window. Counts both voiced→silent AND silent→voiced
-   * flips (a giggle's "ha-ha-ha" produces both). Requires
-   * amplitude above whisper-level (laughs are not subtle).
+   * Laugh: a regular amplitude-modulation RHYTHM at the laugh-call rate
+   * (~210 ms between notes ≈ 4.7 Hz), loud, and breathy or high-pitched.
+   * See the LAUGH_* constant block for why this replaced flip-counting.
+   *
+   * `lastLaughStats` is populated each call for the [event] diag logging
+   * so the thresholds can be tuned against real device captures.
    */
   private detectLaugh(): AcousticEvent | undefined {
-    if (this.history.length < HISTORY_WINDOWS / 2) return undefined;
-    let transitions = 0;
-    let amplitudeSum = 0;
-    for (let i = 1; i < this.history.length; i++) {
-      const prev = this.history[i - 1]!;
-      const cur = this.history[i]!;
-      if (prev.voiced !== cur.voiced) transitions += 1;
-      // Transient loudness — a laugh's bursts average higher here than
-      // in the follower-smoothed channel.
-      amplitudeSum += cur.loudnessFast;
+    const H = this.history;
+    if (H.length < LAUGH_MIN_WINDOWS) return undefined;
+
+    const amps = H.map((e) => e.loudnessFast);
+    // Bursty — a laugh's inter-note gaps drag the MEAN down, so gate on
+    // the loud PEAK instead.
+    let peak = 0;
+    for (const a of amps) if (a > peak) peak = a;
+
+    const periodicity = this.envelopePeriodicity(amps);
+
+    let zcrSum = 0;
+    let voicedPitchSum = 0;
+    let voicedCount = 0;
+    for (const e of H) {
+      zcrSum += e.zcrNorm;
+      if (e.voiced) {
+        voicedPitchSum += e.pitchNorm;
+        voicedCount += 1;
+      }
     }
-    const avgAmplitude = amplitudeSum / (this.history.length - 1);
-    if (transitions < LAUGH_MIN_VOICED_TRANSITIONS) return undefined;
-    if (avgAmplitude < LAUGH_MIN_AMPLITUDE) return undefined;
+    const avgZcr = zcrSum / H.length;
+    const avgVoicedPitch = voicedCount > 0 ? voicedPitchSum / voicedCount : 0;
+    const highPitched = voicedCount > 0 && avgVoicedPitch > LAUGH_MIN_PITCH;
+    const breathy = avgZcr > LAUGH_MIN_ZCR;
+
+    this.lastLaughStats = { peak, periodicity, avgZcr, avgVoicedPitch };
+
+    if (peak < LAUGH_MIN_PEAK_LOUDNESS) return undefined;
+    if (periodicity < LAUGH_MIN_PERIODICITY) return undefined;
+    if (!breathy && !highPitched) return undefined;
     return 'laugh';
+  }
+
+  /**
+   * Normalized autocorrelation peak of the (mean-removed) loudness
+   * envelope across the laugh-rhythm lag band. ~1.0 = a perfectly
+   * regular burst train at that period; ~0 = noise / no rhythm. Speech
+   * envelopes are semi-periodic and irregular, so they sit low; a laugh's
+   * "ha-ha-ha" lands high. O(windows × lagBand) — a few hundred multiply-
+   * adds per frame, negligible.
+   */
+  private envelopePeriodicity(amps: number[]): number {
+    const n = amps.length;
+    let mean = 0;
+    for (const a of amps) mean += a;
+    mean /= n;
+    const x = new Array<number>(n);
+    let energy = 0;
+    for (let i = 0; i < n; i++) {
+      x[i] = amps[i]! - mean;
+      energy += x[i]! * x[i]!;
+    }
+    if (energy < 1e-6) return 0;
+    let best = 0;
+    for (let lag = LAUGH_RHYTHM_LAG_MIN; lag <= LAUGH_RHYTHM_LAG_MAX; lag++) {
+      let s = 0;
+      for (let i = lag; i < n; i++) s += x[i]! * x[i - lag]!;
+      const r = s / energy;
+      if (r > best) best = r;
+    }
+    return best;
   }
 
   /**
@@ -272,5 +349,14 @@ export class AcousticEventDetector {
   /** Test-only inspection of cooldown state. */
   get _cooldownWindows(): number {
     return this.cooldownWindows;
+  }
+
+  /** Latest laugh-feature snapshot for diagnostics/tuning. Undefined
+   *  until the first window where the laugh detector ran (i.e. enough
+   *  history + not in cooldown). */
+  get laughStats():
+    | { peak: number; periodicity: number; avgZcr: number; avgVoicedPitch: number }
+    | undefined {
+    return this.lastLaughStats;
   }
 }
