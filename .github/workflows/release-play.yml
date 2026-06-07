@@ -193,13 +193,11 @@ jobs:
           #
           # FULL-SCREEN INTENT: a 'completed' commit of a bundle carrying
           # USE_FULL_SCREEN_INTENT is rejected (403 "you must let us know…")
-          # until the one-time full-screen-intent declaration is filed in
-          # Play Console (Monitor and improve → App content). A 'draft' commit
-          # lands the bundle WITHOUT tripping the gate (proven at rc.68); the
-          # release just waits on a manual "Send to testers" click. Staying on
-          # 'draft' until the declaration is confirmed filed (a 'completed'
-          # commit succeeding). rc.69 was flipped to 'completed' prematurely
-          # and 403'd — the declaration was NOT yet filed. Flip back to
-          # 'completed' (auto-promote) only once it is.
-          RELEASE_STATUS: draft
+          # until the full-screen-intent declaration is filed in Play Console
+          # (Monitor and improve → App content). Declaration submitted for
+          # Google review at rc.72 — testing here whether SUBMISSION clears
+          # the upload gate (vs needing full APPROVAL). If this 'completed'
+          # commit 403s, revert to 'draft' (which commits regardless) until
+          # the review is approved.
+          RELEASE_STATUS: completed
         run: bash scripts/play-publish.sh
