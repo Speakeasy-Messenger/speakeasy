@@ -52,6 +52,97 @@ export type ExpressionChannel = (typeof EXPRESSION_CHANNELS)[number];
 export const FACIAL_REGIONS = ['head', 'brow', 'eyes', 'mouth', 'cheek'] as const;
 export type FacialRegion = (typeof FACIAL_REGIONS)[number];
 
+// ─────────────────────────────────────────────────────────────────────
+// MAGNITUDE GATE (committee follow-up).
+//
+// Tier-2's coverage score answers "is the channel WIRED to a transform."
+// It went green while faces were flat because a channel can be wired to a
+// 1.0→1.01 interpolation and score full coverage while moving nothing.
+// The magnitude gate answers the missing question: at the input a channel
+// ACTUALLY reaches on a real (compressed) call, does the transform move
+// far enough to SEE? It's a static proxy for "render real-call frames and
+// measure pixels" — it reads each interpolation's outputRange and floors
+// the realistic output delta, rather than trusting that a wire exists.
+
+/**
+ * Per-channel input a real call reaches at a p90 "animated moment",
+ * AFTER the renderer's PROSODY_FULL expansion (AvatarRenderer expands the
+ * compressed wire value onto [0,1] before the per-animal interpolations
+ * see it). Derived from measured real-call stats / expansion divisors:
+ *   amplitude   raw p90 0.21 / 0.35 ≈ 0.60
+ *   mouthShape  raw p90 0.20 / 0.30 ≈ 0.67
+ *   expressiveness raw p90 0.62 / 0.60 → 1.0 (clamped)
+ *   activity    raw p90 ~0.50 / 0.85 ≈ 0.59
+ *   pitchTrend  smoothed real trend is tiny (±~0.07) / 0.40 ≈ 0.18
+ * `amplitude` here is BOTH the prosody channel and the audioLevel prop
+ * the jaw/recoil read (same realistic ceiling).
+ */
+const REAL_INPUT_P90: Record<string, number> = {
+  amplitude: 0.6,
+  mouthShape: 0.67,
+  expressiveness: 1.0,
+  activity: 0.59,
+  pitchTrend: 0.18,
+  pitchNorm: 0.5,
+  zcrNorm: 0.5,
+};
+
+/** Kind of transform an interpolation's output drives — sets the unit and
+ *  thus the perceptibility floor. */
+type MotionKind = 'rotation' | 'translate' | 'scale' | 'opacity';
+
+/** Smallest output delta (over rest→real-p90 input) that reads as motion
+ *  on a call-sized avatar. Below this the motion is "wired but dead." */
+const PERCEPTIBILITY_FLOOR: Record<MotionKind, number> = {
+  rotation: 3, // degrees
+  translate: 1.5, // px in the 100-unit viewBox
+  scale: 0.08, // 8% size change
+  opacity: 0.25, // alpha change
+};
+
+/** Classify the transform kind from the animated variable / JSX prop name.
+ *  Order matters: opacity first (so "opaci*ty*" isn't read as a `ty`
+ *  translate), then scale/rotation keywords, then translate (axis suffixes
+ *  `Tx/Ty/Dx/Dy` matched at the end, plus motion words). */
+function motionKindForName(name: string): MotionKind {
+  const n = name.toLowerCase();
+  if (/opacity|opac|alpha/.test(n)) return 'opacity';
+  if (/scale|perk|flare|spread|widen|squint|wide/.test(n)) return 'scale';
+  if (/rot|tilt|angle|swivel/.test(n)) return 'rotation';
+  if (/(tx|ty|dx|dy)$|translate|recoil|bob|nod|drop|shift|sway|jolt|lean|twitch/.test(n))
+    return 'translate';
+  // Default: most bare animated vars feed a scale (the dominant idiom).
+  return 'scale';
+}
+
+/** Evaluate a piecewise-linear interpolation (RN `interpolate` semantics,
+ *  clamped at the ends) at input `x`. */
+function evalInterp(inRange: number[], outRange: number[], x: number): number {
+  if (inRange.length < 2 || inRange.length !== outRange.length) return outRange[0] ?? 0;
+  if (x <= inRange[0]!) return outRange[0]!;
+  if (x >= inRange[inRange.length - 1]!) return outRange[outRange.length - 1]!;
+  for (let i = 0; i < inRange.length - 1; i++) {
+    const a = inRange[i]!;
+    const b = inRange[i + 1]!;
+    if (x >= a && x <= b) {
+      const t = b === a ? 0 : (x - a) / (b - a);
+      return outRange[i]! + t * (outRange[i + 1]! - outRange[i]!);
+    }
+  }
+  return outRange[outRange.length - 1]!;
+}
+
+/** A motion whose realistic-input output delta falls below the floor —
+ *  wired, but won't visibly move on a real call. */
+export interface WeakMotion {
+  region: FacialRegion;
+  channel: string;
+  kind: MotionKind;
+  /** |output(realP90) − output(rest)|. */
+  magnitude: number;
+  floor: number;
+}
+
 export interface AnimalExpressivity {
   animalId: string;
   /** Which Render we scored — the call variant if present, else default. */
@@ -72,6 +163,9 @@ export interface AnimalExpressivity {
   loudnessReactive: boolean;
   channelCoverage: number; // liveChannels / EXPRESSION_CHANNELS
   regionCoverage: number; // regionsMoved / FACIAL_REGIONS
+  /** Channel-driven motions wired but too small to see at real-call input
+   *  (the magnitude gate — wiring present, pixels absent). */
+  magnitudeWeak: WeakMotion[];
   score: number; // 0.45*channel + 0.45*region + 0.10*loudnessReactive
 }
 
@@ -85,6 +179,10 @@ export interface Tier2Scorecard {
    *  gap, the renderer-side analogue of the event-detector fix. */
   loudnessReactiveFraction: number;
   perAnimal: AnimalExpressivity[];
+  /** Total channel-driven motions across all animals that are wired but
+   *  fall below the perceptibility floor at real-call input — the
+   *  magnitude gate's headline. High = lots of motion that won't read. */
+  weakMotionCount: number;
   /** Animals in the catalog whose Render body lives in another file
    *  (rares/legendaries) and so isn't analyzed here yet. */
   notAnalyzed: string[];
@@ -126,6 +224,49 @@ interface RenderAnalysis {
   regionsMoved: FacialRegion[];
   eyesExpressive: boolean;
   loudnessReactive: boolean;
+  weakMotions: WeakMotion[];
+}
+
+/**
+ * Extract every named channel-driven interpolation and flag those whose
+ * realistic-input (real-call p90) output delta falls below the
+ * perceptibility floor for its transform kind. Matches the dominant
+ * idiom `const NAME = ALIAS ? ALIAS.interpolate({ inputRange:[…],
+ * outputRange:[…] }) : …`. Direct JSX interpolations are not magnitude-
+ * checked in v1 (rare in these bodies).
+ */
+function extractWeakMotions(
+  body: string,
+  srcAlias: Map<string, ExpressionChannel>,
+): WeakMotion[] {
+  const weak: WeakMotion[] = [];
+  const re =
+    /const\s+(\w+)\s*=\s*(\w+)\s*\?\s*\2\s*\.\s*interpolate\(\{\s*inputRange:\s*(\[[^\]]*\])\s*,\s*outputRange:\s*(\[[^\]]*\])/g;
+  for (const m of body.matchAll(re)) {
+    const [, varName, alias, inLit, outLit] = m;
+    const channel = srcAlias.get(alias!);
+    if (!channel) continue;
+    const region = regionForVarName(varName!);
+    if (!region) continue;
+    const parse = (lit: string): number[] =>
+      lit
+        .slice(1, -1)
+        .split(',')
+        .map((s) => parseFloat(s.trim()))
+        .filter((n) => !Number.isNaN(n));
+    const inRange = parse(inLit!);
+    const outRange = parse(outLit!);
+    if (inRange.length < 2 || inRange.length !== outRange.length) continue;
+    const kind = motionKindForName(varName!);
+    const real = REAL_INPUT_P90[channel] ?? 0.6;
+    // Rest input: 0 for unipolar channels, 0 for signed (neutral) too.
+    const mag = Math.abs(evalInterp(inRange, outRange, real) - evalInterp(inRange, outRange, 0));
+    const floor = PERCEPTIBILITY_FLOOR[kind];
+    if (mag < floor) {
+      weak.push({ region, channel, kind, magnitude: Number(mag.toFixed(3)), floor });
+    }
+  }
+  return weak;
 }
 
 /**
@@ -233,11 +374,33 @@ function analyzeRenderBody(body: string): RenderAnalysis {
     if (r && r !== 'mouth') loudnessReactive = true;
   }
 
+  // PRIMITIVE recognition (post-redesign vocabulary). The new mouth/eye
+  // motion lives in reusable components driven by the `amplitude` prop +
+  // acoustic events, NOT the prosody-channel interpolations this parser
+  // tracks — so detect them by element name, else they read as false
+  // "missing mouth / dead eyes". `<Jaw>` and `<BeakGap>` are the loudness
+  // mouth; `<ExprEyes>` reacts to loudness (wide) + the laugh event (arch).
+  const hasJaw = /<Jaw\b/.test(body);
+  const hasBeak = /<BeakGap\b/.test(body);
+  const hasExprEyes = /<ExprEyes\b/.test(body);
+  if (hasJaw || hasBeak) regions.add('mouth');
+  let eyesExpressive = regions.has('eyes');
+  if (hasExprEyes) {
+    regions.add('eyes');
+    eyesExpressive = true; // loudness-wide + laugh-arch + idle gaze
+  }
+  // The loudness jaw/beak is itself a mouth-region loudness reaction, but
+  // `loudnessReactive` deliberately counts only NON-mouth yell reactions,
+  // so the jaw doesn't flip it (the recoil/brow/eye uses still do).
+
+  const weakMotions = extractWeakMotions(body, srcAlias);
+
   return {
     liveChannels: [...liveChannels],
     regionsMoved: [...regions],
-    eyesExpressive: regions.has('eyes'),
+    eyesExpressive,
     loudnessReactive,
+    weakMotions,
   };
 }
 
@@ -358,6 +521,7 @@ export function runTier2(
       loudnessReactive: a.loudnessReactive,
       channelCoverage,
       regionCoverage,
+      magnitudeWeak: a.weakMotions,
       score:
         0.45 * channelCoverage +
         0.45 * regionCoverage +
@@ -386,10 +550,13 @@ export function runTier2(
       worstCells.push({ animalId: p.animalId, kind: 'region', name: r });
   }
 
+  const weakMotionCount = perAnimal.reduce((n, p) => n + p.magnitudeWeak.length, 0);
+
   return {
     overall,
     eyesExpressiveFraction,
     loudnessReactiveFraction,
+    weakMotionCount,
     perAnimal,
     notAnalyzed,
     worstCells,

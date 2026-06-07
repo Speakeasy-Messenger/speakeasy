@@ -59,6 +59,10 @@ const TARGET = {
   eyesExpressiveFraction: 0.8, // close the "no eyes" gap across animals
   loudnessReactiveFraction: 0.8, // animals visibly react to a sustained yell
   minPerAnimalScore: 0.6, // no flat outliers (pigeon/octopus are 0.35 today)
+  maxWeakMotions: 4, // magnitude gate: motions wired but sub-perceptible at
+  //                    real-call input. High today (pitchTrend head/ear
+  //                    tilts barely move on real audio) — drive it down by
+  //                    recalibrating ranges, not by deleting the gate.
 };
 
 /**
@@ -122,6 +126,15 @@ function targetStatus(sc) {
     want,
     ok: got >= want,
   }));
+  // Magnitude gate is a MAX (fewer sub-perceptible motions is better), so
+  // it inverts the comparison — track it as its own row.
+  const weak = sc.tier2.weakMotionCount ?? 0;
+  rows.push({
+    k: 'weak motions (max)',
+    got: weak,
+    want: TARGET.maxWeakMotions,
+    ok: weak <= TARGET.maxWeakMotions,
+  });
   return { rows, met: rows.every((r) => r.ok) };
 }
 
