@@ -170,6 +170,16 @@ export function ChatScreen({
   // in a Modal layered over the chat. Null = closed.
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
   const listRef = useRef<FlatList>(null);
+  // Jump-to-bottom affordance: shown once the user has scrolled up out of
+  // the newest messages. On an `inverted` list, contentOffset.y === 0 is
+  // the bottom (newest), so y past a threshold means "scrolled into
+  // history." setState with the same boolean is a no-op in React, so
+  // firing this on every scroll frame doesn't churn renders.
+  const [showJump, setShowJump] = useState(false);
+  const jumpToBottom = useCallback(() => {
+    listRef.current?.scrollToOffset({ offset: 0, animated: true });
+    setShowJump(false);
+  }, []);
   // The FlatList is `inverted`, so it renders data[0] at the visual
   // bottom — the newest message must come first. The store keeps
   // messages oldest-first, so feed the list a reversed copy.
@@ -708,6 +718,7 @@ export function ChatScreen({
             while its content fades — the dissolve reads as a
             deliberate ending, not a glitch. */}
         <Animated.View style={{ flex: 1, opacity: burnFade }}>
+        <View style={styles.listWrap}>
         <FlatList
           ref={listRef}
           inverted
@@ -715,6 +726,8 @@ export function ChatScreen({
           keyExtractor={(m) => m.id}
           style={styles.list}
           contentContainerStyle={styles.listContent}
+          scrollEventThrottle={16}
+          onScroll={(e) => setShowJump(e.nativeEvent.contentOffset.y > 320)}
           renderItem={({ item }) => {
             if (item.kind === 'date-separator') {
               return <DateSeparatorRow timestamp={item.sentAt} />;
@@ -770,6 +783,20 @@ export function ChatScreen({
             </View>
           }
         />
+        {showJump ? (
+          <Pressable
+            onPress={jumpToBottom}
+            hitSlop={8}
+            accessibilityLabel="Jump to latest message"
+            style={[
+              styles.jumpBtn,
+              { backgroundColor: themed.pale, borderColor: themed.divider },
+            ]}
+          >
+            <DownChevron size={20} color={themed.primary} />
+          </Pressable>
+        ) : null}
+        </View>
         {/* Brand §6.5 InputBar: top border 1px text-faint, padding 14/20,
             canvas bg, "say something..." placeholder in text-mute body,
             send button only fades in once content exists (accent icon,
@@ -988,8 +1015,41 @@ function SendIcon({ size = 22, color }: { size?: number; color: string }): React
   );
 }
 
+function DownChevron({ size = 20, color }: { size?: number; color: string }): React.JSX.Element {
+  // Down chevron for the jump-to-bottom button — matches the input-bar
+  // icons' line-weight (square caps, no fill).
+  return (
+    <Svg width={size} height={size} viewBox="0 0 24 24" fill="none">
+      <Path
+        d="M6 10 L12 16 L18 10"
+        stroke={color}
+        strokeWidth={2}
+        strokeLinecap="square"
+        strokeLinejoin="miter"
+      />
+    </Svg>
+  );
+}
+
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
+  // Wraps the message list so the jump-to-bottom button can float at the
+  // list's bottom-right (just above the composer), not over the AppBar.
+  listWrap: { flex: 1 },
+  // Floating "jump to newest" button — appears bottom-right when scrolled
+  // up into history. Circular surface tile + hairline border, accent
+  // chevron, matching the app's icon-tile language.
+  jumpBtn: {
+    position: 'absolute',
+    right: space.md,
+    bottom: space.md,
+    width: 40,
+    height: 40,
+    borderRadius: 20,
+    borderWidth: StyleSheet.hairlineWidth,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
   // Frozen-state Peephole portrait — sized to match the standard
   // animal portrait tile (28×28 surface tile + faint border + 78%
   // inner mark) so the AppBar layout doesn't shift when block toggles.
