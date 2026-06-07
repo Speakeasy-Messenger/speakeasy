@@ -401,7 +401,7 @@ function useProsodyAnimatedValues(
   // trembled on device (rc.68 feedback). These channels are emotional
   // and slow, so heavier smoothing costs nothing perceptual. The mouth
   // is driven separately (audioLevel via CallScreen), not from here.
-  const duration = reducedMotion ? 0 : 350;
+  const duration = reducedMotion ? 0 : 550;
   useEffect(() => {
     const animations: Animated.CompositeAnimation[] = [];
     const last = lastTargetsRef.current;

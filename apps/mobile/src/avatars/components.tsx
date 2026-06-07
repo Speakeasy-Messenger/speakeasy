@@ -382,16 +382,24 @@ function Jaw({
   });
   const Lx = cx - hw;
   const Rx = cx + hw;
-  // The FULL open mouth: a filled D — near-flat upper lip, rounded lower
-  // lip JAW_OPEN_DEPTH below it. scaleY 0→1 about the lip line grows it
-  // from a line to the full shape (solid + legible, not a thin crescent).
+  // The FULL open mouth: a filled D — near-flat upper lip, rounded lower lip
+  // JAW_OPEN_DEPTH below it. CRITICAL: the cavity is drawn with its top edge
+  // at LOCAL y=0, then `scaleY` is applied about the DEFAULT origin (0,0) and
+  // the group is translated to `lipY`. So as the mouth closes (scaleY→0,
+  // which happens constantly) it collapses to its TOP — i.e. to the lip line.
+  // The previous version scaled about `originX/originY` directly, and that
+  // origin pivot is unreliable in react-native-svg: at scaleY≈0 the cavity
+  // collapsed toward (0,0) — the top of the canvas — so the mouth "flew up
+  // to the forehead" on every close (rc.73 octopus report). translate-then-
+  // scale-about-0 is the robust pivot.
   const cavity =
-    `M ${Lx} ${lipY} Q ${cx} ${lipY + 1.2} ${Rx} ${lipY} ` +
-    `Q ${cx} ${lipY + JAW_OPEN_DEPTH} ${Lx} ${lipY} Z`;
+    `M ${Lx} 0 Q ${cx} 1.2 ${Rx} 0 ` + `Q ${cx} ${JAW_OPEN_DEPTH} ${Lx} 0 Z`;
   return (
     <>
-      <AnimatedG originX={cx} originY={lipY} scaleY={open}>
-        <Path d={cavity} fill={fill} />
+      <AnimatedG translateY={lipY}>
+        <AnimatedG scaleY={open}>
+          <Path d={cavity} fill={fill} />
+        </AnimatedG>
       </AnimatedG>
       {/* Fixed upper-lip line — the closed-mouth pose. */}
       <Path
@@ -1428,18 +1436,21 @@ const MothCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const activitySrc = prosody?.activity;
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
+  // Wing flap halved (±10→±5) — on noisy real-call activity the ±10° flap
+  // read as "manic wings" on device (rc.73); the 550ms low-pass + smaller
+  // throw makes it a slow flutter.
   const leftWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -10] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -5] })
     : 0;
   const rightWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 10] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 5] })
     : 0;
-  // Feathery antennae sweep with the peer's pitch trend.
+  // Feathery antennae sweep with the peer's pitch trend. ±5 (was ±10).
   const leftAntennaRot = trendSrc
-    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [5, 0, -5] })
     : 0;
   const rightAntennaRot = trendSrc
-    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-10, 0, 10] })
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-5, 0, 5] })
     : 0;
   // Wings flare wider as the peer's voice gets more animated (expressiveness).
   const wingFlare = exprSrc
@@ -1498,15 +1509,18 @@ const OctopusCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const exprSrc = prosody?.expressiveness;
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
+  // Tentacle sway halved (±8→±4) — on noisy real-call expressiveness the
+  // ±8° swing read as "manic legs" on device (rc.73). With the 550ms
+  // receiver low-pass this is a gentle drift.
   const swayLeft = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 4] })
     : 0;
   const swayRight = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -4] })
     : 0;
-  // Soft-bodied mantle leans with the peer's pitch trend — rising vs falling pitch tips the head.
+  // Soft-bodied mantle leans with the peer's pitch trend. ±5 (was ±10).
   const mantleTilt = trendSrc
-    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [5, 0, -5] })
     : 0;
   // Articulation rate flushes the cheek patches — pulses with activity.
   const cheekOpacity = activitySrc
