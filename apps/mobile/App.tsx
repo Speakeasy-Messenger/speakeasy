@@ -696,7 +696,19 @@ export default function App() {
             _apfCount = 0;
             _apfLastLog = _now;
           }
-          const isNewEvent = frame.event !== 'none';
+          const prev = usePeerAnimation.getState().byPeerId[peerUserId];
+          // RISING-EDGE detection. The sender now LATCHES each acoustic
+          // event across ~9 frames (EventLatch) so the unreliable channel
+          // delivers at least one — but that means we see the same 'laugh'
+          // on consecutive frames. Treat it as "new" only when it differs
+          // from the currently-held event, so the one-shot overlay fires
+          // exactly once per beat no matter which of the latched copies
+          // arrives first (or how many drop). After the ~1.6s hold expires
+          // the held event reverts to 'none', so a genuine second laugh
+          // (≥2s later, past the detector cooldown) reads as a rising edge
+          // again.
+          const isNewEvent =
+            frame.event !== 'none' && frame.event !== prev?.event;
           // THROTTLE the store write (and thus the call-screen re-render
           // it triggers) to ~10Hz. The data channel delivers 20Hz, and
           // every write re-renders the avatar + fires JS-driver SVG
@@ -704,12 +716,11 @@ export default function App() {
           // thread (frozen face + an unresponsive Hang Up button — the
           // rc.61 report: frames kept arriving at 20/s but the UI was
           // wedged). A NEW acoustic event always applies immediately so
-          // a laugh/gasp never gets dropped; the 60ms ease in
+          // a laugh/gasp never gets dropped; the ease in
           // useProsodyAnimatedValues smooths the lower continuous rate.
           const nowMs = Date.now();
           if (!isNewEvent && nowMs - _apfLastApply < 95) return;
           _apfLastApply = nowMs;
-          const prev = usePeerAnimation.getState().byPeerId[peerUserId];
           // Hold the last event ONLY for its ~1.6s lifetime, then revert to
           // 'none'. Previously it was held sticky FOREVER across 'none'
           // frames — so a single 'laugh' flipped ExprEyes into its happy

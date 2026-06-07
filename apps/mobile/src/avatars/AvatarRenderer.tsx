@@ -81,6 +81,30 @@ const expandSigned = (v: number, full: number): number => {
   return s > 1 ? 1 : s < -1 ? -1 : s;
 };
 
+/**
+ * Noise gate for the EMOTIONAL channels (expressiveness / activity /
+ * pitchTrend). The real-call channels carry a persistent noise floor —
+ * even while the peer is silent and listening, the native extractor's
+ * expressiveness/activity/pitchTrend wobble around a small nonzero value.
+ * The expansion above amplifies that floor, and the 700 ms low-pass only
+ * attenuates (not eliminates) it, so the leftover wiggle drove ±a-few-°
+ * ear/brow/cheek shimmer ACROSS the whole face — the "trembling at rest"
+ * report (persisted through rc.78 despite the ease bumps). A deadband
+ * clamps sub-threshold magnitude to exactly 0 (face dead-still at rest)
+ * and linearly rescales the remainder onto [0,1] so genuine animated
+ * speech still reaches full motion range. Verified in the noisy-render
+ * harness: resting ear jitter −65 %, active motion range essentially
+ * unchanged. Amplitude is deliberately NOT gated — it sits at ~0 at rest
+ * anyway, and the eyes' loudness response should stay linear.
+ */
+const EMOTION_DEADBAND = 0.22;
+const deadband = (v: number, d: number): number => {
+  const a = Math.abs(v);
+  if (a <= d) return 0;
+  const g = (a - d) / (1 - d);
+  return v < 0 ? -g : g;
+};
+
 interface Props {
   animalId: string;
   size: number;
@@ -363,9 +387,20 @@ function useProsodyAnimatedValues(
     ...raw,
     amplitude: expand01(raw.amplitude, PROSODY_FULL.amplitude),
     mouthShape: expand01(raw.mouthShape, PROSODY_FULL.mouthShape),
-    expressiveness: expand01(raw.expressiveness, PROSODY_FULL.expressiveness),
-    activity: expand01(raw.activity, PROSODY_FULL.activity),
-    pitchTrend: expandSigned(raw.pitchTrend, PROSODY_FULL.pitchTrend),
+    // Emotional channels pass through the noise gate so a silent,
+    // listening peer's face holds dead-still (see EMOTION_DEADBAND).
+    expressiveness: deadband(
+      expand01(raw.expressiveness, PROSODY_FULL.expressiveness),
+      EMOTION_DEADBAND,
+    ),
+    activity: deadband(
+      expand01(raw.activity, PROSODY_FULL.activity),
+      EMOTION_DEADBAND,
+    ),
+    pitchTrend: deadband(
+      expandSigned(raw.pitchTrend, PROSODY_FULL.pitchTrend),
+      EMOTION_DEADBAND,
+    ),
   };
   const amplitude = useRef(new Animated.Value(snapshot.amplitude)).current;
   const pitchNorm = useRef(new Animated.Value(snapshot.pitchNorm)).current;
@@ -401,7 +436,11 @@ function useProsodyAnimatedValues(
   // trembled on device (rc.68 feedback). These channels are emotional
   // and slow, so heavier smoothing costs nothing perceptual. The mouth
   // is driven separately (audioLevel via CallScreen), not from here.
-  const duration = reducedMotion ? 0 : 550;
+  // 700 ms (was 550): paired with the EMOTION_DEADBAND noise gate to kill
+  // the residual resting tremble — the gate removes the noise floor, the
+  // longer low-pass takes the edge off what survives. Active motion range
+  // is essentially unaffected (verified in the noisy-render harness).
+  const duration = reducedMotion ? 0 : 700;
   useEffect(() => {
     const animations: Animated.CompositeAnimation[] = [];
     const last = lastTargetsRef.current;

@@ -30,6 +30,55 @@ import {
   type RawFeatures,
 } from './audio-feature-extractor.js';
 import { AcousticEventDetector } from './acoustic-event-detector.js';
+import type { AcousticEvent } from './audio-feature-extractor.js';
+
+/**
+ * Number of frames to keep re-sending a detected acoustic event after it
+ * fires. The animation data channel is `{ ordered: false,
+ * maxRetransmits: 0 }` — fully unreliable — and the detector emits an
+ * event on essentially ONE window, then cools down for ~2 s of 'none'.
+ * If that single frame drops, the laugh/gasp is lost until the next
+ * detectable beat, which on real calls showed up as "the avatar ignored
+ * the laugh, then squinted ~10 s later" (rc.78 on-device report). Re-
+ * sending the same event for ~300 ms (9 frames at the ~30 Hz feature
+ * cadence) makes delivery robust to dropping up to 8 of 9 frames. The
+ * receiver dedups on the rising edge (App.tsx onPeerAnimationFrame), so
+ * the repeats trigger the one-shot overlay exactly once. The detector's
+ * own ~2 s cooldown means a real second laugh can't collide with a latch.
+ */
+const EVENT_LATCH_FRAMES = 8;
+
+/**
+ * Repeats a one-shot acoustic event across a short burst of frames so an
+ * unreliable data channel delivers at least one. Pure + per-call; reset
+ * on a fresh call so a prior call's tail can't leak. Exported for unit
+ * testing the latch cadence in isolation.
+ */
+export class EventLatch {
+  private latched: AcousticEvent = 'none';
+  private remaining = 0;
+
+  /** Feed the detector's per-frame output; get the value to actually
+   *  send. A fresh non-'none' detection (re)arms the latch; while armed,
+   *  'none' inputs return the latched event until the burst is spent. */
+  push(detected: AcousticEvent): AcousticEvent {
+    if (detected !== 'none') {
+      this.latched = detected;
+      this.remaining = EVENT_LATCH_FRAMES;
+      return detected;
+    }
+    if (this.remaining > 0) {
+      this.remaining -= 1;
+      return this.latched;
+    }
+    return 'none';
+  }
+
+  reset(): void {
+    this.latched = 'none';
+    this.remaining = 0;
+  }
+}
 
 /**
  * Event name emitted by `SpeakeasyVoiceFilter` (both platforms) when
@@ -73,6 +122,7 @@ export function attachFeatureEventListener(
   // empty event-detector history.
   let extractor = new AudioFeatureExtractor();
   let eventDetector = new AcousticEventDetector();
+  let eventLatch = new EventLatch();
   let lastCallId: string | undefined;
 
   const sub = emitter.addListener(EVENT_NAME, (raw: NativeFeatureEvent) => {
@@ -88,6 +138,7 @@ export function attachFeatureEventListener(
       // New private call — fresh extractor + event detector state.
       extractor = new AudioFeatureExtractor({ sampleRate: raw.sampleRate });
       eventDetector = new AcousticEventDetector();
+      eventLatch = new EventLatch();
       lastCallId = active.callId;
     }
     // Smooth + normalize the native-supplied raw features through
@@ -103,7 +154,11 @@ export function attachFeatureEventListener(
     // hmm at call start when zcrNorm transitions from its 0.5
     // pre-calibration placeholder into the real post-calibration
     // scaling). See `AcousticEventDetector.push` doc.
-    const event = eventDetector.push(features, extractor.isCalibrated);
+    // Latch the detection across a short burst so the unreliable data
+    // channel delivers at least one copy (see EventLatch).
+    const event = eventLatch.push(
+      eventDetector.push(features, extractor.isCalibrated),
+    );
     // Hand off to the orchestrator — sendAnimationFrame encodes the
     // 10-byte payload + ships over the data channel. The receiver
     // decodes via `decodeAnimationFrame` and pushes into

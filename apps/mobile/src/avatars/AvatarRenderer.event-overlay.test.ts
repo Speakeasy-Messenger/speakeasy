@@ -32,9 +32,16 @@ import type { AnimationFrame } from '../calls/animation-channel.js';
  * the contract change shows up directly here: any future drift
  * between App.tsx's handler and this fixture is the next bug.
  */
+const EVENT_HOLD_MS = 1600;
 function applyFrame(peerUserId: string, frame: AnimationFrame): void {
   const prev = usePeerAnimation.getState().byPeerId[peerUserId];
-  const isNewEvent = frame.event !== 'none';
+  const nowMs = Date.now();
+  // Rising-edge: the sender latches each event across ~9 frames so the
+  // unreliable channel delivers at least one — so we only treat it as
+  // "new" when it differs from the currently-held event.
+  const isNewEvent = frame.event !== 'none' && frame.event !== prev?.event;
+  const eventFresh =
+    !isNewEvent && !!prev?.eventAt && nowMs - prev.eventAt < EVENT_HOLD_MS;
   usePeerAnimation.getState().set(peerUserId, {
     amplitude: frame.amplitude,
     pitchNorm: frame.pitchNorm,
@@ -43,8 +50,8 @@ function applyFrame(peerUserId: string, frame: AnimationFrame): void {
     pitchTrend: frame.pitchTrend,
     expressiveness: frame.expressiveness,
     activity: frame.activity,
-    event: isNewEvent ? frame.event : prev?.event ?? 'none',
-    eventAt: isNewEvent ? Date.now() : prev?.eventAt ?? 0,
+    event: isNewEvent ? frame.event : eventFresh ? prev!.event : 'none',
+    eventAt: isNewEvent ? Date.now() : eventFresh ? prev!.eventAt : 0,
   });
 }
 
@@ -98,6 +105,24 @@ describe('event-overlay lifecycle (rc.11 review blocker regression)', () => {
     const second = selectPeerAnimation(usePeerAnimation.getState(), PEER);
     expect(second.event).toBe('gasp');
     expect(second.eventAt).toBeGreaterThan(firstAt);
+  });
+
+  it('latched repeats of the same event do NOT re-fire the overlay (rising-edge dedup)', () => {
+    // The sender re-sends the SAME event for ~9 frames so the unreliable
+    // channel delivers at least one. The receiver must trigger the
+    // one-shot overlay exactly once — repeats keep the original eventAt
+    // so the animation isn't restarted mid-bounce.
+    applyFrame(PEER, frame({ event: 'laugh' }));
+    const firstAt = selectPeerAnimation(
+      usePeerAnimation.getState(),
+      PEER,
+    ).eventAt;
+    for (let i = 0; i < 8; i++) {
+      applyFrame(PEER, frame({ event: 'laugh' }));
+    }
+    const s = selectPeerAnimation(usePeerAnimation.getState(), PEER);
+    expect(s.event).toBe('laugh');
+    expect(s.eventAt).toBe(firstAt);
   });
 
   it('continuous channels update every frame even while event is sticky', () => {
