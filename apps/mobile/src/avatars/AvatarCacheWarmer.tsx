@@ -7,10 +7,14 @@ import { useConversations } from '../store/conversations.js';
 import { useProfiles } from '../store/profiles.js';
 import { useIdentity } from '../store/identity.js';
 import { useColors } from '../theme/index.js';
+import { useTheme } from '../theme/ThemeProvider.js';
 import { writeAvatarPng } from '../push/avatar-cache.js';
 import { diag } from '../diag/log.js';
 
 const RASTER_SIZE = 128;
+// Mirror of components.tsx's brand consts for the #12 contrast edge.
+const EDGE_BONE = '#F2E9D8';
+const EDGE_INK = '#14091A';
 
 /**
  * Invisible component — rasterizes each conversation peer's (and the
@@ -26,6 +30,17 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
   const profiles = useProfiles((s) => s.byUserId);
   const myUserId = useIdentity((s) => s.userId);
   const themed = useColors();
+  // #12 contrast edge — the notification PNG is baked on a `themed.pale`
+  // (= surface) background, which is dark in dark mode and light in light
+  // mode, so the same mode-based edge logic AnimalSvg uses applies here.
+  // Without this, light-bodied animals (heron/hare/moth) vanished on the
+  // light pale circle in light mode, and ink-bodied ones (bear/cat/bat/
+  // whale) vanished on the dark pale in dark mode — the edge was present
+  // everywhere in-app but MISSING from push-notification avatars.
+  const { mode } = useTheme();
+  const isDark = mode === 'dark';
+  const edgeColor = isDark ? EDGE_BONE : EDGE_INK;
+  const edgeTarget = isDark ? EDGE_INK : EDGE_BONE;
 
   // Every userId we'd want a notification avatar for: the local user,
   // every conversation peer, and everyone we hold a profile for. The
@@ -159,6 +174,8 @@ export function AvatarCacheWarmer(): React.ReactElement | null {
             eyeScale={eyeOpen}
             mouthScale={mouthIdle}
             amplitude={noAmp}
+            edgeColor={edgeColor}
+            edgeTarget={edgeTarget}
           />
         </G>
       </Svg>
