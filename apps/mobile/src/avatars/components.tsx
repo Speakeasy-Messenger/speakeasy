@@ -204,6 +204,15 @@ function Eyes({
  * expanded prosody Animated values (see AvatarRenderer PROSODY_FULL), so
  * ordinary speech drives the full range.
  */
+/**
+ * Master switch for the discrete laugh-squint expression. OFF since rc.83:
+ * the heuristic acoustic laugh detector mis-fired on speech, so the squint
+ * was unreliable and its on/off snapping destabilized the face. Set true
+ * (and pair with ACOUSTIC_EVENT_OVERLAY_ENABLED in AvatarRenderer) only
+ * once a precise (e.g. learned) detector replaces the heuristic.
+ */
+const LAUGH_SQUINT_ENABLED = false;
+
 function ExprEyes({
   leftCx,
   rightCx,
@@ -243,12 +252,16 @@ function ExprEyes({
   const wideScale = amp
     ? amp.interpolate({ inputRange: [0.25, 1], outputRange: [1, 1.4], extrapolate: 'clamp' })
     : 1;
-  // DISCRETE: only a real laugh squints the eyes shut into a happy arch —
-  // expressiveness ("animated voice") is NOT happiness, so we drive this
-  // off the acoustic event, not a continuous channel. Sticky for the
-  // event's ~1.5s lifetime (the receiver holds event/eventAt). Snap is
-  // fine — laughs are punchy.
-  const happy = prosody?.event === 'laugh';
+  // DISCRETE laugh squint — DROPPED (rc.83, user decision). The acoustic
+  // laugh detector was too imprecise on real calls: it mis-fired the
+  // squint during ordinary speech, which both looked wrong AND read as a
+  // face tremor (the eyes snapping open↔arch). Reliability beats a
+  // flaky flourish, so the eyes now stay open and expression lives in the
+  // continuous, signal-grounded channels (loudness eye-widen, mood drift,
+  // blink, gaze). The detector + wire pipeline are left intact but
+  // dormant for a future classifier-based revival — flip
+  // LAUGH_SQUINT_ENABLED to restore the rendering.
+  const happy = LAUGH_SQUINT_ENABLED && prosody?.event === 'laugh';
   const happyOp = happy ? 1 : 0;
   const openOp = happy ? 0 : 1;
   // Open-eye vertical scale = blink × wide. Blink still fully closes the

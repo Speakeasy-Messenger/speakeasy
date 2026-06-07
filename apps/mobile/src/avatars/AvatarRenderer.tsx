@@ -597,6 +597,13 @@ function buildEventAnimation(
  * decorative; the steady-state mouth + per-animal channels still
  * carry the conversation.
  */
+/**
+ * Master switch for the discrete acoustic-event pose overlays (laugh /
+ * gasp / sigh / hmm). OFF since rc.83 — see the effect body and the
+ * matching LAUGH_SQUINT_ENABLED in components.tsx.
+ */
+const ACOUSTIC_EVENT_OVERLAY_ENABLED = false;
+
 function useEventOverlay(
   prosody: ProsodyState | undefined,
   reducedMotion: boolean,
@@ -613,6 +620,14 @@ function useEventOverlay(
   const eventAt = prosody?.eventAt ?? 0;
 
   useEffect(() => {
+    // Acoustic-event pose overlays (laugh bounce / gasp pop / sigh settle /
+    // hmm tilt) DISABLED since rc.83. They ride the same imprecise
+    // heuristic detector as the laugh squint, and the whole-face
+    // scale/rotate bounce was itself a tremor source when the detector
+    // mis-fired on speech. The continuous channels carry expression; the
+    // wrapper stays at its neutral transform. Re-enable alongside
+    // LAUGH_SQUINT_ENABLED once a precise detector lands.
+    if (!ACOUSTIC_EVENT_OVERLAY_ENABLED) return undefined;
     if (reducedMotion) return undefined;
     if (event === 'none' || eventAt === 0) return undefined;
     // Reset to neutral synchronously so a previous event's tail
