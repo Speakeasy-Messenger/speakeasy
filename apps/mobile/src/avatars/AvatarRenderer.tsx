@@ -64,12 +64,15 @@ const PROSODY_FULL = {
   mouthShape: 0.3,
   expressiveness: 0.6,
   activity: 0.85,
-  // signed magnitude. Was 0.4 (too high → tilts barely moved, ~1-2°), then
-  // 0.1 (over-amplified the NOISE → head trembled on device, rc.68). 0.12
-  // keeps tilts visible (~p90 0.6 → owl/whale ±4°, bear ±3°) while the
-  // heavier receiver-side low-pass (AvatarRenderer ease 260 ms) removes the
-  // jitter that the amplification was multiplying. Device-tunable.
-  pitchTrend: 0.12,
+  // signed magnitude. History: 0.4 (tilts barely moved) → 0.1 (over-
+  // amplified NOISE, head trembled, rc.68) → 0.12 (still trembled on rc.70).
+  // The real-call pitchTrend is mostly NOISE, so any amplification that
+  // makes it "gate-visible" also makes it shake. 0.22 keeps the head tilt
+  // subtle (~p90 0.33 → ±1.5–2.3°) — a gentle drift, not a tremble — and the
+  // 350 ms low-pass below carries the liveness. pitchTrend is deliberately
+  // exempt from the magnitude gate now (see tier2: it can't be both stable
+  // and "perceptible" on noisy real data). Device-tunable.
+  pitchTrend: 0.22,
 } as const;
 const expand01 = (v: number, full: number): number =>
   v <= 0 ? 0 : v >= full ? 1 : v / full;
@@ -398,7 +401,7 @@ function useProsodyAnimatedValues(
   // trembled on device (rc.68 feedback). These channels are emotional
   // and slow, so heavier smoothing costs nothing perceptual. The mouth
   // is driven separately (audioLevel via CallScreen), not from here.
-  const duration = reducedMotion ? 0 : 260;
+  const duration = reducedMotion ? 0 : 350;
   useEffect(() => {
     const animations: Animated.CompositeAnimation[] = [];
     const last = lastTargetsRef.current;

@@ -86,7 +86,8 @@ export type FacialRegion = (typeof FACIAL_REGIONS)[number];
  *   mouthShape  raw p90 0.20 / 0.30 ≈ 0.67
  *   expressiveness raw p90 0.62 / 0.60 → 1.0 (clamped)
  *   activity    raw p90 0.95 / 0.85 → 1.0 (clamped)
- *   pitchTrend  raw |p90| ≈ 0.07 / 0.12 ≈ 0.60  (expansion fix, de-jittered)
+ *   pitchTrend  EXEMPT from the magnitude gate (noise-dominated; see
+ *               extractWeakMotions). Expansion divisor 0.22 keeps it subtle.
  * These track AvatarRenderer's PROSODY_FULL divisors — if a divisor
  * changes, the post-expansion p90 here changes with it. `amplitude` is
  * BOTH the prosody channel and the audioLevel prop the jaw/recoil read.
@@ -262,6 +263,14 @@ function extractWeakMotions(
     const [, varName, alias, inLit, outLit] = m;
     const channel = srcAlias.get(alias!);
     if (!channel) continue;
+    // pitchTrend is EXEMPT from the magnitude gate. The smoothed real-call
+    // pitch trend is noise-dominated, so any amplification that clears the
+    // perceptibility floor also amplifies the noise into a visible head/ear
+    // TREMBLE (confirmed on device twice — rc.68 and rc.70). It's driven
+    // deliberately subtle (a gentle drift) and must not be "iterated up" to
+    // pass the gate. Liveness comes from the idle scheduler + loudness, not
+    // from chasing this channel's magnitude.
+    if (channel === 'pitchTrend') continue;
     const region = regionForVarName(varName!);
     if (!region) continue;
     const parse = (lit: string): number[] =>

@@ -197,6 +197,10 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
 let _apfCount = 0;
 let _apfLastLog = 0;
 let _apfLastApply = 0;
+// How long a one-shot acoustic event (laugh/gasp/sigh/hmm) stays "active"
+// before the peer-animation store reverts it to 'none'. ~Matches the event
+// overlay's animation length; keeps a stale event from pinning the eyes.
+const EVENT_HOLD_MS = 1600;
 
 export default function App() {
   const userId = useIdentity((s) => s.userId);
@@ -706,6 +710,19 @@ export default function App() {
           if (!isNewEvent && nowMs - _apfLastApply < 95) return;
           _apfLastApply = nowMs;
           const prev = usePeerAnimation.getState().byPeerId[peerUserId];
+          // Hold the last event ONLY for its ~1.6s lifetime, then revert to
+          // 'none'. Previously it was held sticky FOREVER across 'none'
+          // frames — so a single 'laugh' flipped ExprEyes into its happy
+          // squint permanently (until a different event), and on dark-faced
+          // animals that squint is an invisible ink arc → the eyes appeared
+          // to vanish for the rest of the call (rc.70 on-device report). The
+          // one-shot overlay already (re)triggers off `eventAt`, so clearing
+          // here doesn't shorten it; it just stops the stale event from
+          // pinning continuous-state consumers like the eyes.
+          const eventFresh =
+            !isNewEvent &&
+            !!prev?.eventAt &&
+            nowMs - prev.eventAt < EVENT_HOLD_MS;
           usePeerAnimation.getState().set(peerUserId, {
             amplitude: frame.amplitude,
             pitchNorm: frame.pitchNorm,
@@ -714,11 +731,11 @@ export default function App() {
             pitchTrend: frame.pitchTrend,
             expressiveness: frame.expressiveness,
             activity: frame.activity,
-            event: isNewEvent ? frame.event : prev?.event ?? 'none',
+            event: isNewEvent ? frame.event : eventFresh ? prev!.event : 'none',
             // Stamp with the local clock — the overlay's lifetime
             // ticks against receive time, so sender/receiver clock
             // drift doesn't shorten or extend it.
-            eventAt: isNewEvent ? Date.now() : prev?.eventAt ?? 0,
+            eventAt: isNewEvent ? Date.now() : eventFresh ? prev!.eventAt : 0,
           });
         },
         getAllowIncomingCalls: () =>

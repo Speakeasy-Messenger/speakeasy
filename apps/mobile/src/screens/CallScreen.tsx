@@ -219,15 +219,19 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
       // Mute zeros the local amplitude — the spec mouth-at-rest pose
       // matches "I'm not speaking" so this is the natural cue.
       const localTarget = active.micMuted ? 0 : local;
+      // 150ms (was 200): snappier so the jaw tracks syllable rhythm instead
+      // of lagging the conversation (rc.70 feedback "mouth could track the
+      // convo better"). Still smooth enough not to chatter — the Jaw's
+      // loudness floor closes the mouth between words.
       Animated.timing(localAmp, {
         toValue: localTarget,
-        duration: 200,
+        duration: 150,
         easing: Easing.out(Easing.quad),
         useNativeDriver: false,
       }).start();
       Animated.timing(remoteAmp, {
         toValue: remote,
-        duration: 200,
+        duration: 150,
         easing: Easing.out(Easing.quad),
         useNativeDriver: false,
       }).start();

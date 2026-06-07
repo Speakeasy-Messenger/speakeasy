@@ -1,0 +1,115 @@
+{
+  "overall": 0.9038320604774875,
+  "discriminability": {
+    "accuracy": 0.9411764705882353,
+    "confusion": {
+      "neutral": {
+        "neutral": 3,
+        "laugh": 0,
+        "yell": 0,
+        "question": 0,
+        "sad": 0,
+        "excited": 0,
+        "quiet-filler": 0
+      },
+      "laugh": {
+        "neutral": 0,
+        "laugh": 3,
+        "yell": 0,
+        "question": 0,
+        "sad": 0,
+        "excited": 0,
+        "quiet-filler": 0
+      },
+      "yell": {
+        "neutral": 0,
+        "laugh": 0,
+        "yell": 3,
+        "question": 0,
+        "sad": 0,
+        "excited": 0,
+        "quiet-filler": 0
+      },
+      "question": {
+        "neutral": 0,
+        "laugh": 0,
+        "yell": 0,
+        "question": 1,
+        "sad": 0,
+        "excited": 1,
+        "quiet-filler": 0
+      },
+      "sad": {
+        "neutral": 0,
+        "laugh": 0,
+        "yell": 0,
+        "question": 0,
+        "sad": 2,
+        "excited": 0,
+        "quiet-filler": 0
+      },
+      "excited": {
+        "neutral": 0,
+        "laugh": 0,
+        "yell": 0,
+        "question": 0,
+        "sad": 0,
+        "excited": 2,
+        "quiet-filler": 0
+      },
+      "quiet-filler": {
+        "neutral": 0,
+        "laugh": 0,
+        "yell": 0,
+        "question": 0,
+        "sad": 0,
+        "excited": 0,
+        "quiet-filler": 2
+      }
+    },
+    "perClassRecall": {
+      "neutral": 1,
+      "laugh": 1,
+      "yell": 1,
+      "question": 0.5,
+      "sad": 1,
+      "excited": 1,
+      "quiet-filler": 1
+    }
+  },
+  "signatures": {
+    "mean": 0.8092680719524855,
+    "neutral": 0.41607633096456703,
+    "laugh": 0.9937677438187391,
+    "yell": 1,
+    "question": 0.9598225972271173,
+    "sad": 0.419820208101641,
+    "excited": 1,
+    "quiet-filler": 0.8753896235553342
+  },
+  "liveliness": {
+    "perChannelStd": {
+      "amplitude": 0.05105237043620767,
+      "pitchNorm": 0.08430704251452739,
+      "zcrNorm": 0.08969644148424841,
+      "mouthShape": 0.06040322855320516,
+      "pitchTrend": 0.05067349325697612,
+      "expressiveness": 0.12372441395344878,
+      "activity": 0.08146504026033885
+    },
+    "deadChannels": [],
+    "coverage": 1
+  },
+  "meta": {
+    "numClips": 17,
+    "labels": [
+      "neutral",
+      "laugh",
+      "yell",
+      "question",
+      "sad",
+      "excited",
+      "quiet-filler"
+    ]
+  }
+}

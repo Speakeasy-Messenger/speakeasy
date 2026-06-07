@@ -1,0 +1,354 @@
+{
+  "overall": 0.9050000000000001,
+  "eyesExpressiveFraction": 1,
+  "loudnessReactiveFraction": 1,
+  "weakMotionCount": 0,
+  "perAnimal": [
+    {
+      "animalId": "pigeon",
+      "variant": "call",
+      "renderName": "PigeonCall",
+      "liveChannels": [
+        "pitchTrend",
+        "activity"
+      ],
+      "deadChannels": [
+        "expressiveness"
+      ],
+      "regionsMoved": [
+        "head",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "brow",
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 0.6666666666666666,
+      "regionCoverage": 0.6,
+      "magnitudeWeak": [],
+      "score": 0.67
+    },
+    {
+      "animalId": "owl",
+      "variant": "call",
+      "renderName": "OwlCall",
+      "liveChannels": [
+        "expressiveness",
+        "pitchTrend",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "brow",
+        "head",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "hare",
+      "variant": "call",
+      "renderName": "HareCall",
+      "liveChannels": [
+        "pitchTrend",
+        "expressiveness",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "whale",
+      "variant": "call",
+      "renderName": "WhaleCall",
+      "liveChannels": [
+        "expressiveness",
+        "pitchTrend",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "moth",
+      "variant": "call",
+      "renderName": "MothCall",
+      "liveChannels": [
+        "activity",
+        "pitchTrend",
+        "expressiveness"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "octopus",
+      "variant": "call",
+      "renderName": "OctopusCall",
+      "liveChannels": [
+        "pitchTrend",
+        "activity",
+        "expressiveness"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "cheek",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "brow"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "heron",
+      "variant": "call",
+      "renderName": "HeronCall",
+      "liveChannels": [
+        "pitchTrend",
+        "expressiveness",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "bear",
+      "variant": "call",
+      "renderName": "BearCall",
+      "liveChannels": [
+        "pitchTrend",
+        "expressiveness",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "cat",
+      "variant": "call",
+      "renderName": "CatCall",
+      "liveChannels": [
+        "pitchTrend",
+        "activity",
+        "expressiveness"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "bat",
+      "variant": "call",
+      "renderName": "BatCall",
+      "liveChannels": [
+        "activity",
+        "pitchTrend",
+        "expressiveness"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [
+        "cheek"
+      ],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 0.8,
+      "magnitudeWeak": [],
+      "score": 0.91
+    },
+    {
+      "animalId": "fox",
+      "variant": "call",
+      "renderName": "FoxCall",
+      "liveChannels": [
+        "pitchTrend",
+        "expressiveness",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "head",
+        "brow",
+        "cheek",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 1,
+      "magnitudeWeak": [],
+      "score": 1
+    },
+    {
+      "animalId": "stag",
+      "variant": "call",
+      "renderName": "StagCall",
+      "liveChannels": [
+        "expressiveness",
+        "pitchTrend",
+        "activity"
+      ],
+      "deadChannels": [],
+      "regionsMoved": [
+        "brow",
+        "head",
+        "cheek",
+        "mouth",
+        "eyes"
+      ],
+      "missingRegions": [],
+      "eyesExpressive": true,
+      "loudnessReactive": true,
+      "channelCoverage": 1,
+      "regionCoverage": 1,
+      "magnitudeWeak": [],
+      "score": 1
+    }
+  ],
+  "notAnalyzed": [
+    "lynx"
+  ],
+  "worstCells": [
+    {
+      "animalId": "pigeon",
+      "kind": "channel",
+      "name": "expressiveness"
+    },
+    {
+      "animalId": "pigeon",
+      "kind": "region",
+      "name": "brow"
+    },
+    {
+      "animalId": "pigeon",
+      "kind": "region",
+      "name": "cheek"
+    },
+    {
+      "animalId": "owl",
+      "kind": "region",
+      "name": "cheek"
+    },
+    {
+      "animalId": "hare",
+      "kind": "region",
+      "name": "cheek"
+    },
+    {
+      "animalId": "whale",
+      "kind": "region",
+      "name": "cheek"
+    }
+  ]
+}

@@ -211,6 +211,7 @@ function ExprEyes({
   r = 8,
   blink,
   prosody,
+  lidColor = INK,
 }: {
   leftCx: number;
   rightCx: number;
@@ -218,6 +219,13 @@ function ExprEyes({
   r?: number;
   blink: AnimalRenderProps['eyeScale'];
   prosody?: AnimalRenderProps['prosody'];
+  /**
+   * Color of the happy-squint arch (the closed-eye lid line). Default INK
+   * reads on light BRASS/BONE faces; dark (INK) faces (whale/bear/cat/bat)
+   * must pass BONE or the arch is invisible — which made the eyes appear to
+   * vanish during a laugh on those animals (rc.70 on-device report).
+   */
+  lidColor?: string;
 }): React.ReactElement {
   const amp = prosody?.amplitude;
   // Idle gaze — tiny held saccades from AvatarRenderer's single scheduler.
@@ -261,7 +269,7 @@ function ExprEyes({
       {/* HAPPY squint — upward arch, crossfaded in over the open eye. */}
       <AnimatedPath
         d={`M ${cx - r * 1.1} ${cy + 2} Q ${cx} ${cy - r * 0.9} ${cx + r * 1.1} ${cy + 2}`}
-        stroke={INK}
+        stroke={lidColor}
         strokeWidth={3.2}
         strokeLinecap="round"
         fill="none"
@@ -1226,7 +1234,7 @@ const PigeonCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
         {/* BRASS sheen along the upper head — classic pigeon iridescence cue */}
         <Path d="M22,42 Q50,30 78,42 Q78,46 50,38 Q22,46 22,42 Z" fill={BRASS} opacity={0.35} />
 
-        <ExprEyes leftCx={38} rightCx={62} cy={46} r={5} blink={eyeScale} prosody={prosody} />
+        <ExprEyes leftCx={38} rightCx={62} cy={46} r={5} blink={eyeScale} prosody={prosody} lidColor={BONE} />
 
         {/* Beak parts with loudness. */}
         <BeakGap source={amplitude} cx={50} topY={60} halfW={6} tipY={68} />
@@ -1406,7 +1414,7 @@ const WhaleCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
           <Polygon points="60,32 72,34 72,37 60,35" fill={BONE} />
         </AnimatedG>
 
-        <ExprEyes leftCx={36} rightCx={64} cy={42} r={5} blink={eyeScale} prosody={prosody} />
+        <ExprEyes leftCx={36} rightCx={64} cy={42} r={5} blink={eyeScale} prosody={prosody} lidColor={BONE} />
 
         {/* Wide loudness jaw on the BONE belly. */}
         <Jaw source={amplitude} cx={50} lipY={61} hw={18} />
@@ -1478,7 +1486,7 @@ const MothCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
         <Polygon points="53,38 59,39 59,41 53,40" fill={INK} />
       </AnimatedG>
 
-      <ExprEyes leftCx={45} rightCx={55} cy={44} r={3.5} blink={eyeScale} prosody={prosody} />
+      <ExprEyes leftCx={45} rightCx={55} cy={44} r={3.5} blink={eyeScale} prosody={prosody} lidColor={BONE} />
 
       {/* Tiny loudness jaw — subtle on the narrow moth body. */}
       <Jaw source={amplitude} cx={50} lipY={54} hw={3} fill={BONE} />
@@ -1637,7 +1645,7 @@ const BearCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
         <Polygon points="54,42 70,44 70,47 54,46" fill={BONE} />
       </AnimatedG>
 
-      <ExprEyes leftCx={38} rightCx={62} cy={52} r={7} blink={eyeScale} prosody={prosody} />
+      <ExprEyes leftCx={38} rightCx={62} cy={52} r={7} blink={eyeScale} prosody={prosody} lidColor={BONE} />
 
       {/* Snout — BONE muzzle with INK loudness jaw (muzzle is light, so
           the INK cavity reads even though the bear face is dark). */}
@@ -1697,7 +1705,7 @@ const CatCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
         <Polygon points="56,40 72,42 72,44 56,43" fill={BONE} />
       </AnimatedG>
 
-      <ExprEyes leftCx={36} rightCx={64} cy={50} r={8} blink={eyeScale} prosody={prosody} />
+      <ExprEyes leftCx={36} rightCx={64} cy={50} r={8} blink={eyeScale} prosody={prosody} lidColor={BONE} />
 
       {/* Whiskers — splay outward on activity */}
       <AnimatedG originX={50} originY={68} scaleX={whiskerSpread}>
@@ -1773,7 +1781,7 @@ const BatCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
         <Polygon points="53,43 62,44 62,46 53,45" fill={BRASS} />
       </AnimatedG>
 
-      <ExprEyes leftCx={43} rightCx={57} cy={50} r={5} blink={eyeScale} prosody={prosody} />
+      <ExprEyes leftCx={43} rightCx={57} cy={50} r={5} blink={eyeScale} prosody={prosody} lidColor={BONE} />
 
       {/* Loudness jaw with fangs. Bat face is dark, so the cavity is BONE.
           Fangs are passed as static children — they stay put at the lip
