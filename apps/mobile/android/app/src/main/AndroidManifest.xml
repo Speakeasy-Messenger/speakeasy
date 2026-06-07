@@ -46,6 +46,15 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
+    <!-- Full-screen incoming-call ringing (#5). Presents a full-screen call
+         UI over the lock screen instead of just a banner. On Android 14+
+         this permission additionally requires a one-time full-screen-intent
+         DECLARATION in the Play Console (Policy → App content) before Play
+         will accept an upload — the app's use (incoming calls) qualifies.
+         Without that declaration the Play commit fails with HTTP 403
+         "You must let us know whether your app uses any full-screen intent
+         permissions". -->
+    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
       android:name=".MainApplication"
@@ -65,6 +74,8 @@
         android:launchMode="singleTask"
         android:screenOrientation="portrait"
         android:windowSoftInputMode="adjustResize"
+        android:showWhenLocked="true"
+        android:turnScreenOn="true"
         android:exported="true">
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />

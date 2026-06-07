@@ -732,24 +732,29 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
 }
 
 /**
- * Incoming-call notification. Unlike the plain banner that
- * `displayGenericNotification` posts, this uses `category: CALL` +
- * HIGH importance, which on Android presents a heads-up banner with the
- * call ringtone — so an incoming call *rings* prominently rather than
- * sliding in as a quiet banner the user notices minutes later as a
- * "missed call" (#5).
+ * Full-screen incoming-call notification. Uses `category: CALL` +
+ * `fullScreenAction`, which on Android presents a full-screen ringing UI
+ * over the lock screen (device locked) and a high-priority heads-up banner
+ * with the call ringtone otherwise — so an incoming call *rings* and takes
+ * over the screen rather than sliding in as a quiet banner the user notices
+ * later as a "missed call" (#5).
  *
- * NOT a full-screen intent: `USE_FULL_SCREEN_INTENT` (the lock-screen
- * takeover) was dropped — Google Play requires a per-app full-screen-intent
- * declaration for it, and the prominent heads-up CATEGORY_CALL ring already
- * delivers the "don't miss the call" fix without that friction. The app
- * rings via its in-app IncomingCall screen once the WS offer lands; this
- * notification is the wake/alert.
+ * Requirements for the full-screen behavior on device:
+ *   - `USE_FULL_SCREEN_INTENT` (AndroidManifest) + a one-time full-screen-
+ *     intent DECLARATION in the Play Console (Android 14+; calling apps
+ *     qualify). Without the declaration the Play upload is rejected at
+ *     commit (HTTP 403).
+ *   - MainActivity `showWhenLocked` + `turnScreenOn` so the launch shows
+ *     over the keyguard.
+ *   - A HIGH-importance channel (the 'call' channel already is).
  *
- * `pressAction` launches MainActivity (singleTask); the push-navigation
- * drains the persisted tap target and routes to the incoming-call /
- * connecting screen. Auto-cancels like the prior banner — `routeTarget()`
- * also cancels it by id the moment the call screen shows.
+ * If the full-screen launch is ever blocked it degrades to the heads-up
+ * banner — never quieter than the old generic banner.
+ *
+ * `fullScreenAction`/`pressAction` launch MainActivity (singleTask); the
+ * push-navigation drains the persisted tap target and routes to the
+ * incoming-call / connecting screen. Auto-cancels like the prior banner —
+ * `routeTarget()` also cancels it by id the moment the call screen shows.
  */
 async function displayCallNotification(data: FcmData): Promise<void> {
   const channel = await resolveChannel('call');
@@ -774,6 +779,7 @@ async function displayCallNotification(data: FcmData): Promise<void> {
       // un-swipeable. Keep it auto-cancel like the prior generic banner —
       // routeTarget() also cancels it by id the moment the call screen shows.
       pressAction: { id: 'default', launchActivity: 'default' },
+      fullScreenAction: { id: 'default', launchActivity: 'default' },
     },
   });
 }
