@@ -46,14 +46,6 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_PHONE_CALL" />
-    <!-- Full-screen incoming-call notification (#5). Lets a CATEGORY_CALL
-         notification present a full-screen ringing UI over the lock screen
-         instead of a quiet banner the user notices late as a missed call.
-         Auto-granted to apps that post call-category notifications; on
-         Android 14 a non-call app would need user grant, but CATEGORY_CALL
-         notifications qualify for the automatic grant. Falls back to a
-         heads-up banner if ungranted — never regresses. -->
-    <uses-permission android:name="android.permission.USE_FULL_SCREEN_INTENT" />
 
     <application
       android:name=".MainApplication"
@@ -73,8 +65,6 @@
         android:launchMode="singleTask"
         android:screenOrientation="portrait"
         android:windowSoftInputMode="adjustResize"
-        android:showWhenLocked="true"
-        android:turnScreenOn="true"
         android:exported="true">
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />
