@@ -167,6 +167,21 @@ jobs:
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/androidpublisher
 
+      - name: Upload to Internal App Sharing (review-free install link)
+        # The "update behind the review" path: a Play-hosted install link
+        # that bypasses the track review, so testers get the latest build
+        # via Play (no sideload) even while an App-content / full-screen-
+        # intent declaration review holds the normal track release. Best-
+        # effort — never fails the build (see the script). The link is
+        # printed to the run summary and broadcast via @speaker.
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          AAB_PATH: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          RELEASE_NAME: ${{ github.ref_name }}
+          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
+        run: bash scripts/play-internal-share.sh
+
       - name: Upload AAB to Play Console Internal Testing track
         env:
           ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
