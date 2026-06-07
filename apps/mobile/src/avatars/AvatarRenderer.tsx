@@ -436,11 +436,17 @@ function useProsodyAnimatedValues(
   // trembled on device (rc.68 feedback). These channels are emotional
   // and slow, so heavier smoothing costs nothing perceptual. The mouth
   // is driven separately (audioLevel via CallScreen), not from here.
-  // 700 ms (was 550): paired with the EMOTION_DEADBAND noise gate to kill
-  // the residual resting tremble — the gate removes the noise floor, the
-  // longer low-pass takes the edge off what survives. Active motion range
-  // is essentially unaffected (verified in the noisy-render harness).
-  const duration = reducedMotion ? 0 : 700;
+  // 1200 ms (550 → 700 → 1200): the secondary motions (ears/brows/head-
+  // tilt) reflect emotional ENERGY, which moves on a ~second timescale,
+  // not per-syllable. The audio-derived channels driving them are noisy
+  // frame-to-frame, so a fast response chases that noise and the face
+  // trembles. Paired with EMOTION_DEADBAND (zeroes the resting floor),
+  // a 1.2 s low-pass means motion can only DRIFT, never jerk — it reaches
+  // ~80% of an expression change in ~1.8 s and physically cannot twitch.
+  // Active jitter ~−40% vs 700 ms (noisy-render harness). The MOUTH is a
+  // separate fast path (audioLevel via CallScreen), so speech still reads
+  // instantly; only the mood-level motion is slow.
+  const duration = reducedMotion ? 0 : 1200;
   useEffect(() => {
     const animations: Animated.CompositeAnimation[] = [];
     const last = lastTargetsRef.current;
