@@ -86,7 +86,7 @@ export type FacialRegion = (typeof FACIAL_REGIONS)[number];
  *   mouthShape  raw p90 0.20 / 0.30 ≈ 0.67
  *   expressiveness raw p90 0.62 / 0.60 → 1.0 (clamped)
  *   activity    raw p90 0.95 / 0.85 → 1.0 (clamped)
- *   pitchTrend  raw |p90| ≈ 0.07 / 0.10 ≈ 0.72  (after the expansion fix)
+ *   pitchTrend  raw |p90| ≈ 0.07 / 0.12 ≈ 0.60  (expansion fix, de-jittered)
  * These track AvatarRenderer's PROSODY_FULL divisors — if a divisor
  * changes, the post-expansion p90 here changes with it. `amplitude` is
  * BOTH the prosody channel and the audioLevel prop the jaw/recoil read.
@@ -98,7 +98,7 @@ const REAL_INPUT_P90: Record<string, number> = {
   mouthShape: 0.67,
   expressiveness: 1.0,
   activity: 1.0,
-  pitchTrend: 0.72,
+  pitchTrend: 0.6,
   pitchNorm: 0.5,
   zcrNorm: 0.5,
 };

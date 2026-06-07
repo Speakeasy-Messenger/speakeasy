@@ -64,15 +64,12 @@ const PROSODY_FULL = {
   mouthShape: 0.3,
   expressiveness: 0.6,
   activity: 0.85,
-  // signed magnitude. Was 0.4 — but the SMOOTHED pitch trend (~200 ms) on a
-  // real call only reaches |p90| ≈ 0.07, so /0.4 expanded it to ~0.18 and
-  // every pitchTrend-driven head/ear tilt moved only ~1–2° — below the
-  // perceptibility floor (caught by the Tier-2 magnitude gate; matches the
-  // systems review's "pitchTrend barely moves on real calls"). Set to ~1.4×
-  // the real |p90| so animated speech drives the tilts to ~0.7 of their
-  // range (others follow the same divisor≈p90 pattern). Magnitude is
-  // device-tunable — if ears over-swing on a real call, raise this.
-  pitchTrend: 0.1,
+  // signed magnitude. Was 0.4 (too high → tilts barely moved, ~1-2°), then
+  // 0.1 (over-amplified the NOISE → head trembled on device, rc.68). 0.12
+  // keeps tilts visible (~p90 0.6 → owl/whale ±4°, bear ±3°) while the
+  // heavier receiver-side low-pass (AvatarRenderer ease 260 ms) removes the
+  // jitter that the amplification was multiplying. Device-tunable.
+  pitchTrend: 0.12,
 } as const;
 const expand01 = (v: number, full: number): number =>
   v <= 0 ? 0 : v >= full ? 1 : v / full;
@@ -392,11 +389,16 @@ function useProsodyAnimatedValues(
   });
   const compositeRef = useRef<Animated.CompositeAnimation | null>(null);
 
-  // Frame cadence is 30 Hz; a 60 ms ease keeps a single value
-  // change visually smooth without piling animations on top of
-  // each other (a longer ease would still be mid-flight when the
-  // next frame arrives).
-  const duration = reducedMotion ? 0 : 60;
+  // Frames arrive ~10 Hz (coalesced). The ease doubles as a LOW-PASS:
+  // continuously retargeting a ~260 ms ease every ~100 ms means each
+  // frame only moves ~40% toward the new value before the next, which
+  // smooths the frame-to-frame NOISE in the (compressed, amplified)
+  // prosody channels. The first cut used 60 ms — too short to filter,
+  // so the head-tilt/eyes/spout chased the noise and the whole face
+  // trembled on device (rc.68 feedback). These channels are emotional
+  // and slow, so heavier smoothing costs nothing perceptual. The mouth
+  // is driven separately (audioLevel via CallScreen), not from here.
+  const duration = reducedMotion ? 0 : 260;
   useEffect(() => {
     const animations: Animated.CompositeAnimation[] = [];
     const last = lastTargetsRef.current;

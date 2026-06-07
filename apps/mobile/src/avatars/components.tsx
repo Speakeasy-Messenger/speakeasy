@@ -317,19 +317,22 @@ function Mouth({
  *
  * Driver: the peer's loudness — the `amplitude` prop (WebRTC audioLevel,
  * RMS ~0.05-0.15 for real speech), NOT the compressed prosody channel.
- * `JAW_LOUDNESS_FULL` mirrors AvatarRenderer's `MOUTH_LOUDNESS_FULL`
- * (the real-speech ceiling) so a normal voice visibly opens the jaw;
- * `JAW_OPEN_MAX` is the scaleY at full loudness (base cavity ~2px tall
- * → ~7px open). Geometry validated against the fox PNG prototype.
  *
- * NOTE: open MAGNITUDE (JAW_OPEN_MAX / base cavity height) is the one
- * value that can only be confirmed on a real device — the off-box
- * renders prove the shape, not how far live audioLevel drives it. This
- * is the rc.58→rc.59 "mouth barely opened" failure class; treat the
- * numbers as a device-tunable starting point.
+ * Shape (rc.69 rework, after on-device feedback the first cut was "too
+ * thin + drops too far/often"): the cavity is the FULL open mouth — a
+ * filled D-shape from the upper lip down by `JAW_OPEN_DEPTH` — and an
+ * `<AnimatedG scaleY>` opens it 0→1 about the lip line. So at rest the
+ * mouth is a clean closed lip *line* (scaleY 0), and it grows into a
+ * solid, legible open mouth — not a thin crescent. A loudness FLOOR
+ * keeps it shut on quiet/noise so it doesn't flutter open on every
+ * spike; full open only at `JAW_LOUDNESS_FULL`.
+ *
+ * NOTE: depth / floor / full are device-tunable (off-box renders prove
+ * the shape, not how live audioLevel drives it).
  */
-const JAW_LOUDNESS_FULL = 0.18;
-const JAW_OPEN_MAX = 3.5;
+const JAW_LOUDNESS_FLOOR = 0.04; // below this RMS the mouth stays shut
+const JAW_LOUDNESS_FULL = 0.2; // RMS for a fully open mouth
+const JAW_OPEN_DEPTH = 7; // px the jaw drops at full open
 
 function Jaw({
   source,
@@ -362,28 +365,31 @@ function Jaw({
    */
   children?: React.ReactNode;
 }): React.ReactElement {
-  const openY = source.interpolate({
-    inputRange: [0, JAW_LOUDNESS_FULL],
-    outputRange: [1, JAW_OPEN_MAX],
+  // 0 = shut (just the lip line) … 1 = fully open. Floor ignores quiet
+  // noise so the mouth doesn't flutter; clamp holds full at loud peaks.
+  const open = source.interpolate({
+    inputRange: [JAW_LOUDNESS_FLOOR, JAW_LOUDNESS_FULL],
+    outputRange: [0, 1],
     extrapolate: 'clamp',
   });
   const Lx = cx - hw;
   const Rx = cx + hw;
+  // The FULL open mouth: a filled D — near-flat upper lip, rounded lower
+  // lip JAW_OPEN_DEPTH below it. scaleY 0→1 about the lip line grows it
+  // from a line to the full shape (solid + legible, not a thin crescent).
+  const cavity =
+    `M ${Lx} ${lipY} Q ${cx} ${lipY + 1.2} ${Rx} ${lipY} ` +
+    `Q ${cx} ${lipY + JAW_OPEN_DEPTH} ${Lx} ${lipY} Z`;
   return (
     <>
-      {/* Cavity — a thin lens on the lip line; scaleY about the top edge
-          grows it straight down with loudness. */}
-      <AnimatedG originX={cx} originY={lipY} scaleY={openY}>
-        <Path
-          d={`M ${Lx} ${lipY} Q ${cx} ${lipY + 2.2} ${Rx} ${lipY} Q ${cx} ${lipY + 0.4} ${Lx} ${lipY} Z`}
-          fill={fill}
-        />
+      <AnimatedG originX={cx} originY={lipY} scaleY={open}>
+        <Path d={cavity} fill={fill} />
       </AnimatedG>
-      {/* Fixed upper-lip line. */}
+      {/* Fixed upper-lip line — the closed-mouth pose. */}
       <Path
-        d={`M ${Lx} ${lipY} Q ${cx} ${lipY + 1} ${Rx} ${lipY}`}
+        d={`M ${Lx} ${lipY} Q ${cx} ${lipY + 1.2} ${Rx} ${lipY}`}
         stroke={fill}
-        strokeWidth={1.6}
+        strokeWidth={1.8}
         strokeLinecap="round"
         fill="none"
       />
