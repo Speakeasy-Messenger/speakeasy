@@ -140,6 +140,19 @@ jobs:
           fi
           exit $fail
 
+      - name: Upload AAB as a downloadable artifact
+        # So the signed release bundle can be grabbed from the run even when
+        # the Play upload below fails (e.g. the one-time full-screen-intent
+        # 403 — the declaration form in Play Console only appears once a
+        # bundle carrying USE_FULL_SCREEN_INTENT has been uploaded, so the
+        # break-the-deadlock move is to download this AAB and upload it once
+        # via the Console UI, complete the declaration, then let CI take over).
+        uses: actions/upload-artifact@v4
+        with:
+          name: app-release-aab-${{ github.ref_name }}
+          path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
+          if-no-files-found: error
+
       - name: Authenticate to Google Cloud via Workload Identity Federation
         # Exchanges the GitHub OIDC token for a short-lived GCP access
         # token that impersonates the fastlane-play-publisher SA. The
