@@ -1047,10 +1047,10 @@ const Cat: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 const Bat: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const activitySrc = prosody?.activity;
   const leftWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 14] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
     : 0;
   const rightWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -14] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
     : 0;
   return (
     <>
@@ -1176,10 +1176,10 @@ const OwlCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
     : 0;
   // Ear tufts perk up and fan with articulation rate (activity channel).
   const leftTuftRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -12] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
     : 0;
   const rightTuftRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 12] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
     : 0;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
@@ -1315,7 +1315,7 @@ const StagCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
   const browScale = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.18] })
     : 1;
   // Proud head + antlers tip with the peer's pitch trend.
   const headTilt = trendSrc
@@ -1582,7 +1582,7 @@ const HeronCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
     : 0;
   // Nuchal crest plume raises with articulation rate (activity channel).
   const crestRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -22] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
     : 0;
   // Whole-figure flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
@@ -1629,7 +1629,7 @@ const BearCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-5, 0, 5] })
     : 0;
   const browScale = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.18] })
     : 1;
   // Rounded ears perk with articulation rate (activity channel).
   const earPerk = activitySrc
@@ -1744,10 +1744,10 @@ const BatCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
   const leftWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 14] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
     : 0;
   const rightWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -14] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
     : 0;
   // Big ears swivel with the peer's pitch trend.
   const leftEarRot = trendSrc
@@ -1758,7 +1758,7 @@ const BatCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
     : 0;
   // Ears perk taller as the peer's voice gets more animated (expressiveness).
   const earPerk = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.18] })
     : 1;
   // Brow lifts with expressiveness.
   const browDy = exprSrc
