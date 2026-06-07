@@ -190,5 +190,12 @@ jobs:
           # the Play Store wasn't surfacing the upgrade — every RC was
           # silently waiting on a "Send to testers" click that wasn't
           # always remembered.
-          RELEASE_STATUS: completed
+          #
+          # TEMPORARILY 'draft' (rc.68) to test whether a draft commit of a
+          # bundle carrying USE_FULL_SCREEN_INTENT lands without tripping the
+          # publish-time full-screen-intent declaration gate (403 on
+          # 'completed'). If it lands, the FSI bundle on the track surfaces
+          # the declaration card in App content. REVERT to 'completed' once
+          # the declaration is filed.
+          RELEASE_STATUS: draft
         run: bash scripts/play-publish.sh
