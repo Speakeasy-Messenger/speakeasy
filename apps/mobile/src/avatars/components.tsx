@@ -1436,21 +1436,21 @@ const MothCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const activitySrc = prosody?.activity;
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
-  // Wing flap halved (±10→±5) — on noisy real-call activity the ±10° flap
-  // read as "manic wings" on device (rc.73); the 550ms low-pass + smaller
-  // throw makes it a slow flutter.
+  // Wing flap ±8. 550ms low-pass removes the jitter that made ±10 "manic"
+  // (rc.73); ±5 (rc.76) was over-damped into a still moth. Smoothing kills
+  // the twitch, magnitude carries the slow flutter.
   const leftWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -5] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
     : 0;
   const rightWingRot = activitySrc
-    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 5] })
+    ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 8] })
     : 0;
-  // Feathery antennae sweep with the peer's pitch trend. ±5 (was ±10).
+  // Feathery antennae sweep with the peer's pitch trend. ±7.
   const leftAntennaRot = trendSrc
-    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [5, 0, -5] })
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [7, 0, -7] })
     : 0;
   const rightAntennaRot = trendSrc
-    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-5, 0, 5] })
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-7, 0, 7] })
     : 0;
   // Wings flare wider as the peer's voice gets more animated (expressiveness).
   const wingFlare = exprSrc
@@ -1509,18 +1509,20 @@ const OctopusCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const exprSrc = prosody?.expressiveness;
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
-  // Tentacle sway halved (±8→±4) — on noisy real-call expressiveness the
-  // ±8° swing read as "manic legs" on device (rc.73). With the 550ms
-  // receiver low-pass this is a gentle drift.
+  // Tentacle sway ±7. The 550ms receiver low-pass removes the frame-to-frame
+  // NOISE that made ±8 read as "manic legs" (rc.73), so the magnitude can
+  // stay large enough to carry visible slow sway — cutting it to ±4 (rc.76)
+  // over-corrected into a dead/static octopus. Smoothing kills the jitter;
+  // magnitude carries the life. (Verified alive+smooth in the noisy render.)
   const swayLeft = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 4] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 7] })
     : 0;
   const swayRight = exprSrc
-    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -4] })
+    ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -7] })
     : 0;
-  // Soft-bodied mantle leans with the peer's pitch trend. ±5 (was ±10).
+  // Soft-bodied mantle leans with the peer's pitch trend. ±7.
   const mantleTilt = trendSrc
-    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [5, 0, -5] })
+    ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [7, 0, -7] })
     : 0;
   // Articulation rate flushes the cheek patches — pulses with activity.
   const cheekOpacity = activitySrc
