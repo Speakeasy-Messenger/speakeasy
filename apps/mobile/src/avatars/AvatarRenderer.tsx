@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef } from 'react';
 import { Animated, Easing, View } from 'react-native';
-import { ANIMALS, AnimalSvg } from './components.js';
+import { ANIMALS, AnimalSvg, GazeContext, type GazeValue } from './components.js';
 import { NEUTRAL_PROSODY, type AnimatedProsody, type ProsodyState } from './types.js';
 import type { AcousticEvent } from '../calls/audio-feature-extractor.js';
 import { useReducedMotion } from '../a11y/useReducedMotion.js';
@@ -202,6 +202,53 @@ export function AvatarRenderer({
     };
   }, [blink, skipBlink, reducedMotion]);
 
+  // Idle gaze (saccade) — ONE shared scheduler driving a single gaze
+  // value the eyes read via GazeContext (not N per-region timers; see the
+  // systems review). Tiny held darts every ~1.2–3.8 s, ~70 ms ballistic
+  // move then hold — believable micro-saccades that keep the resting face
+  // alive. Gated to call context (prosody present): only `ExprEyes` (the
+  // call variants) consumes the gaze, so running it for the many static
+  // chat-row / picker avatars would be wasted timers.
+  const gazeX = useRef(new Animated.Value(0)).current;
+  const gazeY = useRef(new Animated.Value(0)).current;
+  const gazeValue = useMemo<GazeValue>(() => ({ x: gazeX, y: gazeY }), [gazeX, gazeY]);
+  const inCall = prosody !== undefined;
+  useEffect(() => {
+    if (!inCall || reducedMotion) return undefined;
+    let cancelled = false;
+    let timeout: ReturnType<typeof setTimeout> | undefined;
+    function schedule() {
+      const hold = 1200 + Math.random() * 2600; // 1.2–3.8 s between darts
+      timeout = setTimeout(() => {
+        if (cancelled) return;
+        // Small offsets in the 100-unit viewBox — a glance, not a roll.
+        const tx = (Math.random() * 2 - 1) * 1.8;
+        const ty = (Math.random() * 2 - 1) * 1.0;
+        Animated.parallel([
+          Animated.timing(gazeX, {
+            toValue: tx,
+            duration: 70,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: false,
+          }),
+          Animated.timing(gazeY, {
+            toValue: ty,
+            duration: 70,
+            easing: Easing.out(Easing.quad),
+            useNativeDriver: false,
+          }),
+        ]).start(() => {
+          if (!cancelled) schedule();
+        });
+      }, hold);
+    }
+    schedule();
+    return () => {
+      cancelled = true;
+      if (timeout) clearTimeout(timeout);
+    };
+  }, [gazeX, gazeY, inCall, reducedMotion]);
+
   // Outer breathing wrapper. The inner SVG sees `eyeScale` + `mouthScale`
   // as Animated.Values and pipes them into the relevant <AnimatedG>s.
   const breathScale = breath.interpolate({
@@ -255,15 +302,17 @@ export function AvatarRenderer({
         ],
       }}
     >
-      <AnimalSvg
-        animalId={animalId}
-        size={size}
-        eyeScale={blink}
-        mouthScale={mouthScale}
-        amplitude={source}
-        prosody={animatedProsody}
-        renderForCall={prosody !== undefined}
-      />
+      <GazeContext.Provider value={gazeValue}>
+        <AnimalSvg
+          animalId={animalId}
+          size={size}
+          eyeScale={blink}
+          mouthScale={mouthScale}
+          amplitude={source}
+          prosody={animatedProsody}
+          renderForCall={prosody !== undefined}
+        />
+      </GazeContext.Provider>
     </Animated.View>
   );
 }

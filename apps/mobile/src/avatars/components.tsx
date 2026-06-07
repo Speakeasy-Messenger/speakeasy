@@ -54,6 +54,23 @@ import { makePlaceholder } from './placeholder.js';
 const AnimatedG = Animated.createAnimatedComponent(G);
 const AnimatedPath = Animated.createAnimatedComponent(Path);
 
+/**
+ * Idle gaze (saccade) — provided by `AvatarRenderer` from a single shared
+ * scheduler, consumed by `ExprEyes` so the eyes drift/dart in tiny held
+ * shifts during a call ("alive but subtle"). Context (not a threaded
+ * prop) so we don't have to plumb a new value through AnimalSvg →
+ * AnimalBody → RenderHost and every per-animal Render + every `<ExprEyes>`
+ * call site. `null` (the default) means no gaze → eyes hold centred, which
+ * is what non-call surfaces (chat rows, picker) get. The single scheduler
+ * lives in AvatarRenderer (one timer), not per-region — see the systems
+ * review's "one shared scheduler, not N timers" note.
+ */
+export interface GazeValue {
+  x: Animated.Value | Animated.AnimatedInterpolation<number>;
+  y: Animated.Value | Animated.AnimatedInterpolation<number>;
+}
+export const GazeContext = React.createContext<GazeValue | null>(null);
+
 // Brand-locked colors — duplicated here from `theme/tokens.ts` so the
 // SVG markup is fully self-contained (animal SVGs are intended to be
 // art assets, not theme-aware components).
@@ -203,16 +220,21 @@ function ExprEyes({
   prosody?: AnimalRenderProps['prosody'];
 }): React.ReactElement {
   const amp = prosody?.amplitude;
-  const trend = prosody?.pitchTrend;
+  // Idle gaze — tiny held saccades from AvatarRenderer's single scheduler.
+  const gaze = React.useContext(GazeContext);
+  const gazeX = gaze?.x ?? 0;
+  const gazeY = gaze?.y ?? 0;
 
-  // CONTINUOUS: eyes blow wide with loudness (yell / emphasis), sink on a
-  // gasp. Smooth, every-frame — this is the "eyes actually move" signal.
+  // CONTINUOUS: eyes engage as the peer talks and blow wide on a loud
+  // emphasis / surprise. Range starts at 0.25 (not 0.45) so ordinary
+  // speech already widens the eyes a touch — the old [0.45,1] only moved
+  // them at a near-yell, which read as "eyes don't move." The old
+  // falling-pitch DROOP (a sad cue) was removed: locked scope is
+  // attentiveness states only (neutral/talking/content/delighted/
+  // surprised) — no sad, no angry. See AVATAR redesign committee verdict.
   const wideScale = amp
-    ? amp.interpolate({ inputRange: [0.45, 1], outputRange: [1, 1.5], extrapolate: 'clamp' })
+    ? amp.interpolate({ inputRange: [0.25, 1], outputRange: [1, 1.4], extrapolate: 'clamp' })
     : 1;
-  const droopY = trend
-    ? trend.interpolate({ inputRange: [-1, -0.15, 0], outputRange: [3.5, 0, 0], extrapolate: 'clamp' })
-    : 0;
   // DISCRETE: only a real laugh squints the eyes shut into a happy arch —
   // expressiveness ("animated voice") is NOT happiness, so we drive this
   // off the acoustic event, not a continuous channel. Sticky for the
@@ -228,9 +250,9 @@ function ExprEyes({
 
   const renderEye = (cx: number, hiSign: number): React.ReactElement => (
     <>
-      {/* OPEN eye — sclera + pupil + glint; taller when loud, sinks when sad. */}
+      {/* OPEN eye — sclera + pupil + glint; taller when loud. */}
       <AnimatedG opacity={openOp}>
-        <AnimatedG originX={cx} originY={cy} scaleY={openScaleY} translateY={droopY}>
+        <AnimatedG originX={cx} originY={cy} scaleY={openScaleY}>
           <Ellipse cx={cx} cy={cy} rx={r} ry={r} fill={BONE} />
           <Ellipse cx={cx} cy={cy + 0.5} rx={r * 0.5} ry={r * 0.5} fill={INK} />
           <Circle cx={cx + 1.4 * hiSign} cy={cy - 1.4} r={1.3} fill={BONE} />
@@ -248,11 +270,12 @@ function ExprEyes({
     </>
   );
 
+  // Both eyes share one conjugate gaze translate (idle saccade).
   return (
-    <>
+    <AnimatedG translateX={gazeX} translateY={gazeY}>
       {renderEye(leftCx, 1)}
       {renderEye(rightCx, -1)}
-    </>
+    </AnimatedG>
   );
 }
 
@@ -276,6 +299,153 @@ function Mouth({
     >
       {children}
     </AnimatedG>
+  );
+}
+
+/**
+ * Loudness JAW (the attentiveness-redesign mouth). Replaces the old
+ * scale-a-tiny-glyph `Mouth` / `MouthMorph` that read as a diagonal
+ * "twitch" (a small lens scaled on BOTH axes about a pivot lunged
+ * south-west and could leave the face box). Instead the jaw opens
+ * straight DOWN about a fixed top-lip pivot — corners anchored, top
+ * lip fixed — so it reads as a mouth opening, not a glyph sliding.
+ *
+ * Mechanism: a thin INK cavity sits on the lip line; an `<AnimatedG>`
+ * with `originY` at the TOP of the mouth applies `scaleY`, which grows
+ * the cavity downward (everything is below the pivot). A fixed upper-lip
+ * stroke sits on top for a crisp lip line.
+ *
+ * Driver: the peer's loudness — the `amplitude` prop (WebRTC audioLevel,
+ * RMS ~0.05-0.15 for real speech), NOT the compressed prosody channel.
+ * `JAW_LOUDNESS_FULL` mirrors AvatarRenderer's `MOUTH_LOUDNESS_FULL`
+ * (the real-speech ceiling) so a normal voice visibly opens the jaw;
+ * `JAW_OPEN_MAX` is the scaleY at full loudness (base cavity ~2px tall
+ * → ~7px open). Geometry validated against the fox PNG prototype.
+ *
+ * NOTE: open MAGNITUDE (JAW_OPEN_MAX / base cavity height) is the one
+ * value that can only be confirmed on a real device — the off-box
+ * renders prove the shape, not how far live audioLevel drives it. This
+ * is the rc.58→rc.59 "mouth barely opened" failure class; treat the
+ * numbers as a device-tunable starting point.
+ */
+const JAW_LOUDNESS_FULL = 0.18;
+const JAW_OPEN_MAX = 3.5;
+
+function Jaw({
+  source,
+  cx,
+  lipY,
+  hw = 10,
+  fill = INK,
+  children,
+}: {
+  /** Loudness source — the `amplitude` prop (audioLevel). */
+  source: AnimalRenderProps['amplitude'];
+  /** Mouth centre x. */
+  cx: number;
+  /** Top-lip y (the anchored pivot the jaw opens down from). */
+  lipY: number;
+  /** Half-width of the mouth. */
+  hw?: number;
+  /**
+   * Cavity + lip color. INK (default) on light BRASS/BONE faces; pass
+   * BONE / BRASS on dark (INK) faces (bear muzzle is light so it keeps
+   * INK; cat/bat faces are dark so they pass a light color). The face
+   * color the jaw sits on is per-animal — see the call-variant call
+   * sites. This is exactly the "don't generalize from the fox" point.
+   */
+  fill?: string;
+  /**
+   * Optional static decoration rendered on top of the cavity at the lip
+   * line (e.g. the bat's fangs) — does NOT scale with the jaw, so fangs
+   * stay put while the mouth opens behind them.
+   */
+  children?: React.ReactNode;
+}): React.ReactElement {
+  const openY = source.interpolate({
+    inputRange: [0, JAW_LOUDNESS_FULL],
+    outputRange: [1, JAW_OPEN_MAX],
+    extrapolate: 'clamp',
+  });
+  const Lx = cx - hw;
+  const Rx = cx + hw;
+  return (
+    <>
+      {/* Cavity — a thin lens on the lip line; scaleY about the top edge
+          grows it straight down with loudness. */}
+      <AnimatedG originX={cx} originY={lipY} scaleY={openY}>
+        <Path
+          d={`M ${Lx} ${lipY} Q ${cx} ${lipY + 2.2} ${Rx} ${lipY} Q ${cx} ${lipY + 0.4} ${Lx} ${lipY} Z`}
+          fill={fill}
+        />
+      </AnimatedG>
+      {/* Fixed upper-lip line. */}
+      <Path
+        d={`M ${Lx} ${lipY} Q ${cx} ${lipY + 1} ${Rx} ${lipY}`}
+        stroke={fill}
+        strokeWidth={1.6}
+        strokeLinecap="round"
+        fill="none"
+      />
+      {children}
+    </>
+  );
+}
+
+/**
+ * Loudness BEAK-GAP — the beaked-bird analogue of `Jaw`. A bird beak
+ * doesn't have a fleshy jaw that opens downward; the mandibles PART.
+ * The beak (a downward triangle: top edge at `topY` ±`halfW`, tip at
+ * `tipY`) is split at ~45% into a fixed UPPER mandible and a LOWER
+ * mandible that drops with loudness, revealing a dark INK throat in the
+ * gap. At rest the mandibles meet and it reads as the original closed
+ * beak. Same `audioLevel` driver + `JAW_LOUDNESS_FULL` ceiling as `Jaw`.
+ *
+ * For owl (frontal) and the re-posed ¾ pigeon/heron the beak is treated
+ * as left-right symmetric about `cx`; the heron's slight asymmetry is
+ * approximated. Magnitude (drop depth) is a device-tunable starting
+ * point, same caveat as `Jaw`.
+ */
+function BeakGap({
+  source,
+  cx,
+  topY,
+  halfW,
+  tipY,
+  fill = BRASS,
+}: {
+  source: AnimalRenderProps['amplitude'];
+  cx: number;
+  /** y of the beak's top (widest) edge. */
+  topY: number;
+  /** half-width of the beak at the top edge. */
+  halfW: number;
+  /** y of the beak tip (bottom point). */
+  tipY: number;
+  /** beak color (BRASS default). */
+  fill?: string;
+}): React.ReactElement {
+  const split = 0.45;
+  const midY = topY + (tipY - topY) * split;
+  const midHW = halfW * (1 - split);
+  const dropMax = (tipY - midY) * 0.9;
+  const drop = source.interpolate({
+    inputRange: [0, JAW_LOUDNESS_FULL],
+    outputRange: [0, dropMax],
+    extrapolate: 'clamp',
+  });
+  const upper = `${cx - halfW},${topY} ${cx + halfW},${topY} ${cx + midHW},${midY} ${cx - midHW},${midY}`;
+  const lower = `${cx - midHW},${midY} ${cx + midHW},${midY} ${cx},${tipY}`;
+  return (
+    <>
+      {/* INK throat — fully covered by the lower mandible at rest; the
+          top band is revealed as the mandible drops. */}
+      <Polygon points={lower} fill={INK} />
+      <Polygon points={upper} fill={fill} />
+      <AnimatedG translateY={drop}>
+        <Polygon points={lower} fill={fill} />
+      </AnimatedG>
+    </>
   );
 }
 
@@ -914,11 +1084,10 @@ const Bat: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 // picker grids, AppBar, IdReveal previews, and notification thumbnail
 // rasterization. Brand identity in static contexts preserved.
 
-const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const FoxCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
   const activitySrc = prosody?.activity;
-  const shapeSrc = prosody?.mouthShape;
 
   const leftEarRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [12, 0, -6] })
@@ -932,9 +1101,6 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const cheekOpacity = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 0.4] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] })
-    : 1;
   // Whole-head flinch: brace back only at a real shout (amplitude > ~0.6).
   const ampSrc = prosody?.amplitude;
   const recoil = ampSrc
@@ -968,26 +1134,20 @@ const FoxCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={34} rightCx={66} cy={48} r={8} blink={eyeScale} prosody={prosody} />
 
-      <AnimatedG originX={50} originY={70} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 70 }} scale={mouthScale} axis="y">
-          <Path d="M40,68 Q50,76 60,68 L57,72 Q50,76 43,72 Z" fill={INK} />
-        </Mouth>
-      </AnimatedG>
+      {/* Loudness jaw — opens straight down about the top-lip pivot.
+          Replaces the old two-axis scaled lens that read as a SW twitch. */}
+      <Jaw source={amplitude} cx={50} lipY={68} hw={10} />
     </AnimatedG>
   );
 };
 
-const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const OwlCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -2] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1.15] })
-    : 1;
   // Owls swivel — tilt the whole head on pitch trend.
   const headTilt = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [9, 0, -9] })
@@ -1028,28 +1188,19 @@ const OwlCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={36} rightCx={64} cy={46} r={11} blink={eyeScale} prosody={prosody} />
 
-      {/* Beak — bigger downward triangle, X-scale on mouthShape */}
-      <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
-          <Polygon points="42,60 58,60 50,72" fill={BRASS} />
-        </Mouth>
-      </AnimatedG>
+      {/* Beak that parts (mandibles separate) with loudness. */}
+      <BeakGap source={amplitude} cx={50} topY={60} halfW={8} tipY={72} />
     </AnimatedG>
     </AnimatedG>
   );
 };
 
-const PigeonCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const PigeonCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const activitySrc = prosody?.activity;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
-  const exprSrc = prosody?.expressiveness;
   const bodyDy = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -3] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.2] })
-    : 1;
   // Pigeons bob — tilt the whole head on pitch trend.
   const headTilt = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [8, 0, -8] })
@@ -1071,21 +1222,17 @@ const PigeonCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
         <ExprEyes leftCx={38} rightCx={62} cy={46} r={5} blink={eyeScale} prosody={prosody} />
 
-        <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
-          <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
-            <Polygon points="44,60 56,60 50,68" fill={BRASS} />
-          </Mouth>
-        </AnimatedG>
+        {/* Beak parts with loudness. */}
+        <BeakGap source={amplitude} cx={50} topY={60} halfW={6} tipY={68} />
       </AnimatedG>
     </AnimatedG>
     </AnimatedG>
   );
 };
 
-const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const HareCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const leftEarRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [6, 0, -10] })
     : 0;
@@ -1094,9 +1241,6 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
     : 0;
   const browScale = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.2] })
-    : 1;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.2] })
     : 1;
   // Ears twitch — splay sideways with articulation rate (activity channel).
   const activitySrc = prosody?.activity;
@@ -1138,25 +1282,18 @@ const HareCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={36} rightCx={64} cy={58} r={7} blink={eyeScale} prosody={prosody} />
 
-      <AnimatedG originX={50} originY={74} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 74 }} scale={mouthScale} axis="y">
-          <Path d="M44,72 Q50,80 56,72 L54,76 Q50,80 46,76 Z" fill={INK} />
-        </Mouth>
-      </AnimatedG>
+      {/* Loudness jaw — INK on the BONE hare face. */}
+      <Jaw source={amplitude} cx={50} lipY={73} hw={7} />
     </AnimatedG>
   );
 };
 
-const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const StagCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
   const browScale = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
-    : 1;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.15] })
     : 1;
   // Proud head + antlers tip with the peer's pitch trend.
   const headTilt = trendSrc
@@ -1207,27 +1344,20 @@ const StagCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={38} rightCx={62} cy={50} r={6} blink={eyeScale} prosody={prosody} />
 
-      <AnimatedG originX={50} originY={70} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 70 }} scale={mouthScale} axis="y">
-          <Path d="M42,68 Q50,76 58,68 L55,72 Q50,76 45,72 Z" fill={INK} />
-        </Mouth>
-      </AnimatedG>
+      {/* Loudness jaw — INK on the BONE stag face. */}
+      <Jaw source={amplitude} cx={50} lipY={68} hw={8} />
     </AnimatedG>
     </AnimatedG>
   );
 };
 
-const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const WhaleCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
   const bodyRot = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, 3] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.8, 1.15] })
-    : 1;
   // Whole head rolls with the peer's pitch trend.
   const headTilt = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [7, 0, -7] })
@@ -1272,21 +1402,16 @@ const WhaleCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
         <ExprEyes leftCx={36} rightCx={64} cy={42} r={5} blink={eyeScale} prosody={prosody} />
 
-        {/* Wide smile-arc mouth */}
-        <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
-          <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
-            <Path d="M28,60 Q50,72 72,60 L70,64 Q50,74 30,64 Z" fill={INK} />
-          </Mouth>
-        </AnimatedG>
+        {/* Wide loudness jaw on the BONE belly. */}
+        <Jaw source={amplitude} cx={50} lipY={61} hw={18} />
       </AnimatedG>
     </AnimatedG>
     </AnimatedG>
   );
 };
 
-const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const MothCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const activitySrc = prosody?.activity;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
   const leftWingRot = activitySrc
@@ -1295,9 +1420,6 @@ const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const rightWingRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, 10] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.6, 1.2] })
-    : 1;
   // Feathery antennae sweep with the peer's pitch trend.
   const leftAntennaRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
@@ -1352,18 +1474,14 @@ const MothCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={45} rightCx={55} cy={44} r={3.5} blink={eyeScale} prosody={prosody} />
 
-      <AnimatedG originX={50} originY={56} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 56 }} scale={mouthScale} axis="y">
-          <Ellipse cx={50} cy={56} rx={3} ry={2} fill={BONE} />
-        </Mouth>
-      </AnimatedG>
+      {/* Tiny loudness jaw — subtle on the narrow moth body. */}
+      <Jaw source={amplitude} cx={50} lipY={54} hw={3} fill={BONE} />
     </AnimatedG>
   );
 };
 
-const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const OctopusCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
   const swayLeft = exprSrc
@@ -1372,9 +1490,6 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const swayRight = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -8] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1.15] })
-    : 1;
   // Soft-bodied mantle leans with the peer's pitch trend — rising vs falling pitch tips the head.
   const mantleTilt = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
@@ -1418,21 +1533,16 @@ const OctopusCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
         <ExprEyes leftCx={38} rightCx={62} cy={36} r={6} blink={eyeScale} prosody={prosody} />
 
-        {/* Mouth — small smile on the mantle */}
-        <AnimatedG originX={50} originY={50} scaleX={mouthShapeX}>
-          <Mouth pivot={{ x: 50, y: 50 }} scale={mouthScale} axis="y">
-            <Path d="M42,48 Q50,54 58,48 L56,52 Q50,55 44,52 Z" fill={INK} />
-          </Mouth>
-        </AnimatedG>
+        {/* Loudness jaw — INK on the BRASS mantle. */}
+        <Jaw source={amplitude} cx={50} lipY={48} hw={8} />
       </AnimatedG>
     </AnimatedG>
   );
 };
 
-const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const HeronCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const activitySrc = prosody?.activity;
   const headTx = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-3, 0, 4] })
@@ -1440,9 +1550,6 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const browDy = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0, -3] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.3] })
-    : 1;
   // Nuchal crest plume raises with articulation rate (activity channel).
   const crestRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -22] })
@@ -1477,30 +1584,22 @@ const HeronCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
         <ExprEyes leftCx={46} rightCx={66} cy={36} r={6} blink={eyeScale} prosody={prosody} />
 
-        {/* Beak repositioned below the face */}
-        <AnimatedG originX={56} originY={56} scaleX={mouthShapeX}>
-          <Mouth pivot={{ x: 56, y: 56 }} scale={mouthScale} axis="y">
-            <Path d="M44,52 L68,54 L56,64 Z" fill={BRASS} />
-          </Mouth>
-        </AnimatedG>
+        {/* Beak parts with loudness (¾ view approximated as symmetric). */}
+        <BeakGap source={amplitude} cx={56} topY={53} halfW={12} tipY={64} />
       </AnimatedG>
     </AnimatedG>
   );
 };
 
-const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const BearCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
-  const shapeSrc = prosody?.mouthShape;
   const activitySrc = prosody?.activity;
   const headRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [-5, 0, 5] })
     : 0;
   const browScale = exprSrc
     ? exprSrc.interpolate({ inputRange: [0, 1], outputRange: [0.9, 1.25] })
-    : 1;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.15] })
     : 1;
   // Rounded ears perk with articulation rate (activity channel).
   const earPerk = activitySrc
@@ -1534,22 +1633,18 @@ const BearCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={38} rightCx={62} cy={52} r={7} blink={eyeScale} prosody={prosody} />
 
-      {/* Snout — BONE muzzle with INK posable mouth */}
+      {/* Snout — BONE muzzle with INK loudness jaw (muzzle is light, so
+          the INK cavity reads even though the bear face is dark). */}
       <Ellipse cx={50} cy={70} rx={16} ry={11} fill={BONE} />
-      <AnimatedG originX={50} originY={72} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 72 }} scale={mouthScale} axis="y">
-          <Path d="M42,70 Q50,78 58,70 L55,74 Q50,78 45,74 Z" fill={INK} />
-        </Mouth>
-      </AnimatedG>
+      <Jaw source={amplitude} cx={50} lipY={70} hw={8} />
     </AnimatedG>
     </AnimatedG>
   );
 };
 
-const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const CatCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const trendSrc = prosody?.pitchTrend;
   const activitySrc = prosody?.activity;
-  const shapeSrc = prosody?.mouthShape;
   const exprSrc = prosody?.expressiveness;
   const leftEarRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [15, 0, -10] })
@@ -1559,9 +1654,6 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
     : 0;
   const whiskerSpread = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [1, 1.15] })
-    : 1;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.65, 1.15] })
     : 1;
   // Ears perk taller as the peer's voice gets more animated (expressiveness).
   const earPerk = exprSrc
@@ -1609,20 +1701,16 @@ const CatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
         <Line x1={58} y1={70} x2={80} y2={70} stroke={BONE} strokeWidth={0.6} />
       </AnimatedG>
 
-      {/* Pink nose + posable mouth */}
+      {/* Pink nose + loudness jaw. Cat face is dark (INK), so the jaw
+          cavity is BRASS to read as an open mouth on black fur. */}
       <Polygon points="47,64 53,64 50,68" fill={BRASS} />
-      <AnimatedG originX={50} originY={74} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 74 }} scale={mouthScale} axis="y">
-          <Path d="M42,72 Q50,78 58,72 L55,75 Q50,78 45,75 Z" fill={BRASS} />
-        </Mouth>
-      </AnimatedG>
+      <Jaw source={amplitude} cx={50} lipY={73} hw={8} fill={BRASS} />
     </AnimatedG>
   );
 };
 
-const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
+const BatCall: AnimalRender = ({ eyeScale, amplitude, prosody }) => {
   const activitySrc = prosody?.activity;
-  const shapeSrc = prosody?.mouthShape;
   const trendSrc = prosody?.pitchTrend;
   const exprSrc = prosody?.expressiveness;
   const leftWingRot = activitySrc
@@ -1631,9 +1719,6 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
   const rightWingRot = activitySrc
     ? activitySrc.interpolate({ inputRange: [0, 1], outputRange: [0, -14] })
     : 0;
-  const mouthShapeX = shapeSrc
-    ? shapeSrc.interpolate({ inputRange: [0, 1], outputRange: [0.7, 1.2] })
-    : 1;
   // Big ears swivel with the peer's pitch trend.
   const leftEarRot = trendSrc
     ? trendSrc.interpolate({ inputRange: [-1, 0, 1], outputRange: [10, 0, -10] })
@@ -1684,16 +1769,13 @@ const BatCall: AnimalRender = ({ eyeScale, mouthScale, prosody }) => {
 
       <ExprEyes leftCx={43} rightCx={57} cy={50} r={5} blink={eyeScale} prosody={prosody} />
 
-      {/* Posable mouth with fangs */}
-      <AnimatedG originX={50} originY={62} scaleX={mouthShapeX}>
-        <Mouth pivot={{ x: 50, y: 62 }} scale={mouthScale} axis="y">
-          <G>
-            <Path d="M42,60 Q50,68 58,60 L56,63 Q50,68 44,63 Z" fill={BONE} opacity={0.4} />
-            <Polygon points="46,60 48,66 50,60" fill={BONE} />
-            <Polygon points="50,60 52,66 54,60" fill={BONE} />
-          </G>
-        </Mouth>
-      </AnimatedG>
+      {/* Loudness jaw with fangs. Bat face is dark, so the cavity is BONE.
+          Fangs are passed as static children — they stay put at the lip
+          line while the mouth opens behind them. */}
+      <Jaw source={amplitude} cx={50} lipY={60} hw={8} fill={BONE}>
+        <Polygon points="46,60 48,66 50,60" fill={BONE} />
+        <Polygon points="50,60 52,66 54,60" fill={BONE} />
+      </Jaw>
     </AnimatedG>
   );
 };
