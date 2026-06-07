@@ -39,12 +39,25 @@ import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
 
-/** Channels that carry emotional nuance (vs low-level pitchNorm/zcr). */
+/**
+ * Channels that carry emotional nuance (vs low-level pitchNorm/zcr).
+ *
+ * `mouthShape` was removed in the redesign: the mouth is now driven by the
+ * clean `audioLevel` loudness signal via the `<Jaw>`/`<BeakGap>` primitives
+ * (recognized as the mouth region below), NOT the compressed `mouthShape`
+ * prosody channel (real-call p90 ≈ 0.20 — too weak to drive a mouth). It's
+ * deliberately abandoned design-wide, so scoring it as a required channel
+ * would permanently mis-measure the new vocabulary and reward re-wiring an
+ * unreliable channel (a regression). The mouth's expressivity is still
+ * scored — as a region (every call variant moves it) — just not via this
+ * channel. Loudness (audioLevel) and acoustic events are the other drivers
+ * and aren't prosody-channel interpolations, so they're scored by region /
+ * primitive presence rather than appearing here.
+ */
 export const EXPRESSION_CHANNELS = [
   'pitchTrend',
   'expressiveness',
   'activity',
-  'mouthShape',
 ] as const;
 export type ExpressionChannel = (typeof EXPRESSION_CHANNELS)[number];
 
@@ -72,17 +85,20 @@ export type FacialRegion = (typeof FACIAL_REGIONS)[number];
  *   amplitude   raw p90 0.21 / 0.35 ≈ 0.60
  *   mouthShape  raw p90 0.20 / 0.30 ≈ 0.67
  *   expressiveness raw p90 0.62 / 0.60 → 1.0 (clamped)
- *   activity    raw p90 ~0.50 / 0.85 ≈ 0.59
- *   pitchTrend  smoothed real trend is tiny (±~0.07) / 0.40 ≈ 0.18
- * `amplitude` here is BOTH the prosody channel and the audioLevel prop
- * the jaw/recoil read (same realistic ceiling).
+ *   activity    raw p90 0.95 / 0.85 → 1.0 (clamped)
+ *   pitchTrend  raw |p90| ≈ 0.07 / 0.10 ≈ 0.72  (after the expansion fix)
+ * These track AvatarRenderer's PROSODY_FULL divisors — if a divisor
+ * changes, the post-expansion p90 here changes with it. `amplitude` is
+ * BOTH the prosody channel and the audioLevel prop the jaw/recoil read.
+ * The raw p90s come from the real-call measurement in PROSODY_FULL's doc;
+ * the pitchTrend raw is the systems-review estimate (device-confirmable).
  */
 const REAL_INPUT_P90: Record<string, number> = {
   amplitude: 0.6,
   mouthShape: 0.67,
   expressiveness: 1.0,
-  activity: 0.59,
-  pitchTrend: 0.18,
+  activity: 1.0,
+  pitchTrend: 0.72,
   pitchNorm: 0.5,
   zcrNorm: 0.5,
 };

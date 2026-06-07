@@ -64,7 +64,15 @@ const PROSODY_FULL = {
   mouthShape: 0.3,
   expressiveness: 0.6,
   activity: 0.85,
-  pitchTrend: 0.4, // signed magnitude
+  // signed magnitude. Was 0.4 — but the SMOOTHED pitch trend (~200 ms) on a
+  // real call only reaches |p90| ≈ 0.07, so /0.4 expanded it to ~0.18 and
+  // every pitchTrend-driven head/ear tilt moved only ~1–2° — below the
+  // perceptibility floor (caught by the Tier-2 magnitude gate; matches the
+  // systems review's "pitchTrend barely moves on real calls"). Set to ~1.4×
+  // the real |p90| so animated speech drives the tilts to ~0.7 of their
+  // range (others follow the same divisor≈p90 pattern). Magnitude is
+  // device-tunable — if ears over-swing on a real call, raise this.
+  pitchTrend: 0.1,
 } as const;
 const expand01 = (v: number, full: number): number =>
   v <= 0 ? 0 : v >= full ? 1 : v / full;
