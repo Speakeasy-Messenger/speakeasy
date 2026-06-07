@@ -81,10 +81,19 @@ const HISTORY_WINDOWS = 30;
 const LAUGH_MIN_WINDOWS = 18;          // ~0.6 s before the rhythm is measurable
 const LAUGH_RHYTHM_LAG_MIN = 4;        // ~8.3 Hz (period 132 ms)
 const LAUGH_RHYTHM_LAG_MAX = 8;        // ~4.1 Hz (period 264 ms); ~210 ms ≈ lag 6.4
-const LAUGH_MIN_PERIODICITY = 0.25;    // normalized autocorr peak in the lag band
+const LAUGH_MIN_PERIODICITY = 0.28;    // normalized autocorr peak in the lag band
 const LAUGH_MIN_PEAK_LOUDNESS = 0.12;  // bursty — gate on PEAK, not mean (transient tap)
 const LAUGH_MIN_ZCR = 0.52;            // breathy: above the per-call ZCR baseline (0.5)
 const LAUGH_MIN_PITCH = 0.6;           // high F0 when voiced (≈ 2× speaking pitch)
+// SUSTAIN — the precision lever (rc.82). rc.81 fired reliably on laughs
+// but also on speech, because a single window of conversational speech
+// can momentarily look rhythmic. A real laugh HOLDS its rhythm across
+// many notes (≥1 s); a speech coincidence doesn't. Require the full
+// laugh condition to hold for this many CONSECUTIVE windows before
+// firing. ~0.27 s of sustained rhythm — long enough to reject transient
+// speech matches, short enough that the squint still lands during the
+// laugh. Cuts false positives without sacrificing the recall rc.81 won.
+const LAUGH_SUSTAIN_WINDOWS = 8;
 const SIGH_MIN_DURATION_WINDOWS = 12;   // ≥ 400 ms sustained
 const SIGH_PITCH_TREND_THRESHOLD = -0.15; // just past the ±0.12 trend deadband
 const SIGH_MIN_PRE_SILENCE_WINDOWS = 6; // ≥ 200 ms quiet before
@@ -123,6 +132,10 @@ export class AcousticEventDetector {
   private lastLaughStats:
     | { peak: number; periodicity: number; avgZcr: number; avgVoicedPitch: number }
     | undefined;
+  /** Consecutive windows the full laugh condition has held — the sustain
+   *  counter that rejects momentary speech rhythms (see
+   *  LAUGH_SUSTAIN_WINDOWS). Reset whenever the condition lapses. */
+  private laughRunLength = 0;
 
   /**
    * Consume one window of smoothed normalized features and return
@@ -207,6 +220,7 @@ export class AcousticEventDetector {
     this.silenceRunLength = 0;
     this.cooldownWindows = 0;
     this.lastLaughStats = undefined;
+    this.laughRunLength = 0;
   }
 
   /**
@@ -243,7 +257,10 @@ export class AcousticEventDetector {
    */
   private detectLaugh(): AcousticEvent | undefined {
     const H = this.history;
-    if (H.length < LAUGH_MIN_WINDOWS) return undefined;
+    if (H.length < LAUGH_MIN_WINDOWS) {
+      this.laughRunLength = 0;
+      return undefined;
+    }
 
     const amps = H.map((e) => e.loudnessFast);
     // Bursty — a laugh's inter-note gaps drag the MEAN down, so gate on
@@ -270,9 +287,18 @@ export class AcousticEventDetector {
 
     this.lastLaughStats = { peak, periodicity, avgZcr, avgVoicedPitch };
 
-    if (peak < LAUGH_MIN_PEAK_LOUDNESS) return undefined;
-    if (periodicity < LAUGH_MIN_PERIODICITY) return undefined;
-    if (!breathy && !highPitched) return undefined;
+    const conditionMet =
+      peak >= LAUGH_MIN_PEAK_LOUDNESS &&
+      periodicity >= LAUGH_MIN_PERIODICITY &&
+      (breathy || highPitched);
+    if (!conditionMet) {
+      this.laughRunLength = 0;
+      return undefined;
+    }
+    // Require the rhythm to PERSIST — a real laugh holds it across many
+    // notes; a momentary speech coincidence lapses within a window or two.
+    this.laughRunLength += 1;
+    if (this.laughRunLength < LAUGH_SUSTAIN_WINDOWS) return undefined;
     return 'laugh';
   }
 

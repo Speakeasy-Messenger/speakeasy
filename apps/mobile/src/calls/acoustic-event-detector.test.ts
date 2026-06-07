@@ -375,8 +375,9 @@ describe('featuresReady gate', () => {
 describe('reset()', () => {
   it('clears history + cooldown so a new call starts clean', () => {
     const detector = new AcousticEventDetector();
-    // Trigger a laugh (regular ~4.7 Hz loud breathy rhythm).
-    for (let i = 0; i < 24; i++) {
+    // Trigger a laugh (regular ~4.7 Hz loud breathy rhythm). Needs enough
+    // windows to clear LAUGH_MIN_WINDOWS + LAUGH_SUSTAIN_WINDOWS.
+    for (let i = 0; i < 34; i++) {
       const onNote = i % 6 < 2;
       detector.push(
         features({
