@@ -191,11 +191,14 @@ jobs:
           # silently waiting on a "Send to testers" click that wasn't
           # always remembered.
           #
-          # TEMPORARILY 'draft' (rc.68) to test whether a draft commit of a
-          # bundle carrying USE_FULL_SCREEN_INTENT lands without tripping the
-          # publish-time full-screen-intent declaration gate (403 on
-          # 'completed'). If it lands, the FSI bundle on the track surfaces
-          # the declaration card in App content. REVERT to 'completed' once
-          # the declaration is filed.
-          RELEASE_STATUS: draft
+          # NOTE on full-screen intent: a 'completed' commit of a bundle
+          # carrying USE_FULL_SCREEN_INTENT is rejected (403) until the
+          # one-time full-screen-intent declaration is filed in Play Console
+          # (Monitor and improve → App content). That declaration card only
+          # appears once an FSI bundle is on a track — and a 'draft' commit
+          # lands the bundle WITHOUT tripping the gate. So the one-time
+          # bootstrap (done at rc.68) was: ship once with RELEASE_STATUS=draft
+          # to surface the card, file the declaration, then revert here. With
+          # the declaration on file, 'completed' commits work normally again.
+          RELEASE_STATUS: completed
         run: bash scripts/play-publish.sh
