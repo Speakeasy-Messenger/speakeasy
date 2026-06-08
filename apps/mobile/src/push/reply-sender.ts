@@ -21,7 +21,7 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { encodePayload, newMessageId, type WsClientMsg } from '@speakeasy/shared';
 import { utf8ToBytes, bytesToB64 } from '../utils/bytes.js';
-import { diag } from '../diag/log.js';
+import { diag, diagFingerprint } from '../diag/log.js';
 
 /** Persist key of the `useIdentity` store — see store/identity.ts. */
 const IDENTITY_KEY = 'speakeasy.identity.v1';
@@ -98,7 +98,7 @@ export async function sendReplyMessage(
   } else {
     ws.enqueueSend(frame);
   }
-  diag('push-reply', 'inline reply sent', { peerId });
+  diag('push-reply', 'inline reply sent', { peerFp: diagFingerprint(peerId) });
 
   // Let the socket flush before the headless task tears the JS context
   // down. `enqueueSend` hands the frame to the socket synchronously

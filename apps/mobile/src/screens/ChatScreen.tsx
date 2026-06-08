@@ -58,7 +58,7 @@ import { ApiError } from '../api/client.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { ensureSessionWithPeer, clearSessionCacheFor } from '../crypto/session.js';
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
-import { diag } from '../diag/log.js';
+import { diag, diagFingerprint } from '../diag/log.js';
 import { colors, fonts, space } from '../theme/index.js';
 import { font, motion, type } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
@@ -449,7 +449,7 @@ export function ChatScreen({
     attachments?: Attachment[];
     mentions?: string[];
   }) {
-    diag('chat', 'send: retry', { msgId: msg.id, peerId });
+    diag('chat', 'send: retry', { msgId: msg.id, peerFp: diagFingerprint(peerId) });
     setSendFailure(conversationId, msg.id, undefined);
     await dispatchOutbound({
       id: msg.id,
@@ -500,16 +500,16 @@ export function ChatScreen({
       if (isSelf) {
         ciphertext = utf8ToBytes(plaintext);
       } else {
-        diag('chat', 'send: ensureSessionWithPeer', { peerId });
+        diag('chat', 'send: ensureSessionWithPeer', { peerFp: diagFingerprint(peerId) });
         await ensureSessionWithPeer({
           api,
           signalProtocol,
           deviceToken,
           peerUserId: peerId,
         });
-        diag('chat', 'send: ensureSessionWithPeer OK', { peerId });
+        diag('chat', 'send: ensureSessionWithPeer OK', { peerFp: diagFingerprint(peerId) });
         ciphertext = await signalProtocol.encrypt(peerId, utf8ToBytes(plaintext));
-        diag('chat', 'send: encrypt OK', { peerId, ctLen: ciphertext.length });
+        diag('chat', 'send: encrypt OK', { peerFp: diagFingerprint(peerId), ctLen: ciphertext.length });
       }
       const ws = getWsClient(async () => deviceToken);
       await ws.waitForAuthed();
@@ -527,7 +527,7 @@ export function ChatScreen({
         // never attach and the bubble is stuck on a single ✓.
         message_id: id,
       });
-      diag('chat', 'send: ws.send OK', { peerId });
+      diag('chat', 'send: ws.send OK', { peerFp: diagFingerprint(peerId) });
     } catch (err: unknown) {
       const e = err as {
         name?: string;

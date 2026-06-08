@@ -28,7 +28,7 @@ import { useProfiles } from '../store/profiles.js';
 import { useUiState } from '../store/ui.js';
 import { useColors } from '../theme/index.js';
 import { font, space, type as typeScale } from '../theme/tokens.js';
-import { diag } from '../diag/log.js';
+import { diag, diagFingerprint } from '../diag/log.js';
 
 interface Props {
   peerId: string;
@@ -98,16 +98,16 @@ export function ConversationSettingsScreen({
     }
     try {
       await api.reportUser(peerId, { reason, detail }, deviceToken);
-      diag('report', 'filed', { peerId, reason });
+      diag('report', 'filed', { peerFp: diagFingerprint(peerId), reason });
     } catch (err) {
       // 404 (handle vanished mid-flight) or 429 (caller spammed
       // reports) are quiet failures from the UI's perspective —
       // showing technical detail leaks the threshold + rate-limit
       // shape. Generic toast either way.
       if (err instanceof ApiError) {
-        diag('report', 'api error (suppressed)', { peerId, status: err.status, code: err.code });
+        diag('report', 'api error (suppressed)', { peerFp: diagFingerprint(peerId), status: err.status, code: err.code });
       } else {
-        diag('report', 'unknown error (suppressed)', { peerId, err: String(err) });
+        diag('report', 'unknown error (suppressed)', { peerFp: diagFingerprint(peerId), err: String(err) });
       }
     }
     setReportSheetOpen(false);

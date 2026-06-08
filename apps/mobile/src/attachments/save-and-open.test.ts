@@ -33,6 +33,7 @@ vi.mock('react-native-fs', () => ({
 
 vi.mock('../diag/log.js', () => ({
   diag: vi.fn(),
+  diagFingerprint: (s: string) => `fp(${s})`,
 }));
 
 vi.mock('../native/file-opener.js', () => ({

@@ -1,7 +1,7 @@
 import { Alert, Platform } from 'react-native';
 import RNFS from 'react-native-fs';
 import type { Attachment } from '@speakeasy/shared';
-import { diag } from '../diag/log.js';
+import { diag, diagFingerprint } from '../diag/log.js';
 import { openSavedFile } from '../native/file-opener.js';
 
 /**
@@ -48,12 +48,12 @@ export async function saveAndAnnounceFile(attachment: Attachment): Promise<void>
       }
     }
 
-    diag('attach', 'file saved', { name, dest });
+    diag('attach', 'file saved', { nameFp: diagFingerprint(name) });
     try {
       await openSavedFile(dest, attachment.mime || '*/*');
-      diag('attach', 'file open launched', { name, dest, mime: attachment.mime });
+      diag('attach', 'file open launched', { nameFp: diagFingerprint(name), mime: attachment.mime });
     } catch (err) {
-      diag('attach', 'file open failed', { err: String(err), name, dest });
+      diag('attach', 'file open failed', { err: String(err), nameFp: diagFingerprint(name) });
       const where =
         Platform.OS === 'android'
           ? 'Android › data › Speakeasy › files'

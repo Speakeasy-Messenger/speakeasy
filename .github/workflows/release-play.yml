@@ -15,9 +15,10 @@ name: Release to Play Store (Internal)
 # `github`, SA `fastlane-play-publisher@speakeasy-mobile-497702`.
 # See PARITY / PLAY-STORE-SETUP docs for the GCP console steps.
 #
-# Releases land with status=draft — i.e. the upload appears in Play
-# Console as "Ready to publish" but doesn't auto-promote to testers.
-# Click "Send to testers" in Play Console after reviewing the build.
+# Releases publish with status=completed — the AAB auto-promotes to the
+# Internal Testing tester list on upload, no "Send to testers" click
+# needed. See the detailed rationale at the RELEASE_STATUS step below
+# (incl. the full-screen-intent declaration caveat).
 
 on:
   push:
