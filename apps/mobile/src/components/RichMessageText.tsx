@@ -8,7 +8,11 @@ import {
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import { useToast } from '../store/toast.js';
-import { LONG_MESSAGE_CHARS, tokenize } from './rich-message-text.js';
+import {
+  LONG_MESSAGE_CHARS,
+  tokenize,
+  truncateForPreview,
+} from './rich-message-text.js';
 
 interface Props {
   /** The full message text. */
@@ -53,7 +57,9 @@ export function RichMessageText({
   onMentionPress,
 }: Props) {
   const truncate = !!onSeeMore && text.length > LONG_MESSAGE_CHARS;
-  const shown = truncate ? text.slice(0, LONG_MESSAGE_CHARS).trimEnd() : text;
+  // Surrogate-safe truncation so an emoji at the 600-char boundary isn't
+  // cut in half into a � replacement glyph (see truncateForPreview).
+  const shown = truncate ? truncateForPreview(text, LONG_MESSAGE_CHARS) : text;
   const segs = tokenize(shown, !!mentions?.length);
 
   // Long-press copies the full message text. The prior approach —

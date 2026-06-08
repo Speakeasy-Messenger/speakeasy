@@ -40,6 +40,30 @@ export type Segment =
   | { kind: 'link'; text: string; url: string };
 
 /**
+ * Truncate a long message for the "See more" preview WITHOUT splitting an
+ * emoji. A plain `text.slice(0, max)` cuts at a UTF-16 code-unit boundary,
+ * which can land between the two halves of an emoji's surrogate pair and
+ * leave a lone surrogate that renders as the � replacement glyph. If the
+ * last included unit is a high surrogate (its low partner would be cut
+ * off), back off one unit so the whole emoji is dropped cleanly instead.
+ *
+ * (A ZWJ sequence — e.g. a 👨‍👩‍👧 family — landing exactly on the boundary
+ * can still split into its component emoji; that's cosmetic and only at the
+ * preview cut. Full grapheme-cluster safety would need Intl.Segmenter,
+ * which Hermes doesn't ship reliably.)
+ */
+export function truncateForPreview(
+  text: string,
+  max: number = LONG_MESSAGE_CHARS,
+): string {
+  if (text.length <= max) return text;
+  let end = max;
+  const last = text.charCodeAt(end - 1);
+  if (last >= 0xd800 && last <= 0xdbff) end -= 1; // lone high surrogate → drop it
+  return text.slice(0, end).trimEnd();
+}
+
+/**
  * Split message text into plain / mention / link segments. Mentions are
  * only matched when `withMentions` is set (the message carried a
  * `mentions` list), mirroring the prior MentionText behaviour. Links are
