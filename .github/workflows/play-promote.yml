@@ -46,6 +46,10 @@ on:
         description: 'draft = Ready to publish (click to roll). completed = auto-publish after review.'
         required: true
         default: 'draft'
+      countries:
+        description: 'Country/region availability for the destination release. "WORLDWIDE" or a comma list of ISO codes e.g. "US,GB,CA". Required for production (no Console UI for it).'
+        required: true
+        default: 'WORLDWIDE'
 
 permissions:
   contents: read
@@ -74,4 +78,5 @@ jobs:
           FROM_TRACK: ${{ inputs.from_track }}
           TO_TRACK: ${{ inputs.to_track }}
           RELEASE_STATUS: ${{ inputs.release_status }}
+          COUNTRIES: ${{ inputs.countries }}
         run: bash scripts/play-promote-track.sh
