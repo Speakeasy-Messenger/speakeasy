@@ -21,7 +21,9 @@ name: Release APK
 
 on:
   push:
-    tags: ['alpha-*']
+    # alpha-*  → alpha RCs (versionName "0.7.0-rc.84", code = rc number)
+    # v*       → production / GA (versionName "1.0.0", code = encoded semver)
+    tags: ['alpha-*', 'v*']
 
 permissions:
   contents: write
@@ -136,8 +138,20 @@ jobs:
         # and we fail before publishing.
         run: |
           tag="${GITHUB_REF##*/}"
-          expected_name="${tag#alpha-}"
-          expected_code="${tag##*-rc.}"
+          # Mirror app/build.gradle's derivation for both tag shapes:
+          #   v<semver>           → name "1.0.0", code = M*10000+m*100+p
+          #   alpha-<semver>-rc.N → name "0.7.0-rc.84", code = N
+          case "$tag" in
+            v*)
+              expected_name="${tag#v}"
+              IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
+              expected_code=$(( 10#$MA * 10000 + 10#$MI * 100 + 10#$PA ))
+              ;;
+            *)
+              expected_name="${tag#alpha-}"
+              expected_code="${tag##*-rc.}"
+              ;;
+          esac
           apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
 
           # build-tools 35.0.0 is provisioned by android-actions/setup-android above

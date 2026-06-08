@@ -22,7 +22,10 @@ name: Release to Play Store (Internal)
 
 on:
   push:
-    tags: ['alpha-*']
+    # alpha-*  → alpha RCs → Internal Testing (versionCode = rc number)
+    # v*       → production / GA build → Internal Testing, then promote to
+    #           Production via play-promote.yml (versionCode = encoded semver)
+    tags: ['alpha-*', 'v*']
 
 permissions:
   contents: read
@@ -105,8 +108,20 @@ jobs:
         # format). bundletool is a single jar; download + run.
         run: |
           tag="${GITHUB_REF##*/}"
-          expected_name="${tag#alpha-}"
-          expected_code="${tag##*-rc.}"
+          # Mirror app/build.gradle's derivation for both tag shapes:
+          #   v<semver>           → name "1.0.0", code = M*10000+m*100+p
+          #   alpha-<semver>-rc.N → name "0.7.0-rc.84", code = N
+          case "$tag" in
+            v*)
+              expected_name="${tag#v}"
+              IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
+              expected_code=$(( 10#$MA * 10000 + 10#$MI * 100 + 10#$PA ))
+              ;;
+            *)
+              expected_name="${tag#alpha-}"
+              expected_code="${tag##*-rc.}"
+              ;;
+          esac
           aab="apps/mobile/android/app/build/outputs/bundle/release/app-release.aab"
 
           # Pinned to a known-good bundletool release. Bump deliberately;

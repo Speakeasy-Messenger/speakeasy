@@ -14,11 +14,15 @@ apply plugin: "com.google.gms.google-services"
 //   2. `git describe --tags --dirty --always` — local dev with tags
 //   3. literal "0.0.0-dev" fallback (CI without tag / shallow checkout)
 //
-// Expected tag format: `alpha-<semver-with-rc>` e.g. `alpha-0.5.0-rc.81`.
-// - versionName strips the `alpha-` prefix → "0.5.0-rc.81"
-// - versionCode is the rc number → 81. For builds off-tag (rc-dirty)
-//   gradle uses 0; release CI only builds on tag push so a dirty
-//   versionCode never reaches the Play Store / users.
+// Tag formats:
+//   - Alpha RC:  `alpha-<semver>-rc.<N>` e.g. `alpha-0.7.0-rc.84`
+//       versionName → "0.7.0-rc.84"; versionCode → N (84)
+//   - Production: `v<semver>` e.g. `v1.0.0`
+//       versionName → "1.0.0"; versionCode → M*10000+m*100+p (10000),
+//       which sits above the alpha rc range and rises monotonically.
+// For builds off-tag (dirty/SHA) gradle uses a positive placeholder;
+// release CI only builds on a real tag, so it never reaches the Store.
+// See computedVersionName / computedVersionCode below.
 //
 // This replaces the previous "manually bump versionName + versionCode +
 // JS APP_VERSION + JS APP_BUILD before each release" choreography. The
@@ -55,27 +59,38 @@ def deriveVersionString = { ->
 def rawVersionTag = deriveVersionString()
 
 def computedVersionName = {
-    // Strip the `alpha-` prefix; if the tag is dirty (e.g.
-    // "alpha-0.5.0-rc.81-3-gabcd123-dirty") keep the extra detail so
-    // the About screen tells the truth about dev builds.
-    def name = rawVersionTag.startsWith("alpha-")
-            ? rawVersionTag.substring("alpha-".length())
-            : rawVersionTag
-    return name
+    // Production / GA tags are `v<semver>` (e.g. "v1.0.0") → "1.0.0".
+    // Alpha tags are `alpha-<semver-with-rc>` (e.g. "alpha-0.7.0-rc.84")
+    // → "0.7.0-rc.84". A dirty/off-tag describe (e.g.
+    // "alpha-0.7.0-rc.84-3-gabcd123-dirty") keeps the extra detail so the
+    // About screen tells the truth about dev builds.
+    if (rawVersionTag.startsWith("alpha-")) {
+        return rawVersionTag.substring("alpha-".length())
+    }
+    if (rawVersionTag ==~ /^v\d.*/) {
+        return rawVersionTag.substring(1)
+    }
+    return rawVersionTag
 }()
 
 def computedVersionCode = {
-    // Extract the rc number for the integer versionCode. On a tag like
-    // "alpha-0.5.0-rc.81" → 81. On any off-tag build (a plain main
-    // commit, a dirty tree, a SHA-only `git describe`) there's no rc
-    // number → fall back to 1. It MUST be a positive integer: the
-    // Android Gradle Plugin rejects versionCode 0 at configuration
-    // time, which previously failed every off-tag build — android.yml
-    // on every push to main, and local dirty builds. Only release CI
-    // builds on a real tag, so this placeholder never ships.
-    def m = rawVersionTag =~ /-rc\.(\d+)$/
-    if (m.find()) {
-        return m.group(1).toInteger()
+    // Alpha rc build → the rc number (e.g. "alpha-0.7.0-rc.84" → 84),
+    // the historical scheme; the highest shipped to date.
+    def rc = rawVersionTag =~ /-rc\.(\d+)$/
+    if (rc.find()) {
+        return rc.group(1).toInteger()
+    }
+    // Final / GA build (e.g. "v1.0.0") → encode the semver as
+    // major*10000 + minor*100 + patch. 1.0.0 → 10000: comfortably above
+    // the alpha rc range (a valid Play upgrade over any rc) and
+    // monotonically increasing for future finals (1.0.1 → 10001,
+    // 1.1.0 → 10100, 2.0.0 → 20000). A SHA-only / non-semver off-tag
+    // build → 1. It MUST be a positive integer: the Android Gradle Plugin
+    // rejects versionCode 0 at configuration time. Only release CI builds
+    // on a real tag, so any off-tag placeholder never ships.
+    def sv = computedVersionName =~ /^(\d+)\.(\d+)\.(\d+)/
+    if (sv.find()) {
+        return sv.group(1).toInteger() * 10000 + sv.group(2).toInteger() * 100 + sv.group(3).toInteger()
     }
     return 1
 }()
