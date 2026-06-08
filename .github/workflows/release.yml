@@ -138,20 +138,14 @@ jobs:
         # and we fail before publishing.
         run: |
           tag="${GITHUB_REF##*/}"
-          # Mirror app/build.gradle's derivation for both tag shapes:
-          #   v<semver>           → name "1.0.0", code = M*10000+m*100+p
-          #   alpha-<semver>-rc.N → name "0.7.0-rc.84", code = N
+          # Mirror app/build.gradle: code = (M*10000+m*100+p)*1000 + sub,
+          # sub = rc number for alpha-<semver>-rc.N, else 999 for v<semver>.
           case "$tag" in
-            v*)
-              expected_name="${tag#v}"
-              IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
-              expected_code=$(( 10#$MA * 10000 + 10#$MI * 100 + 10#$PA ))
-              ;;
-            *)
-              expected_name="${tag#alpha-}"
-              expected_code="${tag##*-rc.}"
-              ;;
+            v*)  expected_name="${tag#v}";     sub=999 ;;
+            *)   expected_name="${tag#alpha-}"; sub="${tag##*-rc.}" ;;
           esac
+          IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
+          expected_code=$(( (10#$MA * 10000 + 10#$MI * 100 + 10#$PA) * 1000 + 10#$sub ))
           apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
 
           # build-tools 35.0.0 is provisioned by android-actions/setup-android above
@@ -211,29 +205,9 @@ jobs:
               --notes "APK built by .github/workflows/release.yml. See commits since previous tag."
           fi
 
-      - name: Announce the build via @speaker
-        # Fans a "new build available" message out from the @speaker
-        # bot to every user (POST /v1/broadcast). Best-effort: if the
-        # ADMIN_TOKEN secret isn't set the step is skipped, and a
-        # broadcast failure is a warning, not a build failure.
-        #
-        # The link points to the Play Console Internal Testing opt-in
-        # URL — testers tapping it land in their Play Store with the
-        # update offered, instead of a raw .apk on GitHub that needs
-        # an "Install unknown apps" sideload. The GitHub release page
-        # still has the universal APK as a fallback for testers who
-        # opt out of the Play track.
-        env:
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
-        run: |
-          if [ -z "$ADMIN_TOKEN" ]; then
-            echo "ADMIN_TOKEN secret not set — skipping @speaker broadcast."
-            exit 0
-          fi
-          tag="${GITHUB_REF##*/}"
-          url="https://play.google.com/apps/internaltest/4700431525241449795"
-          curl -fsS -X POST "https://api.speakeasyapp.xyz/v1/broadcast" \
-            -H "Authorization: Bearer $ADMIN_TOKEN" \
-            -H "Content-Type: application/json" \
-            -d "{\"text\": \"New build ${tag} is available — ${url}\"}" \
-            || echo "::warning::@speaker broadcast failed (non-fatal)."
+      # Automatic @speaker build announcements are DISABLED (muted by
+      # request). A release no longer broadcasts a "new build available"
+      # message to every user's @speaker conversation on each tag — that
+      # was right for the alpha tester loop but too noisy past GA.
+      # To announce a build deliberately, run the manual workflow:
+      #   gh workflow run announce.yml -f text="Speakeasy 1.0.0 is live …"

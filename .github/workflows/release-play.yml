@@ -108,20 +108,14 @@ jobs:
         # format). bundletool is a single jar; download + run.
         run: |
           tag="${GITHUB_REF##*/}"
-          # Mirror app/build.gradle's derivation for both tag shapes:
-          #   v<semver>           → name "1.0.0", code = M*10000+m*100+p
-          #   alpha-<semver>-rc.N → name "0.7.0-rc.84", code = N
+          # Mirror app/build.gradle: code = (M*10000+m*100+p)*1000 + sub,
+          # sub = rc number for alpha-<semver>-rc.N, else 999 for v<semver>.
           case "$tag" in
-            v*)
-              expected_name="${tag#v}"
-              IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
-              expected_code=$(( 10#$MA * 10000 + 10#$MI * 100 + 10#$PA ))
-              ;;
-            *)
-              expected_name="${tag#alpha-}"
-              expected_code="${tag##*-rc.}"
-              ;;
+            v*)  expected_name="${tag#v}";     sub=999 ;;
+            *)   expected_name="${tag#alpha-}"; sub="${tag##*-rc.}" ;;
           esac
+          IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
+          expected_code=$(( (10#$MA * 10000 + 10#$MI * 100 + 10#$PA) * 1000 + 10#$sub ))
           aab="apps/mobile/android/app/build/outputs/bundle/release/app-release.aab"
 
           # Pinned to a known-good bundletool release. Bump deliberately;
@@ -189,13 +183,15 @@ jobs:
         # via Play (no sideload) even while an App-content / full-screen-
         # intent declaration review holds the normal track release. Best-
         # effort — never fails the build (see the script). The link is
-        # printed to the run summary and broadcast via @speaker.
+        # printed to the run summary. The automatic @speaker broadcast is
+        # MUTED: ADMIN_TOKEN is intentionally NOT passed, so the script's
+        # `if [ -n "$ADMIN_TOKEN" ]` broadcast block is skipped. Announce
+        # deliberately via `gh workflow run announce.yml` instead.
         env:
           ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
           PACKAGE_NAME: xyz.speakeasyapp.app
           AAB_PATH: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
           RELEASE_NAME: ${{ github.ref_name }}
-          ADMIN_TOKEN: ${{ secrets.ADMIN_TOKEN }}
         run: bash scripts/play-internal-share.sh
 
       - name: Upload AAB to Play Console Internal Testing track

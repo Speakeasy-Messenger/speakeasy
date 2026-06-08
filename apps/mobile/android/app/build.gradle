@@ -74,25 +74,23 @@ def computedVersionName = {
 }()
 
 def computedVersionCode = {
-    // Alpha rc build → the rc number (e.g. "alpha-0.7.0-rc.84" → 84),
-    // the historical scheme; the highest shipped to date.
-    def rc = rawVersionTag =~ /-rc\.(\d+)$/
-    if (rc.find()) {
-        return rc.group(1).toInteger()
-    }
-    // Final / GA build (e.g. "v1.0.0") → encode the semver as
-    // major*10000 + minor*100 + patch. 1.0.0 → 10000: comfortably above
-    // the alpha rc range (a valid Play upgrade over any rc) and
-    // monotonically increasing for future finals (1.0.1 → 10001,
-    // 1.1.0 → 10100, 2.0.0 → 20000). A SHA-only / non-semver off-tag
-    // build → 1. It MUST be a positive integer: the Android Gradle Plugin
-    // rejects versionCode 0 at configuration time. Only release CI builds
-    // on a real tag, so any off-tag placeholder never ships.
+    // Unified monotonic scheme: code = base*1000 + sub
+    //   base = major*10000 + minor*100 + patch   (the semver in the name)
+    //   sub  = rc number (1..998) for an alpha rc, else 999 for a final/GA
+    // Guarantees every rc sits below its own final, every version's codes
+    // sit above all earlier versions', and ALL sit above the first GA — so
+    // the alpha line stays a valid Play upgrade after 1.0.0 went live:
+    //   alpha-1.0.1-rc.1 → 10001001 ; v1.0.1 → 10001999 ; v1.1.0 → 11000999
+    // (Historical note: v1.0.0 shipped under an earlier simple scheme as
+    //  code 10000; every code this scheme produces is > 10000, so the line
+    //  stays monotonic.) MUST be a positive integer — AGP rejects 0 — so a
+    //  SHA-only / non-semver off-tag build falls back to 1 (never shipped).
     def sv = computedVersionName =~ /^(\d+)\.(\d+)\.(\d+)/
-    if (sv.find()) {
-        return sv.group(1).toInteger() * 10000 + sv.group(2).toInteger() * 100 + sv.group(3).toInteger()
-    }
-    return 1
+    if (!sv.find()) return 1
+    def base = sv.group(1).toInteger() * 10000 + sv.group(2).toInteger() * 100 + sv.group(3).toInteger()
+    def rc = rawVersionTag =~ /-rc\.(\d+)$/
+    def sub = rc.find() ? rc.group(1).toInteger() : 999
+    return base * 1000 + sub
 }()
 
 println "[version] tag=${rawVersionTag} name=${computedVersionName} code=${computedVersionCode}"
