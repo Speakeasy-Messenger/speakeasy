@@ -5,6 +5,7 @@ import {
   type NativeStackScreenProps,
 } from '@react-navigation/native-stack';
 import { InAppBanner } from '../components/InAppBanner.js';
+import { ScreenErrorBoundary } from '../components/ScreenErrorBoundary.js';
 import { Toast } from '../components/Toast.js';
 import { VerifyDeviceSheet } from '../components/VerifyDeviceSheet.js';
 import type { BannerData } from '../store/banner.js';
@@ -106,9 +107,10 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
       <InAppBanner onTap={onBannerTap} />
       <Toast />
       <VerifyDeviceSheet />
-      <Stack.Navigator
-        screenOptions={{ headerShown: false, animation: 'fade', animationDuration: 400 }}
-      >
+      <ScreenErrorBoundary>
+        <Stack.Navigator
+          screenOptions={{ headerShown: false, animation: 'fade', animationDuration: 400 }}
+        >
         {!userId ? (
           <Stack.Screen name="Onboarding">
             {({ navigation }: NativeStackScreenProps<RootStack, 'Onboarding'>) => (
@@ -396,7 +398,8 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
             </Stack.Screen>
           </Stack.Group>
         )}
-      </Stack.Navigator>
+        </Stack.Navigator>
+      </ScreenErrorBoundary>
     </NavigationContainer>
   );
 }
