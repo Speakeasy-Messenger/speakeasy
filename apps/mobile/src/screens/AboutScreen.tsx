@@ -38,36 +38,37 @@ const BUILD = appBuild();
  * never dilute, A/B test, compress, or move it behind feature
  * flags. Hard-coded in source.
  *
- * In `__DEV__` builds the version line tap-7-times unlocks the
- * DiagnosticsScreen per §9.5 / CLAUDECODENOTE.md §3. In production
- * the tap handler is compiled out.
+ * Diagnostics is a hidden, support-only surface: it's reached ONLY by
+ * tapping the version line 5 times in a row (§9.5). There is no visible
+ * Diagnostics row in production — keeping the logs/entitlement-reset tools
+ * out of the everyday UI. The version line has a deliberately generous
+ * tap target (padding + hitSlop) so the gesture is reliable on a release
+ * APK, which is what an earlier always-visible row was a workaround for.
  */
+const DIAGNOSTICS_TAP_COUNT = 5;
+const DIAGNOSTICS_TAP_WINDOW_MS = 5000;
+
 export function AboutScreen({
   onBack,
   onOpenDiagnostics,
 }: Props): React.ReactElement {
   const themed = useColors();
-  // Debug-only 7-tap unlock.
+  // Hidden 5-tap unlock for the Diagnostics screen.
   const tapCountRef = useRef(0);
   const tapTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   function handleVersionTap() {
-    // 7-tap unlock is enabled in all alpha builds — without it the
-    // user has no way to reach Diagnostics on a release-mode APK,
-    // which is what we ship for sideload testing. When a real
-    // production-vs-alpha build flag exists this can re-gate to
-    // "alpha-only".
     if (!onOpenDiagnostics) return;
     tapCountRef.current += 1;
     if (tapTimerRef.current) clearTimeout(tapTimerRef.current);
-    if (tapCountRef.current >= 7) {
+    if (tapCountRef.current >= DIAGNOSTICS_TAP_COUNT) {
       tapCountRef.current = 0;
       onOpenDiagnostics();
       return;
     }
     tapTimerRef.current = setTimeout(() => {
       tapCountRef.current = 0;
-    }, 5000);
+    }, DIAGNOSTICS_TAP_WINDOW_MS);
   }
 
   return (
@@ -123,30 +124,17 @@ export function AboutScreen({
           goes straight to the team, no email needed.
         </Text>
 
-        {/* Alpha-only — surfaces the Diagnostics screen as a regular
-            row instead of behind the 7-tap version unlock (which has
-            been unreliable on release-mode builds). When alpha →
-            production this block re-gates behind the alpha flag and
-            the 7-tap unlock returns as the dev-only path. */}
-        {onOpenDiagnostics ? (
-          <>
-            <Text style={[styles.sectionLabel, { color: themed.slate }]}>
-              ALPHA
-            </Text>
-            <SettingsListItem
-              kind="drilldown"
-              title="Diagnostics"
-              description="Logs, last crash, entitlement reset."
-              onPress={onOpenDiagnostics}
-              testID="about-diagnostics-row"
-            />
-          </>
-        ) : null}
+        {/* Diagnostics has NO visible row — it's reached only by the
+            hidden 5-tap on the version line below (see handleVersionTap).
+            Keeps support-only tooling out of the everyday UI. */}
 
         <View style={styles.footer}>
           <Pressable
             onPress={handleVersionTap}
-            hitSlop={8}
+            style={styles.versionTap}
+            hitSlop={{ top: 16, bottom: 16, left: 32, right: 32 }}
+            accessibilityRole="button"
+            accessibilityLabel={`Version ${VERSION}, build ${BUILD}`}
             testID="about-version"
           >
             <Text style={[styles.version, { color: themed.slate }]}>
@@ -192,6 +180,14 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     paddingTop: 24,
     paddingBottom: 8,
+  },
+  // Generous touch target for the hidden 5-tap Diagnostics unlock —
+  // the label itself is small (10pt), so the Pressable pads it out to a
+  // comfortable, reliably-hittable area (paired with hitSlop above).
+  versionTap: {
+    paddingVertical: 12,
+    paddingHorizontal: 32,
+    alignItems: 'center',
   },
   version: {
     fontFamily: typeScale.meta.weight,
