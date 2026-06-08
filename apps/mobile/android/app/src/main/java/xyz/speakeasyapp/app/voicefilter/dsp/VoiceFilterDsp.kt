@@ -171,9 +171,21 @@ class VoiceFilterDsp(
      */
     const val MAX_FRAME_SAMPLES = 2880
 
-    /** Phase 2a default — flip to `false` to revert to the rc.17
-     *  granular shifter if field testing finds the vocoder worse. */
-    private const val USE_PHASE_VOCODER = true
+    /** Pitch-shifter selection. Flipped to GRANULAR (false) for the 1.0.x
+     *  latency fix. An offline bench of the actual shifter code (impulse/
+     *  amplitude-step group-delay + 30s RTF, JVM) measured:
+     *    phase vocoder: 30.3 ms added delay, 253 µs/frame
+     *    granular:      19.9 ms added delay,  3.6 µs/frame
+     *  i.e. the vocoder's real algorithmic delay is ~3× the 10.6 ms its
+     *  own doc claimed, and it's the dominant cause of the "voice filter
+     *  adds significant call delay" report (CPU was never the bottleneck).
+     *  Granular cuts ~10 ms of latency + ~99% of the per-frame CPU.
+     *  Tradeoff: granular crackles on sustained vowels and can't do
+     *  independent formant shift (the Smoke/Velvet/Glass profiles converge
+     *  in character). Flip back to `true` to restore the vocoder, or see
+     *  the plan for the window-shrink (1024→512) option that keeps the
+     *  vocoder while cutting its delay. */
+    private const val USE_PHASE_VOCODER = false
   }
 }
 

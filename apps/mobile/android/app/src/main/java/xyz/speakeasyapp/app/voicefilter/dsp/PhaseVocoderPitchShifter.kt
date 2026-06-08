@@ -44,9 +44,14 @@ import kotlin.math.sqrt
  *
  * # Latency
  *
- * Algorithmic delay is `FFT_SIZE / 2 = 512` samples ≈ 10.6ms at
- * 48kHz — half of the rc.17 halved-granular delay. End-to-end
- * Private Call latency drops by another ~10ms.
+ * CORRECTION (1.0.x bench): the real added group delay is **~30 ms**
+ * (1453 samples @ 48 kHz), measured offline by running this exact class
+ * against an amplitude-step probe — NOT the `FFT_SIZE/2 = 512` / 10.6 ms
+ * once claimed here. The full analysis window plus the output-ring
+ * overlap-add offset dominate. The granular shifter measured ~20 ms, so
+ * granular is currently the default (see USE_PHASE_VOCODER). To make this
+ * vocoder competitive on latency, halve the window (FFT_SIZE 1024→512),
+ * which roughly halves the group delay while keeping formant preservation.
  *
  * # Allocation
  *
