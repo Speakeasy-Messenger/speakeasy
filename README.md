@@ -29,13 +29,18 @@ spec.md      Authoritative product + protocol spec
 
 ## Status
 
-Active development. **Alpha 0.1** is the first APK that walks through real
-device attestation + identity generation + 1:1 encrypt/decrypt end-to-end on
-hardware. See the [GitHub Releases](../../releases) page for the alpha APK.
+Active development. Current release line: **alpha-0.7.0** (latest tag
+`alpha-0.7.0-rc.83`). The Android APK walks through real device attestation +
+identity generation + 1:1 encrypt/decrypt end-to-end on hardware; the iOS
+`.app` is packaged end-to-end on Xcode 26.4.1 (all four native bridges, Metro
+bundle, SQLCipher + libsignal_ffi + Vouchflow linked). See the
+[GitHub Releases](../../releases) page for the alpha APK.
 
-Per-component status is tracked at the top of [`spec.md`](./spec.md) — Phases 1–4
-complete (server + JS), Phase 5 in progress (native bridges, persistent
-storage, conversations UI).
+Per-component status is tracked at the top of [`spec.md`](./spec.md) — Phases
+0–4 complete (server + JS), Phase 5 (native bridges, SQLCipher persistence,
+conversations/chat/calls UI) largely landed on Android with iOS counterparts
+authored and CI-gated, and Phase 6 (1:1 voice calls, DTLS-SRTP over the Signal
+session) in progress.
 
 ## Testing the alpha
 

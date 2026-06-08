@@ -4,15 +4,18 @@ Three apps make up the Speakeasy backend on Fly:
 
 | App                | Purpose                | Provisioning                                              |
 | ------------------ | ---------------------- | --------------------------------------------------------- |
-| `speakeasy-api`    | Fastify + WebSocket    | `flyctl deploy --config infra/fly/api.toml`               |
+| `speakeasy-api-1`  | Fastify + WebSocket    | `flyctl deploy --config infra/fly/api.toml`               |
 | `speakeasy-db`     | Managed Postgres       | `flyctl postgres create --name speakeasy-db`              |
 | `speakeasy-redis`  | Managed Upstash Redis  | `flyctl redis create --name speakeasy-redis`              |
+
+Normal deploys run from CI (`.github/workflows/ci.yml`, `deploy-api` job)
+on push to `main`; the `flyctl deploy` command above is the manual path.
 
 After Postgres and Redis exist, attach them to the API so the URLs are
 injected as secrets:
 
 ```sh
-flyctl postgres attach speakeasy-db --app speakeasy-api
+flyctl postgres attach speakeasy-db --app speakeasy-api-1
 flyctl redis status speakeasy-redis    # copy URL → flyctl secrets set REDIS_URL=...
 ```
 
@@ -22,7 +25,7 @@ base image keeps that migration mechanical.
 
 ## Phase 4 production hardening
 
-**Secrets to set on first deploy** (`flyctl secrets set ... --app speakeasy-api`):
+**Secrets to set on first deploy** (`flyctl secrets set ... --app speakeasy-api-1`):
 
 | Secret                          | Source                                       |
 | ------------------------------- | -------------------------------------------- |

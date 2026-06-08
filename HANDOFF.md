@@ -82,8 +82,9 @@ shipped with a bug Tier A would have caught had it existed.
   catches uncaught Java/Kotlin throwables and writes timestamped files
   to `/sdcard/Download/speakeasy_crash_YYYY-MM-DDTHH-MM-SS.txt`
   (Termux-readable, no SAF needed).
-- **On-device diagnostics screen.** Tap "connection · …" on
-  Conversations → opens a full diag log with breadcrumbs from the
+- **On-device diagnostics screen.** Hidden support tool: tap the version
+  line in **AboutScreen** 5 times in a row to unlock it (no visible
+  Diagnostics row). Opens a full diag log with breadcrumbs from the
   message router, ChatScreen send path, group create. Selectable text
   for paste-back debug. Lives in `apps/mobile/src/diag/log.ts` +
   `screens/DiagnosticsScreen.tsx`.

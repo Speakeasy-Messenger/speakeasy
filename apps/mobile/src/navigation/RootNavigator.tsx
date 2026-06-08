@@ -161,7 +161,7 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                 meant to be debug/alpha only. Until we have a build
                 flag distinguishing alpha-channel from production
                 release, we ship them in all alpha sideloads (the
-                7-tap-version unlock in About → footer is the access
+                5-tap-version unlock in About → footer is the access
                 gate). When a production pipeline exists, re-gate
                 this block on the alpha flag. */}
             <Stack.Screen name="Diagnostics">

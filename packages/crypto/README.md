@@ -2,7 +2,12 @@
 
 Signal Protocol wrapper + community channel-key logic.
 
-**Status:** placeholder. Implemented in Phase 2 (see `spec.md` §11).
+**Status:** implemented (see `spec.md` §11). Exposes the native-module
+contracts (`signal-protocol.ts`, `channel-key.ts`, `group-messaging.ts`),
+a `MockGroupMessagingClient`, and a Node-only `SoftwareChannelKeyModule`
+(imported via the `./software-channel-key` subpath — intentionally not in
+the package root, since it depends on `node:crypto`, which crashes Metro
+bundling in React Native).
 
 Two responsibilities:
 
@@ -17,5 +22,8 @@ Two responsibilities:
    Vouchflow-attested members via the gated `/v1/communities/:id/key` endpoint.
    The server never holds the channel key in plaintext (`spec.md` §4b).
 
-Server-side counterpart for Signal Protocol PreKey bundle handling lives in
-`@speakeasy/api` and uses `@raphaelvserafim/libsignal`.
+Server-side PreKey bundle handling lives in `@speakeasy/api` (`db/prekeys.ts`,
+`routes/prekeys.ts`). The server performs no Signal cryptography: it stores
+opaque key bytes and serves one one-time prekey per fetch ("consume on
+fetch"). All Signal session crypto runs on the device via the native module
+contracts above.

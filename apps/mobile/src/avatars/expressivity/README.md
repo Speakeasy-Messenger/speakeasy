@@ -24,11 +24,14 @@ optimizing motion that's driven by noise.
 actually sees. For each animal's call-time `Render` in `components.tsx`
 it measures, statically, which prosody channels (`pitchTrend`,
 `expressiveness`, `activity`, `mouthShape`) reach a transform and which
-facial regions (head, brow, eyes, mouth, cheek) move. Today it's ~0.54:
-coverage is uneven (FoxCall wires all four channels; pigeon/octopus only
-move the mouth) and **no animal moves the eyes on emotion** — the eyes
-are blink-timer only. That `eyesExpressiveFraction = 0` is the headline
-gap.
+facial regions (head, brow, eyes, mouth, cheek) move. Coverage is uneven
+(FoxCall wires all four channels; pigeon/octopus only move the mouth).
+The original headline gap — **no animal moved the eyes on emotion** (the
+eyes were blink-timer only, `eyesExpressiveFraction = 0`) — was closed by
+the rc.58 `ExprEyes` redesign: the shared eyes now blow wide with the
+peer's loudness and every call-time `Render` wires them up. (The discrete
+laugh-squint eye pose is disabled since rc.83 — see `LAUGH_SQUINT_ENABLED`
+in `components.tsx` — so it no longer contributes to the eyes score.)
 
 > **What Tier-2 does NOT measure:** magnitude or aesthetics. `react-native`
 > is mocked in vitest (no Animated/SVG, no rasterizer), so we can't render

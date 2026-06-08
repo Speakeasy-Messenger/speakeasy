@@ -42,7 +42,7 @@ interface Props {
 /**
  * Diagnostics — alpha-channel only (CLAUDECODENOTE.md §3).
  *
- * Reachable via the 7-tap-version unlock on the About footer. NOT
+ * Reachable via the 5-tap-version unlock on the About footer. NOT
  * `__DEV__`-gated at the route level (see RootNavigator.tsx) — the
  * tap-gate is the access control, the diag buffer's redaction
  * (peerFp + textLen, never plaintext) is the data-leak defense.

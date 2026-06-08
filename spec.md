@@ -2,7 +2,7 @@
 
 > This document is the authoritative source of truth for the Speakeasy project.
 > It is intended as the first thing Claude Code reads before taking any action.
-> Last updated: April 2026.
+> Last updated: June 2026 (release line alpha-0.7.0, latest tag alpha-0.7.0-rc.83).
 
 ---
 
@@ -229,7 +229,7 @@ Communities are a distinct type from the data model level — separate tables, s
 | WebRTC | react-native-webrtc + react-native-callkeep | Voice calls + native CallKit/ConnectionService |
 | SVG | react-native-svg 15.x | Animal avatars + RoomMark glyphs |
 | Animations | Animated (classic) + react-native-reanimated 3.x | Reanimated for SVG transform animations (signature avatar effects) |
-| Payments | RevenueCat (Phase C) — fake purchases in Phase A sideload | Wraps StoreKit / Play Billing |
+| Payments | RevenueCat (Phase C) — Phase B `PURCHASING_LIVE=false` refuses paid SKUs (no charge, no grant); fake purchases removed after Phase A | Wraps StoreKit / Play Billing |
 
 ### Backend
 
@@ -596,7 +596,7 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 
 - ✅ **Sealed sender:** **Resolved.** 1:1 messages hide sender identity from the server (`messages.sealed = TRUE`) — sender recovered from inner envelope by the recipient. Migration 0007. Wire format in Phase A of the sealed-sender rollout.
 - **Channel key rotation policy:** Rotate on every member leave? Every N days? Moderator-triggered only? Still TBD.
-- ✅ **Payments:** **Resolved.** Avatar store uses **App Store / Play Billing** non-consumables, not crypto. RevenueCat is the wrapper; Phase A ships fake (sideload) purchases, Phase C ships real billing once we're on the stores. Crypto-payments idea dropped per `AVATARSTORE.md`.
+- ✅ **Payments:** **Resolved.** Avatar store uses **App Store / Play Billing** non-consumables, not crypto. RevenueCat is the wrapper. Phase A's fake (sideload) purchases have been removed; the current **Phase B** (`services/purchases.ts`, `PURCHASING_LIVE=false`) deliberately refuses paid SKUs — it neither charges nor grants ownership, avoiding grants without payment. Phase C wires real Play Billing / StoreKit once we're on the stores. Crypto-payments idea dropped per `AVATARSTORE.md`.
 - **Community message TTL:** decided in Phase 5g. Moderator-configurable 1..365 days, default 7.
 - **Per-conversation disappearing timer options:** Suggested: 1 hour, 24 hours, 7 days, 30 days, off.
 - ✅ **Username discovery:** **Resolved.** QR code + `speakeasy://add?handle=…` deep link shipped (rc.0+). Tap "Share my handle" → present QR; scanning a peer's QR routes to NewChat with the handle prefilled.

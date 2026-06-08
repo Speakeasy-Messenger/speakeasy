@@ -195,9 +195,11 @@ function Eyes({
  * movement". These EYES CHANGE SHAPE with the peer's voice, the single
  * biggest expressivity win:
  *  - blow WIDE with loudness (yell / surprise),
- *  - squint into a happy upward arch when the voice is animated
- *    (cross-faded over the open eye),
- *  - DROOP when pitch falls (winding down / sad),
+ *  - squint into a happy upward arch on a detected laugh (cross-faded
+ *    over the open eye) — DISABLED since rc.83, gated by
+ *    LAUGH_SQUINT_ENABLED below.
+ * (The old falling-pitch DROOP cue was dropped — scope is attentiveness
+ * states only, no sad/angry; see the inline note on wideScale.)
  * while the timer blink still multiplies the open-eye height. Pure SVG
  * helper (no hooks) so it stays inside the AnimalBody invariant; drop it
  * in where an animal's `<Eyes>` block was. All channels are the already-
