@@ -25,6 +25,13 @@ interface Props {
    */
   onSeeMore?: () => void;
   /**
+   * Color for the "See more" affordance. Passed per bubble variant so it
+   * stays visible: brass on the dark received bubble (where long incoming
+   * texts live), omitted on the brass sent bubble (brass-on-brass would
+   * vanish — there the bold+underline carries it). Defaults to inherited.
+   */
+  seeMoreColor?: string;
+  /**
    * Tap handler for an @mention. Receives the bare handle (no `@`).
    * When set, mention spans become tappable; when omitted they are
    * still highlighted but inert (e.g. the full-message screen).
@@ -42,6 +49,7 @@ export function RichMessageText({
   mentions,
   style,
   onSeeMore,
+  seeMoreColor,
   onMentionPress,
 }: Props) {
   const truncate = !!onSeeMore && text.length > LONG_MESSAGE_CHARS;
@@ -101,7 +109,11 @@ export function RichMessageText({
       {truncate ? (
         <Text onPress={onSeeMore}>
           {'… '}
-          <Text style={styles.seeMore}>See more</Text>
+          <Text
+            style={[styles.seeMore, seeMoreColor ? { color: seeMoreColor } : null]}
+          >
+            See more
+          </Text>
         </Text>
       ) : null}
     </Text>

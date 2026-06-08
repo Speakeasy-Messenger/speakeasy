@@ -66,7 +66,7 @@ export function GroupSettingsScreen({ groupId, onBack, onOpenPeer }: Props): Rea
   const removeGroupLocal = useGroups((s) => s.remove);
   const addMemberLocal = useGroups((s) => s.addMember);
   const removeMemberLocal = useGroups((s) => s.removeMember);
-  const ttl = useConversations((s) => s.byId[groupId]?.ttl ?? 'day');
+  const ttl = useConversations((s) => s.byId[groupId]?.ttl ?? 'week');
   const muted = useConversations((s) => !!s.byId[groupId]?.muted);
   const setTtl = useConversations((s) => s.setTtl);
   const setMuted = useConversations((s) => s.setMuted);

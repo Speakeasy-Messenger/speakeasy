@@ -245,6 +245,10 @@ export function DisappearingMessageBubble({
           text={text}
           mentions={mentions}
           onSeeMore={onSeeMore}
+          // Brass "See more" on the dark received bubble so it stands out
+          // from the body text; omitted on the brass sent bubble (would be
+          // brass-on-brass) where bold+underline carries it.
+          seeMoreColor={isSent ? undefined : accent.base}
           onMentionPress={onMentionPress}
           style={[
             styles.text,

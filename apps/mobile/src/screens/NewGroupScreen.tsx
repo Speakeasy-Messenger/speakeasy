@@ -61,7 +61,9 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
 
   const [members, setMembers] = useState<readonly string[]>([]);
   const [name, setName] = useState('');
-  const [ttl, setTtlValue] = useState<Exclude<TtlOption, 'off'>>('day');
+  // Default new-group disappearing timer: 7 days (matches DEFAULT_TTL_SECONDS
+  // and the DM default in emptyConversation).
+  const [ttl, setTtlValue] = useState<Exclude<TtlOption, 'off'>>('week');
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
