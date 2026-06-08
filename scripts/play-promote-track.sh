@@ -83,7 +83,7 @@ echo "  source releases: $(echo "$SOURCE_TRACK" | python3 -c 'import json,sys; d
 # Pick the release with the highest versionCode — that's the most
 # recently uploaded one. Encode the chosen release as a JSON object
 # we'll splice into TO_TRACK's `releases` array.
-PROMOTED_RELEASE=$(FROM_JSON="$SOURCE_TRACK" RELEASE_STATUS="$RELEASE_STATUS" COUNTRIES="${COUNTRIES:-WORLDWIDE}" python3 <<'PY'
+PROMOTED_RELEASE=$(FROM_JSON="$SOURCE_TRACK" RELEASE_STATUS="$RELEASE_STATUS" python3 <<'PY'
 import json, os, sys
 src = json.loads(os.environ["FROM_JSON"])
 releases = src.get("releases", [])
@@ -99,17 +99,6 @@ out = {
     "versionCodes": chosen["versionCodes"],
     "status": os.environ["RELEASE_STATUS"],
 }
-# Country / region availability. Production has NO Console UI to pick
-# countries (that's testing-track only) — availability rides on the
-# release's `countryTargeting` set here at promote time. Without it the
-# track errors "No countries or regions have been selected." Default is
-# worldwide (includeRestOfWorld); pass COUNTRIES="US,GB,CA" for a subset.
-countries_env = (os.environ.get("COUNTRIES") or "WORLDWIDE").strip()
-if countries_env.upper() == "WORLDWIDE":
-    out["countryTargeting"] = {"includeRestOfWorld": True}
-else:
-    codes = [c.strip().upper() for c in countries_env.split(",") if c.strip()]
-    out["countryTargeting"] = {"countries": codes, "includeRestOfWorld": False}
 # Carry release notes across if present — Google complains when the
 # destination track is empty of notes for a promoted release.
 if chosen.get("releaseNotes"):
