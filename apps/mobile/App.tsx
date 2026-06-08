@@ -13,6 +13,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
 import { AvatarCacheWarmer } from './src/avatars/AvatarCacheWarmer.js';
+import { PrivacyCover } from './src/components/PrivacyCover.js';
 import { GroupMarkCacheWarmer } from './src/avatars/GroupMarkCacheWarmer.js';
 import { useIdentity } from './src/store/identity.js';
 import { useBlocks } from './src/store/blocks.js';
@@ -976,6 +977,11 @@ export default function App() {
     // already in `authed` state.
     const lifecycleSub = AppState.addEventListener('change', (next) => {
       diag('app', 'AppState change', { next, wsState: ws.getState() });
+      // Privacy cover: paint an opaque sheet over the UI whenever the app
+      // isn't foregrounded-active, so chat content isn't exposed in the
+      // app-switcher thumbnail or during a screen-off→on flash. Cleared
+      // on 'active'. (See PrivacyCover — lightweight, no re-auth.)
+      useUiState.getState().setPrivacyCovered(next !== 'active');
       if (next === 'active') {
         const state = ws.getState();
         // `reconnecting` already has a timer pending — the WS client
@@ -1089,6 +1095,10 @@ export default function App() {
         ) : (
           <SplashScreen />
         )}
+        {/* Opaque privacy sheet — paints over everything while the app is
+            backgrounded / inactive / screen-off (driven by the AppState
+            listener above). Renders null when foregrounded-active. */}
+        <PrivacyCover />
       </ThemeProvider>
     </SafeAreaProvider>
   );

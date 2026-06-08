@@ -158,6 +158,14 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   // have to keep the [0, 1] amplitude smooth.
   const localAmp = useRef(new Animated.Value(0)).current;
   const remoteAmp = useRef(new Animated.Value(0)).current;
+  // Private-call peer mouth driver. The WebRTC getStats `audioLevel`
+  // feeding `remoteAmp` is an AVERAGED RMS that plateaus during sustained
+  // speech, so the jaw freezes open ("mouth stops animating in long
+  // speeches"). The data-channel prosody carries the sender's real
+  // per-window loudness (~30Hz) which dips between syllables, so we drive
+  // the peer jaw from THAT on private calls (same loudness-driven-jaw
+  // design, better source). Falls back to `remoteAmp` when no prosody.
+  const peerMouthAmp = useRef(new Animated.Value(0)).current;
 
   /**
    * Tick once the Private Call init window (1s after entering
@@ -238,6 +246,24 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
     });
     return unsubscribe;
   }, [active?.stage, active?.micMuted, animateMouth, orchestrator, localAmp, remoteAmp]);
+
+  // Private-call peer mouth: track the data-channel prosody loudness
+  // (`peerProsody.amplitude`, the sender's per-window loudnessFast) on
+  // each frame. ~80ms timing — short enough to follow syllables, long
+  // enough not to chatter. The Jaw's own loudness floor closes the mouth
+  // in the gaps. This signal modulates during sustained speech where the
+  // averaged WebRTC audioLevel plateaus, so the jaw no longer freezes.
+  const peerMouthShape = peerProsody?.amplitude;
+  useEffect(() => {
+    if (active?.stage !== 'connected' || !animateMouth) return;
+    if (peerMouthShape === undefined) return;
+    Animated.timing(peerMouthAmp, {
+      toValue: peerMouthShape,
+      duration: 80,
+      easing: Easing.out(Easing.quad),
+      useNativeDriver: false,
+    }).start();
+  }, [active?.stage, animateMouth, peerMouthShape, peerMouthAmp]);
 
   // Auto-dismiss after the orchestrator clears `active` — EXCEPT when
   // the call ended with a filter-failure variant. The brand promise is
@@ -473,7 +499,10 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
           kind="animal"
           id={peerAnimalId}
           size={active.kind === 'private' ? PRIVATE_HERO_SIZE : 120}
-          amplitude={remoteAmp}
+          // Private calls drive the jaw from the data-channel prosody
+          // loudness (never plateaus → no freeze); audio/video calls have
+          // no prosody channel, so they keep the WebRTC-audioLevel path.
+          amplitude={peerProsody ? peerMouthAmp : remoteAmp}
           prosody={peerProsody}
         />
         <Handle value={active.peerUserId} variant="display" />

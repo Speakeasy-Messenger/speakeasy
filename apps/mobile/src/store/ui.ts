@@ -35,6 +35,16 @@ interface UiState {
   storeResetBannerVisible: boolean;
   showStoreResetBanner: () => void;
   dismissStoreResetBanner: () => void;
+  /**
+   * Privacy cover — true while the app is NOT foregrounded-active (it's
+   * backgrounded / inactive / the screen just went off). Driven by the
+   * App.tsx AppState listener; PrivacyCover paints an opaque sheet over
+   * everything so chat content isn't visible in the app-switcher
+   * thumbnail or during a screen-off→on flash. Auto-clears on 'active'
+   * (no re-auth — see plan).
+   */
+  privacyCovered: boolean;
+  setPrivacyCovered: (covered: boolean) => void;
 }
 
 export const useUiState = create<UiState>((set) => ({
@@ -47,4 +57,6 @@ export const useUiState = create<UiState>((set) => ({
   storeResetBannerVisible: false,
   showStoreResetBanner: () => set({ storeResetBannerVisible: true }),
   dismissStoreResetBanner: () => set({ storeResetBannerVisible: false }),
+  privacyCovered: false,
+  setPrivacyCovered: (covered) => set({ privacyCovered: covered }),
 }));
