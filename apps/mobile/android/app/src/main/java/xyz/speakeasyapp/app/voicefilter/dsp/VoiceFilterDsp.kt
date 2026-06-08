@@ -171,21 +171,23 @@ class VoiceFilterDsp(
      */
     const val MAX_FRAME_SAMPLES = 2880
 
-    /** Pitch-shifter selection. Flipped to GRANULAR (false) for the 1.0.x
-     *  latency fix. An offline bench of the actual shifter code (impulse/
-     *  amplitude-step group-delay + 30s RTF, JVM) measured:
-     *    phase vocoder: 30.3 ms added delay, 253 µs/frame
-     *    granular:      19.9 ms added delay,  3.6 µs/frame
-     *  i.e. the vocoder's real algorithmic delay is ~3× the 10.6 ms its
-     *  own doc claimed, and it's the dominant cause of the "voice filter
-     *  adds significant call delay" report (CPU was never the bottleneck).
-     *  Granular cuts ~10 ms of latency + ~99% of the per-frame CPU.
-     *  Tradeoff: granular crackles on sustained vowels and can't do
-     *  independent formant shift (the Smoke/Velvet/Glass profiles converge
-     *  in character). Flip back to `true` to restore the vocoder, or see
-     *  the plan for the window-shrink (1024→512) option that keeps the
-     *  vocoder while cutting its delay. */
-    private const val USE_PHASE_VOCODER = false
+    /** Pitch-shifter selection. `true` = phase vocoder (now at a 512
+     *  window — see PhaseVocoderPitchShifter), `false` = granular.
+     *
+     *  1.0.x latency fix. An offline bench of the ACTUAL shifter code
+     *  (amplitude-step group-delay + 30s RTF on the JVM, no device)
+     *  measured the added call delay + per-frame CPU:
+     *    vocoder @1024 (old): 30.3 ms, 253 µs/frame   ← the delay reported
+     *    vocoder @512  (now): 16.6 ms, 364 µs/frame   ← shipped
+     *    granular:            19.9 ms,   3.6 µs/frame
+     *  The vocoder's delay is ~one analysis window, so halving the window
+     *  (1024→512) nearly halves the delay — to BELOW granular — while
+     *  KEEPING the vocoder's formant control (distinct Smoke/Velvet/Glass,
+     *  no granular crackle). CPU is only ~44% over the already-shipped
+     *  @1024 vocoder and well under the 10 ms/frame budget even at 15×
+     *  mobile slowdown. Granular stays as the `false` fallback (trivial
+     *  CPU) if the @512 voice character isn't acceptable on device. */
+    private const val USE_PHASE_VOCODER = true
   }
 }
 

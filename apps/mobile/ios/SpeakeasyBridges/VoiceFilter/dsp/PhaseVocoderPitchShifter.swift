@@ -21,8 +21,12 @@
 import Foundation
 
 final class PhaseVocoderPitchShifter {
-  private static let FFT_SIZE = Fft1024.SIZE
-  private static let HOP_SIZE = 256
+  // 512 window (was 1024) for the 1.0.x latency fix — halves the added
+  // call delay (measured 30.3 ms @1024 → 16.6 ms @512) while keeping
+  // formant control. 75% overlap preserved (HOP 128 of 512). Mirror of
+  // the Kotlin change.
+  private static let FFT_SIZE = Fft512.SIZE
+  private static let HOP_SIZE = 128
   private static let HALF_FFT = FFT_SIZE / 2
   private static let OLA_GAIN: Float = 1.0 / 1.5
   /// Cepstral envelope cutoff (quefrency bins). See Kotlin mirror
@@ -34,7 +38,7 @@ final class PhaseVocoderPitchShifter {
   /// (Phase 2a behavior). >1.0 = formants up; <1.0 = formants down.
   private let formantFactor: Float
 
-  private let fft = Fft1024()
+  private let fft = Fft512()
   private let hann: [Float]
 
   // Input ring + analysis state.

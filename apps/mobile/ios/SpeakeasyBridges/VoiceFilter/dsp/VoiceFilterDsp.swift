@@ -19,15 +19,14 @@ import Foundation
 
 final class VoiceFilterDsp: SampleFilter {
 
-  /// Pitch-shifter selection. Flipped to GRANULAR (false) for the 1.0.x
-  /// latency fix — an offline bench of the actual shifter code measured
-  /// the phase vocoder at 30.3 ms added delay vs granular 19.9 ms (and the
-  /// vocoder at ~70× the per-frame CPU). The vocoder's real algorithmic
-  /// delay is ~3× the 10.6 ms its doc claimed and is the dominant cause of
-  /// the call-delay report. Granular cuts ~10 ms latency + nearly all CPU;
-  /// tradeoff is crackle on sustained vowels + no independent formant
-  /// shift. Mirror of the Android toggle. Flip back to `true` to restore.
-  private static let USE_PHASE_VOCODER: Bool = false
+  /// Pitch-shifter selection. `true` = phase vocoder (now a 512 window),
+  /// `false` = granular. 1.0.x latency fix: an offline bench measured the
+  /// vocoder @1024 at 30.3 ms added delay; halving the window to 512 cut
+  /// it to 16.6 ms (below granular's 19.9 ms) while KEEPING the
+  /// Smoke/Velvet/Glass formant masks (no granular crackle). CPU stays
+  /// under the 10 ms/frame budget. Granular is the `false` fallback.
+  /// Mirror of the Android toggle.
+  private static let USE_PHASE_VOCODER: Bool = true
 
   private let factor: Float
   private let formantFactor: Float

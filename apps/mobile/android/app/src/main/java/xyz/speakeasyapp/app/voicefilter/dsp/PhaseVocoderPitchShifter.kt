@@ -44,14 +44,14 @@ import kotlin.math.sqrt
  *
  * # Latency
  *
- * CORRECTION (1.0.x bench): the real added group delay is **~30 ms**
- * (1453 samples @ 48 kHz), measured offline by running this exact class
- * against an amplitude-step probe — NOT the `FFT_SIZE/2 = 512` / 10.6 ms
- * once claimed here. The full analysis window plus the output-ring
- * overlap-add offset dominate. The granular shifter measured ~20 ms, so
- * granular is currently the default (see USE_PHASE_VOCODER). To make this
- * vocoder competitive on latency, halve the window (FFT_SIZE 1024→512),
- * which roughly halves the group delay while keeping formant preservation.
+ * Added group delay ≈ one analysis window. Measured offline (this exact
+ * class, amplitude-step probe, JVM): **30.3 ms at FFT_SIZE=1024**, not the
+ * `FFT_SIZE/2` / 10.6 ms once claimed here — the window + output-ring
+ * overlap-add offset dominate. The 1.0.x latency fix halved the window to
+ * **FFT_SIZE=512 → 16.6 ms** (below the granular fallback's ~20 ms) while
+ * keeping formant preservation. Trade: coarser bins (94 Hz vs 47),
+ * slightly more metallic on sustained vowels. Going smaller still (256)
+ * would cut delay further at a steeper quality cost.
  *
  * # Allocation
  *
@@ -78,15 +78,18 @@ internal class PhaseVocoderPitchShifter(
     private val formantFactor: Float = 1f,
 ) {
   companion object {
-    /** Analysis + synthesis FFT length. Power of two for FFT, large
-     *  enough that 80Hz speech fundamentals get adequate bin
-     *  resolution (48000/1024 ≈ 47 Hz/bin). */
-    private const val FFT_SIZE = Fft1024.SIZE
-    /** Frame advance. 75% overlap (256 of 1024) is the canonical
-     *  choice for voice — high enough that the synthesis Hann
-     *  reconstructs flat (after squared-window overlap sum = const),
-     *  low enough that CPU stays cheap. */
-    private const val HOP_SIZE = 256
+    /** Analysis + synthesis FFT length. 512 (was 1024) for the 1.0.x
+     *  latency fix: the group delay is ~one window, so halving the window
+     *  ~halves the added call delay (measured 30ms@1024 → ~15ms@512).
+     *  Bin resolution coarsens to 48000/512 ≈ 94 Hz/bin (was 47) — a bit
+     *  more metallic on sustained vowels, the accepted trade for cutting
+     *  latency while KEEPING the vocoder's formant control (vs the
+     *  cracklier granular fallback). */
+    private const val FFT_SIZE = Fft512.SIZE
+    /** Frame advance. 75% overlap (128 of 512) — same overlap ratio as
+     *  before (256 of 1024), so the OLA_GAIN below is unchanged and the
+     *  Hann synthesis still reconstructs flat. */
+    private const val HOP_SIZE = 128
     private const val HALF_FFT = FFT_SIZE / 2
     /** Output gain compensates for the overlap-add of the squared
      *  Hann window. At 75% overlap with Hann analysis + synthesis,
@@ -108,7 +111,7 @@ internal class PhaseVocoderPitchShifter(
     private const val ENV_FLOOR = 1e-6f
   }
 
-  private val fft = Fft1024()
+  private val fft = Fft512()
   private val hann = FloatArray(FFT_SIZE).also { w ->
     // Periodic Hann (N samples spanning [0, 2π)).
     for (i in 0 until FFT_SIZE) {
