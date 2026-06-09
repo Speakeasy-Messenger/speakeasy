@@ -22,6 +22,7 @@ import { SEND_TEXT_MAX_CHARS } from '../components/rich-message-text.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
+import { collectGalleryImages } from '../feed/gallery-images.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import { SystemMessageRow } from '../components/SystemMessageRow.js';
@@ -204,6 +205,10 @@ export function GroupChatScreen({
   // bottom — the newest message must come first. The store keeps
   // messages oldest-first, so feed the list a reversed copy.
   const orderedMessages = useMemo(() => [...messages].reverse(), [messages]);
+  // Every viewable (image/gif) attachment in this room, in chat order —
+  // powers swipe-through paging in the media viewer. See
+  // collectGalleryImages.
+  const galleryImages = useMemo(() => collectGalleryImages(messages), [messages]);
   // Date-change separators interleaved into the inverted-list data so
   // "Today" / "Yesterday" / etc. sit above the first message of each
   // day. See `withDateSeparators` for the visual-layout reasoning.
@@ -575,10 +580,10 @@ export function GroupChatScreen({
       >
         {viewerAttachment ? (
           <MediaViewerScreen
-            data={viewerAttachment.data}
-            mime={viewerAttachment.mime}
+            items={galleryImages}
+            initialIndex={galleryImages.indexOf(viewerAttachment)}
             onClose={() => setViewerAttachment(null)}
-            onSave={() => void saveAndAnnounceFile(viewerAttachment)}
+            onSave={(a) => void saveAndAnnounceFile(a)}
           />
         ) : null}
       </Modal>
