@@ -1,0 +1,5 @@
+• Private calls are snappier — we roughly halved the voice-filter delay.
+• Your animal's mouth now keeps moving naturally through long sentences.
+• New privacy screen — your chats are hidden when you switch apps or the screen turns off.
+• Cleaner emoji and long-message display.
+• Stability and polish under the hood.

@@ -83,16 +83,29 @@ echo "3/4 Setting ${TRACK} track release (${RELEASE_NAME}, status=${RELEASE_STAT
 # here so it has to be exported into python's env this way;
 # TRACK/RELEASE_NAME/RELEASE_STATUS are already in env via the
 # workflow's env block, so python inherits them automatically.
-track_body=$(VERSION_CODE="$version_code" python3 -c "
+# Release notes ("What's new") for this version. Read the per-versionCode
+# changelog, falling back to default.txt; absent → the release ships with
+# no notes (the prior behaviour). Play caps notes at 500 chars/language.
+CHANGELOG_DIR="fastlane/metadata/android/en-US/changelogs"
+NOTES_FILE="${CHANGELOG_DIR}/${version_code}.txt"
+[ -f "$NOTES_FILE" ] || NOTES_FILE="${CHANGELOG_DIR}/default.txt"
+RELEASE_NOTES=""
+if [ -f "$NOTES_FILE" ]; then
+  RELEASE_NOTES="$(cat "$NOTES_FILE")"
+  echo "  release notes from: $NOTES_FILE"
+fi
+
+track_body=$(VERSION_CODE="$version_code" RELEASE_NOTES="$RELEASE_NOTES" python3 -c "
 import json, os
-print(json.dumps({
-  'track': os.environ['TRACK'],
-  'releases': [{
-    'name': os.environ['RELEASE_NAME'],
-    'status': os.environ['RELEASE_STATUS'],
-    'versionCodes': [os.environ['VERSION_CODE']],
-  }],
-}))
+release = {
+  'name': os.environ['RELEASE_NAME'],
+  'status': os.environ['RELEASE_STATUS'],
+  'versionCodes': [os.environ['VERSION_CODE']],
+}
+notes = os.environ.get('RELEASE_NOTES', '').strip()
+if notes:
+  release['releaseNotes'] = [{'language': 'en-US', 'text': notes}]
+print(json.dumps({'track': os.environ['TRACK'], 'releases': [release]}))
 ")
 
 api PUT "${API}/edits/${edit_id}/tracks/${TRACK}" \
