@@ -53,7 +53,7 @@ jobs:
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
         with:
-          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;26.1.10909125 cmake;3.22.1'
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1'
 
       - name: Cache Gradle
         uses: actions/cache@v5
@@ -111,6 +111,13 @@ jobs:
           # Mirror app/build.gradle: code = (M*10000+m*100+p)*1000 + sub,
           # sub = rc number for alpha-<semver>-rc.N, else 999 for v<semver>.
           case "$tag" in
+            v*-hotfix.*)
+              # GA hotfix re-cut: versionName stays the base GA semver, the
+              # versionCode advances into the 1000+ hotfix sub-range (see
+              # app/build.gradle computedVersionCode). v1.0.1-hotfix.1 →
+              # name 1.0.1, code (10001)*1000 + (999+1) = 10002000.
+              base_name="${tag#v}"; expected_name="${base_name%-hotfix.*}"
+              hf="${tag##*-hotfix.}"; sub=$((999 + 10#$hf)) ;;
             v*)  expected_name="${tag#v}";     sub=999 ;;
             *)   expected_name="${tag#alpha-}"; sub="${tag##*-rc.}" ;;
           esac

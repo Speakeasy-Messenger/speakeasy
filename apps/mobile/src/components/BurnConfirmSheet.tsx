@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TtlOption } from '@speakeasy/shared';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
@@ -40,6 +41,8 @@ export function BurnConfirmSheet({
   onConfirm,
 }: Props): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   return (
     <Modal
       visible={visible}
@@ -56,7 +59,11 @@ export function BurnConfirmSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="burn-confirm-sheet"
         >

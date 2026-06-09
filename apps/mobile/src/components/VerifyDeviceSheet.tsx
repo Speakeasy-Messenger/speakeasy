@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
@@ -17,6 +18,8 @@ import type { VerificationReason } from '../auth/verify-device-types.js';
  */
 export function VerifyDeviceSheet(): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   const pending = useVerifySheet((s) => s.pending);
   const confirm = useVerifySheet((s) => s.confirm);
   const cancel = useVerifySheet((s) => s.cancel);
@@ -37,7 +40,11 @@ export function VerifyDeviceSheet(): React.ReactElement {
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="verify-device-sheet"
         >

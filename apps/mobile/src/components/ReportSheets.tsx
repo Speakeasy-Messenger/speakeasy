@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import { Modal, Pressable, StyleSheet, Text, TextInput, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ABUSE_REPORT_DETAIL_MAX_CHARS, type AbuseReportReason } from '@speakeasy/shared';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
@@ -63,6 +64,8 @@ export function ReportConfirmSheet({
   onSubmit,
 }: Props): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the action buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   // Reset internal step whenever the sheet re-opens — re-opening after
   // close should always land on the reason picker, not the confirm
   // step from the previous run.
@@ -104,7 +107,11 @@ export function ReportConfirmSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="report-confirm-sheet"
         >

@@ -1,6 +1,7 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import Svg, { Circle, Path, Rect } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 import { useCallCapabilities } from '../store/call-capabilities.js';
@@ -42,6 +43,9 @@ export function CallTypeSheet({
   onPickVideo,
 }: Props): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: pad the sheet's bottom past the gesture/3-button nav
+  // bar so the Cancel row never sits behind it (matches AcquireSheet).
+  const insets = useSafeAreaInsets();
   // Hide Video only when we have FRESH capability data that excludes it
   // (the peer refuses video). Stale/absent → show it; the server is the
   // authoritative gate.
@@ -68,7 +72,11 @@ export function CallTypeSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="call-type-sheet"
         >

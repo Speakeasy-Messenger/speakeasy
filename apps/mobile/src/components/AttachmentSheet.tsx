@@ -7,6 +7,7 @@ import {
   View,
 } from 'react-native';
 import Svg, { Path, Rect } from 'react-native-svg';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space, type as typeScale } from '../theme/tokens.js';
 
@@ -43,6 +44,8 @@ export function AttachmentSheet({
   onPickFile,
 }: Props): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the bottom action row isn't behind it.
+  const insets = useSafeAreaInsets();
 
   useEffect(() => {
     if (!visible) return;
@@ -65,7 +68,11 @@ export function AttachmentSheet({
       <View
         style={[
           styles.sheet,
-          { backgroundColor: themed.cream, borderTopColor: themed.divider },
+          {
+            backgroundColor: themed.cream,
+            borderTopColor: themed.divider,
+            paddingBottom: insets.bottom + space.xxl,
+          },
         ]}
         testID="attach-sheet"
       >

@@ -68,7 +68,12 @@ def computedVersionName = {
         return rawVersionTag.substring("alpha-".length())
     }
     if (rawVersionTag ==~ /^v\d.*/) {
-        return rawVersionTag.substring(1)
+        // Strip the leading `v` and any `-hotfix.N` suffix so a re-cut of
+        // a shipped GA keeps the same user-facing version string:
+        //   v1.0.1         → "1.0.1"
+        //   v1.0.1-hotfix.1 → "1.0.1"  (16 KB / edge-to-edge re-cut)
+        // The hotfix only moves versionCode (below), never versionName.
+        return rawVersionTag.substring(1).replaceAll(/-hotfix\.\d+$/, "")
     }
     return rawVersionTag
 }()
@@ -76,20 +81,34 @@ def computedVersionName = {
 def computedVersionCode = {
     // Unified monotonic scheme: code = base*1000 + sub
     //   base = major*10000 + minor*100 + patch   (the semver in the name)
-    //   sub  = rc number (1..998) for an alpha rc, else 999 for a final/GA
-    // Guarantees every rc sits below its own final, every version's codes
-    // sit above all earlier versions', and ALL sit above the first GA — so
-    // the alpha line stays a valid Play upgrade after 1.0.0 went live:
-    //   alpha-1.0.1-rc.1 → 10001001 ; v1.0.1 → 10001999 ; v1.1.0 → 11000999
-    // (Historical note: v1.0.0 shipped under an earlier simple scheme as
-    //  code 10000; every code this scheme produces is > 10000, so the line
-    //  stays monotonic.) MUST be a positive integer — AGP rejects 0 — so a
-    //  SHA-only / non-semver off-tag build falls back to 1 (never shipped).
+    //   sub  = rc number (1..998)   for an alpha rc
+    //          999                  for a final/GA
+    //          999+N (1000..)       for the Nth hotfix re-cut of a GA
+    // Guarantees every rc sits below its own final, every final sits below
+    // its own hotfixes, and every version's codes sit above all earlier
+    // versions' — so the line stays a valid Play upgrade after 1.0.0:
+    //   alpha-1.0.1-rc.1 → 10001001 ; v1.0.1 → 10001999 ;
+    //   v1.0.1-hotfix.1 → 10002000 ; v1.1.0 → 11000999
+    // The hotfix sub-range (1000..) stays below the next patch's rc range
+    // (v1.0.2 would be base 10002 → 10002001..), so a hotfix of v1.0.1 is
+    // distinct from anything a v1.0.2 line produces. (Historical note:
+    // v1.0.0 shipped under an earlier simple scheme as code 10000; every
+    // code this scheme produces is > 10000, so the line stays monotonic.)
+    // MUST be a positive integer — AGP rejects 0 — so a SHA-only /
+    // non-semver off-tag build falls back to 1 (never shipped).
     def sv = computedVersionName =~ /^(\d+)\.(\d+)\.(\d+)/
     if (!sv.find()) return 1
     def base = sv.group(1).toInteger() * 10000 + sv.group(2).toInteger() * 100 + sv.group(3).toInteger()
     def rc = rawVersionTag =~ /-rc\.(\d+)$/
-    def sub = rc.find() ? rc.group(1).toInteger() : 999
+    def hotfix = rawVersionTag =~ /-hotfix\.(\d+)$/
+    def sub
+    if (rc.find()) {
+        sub = rc.group(1).toInteger()           // alpha rc: 1..998
+    } else if (hotfix.find()) {
+        sub = 999 + hotfix.group(1).toInteger() // GA hotfix re-cut: 1000..
+    } else {
+        sub = 999                               // final / GA
+    }
     return base * 1000 + sub
 }()
 
@@ -564,9 +583,12 @@ dependencies {
     // RN's bundled <Image> renders only the first frame of GIFs by
     // default — Fresco's animated-gif backend has to be added
     // explicitly. Pin the version to match the Fresco bundled with
-    // RN 0.76 (3.2.0). Without this, GIF attachments render as a
-    // single frozen frame.
-    implementation("com.facebook.fresco:animated-gif:3.2.0")
+    // RN 0.77 (3.4.0 — see node_modules/react-native/gradle/libs.versions.toml).
+    // 3.4.0 also ships a 16 KB-page-aligned libgifimage.so (3.2.0/3.3.0
+    // were 0x1000) — required for Play `completed` validation; it was the
+    // last 4 KB-aligned lib in the v1.0.1 AAB. Without animated-gif at all,
+    // GIF attachments render as a single frozen frame.
+    implementation("com.facebook.fresco:animated-gif:3.4.0")
 
     // Phase 5b: Vouchflow Android SDK — wraps Android Keystore + biometrics
     // + Play Integrity attestation for device-native verification.
@@ -583,13 +605,24 @@ dependencies {
     // (vouchflow/android-sdk#1); it falls back to Keystore-only storage.
     implementation("dev.vouchflow:android-sdk:2.1.1")
 
+    // libsignal note (v1.0.1 16 KB re-cut): bumped 0.59.0 → 0.69.1.
+    // 0.69.1 is the FIRST libsignal-android release whose prebuilt
+    // libsignal_jni.so is 16 KB-page-aligned (LOAD p_align 0x4000) on
+    // both arm64-v8a and x86_64 — verified by readelf against every
+    // release from 0.59.0..0.73.3 (0.69.0 and earlier are 0x1000).
+    // This is the smallest jump from our shipped 0.59.0, minimizing
+    // API churn. Core protocol/state serialization (SessionRecord,
+    // PreKeyRecord, identity keys) is protobuf and backward-compatible,
+    // so v1.0.0 users' stored sessions deserialize unchanged — this is
+    // a device-verification item (see release notes / plan risk #1).
+
     // Phase 5b: Signal Protocol — official AGPLv3 library from Open Whisper
     // Systems. Rust-backed implementation of Double Ratchet + X3DH on top of
     // platform crypto. Speakeasy is open source (AGPL-compatible) so the
     // license is fine. The spec's earlier "Conscrypt + BouncyCastle" wording
     // referred to the underlying primitives; libsignal uses platform crypto
     // under the hood, which is the spec's actual intent.
-    implementation("org.signal:libsignal-android:0.59.0")
+    implementation("org.signal:libsignal-android:0.69.1")
     // Required for libsignal-android (java.time backport on minSdk 28).
     coreLibraryDesugaring("com.android.tools:desugar_jdk_libs:2.0.4")
 

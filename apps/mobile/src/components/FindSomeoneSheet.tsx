@@ -7,6 +7,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { isUserId } from '@speakeasy/shared';
 import { Handle } from './Handle.js';
 import { PortraitTile } from './PortraitTile.js';
@@ -98,6 +99,9 @@ export function FindSomeoneSheet({
   roomName,
 }: Props): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: pad the sheet's bottom past the nav bar (the sheet is
+  // position:absolute bottom:0, so it sits on the true screen edge).
+  const insets = useSafeAreaInsets();
   const myUserId = useIdentity((s) => s.userId);
   const isBlocked = useBlocks((s) => s.isBlocked);
   const unblock = useBlocks((s) => s.unblock);
@@ -262,7 +266,11 @@ export function FindSomeoneSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="find-sheet"
         >
