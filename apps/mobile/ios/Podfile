@@ -65,5 +65,29 @@ target 'Speakeasy' do
       :mac_catalyst_enabled => false,
       # :ccache_enabled => true
     )
+
+    # RN 0.77 bundles {fmt} 11.0.2 (pinned exactly by RCT-Folly). On modern
+    # Apple Clang (Xcode 16.3+ / 26) fmt 11.0.2's internal FMT_COMPILE_STRING
+    # call sites trip "call to consteval function ... is not a constant
+    # expression" in fmt/format-inl.h, failing the fmt pod compile (fixed
+    # upstream in fmt 11.1, but RCT-Folly can't take it; RN 0.76.5's older
+    # fmt didn't hit this). A -DFMT_USE_CONSTEVAL=0 define doesn't help —
+    # fmt/base.h *redefines* FMT_USE_CONSTEVAL itself by compiler detection
+    # (Apple clang >=14 -> 1), overriding any predefine. So patch base.h
+    # directly to force the consteval branches off: FMT_CONSTEVAL then
+    # expands to empty (constexpr-only format-string checking) instead of
+    # `consteval` — no runtime behavior change. Idempotent; re-applied on
+    # every pod install.
+    fmt_base = File.join(installer.sandbox.root, 'fmt', 'include', 'fmt', 'base.h')
+    if File.exist?(fmt_base)
+      contents = File.read(fmt_base)
+      patched = contents.gsub("#  define FMT_USE_CONSTEVAL 1", "#  define FMT_USE_CONSTEVAL 0")
+      if patched != contents
+        # CocoaPods marks pod source files read-only — make writable first.
+        File.chmod(0644, fmt_base)
+        File.write(fmt_base, patched)
+        Pod::UI.puts "[Speakeasy] Patched fmt base.h: FMT_USE_CONSTEVAL forced 0 (Xcode 16.3+ consteval fix)".green
+      end
+    end
   end
 end
