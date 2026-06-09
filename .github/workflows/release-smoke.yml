@@ -1,0 +1,201 @@
+name: Release smoke (minified release + API 35)
+
+# Closes the gap that let v1.0.1-hotfix.1 reach the internal track broken:
+# nothing exercised a MINIFIED RELEASE build, and the Tier-B Maestro suite
+# (a) is manual-only and (b) runs debug builds on API 30.
+#
+#   - tsc / vitest / lint never run the app — can't see a runtime crash.
+#   - Tier-B runs the *debug* build (Metro), where R8 never runs — so the
+#     release-only `ClassNotFoundException: ReactModalHostView` (R8
+#     renamed a reflectively-loaded RN view) was invisible to it.
+#   - Tier-B runs API 30 — can't reproduce API-35 forced-edge-to-edge
+#     regressions (keyboard hidden behind IME, FAB under the nav bar).
+#
+# This workflow builds the minified release APK and gates on:
+#   1. R8 guard (deterministic) — assert the RN view classes RN 0.77
+#      resolves reflectively by name are present UN-OBFUSCATED in the dex.
+#      This is the reliable catch for the Modal-class bug: a runtime
+#      emulator flow can't reach a <Modal> without a second enrolled peer
+#      (self-DM is disallowed), so a dex assertion is the right gate.
+#   2. 16 KB guard (deterministic) — every 64-bit .so LOAD p_align >= 0x4000
+#      (Play `completed` validation rejects otherwise; only Google catches
+#      it today).
+#   3. API-35 enroll smoke — install the release APK on an Android-15
+#      emulator and run the enroll flow: catches startup R8 crashes and
+#      basic API-35 rendering that debug/API-30 can't.
+
+on:
+  pull_request:
+    branches: [main]
+    paths:
+      - 'apps/mobile/**'
+      - 'packages/**'
+      - '.github/workflows/release-smoke.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  release-smoke:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v6
+
+      # KVM for the hardware-accelerated emulator (same as Tier B).
+      - name: Enable KVM
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' \
+            | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - uses: actions/setup-java@v5
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-35 build-tools;35.0.0 ndk;27.1.12297006 cmake;3.22.1'
+
+      - name: Cache Gradle
+        uses: actions/cache@v5
+        with:
+          path: |
+            ~/.gradle/caches
+            ~/.gradle/wrapper
+            apps/mobile/android/.gradle
+          key: gradle-smoke-${{ runner.os }}-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/**/gradle-wrapper.properties') }}
+          restore-keys: |
+            gradle-smoke-${{ runner.os }}-
+            gradle-${{ runner.os }}-
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Install Maestro
+        run: |
+          curl -Ls "https://get.maestro.mobile.dev" | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Point mobile config at the in-runner api server
+        env:
+          API_BASE_URL: http://10.0.2.2:8080
+          WS_URL: ws://10.0.2.2:8080/ws
+        run: node apps/mobile/scripts/write-test-config.mjs
+
+      - name: Build minified release APK (R8 on, sandbox Vouchflow)
+        working-directory: apps/mobile/android
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
+            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set"; exit 1
+          fi
+          rm -rf ../../node_modules/.cache/metro /tmp/metro-* || true
+          ./gradlew :app:assembleRelease --no-daemon -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY"
+
+      - name: R8 guard — reflectively-loaded RN view classes must survive minification
+        # RN 0.77 resolves these by full class name via reflection
+        # (Class.forName). If R8 renames/strips them, the app crashes the
+        # moment the component mounts. ReactModalHostView is the one that
+        # bit v1.0.1-hotfix.1 (every <Modal>: media viewer, attachment
+        # open, confirm sheets). Assert the class DESCRIPTORS are present
+        # un-obfuscated in the dex.
+        run: |
+          set -euo pipefail
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          work="$RUNNER_TEMP/r8guard"; rm -rf "$work"; mkdir -p "$work"
+          unzip -oq "$apk" 'classes*.dex' -d "$work"
+          required=(
+            "Lcom/facebook/react/views/modal/ReactModalHostView;"
+            "Lcom/facebook/react/views/modal/ReactModalHostManager;"
+          )
+          fail=0
+          for desc in "${required[@]}"; do
+            if strings -a "$work"/classes*.dex | grep -qF "$desc"; then
+              echo "ok: $desc present (un-obfuscated)"
+            else
+              echo "::error::$desc is missing from the release dex — R8 renamed/stripped a reflectively-loaded RN view. Add a keep rule in app/proguard-rules.pro."
+              fail=1
+            fi
+          done
+          exit $fail
+
+      - name: 16 KB guard — every 64-bit .so must be 16 KB page-aligned
+        run: |
+          set -euo pipefail
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
+          work="$RUNNER_TEMP/align"; rm -rf "$work"; mkdir -p "$work"
+          unzip -oq "$apk" 'lib/*' -d "$work"
+          fail=0; total=0
+          for abi in arm64-v8a x86_64; do
+            for so in "$work"/lib/"$abi"/*.so; do
+              [ -f "$so" ] || continue
+              total=$((total+1)); min=999999999
+              for a in $(readelf -lW "$so" | awk '$1=="LOAD"{print $NF}'); do
+                d=$((a)); [ "$d" -lt "$min" ] && min=$d
+              done
+              if [ "$min" -lt 16384 ]; then
+                printf '::error::%s/%s LOAD p_align=0x%x (< 0x4000) — not 16 KB aligned\n' "$abi" "$(basename "$so")" "$min"
+                fail=1
+              fi
+            done
+          done
+          echo "checked $total 64-bit libs"
+          [ "$total" -gt 0 ] || { echo "::error::no 64-bit libs found in APK"; exit 1; }
+          exit $fail
+
+      - name: API-35 launch + render smoke (minified release build)
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          target: google_apis
+          arch: x86_64
+          profile: pixel_7
+          force-avd-creation: false
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 2048
+          disable-animations: true
+          # stayon + dismiss-keyguard — keep the screen on so the keyguard
+          # doesn't re-engage between clearState and the launch (see Tier B).
+          # smoke-launch.yaml launches the minified release build and waits
+          # for the first onboarding screen — catches a startup R8 crash or
+          # a gross API-35 render failure. It needs no api server and stops
+          # before the network/biometric/handle steps where GHA emulator
+          # flakiness lives (deeper flows: manual Tier-B + on-device pass).
+          # NOTE: the action runs the script as one sh -c, so the retry
+          # loop stays on a single &&-chain (vars persist). Maestro's
+          # clearState→launchApp can race on a cold emulator ("Unable to
+          # launch app") — a flaky launch, not an app fault. Retry up to
+          # 3x; fail only if all attempts fail. The deterministic R8 +
+          # 16 KB guards above are the hard gate; this adds API-35 render.
+          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time ReactNativeJS:V ReactNative:V AndroidRuntime:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && ( adb shell pm grant xyz.speakeasyapp.app android.permission.POST_NOTIFICATIONS || true ) && ok=0 && for i in 1 2 3; do adb shell wm dismiss-keyguard; adb shell am force-stop xyz.speakeasyapp.app; sleep 3; if timeout 180 maestro test apps/mobile/maestro/smoke-launch.yaml --debug-output /tmp/maestro-01-$i; then ok=1; break; fi; echo "launch smoke attempt $i failed — retrying"; sleep 5; done && [ "$ok" = 1 ]
+
+      - name: Assert no release-build crash in logcat
+        if: always()
+        run: |
+          if grep -qE "ClassNotFoundException|FATAL EXCEPTION" /tmp/logcat.txt 2>/dev/null; then
+            echo "::error::release build crashed on the emulator:"
+            grep -E "ClassNotFoundException|FATAL EXCEPTION|screen boundary" /tmp/logcat.txt | head -20
+            exit 1
+          fi
+          echo "no ClassNotFound / FATAL in logcat"
+
+      - name: Dump diagnostics on failure
+        if: failure()
+        timeout-minutes: 3
+        run: |
+          set +e
+          echo "::group::api server log"; cat /tmp/api-server.log 2>/dev/null; echo "::endgroup::"
+          echo "::group::logcat"; tail -200 /tmp/logcat.txt 2>/dev/null; echo "::endgroup::"
+          echo "::group::maestro debug"; find /tmp/maestro-01-* -maxdepth 4 -type f 2>/dev/null | head -40; echo "::endgroup::"
