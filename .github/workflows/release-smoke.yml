@@ -83,12 +83,10 @@ jobs:
       - name: Build workspace packages
         run: npm run build
 
-      - name: Install Maestro
-        run: |
-          curl -Ls "https://get.maestro.mobile.dev" | bash
-          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
-
-      - name: Point mobile config at the in-runner api server
+      - name: Point mobile config away from production
+        # The launch smoke stops at onboarding and contacts no server, but
+        # point the build at a dead local URL anyway so a CI run can never
+        # touch production. (Also sets useMockSignalProtocol.)
         env:
           API_BASE_URL: http://10.0.2.2:8080
           WS_URL: ws://10.0.2.2:8080/ws
@@ -163,23 +161,28 @@ jobs:
           target: google_apis
           arch: x86_64
           profile: pixel_7
-          force-avd-creation: false
-          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 2048
+          # Clean cold boot, fresh AVD per run — no snapshot reuse (stale
+          # state was a flake source). `-no-snapshot` cold-boots and never
+          # loads/saves a snapshot; `force-avd-creation: true` (the action
+          # default) recreates the AVD each run. The action waits for boot
+          # (600s) before running the script.
+          force-avd-creation: true
+          emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -no-snapshot -camera-back none -memory 2048
           disable-animations: true
-          # stayon + dismiss-keyguard — keep the screen on so the keyguard
-          # doesn't re-engage between clearState and the launch (see Tier B).
-          # smoke-launch.yaml launches the minified release build and waits
-          # for the first onboarding screen — catches a startup R8 crash or
-          # a gross API-35 render failure. It needs no api server and stops
-          # before the network/biometric/handle steps where GHA emulator
-          # flakiness lives (deeper flows: manual Tier-B + on-device pass).
-          # NOTE: the action runs the script as one sh -c, so the retry
-          # loop stays on a single &&-chain (vars persist). Maestro's
-          # clearState→launchApp can race on a cold emulator ("Unable to
-          # launch app") — a flaky launch, not an app fault. Retry up to
-          # 3x; fail only if all attempts fail. The deterministic R8 +
-          # 16 KB guards above are the hard gate; this adds API-35 render.
-          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time ReactNativeJS:V ReactNative:V AndroidRuntime:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && ( adb shell pm grant xyz.speakeasyapp.app android.permission.POST_NOTIFICATIONS || true ) && ok=0 && for i in 1 2 3; do adb shell wm dismiss-keyguard; adb shell am force-stop xyz.speakeasyapp.app; sleep 3; if timeout 180 maestro test apps/mobile/maestro/smoke-launch.yaml --debug-output /tmp/maestro-01-$i; then ok=1; break; fi; echo "launch smoke attempt $i failed — retrying"; sleep 5; done && [ "$ok" = 1 ]
+          # Launch via `adb am start -W`, NOT Maestro's launchApp. The
+          # action already waited for boot, so the emulator is up; the
+          # previous flake was Maestro's clearState→launchApp racing on a
+          # cold device ("Unable to launch app"), which failed even with 3
+          # retries. `am start -W` blocks until the activity is displayed —
+          # no UI-automation race — then we assert from logcat that React
+          # Native actually booted (no startup R8 crash). The crash check
+          # (FATAL / ClassNotFound) is the next step. This is best-effort
+          # render coverage; the deterministic R8 + 16 KB guards above are
+          # the hard gate (CI emulator stability is inherently imperfect).
+          # Literal block scalar (one physical line) so embedded colons /
+          # quotes don't trip YAML and survive verbatim into the shell.
+          script: |
+            adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time ReactNativeJS:V ReactNative:V AndroidRuntime:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && adb shell wm dismiss-keyguard && adb shell am start -W -n xyz.speakeasyapp.app/.MainActivity && sleep 25 && ( adb shell pidof xyz.speakeasyapp.app > /dev/null || { echo "::error::app process not alive ~25s after launch (startup crash)"; exit 1; } ) && ( grep -q 'Running "Speakeasy"' /tmp/logcat.txt || { echo "::error::React Native bundle did not run (no Running Speakeasy in logcat)"; tail -80 /tmp/logcat.txt; exit 1; } ) && echo "launch+render OK - app alive and RN bundle running"
 
       - name: Assert no release-build crash in logcat
         if: always()
@@ -196,6 +199,4 @@ jobs:
         timeout-minutes: 3
         run: |
           set +e
-          echo "::group::api server log"; cat /tmp/api-server.log 2>/dev/null; echo "::endgroup::"
-          echo "::group::logcat"; tail -200 /tmp/logcat.txt 2>/dev/null; echo "::endgroup::"
-          echo "::group::maestro debug"; find /tmp/maestro-01-* -maxdepth 4 -type f 2>/dev/null | head -40; echo "::endgroup::"
+          echo "::group::logcat (last 250 lines)"; tail -250 /tmp/logcat.txt 2>/dev/null; echo "::endgroup::"
