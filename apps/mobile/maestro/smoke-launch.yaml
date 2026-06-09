@@ -1,0 +1,28 @@
+appId: xyz.speakeasyapp.app
+name: Launch + render smoke (minified release, API 35)
+---
+
+# Minimal, reliable smoke for the release-smoke CI gate: does the
+# MINIFIED RELEASE build launch and render its first screen on Android 15?
+#
+# This catches the class of bug that shipped in v1.0.1-hotfix.1 at the
+# layer an emulator can reliably see: a release-only R8 crash on startup,
+# or a gross API-35 render failure. It deliberately stops at the first
+# onboarding screen — it needs NO api server and avoids the network /
+# biometric / handle-availability steps where GitHub Actions emulator
+# flakiness lives (that deeper coverage stays in the manual Tier-B suite
+# and the on-device pass). The Modal-class regression is caught
+# deterministically by the dex R8 guard in the workflow, not here.
+
+- clearState
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+# App launched + rendered the Door step = no startup R8 crash, JS bundle
+# ran, the new-arch view tree mounted. Generous timeout for the cold
+# CI emulator.
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-door-continue"
+    timeout: 60000

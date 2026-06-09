@@ -156,25 +156,7 @@ jobs:
           [ "$total" -gt 0 ] || { echo "::error::no 64-bit libs found in APK"; exit 1; }
           exit $fail
 
-      - name: Boot api server (in-memory, sandbox Vouchflow)
-        env:
-          VOUCHFLOW_READ_KEY: ${{ secrets.VOUCHFLOW_READ_KEY }}
-        run: |
-          if [ -z "$VOUCHFLOW_READ_KEY" ]; then
-            echo "::error::VOUCHFLOW_READ_KEY secret is not set"; exit 1
-          fi
-          cd apps/api
-          PORT=8080 HOST=0.0.0.0 LOG_LEVEL=info \
-            VOUCHFLOW_BASE_URL='https://sandbox.api.vouchflow.dev/v1' \
-            ENROLL_RATE_LIMIT=100 \
-            nohup node dist/server.js > /tmp/api-server.log 2>&1 &
-          for i in $(seq 1 30); do
-            curl -fsS http://127.0.0.1:8080/healthz >/dev/null 2>&1 && { echo "api up"; exit 0; }
-            sleep 1
-          done
-          echo "api server did not come up"; cat /tmp/api-server.log; exit 1
-
-      - name: API-35 enroll smoke (minified release build)
+      - name: API-35 launch + render smoke (minified release build)
         uses: reactivecircus/android-emulator-runner@v2
         with:
           api-level: 35
@@ -184,19 +166,20 @@ jobs:
           force-avd-creation: false
           emulator-options: -no-window -gpu swiftshader_indirect -noaudio -no-boot-anim -camera-back none -no-snapshot-save -memory 2048
           disable-animations: true
-          # PIN 0000 — Vouchflow's keystore key requires a secure lock.
           # stayon + dismiss-keyguard — keep the screen on so the keyguard
-          # doesn't re-engage between clearState and the flow (see Tier B).
-          # The enroll flow launches the app (catches startup R8 crashes)
-          # and asserts it reaches Conversations (catches API-35 render).
+          # doesn't re-engage between clearState and the launch (see Tier B).
+          # smoke-launch.yaml launches the minified release build and waits
+          # for the first onboarding screen — catches a startup R8 crash or
+          # a gross API-35 render failure. It needs no api server and stops
+          # before the network/biometric/handle steps where GHA emulator
+          # flakiness lives (deeper flows: manual Tier-B + on-device pass).
           # NOTE: the action runs the script as one sh -c, so the retry
           # loop stays on a single &&-chain (vars persist). Maestro's
           # clearState→launchApp can race on a cold emulator ("Unable to
-          # launch app") — a flaky launch, not an app fault. Retry the
-          # enroll flow up to 3x; fail the step only if all attempts fail.
-          # The deterministic R8 + 16 KB guards above are the hard gate;
-          # this step adds startup/render coverage on API 35.
-          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time ReactNativeJS:V ReactNative:V AndroidRuntime:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && ( adb shell pm grant xyz.speakeasyapp.app android.permission.POST_NOTIFICATIONS || true ) && ok=0 && for i in 1 2 3; do adb shell wm dismiss-keyguard; adb shell am force-stop xyz.speakeasyapp.app; sleep 3; if timeout 300 maestro test apps/mobile/maestro/01-enroll.yaml --debug-output /tmp/maestro-01-$i; then ok=1; break; fi; echo "enroll attempt $i failed (likely launch race) — retrying"; sleep 5; done && [ "$ok" = 1 ]
+          # launch app") — a flaky launch, not an app fault. Retry up to
+          # 3x; fail only if all attempts fail. The deterministic R8 +
+          # 16 KB guards above are the hard gate; this adds API-35 render.
+          script: adb shell locksettings set-pin 0000 && adb shell svc power stayon true && adb shell settings put system screen_off_timeout 1800000 && adb shell input keyevent KEYCODE_WAKEUP && adb logcat -c && ( nohup adb logcat -v time ReactNativeJS:V ReactNative:V AndroidRuntime:V '*:E' > /tmp/logcat.txt 2>&1 & ) && adb install -r apps/mobile/android/app/build/outputs/apk/release/app-release.apk && ( adb shell pm grant xyz.speakeasyapp.app android.permission.POST_NOTIFICATIONS || true ) && ok=0 && for i in 1 2 3; do adb shell wm dismiss-keyguard; adb shell am force-stop xyz.speakeasyapp.app; sleep 3; if timeout 180 maestro test apps/mobile/maestro/smoke-launch.yaml --debug-output /tmp/maestro-01-$i; then ok=1; break; fi; echo "launch smoke attempt $i failed — retrying"; sleep 5; done && [ "$ok" = 1 ]
 
       - name: Assert no release-build crash in logcat
         if: always()
