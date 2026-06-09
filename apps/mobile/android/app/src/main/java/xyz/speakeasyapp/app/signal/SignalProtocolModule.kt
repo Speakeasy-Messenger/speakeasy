@@ -163,7 +163,10 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
         promise.reject("no_prekey", "peer bundle missing one-time prekey")
         return
       }
-      val firstPreKey = preKeysArr.getMap(0)
+      // RN 0.77: ReadableArray.getMap() now returns a nullable type. We
+      // already guarded size() != 0 above, so index 0 exists — assert
+      // non-null (matches the getString(...)!! style used in this file).
+      val firstPreKey = preKeysArr.getMap(0)!!
       val preKeyId = firstPreKey.getInt("id")
       val preKeyBytes = unb64(firstPreKey.getString("key")!!)
 

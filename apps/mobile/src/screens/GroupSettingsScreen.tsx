@@ -13,7 +13,7 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
 import type { TtlOption } from '@speakeasy/shared';
 import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
@@ -471,6 +471,8 @@ function NameEditSheet({
   onSave,
 }: NameEditSheetProps): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the sheet buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   const [draft, setDraft] = useState(currentName);
   useEffect(() => {
     if (visible) setDraft(currentName);
@@ -501,7 +503,11 @@ function NameEditSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
         >
           <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />
@@ -584,6 +590,8 @@ function RemoveMemberSheet({
   onConfirm,
 }: RemoveMemberSheetProps): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the sheet buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   // Same inline-overlay pattern as FindSomeoneSheet after rc.30 dropped
   // RN Modal. Native Modal + box-none wrap froze the entire app on
   // Android Samsung One UI dark mode + statusBarTranslucent — same
@@ -607,7 +615,11 @@ function RemoveMemberSheet({
       <View
         style={[
           styles.sheet,
-          { backgroundColor: themed.cream, borderTopColor: themed.divider },
+          {
+            backgroundColor: themed.cream,
+            borderTopColor: themed.divider,
+            paddingBottom: insets.bottom + space.xxl,
+          },
         ]}
       >
         <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />
@@ -668,6 +680,8 @@ function LeaveRoomSheet({
   onConfirm,
 }: LeaveRoomSheetProps): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the sheet buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   useEffect(() => {
     if (!visible) return;
     const sub = BackHandler.addEventListener('hardwareBackPress', () => {
@@ -686,7 +700,11 @@ function LeaveRoomSheet({
       <View
         style={[
           styles.sheet,
-          { backgroundColor: themed.cream, borderTopColor: themed.divider },
+          {
+            backgroundColor: themed.cream,
+            borderTopColor: themed.divider,
+            paddingBottom: insets.bottom + space.xxl,
+          },
         ]}
       >
         <View style={[styles.sheetGrab, { backgroundColor: themed.divider }]} />

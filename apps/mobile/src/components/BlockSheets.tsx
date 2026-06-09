@@ -1,5 +1,6 @@
 import React from 'react';
 import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 
@@ -27,6 +28,8 @@ export function BlockConfirmSheet({
   onConfirm,
 }: BaseProps): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the action buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   return (
     <Modal
       visible={visible}
@@ -43,7 +46,11 @@ export function BlockConfirmSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="block-confirm-sheet"
         >
@@ -103,6 +110,8 @@ export function UnblockConfirmSheet({
   onConfirm,
 }: BaseProps): React.ReactElement {
   const themed = useColors();
+  // Edge-to-edge: clear the nav bar so the action buttons aren't behind it.
+  const insets = useSafeAreaInsets();
   return (
     <Modal
       visible={visible}
@@ -119,7 +128,11 @@ export function UnblockConfirmSheet({
         <View
           style={[
             styles.sheet,
-            { backgroundColor: themed.cream, borderTopColor: themed.divider },
+            {
+              backgroundColor: themed.cream,
+              borderTopColor: themed.divider,
+              paddingBottom: insets.bottom + space.xxl,
+            },
           ]}
           testID="unblock-confirm-sheet"
         >

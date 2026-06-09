@@ -9,8 +9,14 @@ buildscript {
         // Play Console error shown on rc.26 upload). compileSdk is
         // already 35 so this is just lifting the runtime target.
         targetSdkVersion = 35
-        ndkVersion = "26.1.10909125"
-        kotlinVersion = "1.9.24"
+        // NDK r27 is the first NDK that emits 16 KB-page-aligned (p_align
+        // 0x4000) prebuilt .so files — required for Play `completed`
+        // production validation since Aug 2025. Matches React Native
+        // 0.77's pinned NDK. Bumped from r26 (26.1.10909125) for the
+        // v1.0.1 16 KB re-cut. RN 0.77 also moves the Kotlin toolchain to
+        // 2.0.21.
+        ndkVersion = "27.1.12297006"
+        kotlinVersion = "2.0.21"
     }
     repositories {
         google()

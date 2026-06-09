@@ -1,6 +1,12 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+// RN 0.77: RCTAppDelegate now requires a dependency provider (it feeds
+// the new-architecture module/codegen registry). The pod is pulled in
+// automatically by use_react_native! in the Podfile. Set it in
+// didFinishLaunchingWithOptions before calling super, or the bridge
+// startup hits a nil dependencyProvider.
+#import <ReactAppDependencyProvider/RCTAppDependencyProvider.h>
 // Phase 5j: must come BEFORE Speakeasy-Swift.h — the generated
 // bridging header declares
 //   @interface SpeakeasyAudioDevice (SWIFT_EXTENSION(Speakeasy))
@@ -83,6 +89,8 @@ static void SpeakeasyWriteCrash(NSException *exception)
   NSSetUncaughtExceptionHandler(&SpeakeasyWriteCrash);
 
   self.moduleName = @"Speakeasy";
+  // RN 0.77: required dependency provider for new-arch module setup.
+  self.dependencyProvider = [RCTAppDependencyProvider new];
   // You can add your custom initial props in the dictionary below.
   // They will be passed down to the ViewController used by React Native.
   self.initialProps = @{};
