@@ -44,6 +44,7 @@ import { Handle } from '../components/Handle.js';
 import { StatusSquare } from '../components/StatusSquare.js';
 import { useBlocks } from '../store/blocks.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
+import { collectGalleryImages } from '../feed/gallery-images.js';
 import Svg, { Path } from 'react-native-svg';
 import { DisappearingMessageBubble } from '../components/DisappearingMessageBubble.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
@@ -169,6 +170,10 @@ export function ChatScreen({
   // Tap a photo/gif in the bubble → render this attachment fullscreen
   // in a Modal layered over the chat. Null = closed.
   const [viewerAttachment, setViewerAttachment] = useState<Attachment | null>(null);
+  // Every viewable (image/gif) attachment in this conversation, in chat
+  // order — tapping a photo opens the viewer here and it pages
+  // left/right through the list. See collectGalleryImages.
+  const galleryImages = useMemo(() => collectGalleryImages(messages), [messages]);
   const listRef = useRef<FlatList>(null);
   // Jump-to-bottom affordance: shown once the user has scrolled up out of
   // the newest messages. On an `inverted` list, contentOffset.y === 0 is
@@ -935,10 +940,10 @@ export function ChatScreen({
       >
         {viewerAttachment ? (
           <MediaViewerScreen
-            data={viewerAttachment.data}
-            mime={viewerAttachment.mime}
+            items={galleryImages}
+            initialIndex={galleryImages.indexOf(viewerAttachment)}
             onClose={() => setViewerAttachment(null)}
-            onSave={() => void saveAndAnnounceFile(viewerAttachment)}
+            onSave={(a) => void saveAndAnnounceFile(a)}
           />
         ) : null}
       </Modal>
