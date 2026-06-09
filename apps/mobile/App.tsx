@@ -1106,23 +1106,22 @@ export default function App() {
 
 /**
  * StatusBar that flips with the active theme. Lives inside the
- * ThemeProvider so it can read `useTheme()`.
+ * ThemeProvider so it can read `useTheme()`. The status bar is owned
+ * by the OS shell, so backgroundColor here paints the Android tinted
+ * area to match the workspace canvas (or stays dark on the brand
+ * canvas — Onboarding / IdReveal handle their own status-bar color
+ * via their SafeAreaView).
  *
- * Edge-to-edge (v1.0.1 re-cut): under targetSdk 35's forced edge-to-edge
- * the status bar is a transparent overlay and `StatusBar backgroundColor`
- * is a deprecated no-op (it maps to the now-removed
- * Window.setStatusBarColor — Play Console recommendation #2). We drop it
- * and let the per-screen SafeAreaView paint the canvas behind the
- * transparent bar via its top inset. Only `barStyle` is kept — it drives
- * the system bar icon appearance (light/dark), which is still the
- * supported API under edge-to-edge.
+ * (v1.0.1-hotfix.2 restored `backgroundColor` after the hotfix.1
+ * edge-to-edge attempt was reverted — with the edge-to-edge opt-out back
+ * on, the legacy tinted status bar is the correct, supported behavior.)
  */
 function ThemedStatusBar(): React.JSX.Element {
   const t = useTheme();
   return (
     <StatusBar
       barStyle={t.mode === 'dark' ? 'light-content' : 'dark-content'}
-      translucent
+      backgroundColor={t.canvas}
     />
   );
 }

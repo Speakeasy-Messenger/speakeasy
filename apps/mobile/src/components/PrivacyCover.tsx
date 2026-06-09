@@ -1,8 +1,7 @@
 import React from 'react';
 import { StyleSheet, View } from 'react-native';
 import { useUiState } from '../store/ui.js';
-import { useTheme } from '../theme/ThemeProvider.js';
-import { Wordmark } from './Wordmark.js';
+import { SplashScreen } from './SplashScreen.js';
 
 /**
  * Full-screen opaque privacy sheet. Shown by App.tsx's AppState listener
@@ -13,26 +12,29 @@ import { Wordmark } from './Wordmark.js';
  *   - the brief flash when the screen turns back on before the app is
  *     fully 'active'
  *
+ * Renders the SplashScreen verbatim (the aubergine brand splash) rather
+ * than a bare wordmark on canvas: it's opaque (fully hides content), it
+ * looks finished, and reusing the exact splash makes the cover read as
+ * "the app", not a glitch — including the brief cover that shows when
+ * resuming via a push tap.
+ *
  * Intentionally lightweight (plan, rc.* 1.0.x): it auto-clears on
  * 'active' and does NOT require re-auth on resume — a biometric re-lock
- * is a separate, settings-gated feature. The opaque background + brand
- * mark mirror the splash so the transition reads as "the app", not a
- * glitch.
+ * is a separate, settings-gated feature.
  */
 export function PrivacyCover(): React.ReactElement | null {
   const covered = useUiState((s) => s.privacyCovered);
-  const theme = useTheme();
   if (!covered) return null;
   return (
     <View
-      style={[styles.fill, { backgroundColor: theme.canvas }]}
+      style={styles.fill}
       // Block any touches from reaching the screens beneath while covered.
       pointerEvents="auto"
       accessibilityElementsHidden
       importantForAccessibility="no-hide-descendants"
       testID="privacy-cover"
     >
-      <Wordmark variant="hero" />
+      <SplashScreen />
     </View>
   );
 }
@@ -42,7 +44,5 @@ const styles = StyleSheet.create({
     ...StyleSheet.absoluteFillObject,
     zIndex: 9999,
     elevation: 9999,
-    alignItems: 'center',
-    justifyContent: 'center',
   },
 });

@@ -11,6 +11,16 @@
 # exercising it — a missing keep surfaces as a runtime ClassNotFound /
 # NoSuchMethod, not a build error.
 
+# ── React Native view managers / views (loaded reflectively) ─────────
+# RN 0.77's new-architecture interop resolves core view classes by their
+# FULL class name via reflection (Class.forName). R8 in release builds
+# RENAMES e.g. com.facebook.react.views.modal.ReactModalHostView to
+# `…/modal/a`, so the reflective lookup throws ClassNotFoundException at
+# runtime — a hard crash the moment any <Modal> mounts (media viewer,
+# attachment/file open, the confirm sheets). RN 0.76's bundled rules
+# covered this; 0.77's don't. Keep the views package by name.
+-keep class com.facebook.react.views.** { *; }
+
 # ── React Native bridge ──────────────────────────────────────────────
 # RN's own consumer rules have lagged the new architecture before; keep
 # the reflective bridge surfaces explicitly so a renamed @ReactMethod
