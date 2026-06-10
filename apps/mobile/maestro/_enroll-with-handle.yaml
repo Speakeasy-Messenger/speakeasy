@@ -6,10 +6,10 @@
 #   03 Handle      — type handle → wait for "available" → tap continue
 #                    → BiometricPrompt subflow (PIN 0000 on the emulator)
 #   04 Face        — tap the first animal tile → tap confirm
-#   05 Permissions — tap "Continue" on the notifications-permission
-#                    screen. This screen's button is what calls
-#                    identity.setUserId, so the app does NOT flip to
-#                    Conversations until it is tapped through.
+#   05 Permissions — tap "Continue" on the notifications-permission screen.
+#   06 Invite      — tap "Start messaging" on the share-your-handle screen.
+#                    This button is what calls identity.setUserId, so the
+#                    app does NOT flip to Conversations until it is tapped.
 #
 # Each Tier B run boots a fresh in-memory api server, so any well-formed
 # handle is available. Callers don't need to thread a unique value
@@ -118,6 +118,18 @@ appId: xyz.speakeasyapp.app
 - tapOn:
     text: "Allow"
     optional: true
+
+# ─── Step 06: Bring someone in (InviteStep) ───
+# Onboarding screen 06 (InviteStep). The "Start messaging" button is now
+# what calls identity.setUserId and flips the app into Conversations
+# (moved here from Permissions so the share-your-handle moment lands
+# before the chat list).
+- extendedWaitUntil:
+    visible:
+      id: "onboarding-invite-continue"
+    timeout: 15000
+- tapOn:
+    id: "onboarding-invite-continue"
 
 # Race condition (documented in 01-enroll.yaml): after setUserId the
 # navigator flips to the authed stack; the navigation.replace

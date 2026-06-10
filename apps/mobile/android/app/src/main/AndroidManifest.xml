@@ -92,6 +92,19 @@
             <category android:name="android.intent.category.BROWSABLE" />
             <data android:scheme="speakeasy" android:host="add" />
         </intent-filter>
+        <!-- App Link: https://speakeasyapp.xyz/add?handle=<handle>. The
+             canonical shareable link (also the QR value). autoVerify lets
+             Android verify ownership via the domain's
+             /.well-known/assetlinks.json and open the app directly instead
+             of the browser. Same MainActivity handler (Linking → parseAdd).
+             A shared link that the app can't open (not installed) falls
+             back to the speakeasyapp.xyz/add web page → Play download. -->
+        <intent-filter android:autoVerify="true">
+            <action android:name="android.intent.action.VIEW" />
+            <category android:name="android.intent.category.DEFAULT" />
+            <category android:name="android.intent.category.BROWSABLE" />
+            <data android:scheme="https" android:host="speakeasyapp.xyz" android:pathPrefix="/add" />
+        </intent-filter>
       </activity>
 
       <provider

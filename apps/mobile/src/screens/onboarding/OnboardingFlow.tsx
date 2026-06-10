@@ -6,6 +6,7 @@ import { RoomStep } from './RoomStep.js';
 import { HandleStep } from './HandleStep.js';
 import { FaceStep } from './FaceStep.js';
 import { PermissionsStep } from './PermissionsStep.js';
+import { InviteStep } from './InviteStep.js';
 
 /**
  * Onboarding orchestrator — Phase 3 brand overhaul.
@@ -33,7 +34,7 @@ interface Props {
   onEnrolled: (userId: string) => void;
 }
 
-type Step = 'door' | 'room' | 'handle' | 'face' | 'permissions';
+type Step = 'door' | 'room' | 'handle' | 'face' | 'permissions' | 'invite';
 
 interface ClaimedIdentity {
   userId: string;
@@ -93,7 +94,24 @@ export function OnboardingFlow({ onEnrolled }: Props): React.ReactElement {
       return (
         <PermissionsStep
           onContinue={() => {
-            // Now flip the App-level routing into Conversations.
+            // One more onboarding screen (Invite) before the routing flip.
+            setStep('invite');
+          }}
+        />
+      );
+    case 'invite':
+      if (!claimed) {
+        // Same defensive path as 'face' / 'permissions'.
+        setStep('handle');
+        return <HandleStep onClaimed={(args) => { setClaimed(args); setStep('face'); }} />;
+      }
+      return (
+        <InviteStep
+          handle={claimed.userId}
+          onContinue={() => {
+            // NOW flip the App-level routing into Conversations — kept as
+            // the very last onboarding action so enrollment timing is
+            // unchanged (App.tsx routes on userId).
             useIdentity.getState().setDeviceToken(claimed.deviceToken);
             useIdentity.getState().setUserId(claimed.userId);
             onEnrolled(claimed.userId);
