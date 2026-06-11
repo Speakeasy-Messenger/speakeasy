@@ -176,6 +176,14 @@ const styles = StyleSheet.create({
     paddingHorizontal: space.s,
     borderWidth: 1,
     borderRadius: radius.sm,
+    // The card needs an explicit width. Without it the parent bubble
+    // shrinks to fit, the `flex: 1` fileMeta column gets zero intrinsic
+    // width, and the (numberOfLines=1) filename collapses to nothing —
+    // the reported "filename cut off / malformed box" bug. SIDE matches
+    // the photo footprint so file and photo bubbles read at one width.
+    // maxWidth keeps it inside the bubble's 78% cap on narrow screens.
+    width: SIDE,
+    maxWidth: '100%',
   },
   fileBadge: {
     width: 36,

@@ -2,6 +2,7 @@ import React, { useEffect, useRef } from 'react';
 import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
+import { isEdgeToEdgeMedia } from './attachment-layout.js';
 import { RichMessageText } from './RichMessageText.js';
 import { radius, space, useColors } from '../theme/index.js';
 import { accent, font } from '../theme/tokens.js';
@@ -197,12 +198,10 @@ export function DisappearingMessageBubble({
 
   const isSent = variant === 'sent';
   const isFailed = isSent && !!sendFailure;
-  // A media-only message (photo/gif/file, no caption) drops the bubble's
-  // text padding so the image fills the bubble edge-to-edge — the bubble
-  // already clips to its radius via `overflow: 'hidden'`. With padding the
-  // photo sat inset behind a chunky bubble margin (rc.40 feedback: "margins
-  // to the photos are too large"). Captioned media keeps the padding.
-  const mediaOnly = !!attachments && attachments.length > 0 && !text;
+  // A media-only message (photo/gif, no caption) drops the bubble's text
+  // padding so the image fills the bubble edge-to-edge. Files are excluded
+  // — see isEdgeToEdgeMedia for the why (it fixes the cut-off-filename bug).
+  const mediaOnly = isEdgeToEdgeMedia(attachments, !!text);
   const bubbleStyle = [
     styles.base,
     mediaOnly ? styles.mediaOnly : null,
