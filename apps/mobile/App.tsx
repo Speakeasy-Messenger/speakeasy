@@ -51,6 +51,7 @@ import { makeReplenisher } from './src/crypto/replenish.js';
 import { CallOrchestrator, type CallHistoryEntry } from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
+import { setShowWhenLocked, shouldShowOverLockScreen } from './src/native/lock-screen.js';
 import { usePeerAnimation } from './src/store/peer-animation.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // CallKeepBridge intentionally not imported here — see the deferred-
@@ -382,6 +383,25 @@ export default function App() {
   // landing on the conversation list. Covers cold start, warm
   // resume, and deferred (background-handler persisted) taps.
   usePushNavigation(navRef, navReady, callOrchestrator);
+
+  // Allow the app over the lock screen ONLY while a call is live.
+  //
+  // These OS flags (showWhenLocked / turnScreenOn) used to be static
+  // manifest attributes on MainActivity so an incoming call could ring
+  // over the lock screen — but static attributes apply to the whole app
+  // forever, so locking the device on the chat list and pressing power
+  // surfaced the chat list over the lock screen (a privacy leak, user
+  // report 2026-06). We now subscribe to the call store and toggle the
+  // flags programmatically: on for any active, non-ended call (covers
+  // incoming ringing and a call answered from the lock screen), off the
+  // moment it ends or there's no call. No-ops off-Android.
+  useEffect(() => {
+    const apply = (stage: string | undefined) => {
+      setShowWhenLocked(shouldShowOverLockScreen(stage));
+    };
+    apply(useCalls.getState().active?.stage);
+    return useCalls.subscribe((s) => apply(s.active?.stage));
+  }, []);
 
   // Load (or generate) the local SpeakeasySignalStore identity key.
   // OnboardingFlow's RoomStep calls this once at signup; subsequent

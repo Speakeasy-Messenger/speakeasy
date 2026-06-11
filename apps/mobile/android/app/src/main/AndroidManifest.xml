@@ -74,9 +74,17 @@
         android:launchMode="singleTask"
         android:screenOrientation="portrait"
         android:windowSoftInputMode="adjustResize"
-        android:showWhenLocked="true"
-        android:turnScreenOn="true"
         android:exported="true">
+        <!-- showWhenLocked / turnScreenOn are deliberately NOT declared as
+             static attributes. As static manifest attributes they applied to
+             the whole app for its entire lifetime, so any screen-on event
+             with Speakeasy foregrounded (e.g. lock the device on the chat
+             list, then press power) rendered the chat list OVER the lock
+             screen — a privacy leak. They are now toggled programmatically
+             only while a call is ringing/active via the SpeakeasyLockScreen
+             native module (lockscreen/LockScreenModule.kt) driven from
+             src/native/lock-screen.ts. -->
+
         <intent-filter>
             <action android:name="android.intent.action.MAIN" />
             <category android:name="android.intent.category.LAUNCHER" />
