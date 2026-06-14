@@ -250,30 +250,28 @@ function emptyConversation(kind: ConversationKind): ConversationState {
 }
 
 /**
- * Append `msg` keeping `messages` ordered by **local arrival order**
- * (receivedAt, falling back to sentAt for legacy persisted messages).
+ * Append `msg` keeping `messages` ordered by **send time** (sentAt) —
+ * chronological order, like every mainstream messenger.
  *
- * # Why receivedAt, not sentAt
+ * # Why sentAt (changed from receivedAt)
  *
- * The server buffers messages while a recipient is offline, then
- * relays them in a batch when the WS reconnects. Those buffered
- * messages can carry sentAt values from minutes ago — and inserting
- * them into the chat at their original send-time position buries
- * them above all the messages the user has already been reading.
+ * The server buffers messages while a recipient is offline, then relays
+ * them in a batch when the WS reconnects — and because the app tears the
+ * socket down on every background, that delivery is fragmented across
+ * reconnects and can arrive out of *send* order (a live message lands
+ * before older buffered ones). Ordering by arrival time made a backlog
+ * batch render at the bottom out of sent-order — visibly scrambled
+ * (reported 2026-06-14: 2:33–2:37pm messages interleaved wrong).
  *
- * rc.19 user feedback (peachtree): tapped a push for "sup chigga",
- * opened the chat, couldn't find the message at the bottom — it had
- * been inserted four messages back in history at its sentAt
- * position. Cardinal "message disappeared" UX bug for any messenger.
- *
- * Sorting by receivedAt lands the message at the BOTTOM of the chat
- * the moment it arrives — where the user just saw the notification
- * preview, and where they'd expect the message they tapped on to be.
- * The bubble's *displayed* timestamp stays sentAt — original send
- * time, like every other messenger shows.
+ * Historic note: receivedAt ordering was adopted for the rc.19
+ * "peachtree" case — a tapped push message inserted several messages back
+ * at its sentAt position, so the user couldn't spot it at the bottom.
+ * That concern is real but belongs to an unread / "new messages" jump
+ * indicator, not to scrambling chronological order. The bubble's
+ * displayed timestamp was always sentAt; now the ordering matches it.
  */
 function localOrderKey(m: ChatMessage): number {
-  return m.receivedAt ?? m.sentAt;
+  return m.sentAt;
 }
 
 function insertByLocalOrder(
@@ -699,14 +697,18 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         const now = Date.now();
         const filtered: Record<string, ConversationState> = {};
         for (const [id, c] of Object.entries(parsed)) {
+          // Re-sort by send time. Builds before v1.0.10 persisted messages
+          // in arrival (receivedAt) order, so a conversation that received
+          // a late backlog batch is stored out of sent-order. Stable sort
+          // (ms ties keep their stored order) corrects it on first load.
+          const sorted = [...c.messages].sort((a, b) => a.sentAt - b.sentAt);
           if (c.persistenceEnabled) {
-            filtered[id] = c;
+            filtered[id] = { ...c, messages: sorted };
             continue;
           }
           const ttlSec = TTL_OPTIONS[c.ttl];
           const ttlMs = ttlSec === null ? Infinity : ttlSec * 1000;
-          const aliveMessages = c.messages.filter((m) => now - m.sentAt < ttlMs);
-          filtered[id] = { ...c, messages: aliveMessages };
+          filtered[id] = { ...c, messages: sorted.filter((m) => now - m.sentAt < ttlMs) };
         }
         set({ byId: filtered });
       }

@@ -35,74 +35,35 @@ describe('useConversations', () => {
     ]);
   });
 
-  it('add keeps messages in arrival order regardless of sentAt skew', () => {
-    // rc.19 fix (peachtree feedback): a message buffered by the server
-    // while the recipient was offline arrives via WS with a sentAt
-    // value from minutes earlier. The OLD behavior sorted by sentAt,
-    // which buried the late-arriving message above messages the user
-    // had already been reading — so tapping its push notification
-    // landed the user in the chat with the message they tapped on
-    // four messages back in history, looking "vanished."
-    //
-    // The fix: stamp receivedAt = Date.now() on every add(), and sort
-    // by receivedAt. Messages stay in CALL order regardless of sentAt
-    // skew, so a late-relayed message lands at the BOTTOM of the chat
-    // where the user expects it.
+  it('orders messages by sentAt (chronological), regardless of arrival order', () => {
+    // A message buffered server-side while the recipient was offline can
+    // arrive AFTER newer live messages — the app tears the WS down on every
+    // background, so backlog delivery is fragmented across reconnects and
+    // arrives out of send order. It must still sort to its sent-time
+    // position, not land out of order at the bottom (reported 2026-06-14:
+    // 2:33–2:37pm messages interleaved wrong).
     useConversations.getState().add(CONV, { ...baseMsg('first'), sentAt: 1_000 });
     useConversations.getState().add(CONV, { ...baseMsg('second'), sentAt: 3_000 });
-    // "buffered" arrives third in call order, but with the OLDEST sentAt
+    // "buffered" arrives last in call order but was SENT first → top.
     useConversations.getState().add(CONV, { ...baseMsg('buffered'), sentAt: 500 });
     expect(useConversations.getState().byId[CONV]?.messages.map((m) => m.id)).toEqual([
+      'buffered',
       'first',
       'second',
-      'buffered',
     ]);
   });
 
-  it('add honors an explicit receivedAt when the caller supplies one', () => {
-    // Messages restored from persistence carry their original
-    // receivedAt — sort must use the supplied value, not Date.now().
-    // Otherwise rehydration scrambles the chat history.
-    useConversations.getState().add(CONV, {
-      ...baseMsg('newest'),
-      sentAt: 1_000,
-      receivedAt: 3_000,
-    });
-    useConversations.getState().add(CONV, {
-      ...baseMsg('oldest'),
-      sentAt: 1_000,
-      receivedAt: 1_000,
-    });
-    useConversations.getState().add(CONV, {
-      ...baseMsg('middle'),
-      sentAt: 1_000,
-      receivedAt: 2_000,
-    });
+  it('ignores receivedAt for ordering — sentAt wins', () => {
+    // receivedAt may still be recorded, but it no longer drives order. A
+    // late backlog batch (high receivedAt, low sentAt) sorts by send time.
+    useConversations.getState().add(CONV, { ...baseMsg('sent-2'), sentAt: 2_000, receivedAt: 9_000 });
+    useConversations.getState().add(CONV, { ...baseMsg('sent-1'), sentAt: 1_000, receivedAt: 9_500 });
+    useConversations.getState().add(CONV, { ...baseMsg('sent-3'), sentAt: 3_000, receivedAt: 8_000 });
     expect(useConversations.getState().byId[CONV]?.messages.map((m) => m.id)).toEqual([
-      'oldest',
-      'middle',
-      'newest',
+      'sent-1',
+      'sent-2',
+      'sent-3',
     ]);
-  });
-
-  it('add falls back to sentAt for messages without receivedAt (legacy persisted state)', () => {
-    // Pre-rc.19 persisted messages don't have receivedAt. They should
-    // still sort cleanly — the fallback keys off sentAt, the same way
-    // the legacy code did. Mixing legacy + new in the same chat should
-    // interleave correctly.
-    const stamped = { ...baseMsg('stamped'), receivedAt: 2_500 };
-    const legacyEarly = { ...baseMsg('legacy-early'), sentAt: 1_000 };
-    const legacyLate = { ...baseMsg('legacy-late'), sentAt: 4_000 };
-    useConversations.getState().add(CONV, stamped);
-    useConversations.getState().add(CONV, legacyEarly);
-    useConversations.getState().add(CONV, legacyLate);
-    // Note: legacyEarly + legacyLate get implicit receivedAt = Date.now()
-    // here because the add() function stamps when receivedAt is missing.
-    // The test verifies that the EXPLICIT receivedAt on `stamped` still
-    // participates in the same sort. Insertion order: stamped (2500),
-    // legacy-early (~now), legacy-late (~now). All three implicit times
-    // will be > 2500, so `stamped` lands first.
-    expect(useConversations.getState().byId[CONV]?.messages[0]?.id).toBe('stamped');
   });
 
   it('add dedupes inbound content duplicates (different ids, same text within 2s)', () => {
