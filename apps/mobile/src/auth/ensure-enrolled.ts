@@ -2,6 +2,7 @@ import { api } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { useIdentity } from '../store/identity.js';
 import { diag } from '../diag/log.js';
+import { verifyDeviceWithExplanation } from './verify-device.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { VouchflowClient } from '../native/vouchflow.js';
 
@@ -89,11 +90,10 @@ export async function ensureServerBinding(
     userId,
     forced: deps.forceReenroll === true,
   });
-  // Hoisted outside the try so the 409-rebind path in the catch can
-  // reuse the freshly-generated identity key + bundle. The catch
-  // arm calls `api.rebindDevice` with these values to reclaim the
-  // existing handle without regenerating keys (regenerating would
-  // race the rebind's identity-match check).
+  // Hoisted outside the attempts so the 409-rebind path can reuse the
+  // freshly-generated identity key + bundle. The rebind call uses these
+  // values to reclaim the existing handle without regenerating keys
+  // (regenerating would race the rebind's identity-match check).
   const identityPublicKey = await deps.signalProtocol.generateIdentityKey();
   const registrationId = randomRegistrationId();
   const ownBundle = await deps.signalProtocol.generatePreKeyBundle({
@@ -101,82 +101,101 @@ export async function ensureServerBinding(
     signedPreKeyId: 1,
     oneTimePreKeyCount: PREKEY_BATCH_SIZE,
   });
+  const bundleInput = {
+    registrationId: ownBundle.registrationId,
+    signedPreKeyId: ownBundle.signedPreKeyId,
+    signedPreKey: ownBundle.signedPreKey,
+    signedPreKeySig: ownBundle.signedPreKeySig,
+    preKeys: ownBundle.preKeys,
+  };
 
-  try {
-    await api.enroll({
-      token: deviceToken,
-      user_id: userId,
-      publicKey: identityPublicKey,
-      preKeyBundle: {
-        registrationId: ownBundle.registrationId,
-        signedPreKeyId: ownBundle.signedPreKeyId,
-        signedPreKey: ownBundle.signedPreKey,
-        signedPreKeySig: ownBundle.signedPreKeySig,
-        preKeys: ownBundle.preKeys,
-      },
-    });
-    diag('auth', 'silent re-enroll OK', { userId });
-    return 'reenrolled';
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 409 && err.code === 'taken') {
-      // The handle exists server-side but the device-token binding
-      // is stale (typical after a reinstall / Vouchflow rotation).
-      // Try the rebind path: server verifies our identity publicKey
-      // still matches what's on file, and if so, atomically swaps
-      // the token. If our local Signal identity DIFFERS (a wiped
-      // SQLCipher store) the server returns 401 identity_mismatch
-      // and we surface the same `noop` keep-identity behavior the
-      // prior code path used.
-      diag('auth', 're-enroll hit 409 taken — trying device rebind', {
-        userId,
-      });
-      try {
-        // Use the same identityPublicKey we just generated for the
-        // failed enroll attempt above; if we got here the local
-        // Signal store opened successfully so this key matches the
-        // one persisted on the original enrollment.
-        await api.rebindDevice({
-          token: deviceToken,
-          user_id: userId,
-          publicKey: identityPublicKey,
-          preKeyBundle: {
-            registrationId: ownBundle.registrationId,
-            signedPreKeyId: ownBundle.signedPreKeyId,
-            signedPreKey: ownBundle.signedPreKey,
-            signedPreKeySig: ownBundle.signedPreKeySig,
-            preKeys: ownBundle.preKeys,
-          },
-        });
-        diag('auth', 'device rebind OK after 409 taken', { userId });
-        return 'reenrolled';
-      } catch (rebindErr) {
-        if (rebindErr instanceof ApiError && rebindErr.status === 401
-            && rebindErr.code === 'identity_mismatch') {
-          // The local Signal identity does NOT match what the server
-          // has for this handle. Either the user wiped data and is
-          // trying to recover (handle isn't recoverable without the
-          // original key), or someone else briefly held this handle.
-          // Keep the local identity intact — destroying it wouldn't
-          // help — and surface the original "keep identity intact"
-          // behavior so the UI doesn't loop.
-          diag('auth', 'device rebind rejected — identity_mismatch (handle unrecoverable on this device)', {
-            userId,
+  // One enroll → (on 409) rebind attempt with a given device token.
+  //   'reenrolled'      — server-side binding rebuilt.
+  //   'token_rejected'  — Vouchflow refused the TOKEN itself (enroll/rebind
+  //                       401 with a non-identity reason, e.g.
+  //                       `device_not_found`). The caller re-attests for a
+  //                       fresh token and retries.
+  //   'fail'            — terminal (identity_mismatch, network, 5xx). Keep
+  //                       the local identity intact; never loop.
+  const attempt = async (
+    token: string,
+  ): Promise<'reenrolled' | 'token_rejected' | 'fail'> => {
+    try {
+      await api.enroll({ token, user_id: userId, publicKey: identityPublicKey, preKeyBundle: bundleInput });
+      diag('auth', 'silent re-enroll OK', { userId });
+      return 'reenrolled';
+    } catch (err) {
+      if (err instanceof ApiError && err.status === 409 && err.code === 'taken') {
+        // The handle exists server-side but the device-token binding is
+        // stale (reinstall / Vouchflow rotation). Rebind: the server
+        // verifies our identity publicKey still matches what's on file and
+        // atomically swaps the token.
+        diag('auth', 're-enroll hit 409 taken — trying device rebind', { userId });
+        try {
+          await api.rebindDevice({ token, user_id: userId, publicKey: identityPublicKey, preKeyBundle: bundleInput });
+          diag('auth', 'device rebind OK after 409 taken', { userId });
+          return 'reenrolled';
+        } catch (rebindErr) {
+          if (rebindErr instanceof ApiError && rebindErr.status === 401
+              && rebindErr.code === 'identity_mismatch') {
+            // Local Signal identity doesn't match the server's record for
+            // this handle (wiped store, or someone else briefly held it).
+            // Re-attesting can't fix this — keep identity intact, don't loop.
+            diag('auth', 'device rebind rejected — identity_mismatch (handle unrecoverable on this device)', { userId });
+            return 'fail';
+          }
+          if (rebindErr instanceof ApiError && rebindErr.status === 401) {
+            // 401 with a different reason = the TOKEN was refused, not the
+            // identity. Re-attest for a fresh one.
+            diag('auth', 'device rebind: token refused', { code: rebindErr.code });
+            return 'token_rejected';
+          }
+          diag('auth', 'device rebind FAILED (non-fatal)', {
+            err: String(rebindErr),
+            status: (rebindErr as ApiError | undefined)?.status,
+            code: (rebindErr as ApiError | undefined)?.code,
           });
-          return 'noop';
+          return 'fail';
         }
-        diag('auth', 'device rebind FAILED (non-fatal)', {
-          err: String(rebindErr),
-          status: (rebindErr as ApiError | undefined)?.status,
-          code: (rebindErr as ApiError | undefined)?.code,
-        });
-        return 'noop';
       }
+      // The enroll route only 401s from vouchflow.validate(), so any enroll
+      // 401 means the device token was refused → re-attest.
+      if (err instanceof ApiError && err.status === 401) {
+        diag('auth', 'silent re-enroll: token refused', { code: err.code });
+        return 'token_rejected';
+      }
+      diag('auth', 'silent re-enroll FAILED (non-fatal)', {
+        err: String(err),
+        status: (err as ApiError | undefined)?.status,
+        code: (err as ApiError | undefined)?.code,
+      });
+      return 'fail';
     }
-    diag('auth', 'silent re-enroll FAILED (non-fatal)', {
-      err: String(err),
-      status: (err as ApiError | undefined)?.status,
-      code: (err as ApiError | undefined)?.code,
-    });
-    return 'noop';
+  };
+
+  let outcome = await attempt(deviceToken);
+
+  if (outcome === 'token_rejected') {
+    // The stored device token is no longer valid against the server's
+    // Vouchflow environment. The classic case is an alpha SANDBOX token
+    // after the production cutover: the production endpoint never issued it,
+    // so the server returns `device_not_found` forever. Nothing re-attests
+    // the stored token on its own, so the account is stuck. Mint a FRESH
+    // attestation (this prompts biometric, via the same explanation sheet
+    // the WS-auth-failed path uses) and retry once. Capped at a single
+    // re-attest so a genuinely failing attestation — e.g. a TLS
+    // PinningFailure — can't turn into a biometric prompt loop.
+    diag('auth', 'device token rejected — re-attesting for a fresh token', { userId });
+    try {
+      const fresh = await verifyDeviceWithExplanation(deps.vouchflow, 'websocket_auth_failed');
+      // verifyDeviceWithExplanation already persists the new token via
+      // useIdentity.setDeviceToken; pass it straight into the retry.
+      outcome = await attempt(fresh.deviceToken);
+    } catch (verifyErr) {
+      diag('auth', 're-attestation FAILED (non-fatal)', { err: String(verifyErr) });
+      return 'noop';
+    }
   }
+
+  return outcome === 'reenrolled' ? 'reenrolled' : 'noop';
 }

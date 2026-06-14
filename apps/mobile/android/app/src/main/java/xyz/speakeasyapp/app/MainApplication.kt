@@ -30,6 +30,14 @@ import dev.vouchflow.sdk.Vouchflow
 import dev.vouchflow.sdk.VouchflowConfig
 import dev.vouchflow.sdk.VouchflowEnvironment
 
+// SPKI SHA-256 pins for the production Vouchflow API (api.vouchflow.dev).
+// See the configure() call below for why these exist and the rotation
+// caveat. Public values (cert hashes), safe to commit.
+private const val VOUCHFLOW_PROD_LEAF_PIN =
+    "sha256/NQ7reZqY0tQjef9LBQwbs0gHjrdrroWrd+scM74zQrU="
+private const val VOUCHFLOW_PROD_INTERMEDIATE_PIN =
+    "sha256/brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
+
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost =
@@ -71,14 +79,37 @@ class MainApplication : Application(), ReactApplication {
     //
     // BuildConfig fields come from android/gradle.properties (gitignored
     // for the API key — see android/gradle.properties.example).
-    Vouchflow.configure(
-        VouchflowConfig(
-            apiKey = BuildConfig.VOUCHFLOW_API_KEY,
-            environment =
-                if (BuildConfig.VOUCHFLOW_ENVIRONMENT == "sandbox")
-                    VouchflowEnvironment.SANDBOX
-                else VouchflowEnvironment.PRODUCTION,
-        ))
+    //
+    // Certificate pinning (v1.0.5 fix): the SDK enforces TLS pinning in
+    // PRODUCTION. v1.0.4 shipped WITHOUT real pins, so the SDK fell back to
+    // placeholder pins and every verify() failed client-side with
+    // `VouchflowError$PinningFailure` — blocking ALL production signups
+    // (sandbox relaxes pinning, which is why the alpha never hit it). The
+    // pins below are the SPKI SHA-256 of the production cert chain for
+    // api.vouchflow.dev (SAN *.vouchflow.dev): the leaf (CN=vouchflow.dev)
+    // and the Let's Encrypt intermediate (YE1). Set only for production;
+    // sandbox uses the SDK default (no enforced pin).
+    //
+    // ⚠ Rotation: api.vouchflow.dev is Let's Encrypt, so the LEAF rotates
+    // ~every 60 days. Pinning the intermediate as well keeps verify()
+    // working across a leaf renewal; if Let's Encrypt rotates the YE1
+    // intermediate these must be refreshed (recompute from the live chain:
+    //   openssl s_client -connect api.vouchflow.dev:443 -showcerts).
+    val isSandbox = BuildConfig.VOUCHFLOW_ENVIRONMENT == "sandbox"
+    val vouchflowConfig =
+        if (isSandbox)
+            VouchflowConfig(
+                apiKey = BuildConfig.VOUCHFLOW_API_KEY,
+                environment = VouchflowEnvironment.SANDBOX,
+            )
+        else
+            VouchflowConfig(
+                apiKey = BuildConfig.VOUCHFLOW_API_KEY,
+                environment = VouchflowEnvironment.PRODUCTION,
+                leafCertificatePin = VOUCHFLOW_PROD_LEAF_PIN,
+                intermediateCertificatePin = VOUCHFLOW_PROD_INTERMEDIATE_PIN,
+            )
+    Vouchflow.configure(vouchflowConfig)
   }
 
   /**
