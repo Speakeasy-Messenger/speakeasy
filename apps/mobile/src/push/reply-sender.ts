@@ -72,6 +72,14 @@ export async function sendReplyMessage(
   peerId: string,
   text: string,
   deps: ReplySenderDeps,
+  /**
+   * Pre-minted wire id. The headless caller mints the id and persists the
+   * local echo BEFORE calling this, so the in-app copy survives even if the
+   * headless task/process is torn down during the post-send settle. When
+   * omitted we mint one (back-compat). For 1:1 this id MUST be the wire id
+   * — the peer's read receipt references it.
+   */
+  presetMessageId?: string,
 ): Promise<{ messageId: string }> {
   const trimmed = text.trim();
   if (!trimmed) throw new Error('empty_reply');
@@ -85,7 +93,7 @@ export async function sendReplyMessage(
   const ws = deps.getWsClient(async () => deviceToken);
   ws.connect();
   await ws.waitForAuthed();
-  const messageId = newMessageId();
+  const messageId = presetMessageId ?? newMessageId();
   const frame: WsClientMsg = {
     type: 'message',
     to: peerId,

@@ -75,6 +75,24 @@ describe('sendReplyMessage', () => {
     expect(messageId).toBe(sent[0]!.message_id);
   });
 
+  it('uses a caller-supplied preset message id as the wire id', async () => {
+    // The headless caller mints the id, persists the local echo with it
+    // BEFORE sending, then passes it here — so the persisted echo id and the
+    // wire id (which the peer's read receipt references) are the same.
+    const { ws, sent } = mockWs();
+    const deps: ReplySenderDeps = {
+      encrypt: vi.fn().mockResolvedValue(new Uint8Array([1])),
+      getWsClient: () => ws,
+      loadDeviceToken: async () => 'dvt_test',
+      settleMs: 0,
+    };
+
+    const result = await sendReplyMessage('bob', 'hi', deps, 'msg_preset_123');
+
+    expect(result.messageId).toBe('msg_preset_123');
+    expect(sent[0]!.message_id).toBe('msg_preset_123');
+  });
+
   it('waits for the queued send to flush before returning success', async () => {
     const sent: WsClientMsgLike[] = [];
     let flush: (() => void) | undefined;
