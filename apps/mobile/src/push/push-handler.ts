@@ -34,7 +34,7 @@ import notifee, {
   type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePayload } from '@speakeasy/shared';
+import { decodePayload, newMessageId } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -1003,31 +1003,36 @@ export async function handleInlineReplyFromData(args: {
     withReply: true,
   });
 
+  // Persist the local echo BEFORE sending. The old order sent first (the
+  // send ends with a ~1500ms flush settle) and only THEN enqueued the echo
+  // — so on a headless reply the in-app copy was written in the most
+  // fragile window, right before the task/process tears down. If teardown
+  // beat the AsyncStorage flush, the message went out (peer received it)
+  // but vanished from the sender's own chat (reported bug). Minting the id
+  // up front lets us queue the echo first; for 1:1 this SAME id is then
+  // passed to the send so it's the wire id the peer's read receipt
+  // references.
+  const messageId = newMessageId();
+  await enqueuePendingReply({
+    conversationId,
+    peerId,
+    messageId,
+    text,
+    sentAt: Date.now(),
+    msgType: isGroup ? 'group' : 'direct',
+  });
+  if (AppState.currentState === 'active') await drainPendingReplies();
+
   try {
     // Group replies fan out via the send orchestrator (SKDM bootstrap +
     // encryptForGroup); 1:1 replies use the direct Signal session. Both
-    // run headlessly.
-    const { messageId } = isGroup
-      ? await sendGroupReplyHeadless(conversationId, text)
-      : await sendReplyMessage(peerId, text, replyDeps());
-    // Record the reply in the in-app conversation log. Queued (not
-    // added straight to the store) because this may run headlessly
-    // with an un-hydrated store; drained right away when the app is
-    // already foreground, otherwise on the next foreground.
-    //
-    // For 1:1, `messageId` MUST be the wire id — the peer's read receipt
-    // references it; minting a fresh id left inline replies un-receipted.
-    // Group frames carry no client message_id (the foreground echo mints
-    // a local id the same way), so the group id is local-only.
-    await enqueuePendingReply({
-      conversationId,
-      peerId,
-      messageId,
-      text,
-      sentAt: Date.now(),
-      msgType: isGroup ? 'group' : 'direct',
-    });
-    if (AppState.currentState === 'active') await drainPendingReplies();
+    // run headlessly. The echo is already queued above, so a teardown
+    // after this point no longer loses the in-app copy.
+    if (isGroup) {
+      await sendGroupReplyHeadless(conversationId, text);
+    } else {
+      await sendReplyMessage(peerId, text, replyDeps(), messageId);
+    }
     diag('push-reply', 'reply sent + notification updated', { conversationId });
   } catch (err) {
     diag('push-reply', 'reply send FAILED', { conversationId, err: String(err) });
