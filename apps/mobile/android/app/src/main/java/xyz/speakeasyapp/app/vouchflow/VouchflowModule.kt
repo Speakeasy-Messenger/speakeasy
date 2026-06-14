@@ -165,6 +165,18 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
       } catch (e: VouchflowError.AccountStoreAccessDenied) {
         Log.e(TAG, "verify: account_store_access_denied", e)
         promise.reject("account_store_access_denied", e.message, e)
+      } catch (e: VouchflowError.DeviceClaimedElsewhere) {
+        // SDK 2.3.0: the device's token belongs to a different App row
+        // (the sandbox→production split). Surfaced as a typed code so JS
+        // can show an actionable message instead of an opaque 403; the
+        // server-side device transfer is the recovery (see android-sdk#6).
+        Log.e(TAG, "verify: device_claimed_elsewhere", e)
+        promise.reject("device_claimed_elsewhere", e.message, e)
+      } catch (e: VouchflowError.PublicKeyAlreadyRegistered) {
+        // SDK 2.3.0: post server-v59 this only fires for genuine
+        // cross-tenant key collisions.
+        Log.e(TAG, "verify: public_key_already_registered", e)
+        promise.reject("public_key_already_registered", e.message, e)
       } catch (e: Throwable) {
         Log.e(TAG, "verify: unknown_error (${e.javaClass.name})", e)
         promise.reject("unknown_error", e.message ?: e.toString(), e)
