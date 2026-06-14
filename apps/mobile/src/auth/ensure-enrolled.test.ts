@@ -14,6 +14,13 @@ vi.mock('../services.js', () => ({
   },
 }));
 
+// Mock the device-verification flow so the re-attest path doesn't drag in
+// the native Vouchflow SDK / verify sheet.
+const verifyMock = vi.fn();
+vi.mock('./verify-device.js', () => ({
+  verifyDeviceWithExplanation: (...args: unknown[]) => verifyMock(...args),
+}));
+
 import { ensureServerBinding } from './ensure-enrolled.js';
 import { ApiError } from '../api/client.js';
 
@@ -34,6 +41,7 @@ beforeEach(() => {
   apiMock.fetchUser.mockReset();
   apiMock.enroll.mockReset();
   apiMock.rebindDevice.mockReset();
+  verifyMock.mockReset();
   useIdentity.setState({
     userId: 'silent-golden-hawk',
     deviceToken: 'dvt_test',
@@ -126,6 +134,78 @@ describe('ensureServerBinding', () => {
       forceReenroll: true,
     });
     expect(result).toBe('noop');
+  });
+
+  // --- sandbox→production migration: stale token re-attestation ---
+
+  it('re-attests for a fresh token when enroll 401s device_not_found, then re-enrolls', async () => {
+    // The stored token is a stale alpha SANDBOX token; the production
+    // server returns device_not_found. The recovery must mint a FRESH
+    // attestation and retry — without it, the account is stuck forever.
+    apiMock.enroll
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found'))
+      .mockResolvedValueOnce(undefined); // retry with the fresh token
+    verifyMock.mockResolvedValueOnce({ deviceToken: 'dvt_fresh_prod' });
+
+    const result = await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(result).toBe('reenrolled');
+    expect(verifyMock).toHaveBeenCalledOnce();
+    expect(apiMock.enroll).toHaveBeenCalledTimes(2);
+    // The retry must carry the freshly-minted token, not the stale one.
+    expect(apiMock.enroll.mock.calls[1]?.[0].token).toBe('dvt_fresh_prod');
+  });
+
+  it('re-attests, then rebinds on 409 taken with the fresh token (existing-account recovery)', async () => {
+    // fuertechino's exact case: handle already exists in the (shared) DB,
+    // so the fresh-token enroll hits 409 → rebind with the fresh token +
+    // matching identity succeeds.
+    apiMock.enroll
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found'))
+      .mockRejectedValueOnce(new ApiError(409, 'taken'));
+    verifyMock.mockResolvedValueOnce({ deviceToken: 'dvt_fresh_prod' });
+    apiMock.rebindDevice.mockResolvedValueOnce({ user_id: 'silent-golden-hawk' });
+
+    const result = await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(result).toBe('reenrolled');
+    expect(apiMock.rebindDevice.mock.calls[0]?.[0].token).toBe('dvt_fresh_prod');
+  });
+
+  it('caps re-attestation at one — does NOT loop if the fresh token is also rejected', async () => {
+    // If attestation itself is broken (e.g. a TLS PinningFailure that still
+    // somehow yields a token), the fresh token gets rejected too. We must
+    // give up with "noop", not re-attest forever (biometric prompt loop).
+    apiMock.enroll
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found'))
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found'));
+    verifyMock.mockResolvedValueOnce({ deviceToken: 'dvt_fresh_prod' });
+
+    const result = await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(result).toBe('noop');
+    expect(verifyMock).toHaveBeenCalledOnce(); // exactly once, no loop
+  });
+
+  it('returns "noop" if re-attestation itself fails (e.g. PinningFailure / cancelled)', async () => {
+    apiMock.enroll.mockRejectedValueOnce(new ApiError(401, 'device_not_found'));
+    verifyMock.mockRejectedValueOnce(new Error('VouchflowError$PinningFailure'));
+
+    const result = await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(result).toBe('noop');
+    // Identity must remain intact — never destroyed over a failed re-attest.
+    expect(useIdentity.getState().userId).toBe('silent-golden-hawk');
+  });
+
+  it('does NOT re-attest on identity_mismatch (re-attestation cannot fix it)', async () => {
+    apiMock.enroll.mockRejectedValueOnce(new ApiError(409, 'taken'));
+    apiMock.rebindDevice.mockRejectedValueOnce(new ApiError(401, 'identity_mismatch'));
+
+    const result = await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(result).toBe('noop');
+    expect(verifyMock).not.toHaveBeenCalled();
   });
 
   it('returns "noop" when there is no userId or deviceToken yet', async () => {
