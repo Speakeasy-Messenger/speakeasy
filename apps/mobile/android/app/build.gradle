@@ -619,7 +619,7 @@ dependencies {
     // 2.1.1 fixes a first-launch crash — configure() no longer lets an
     // AccountManager SecurityException escape Application.onCreate()
     // (vouchflow/android-sdk#1); it falls back to Keystore-only storage.
-    implementation("dev.vouchflow:android-sdk:2.2.0")
+    implementation("dev.vouchflow:android-sdk:2.3.0")
 
     // libsignal note (v1.0.1 16 KB re-cut): bumped 0.59.0 → 0.69.1.
     // 0.69.1 is the FIRST libsignal-android release whose prebuilt
