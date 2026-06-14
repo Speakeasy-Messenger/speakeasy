@@ -33,10 +33,19 @@ import dev.vouchflow.sdk.VouchflowEnvironment
 // SPKI SHA-256 pins for the production Vouchflow API (api.vouchflow.dev).
 // See the configure() call below for why these exist and the rotation
 // caveat. Public values (cert hashes), safe to commit.
+//
+// FORMAT: RAW base64 of the SPKI SHA-256 — NO `sha256/` prefix. The SDK's
+// PinningInterceptor builds the OkHttp pin as `"sha256/${leafCertificatePin}"`,
+// i.e. it prepends `sha256/` itself. v1.0.5 shipped these WITH the prefix,
+// producing a double `sha256/sha256/...` pin that never matched → the SDK
+// fell back / rejected and verify() failed with PinningFailure. Verified
+// against dev.vouchflow:android-sdk:2.1.1 (PinningInterceptor.kt:53-54).
+//   leaf         CN=vouchflow.dev    (SAN *.vouchflow.dev)
+//   intermediate Let's Encrypt YE1
 private const val VOUCHFLOW_PROD_LEAF_PIN =
-    "sha256/NQ7reZqY0tQjef9LBQwbs0gHjrdrroWrd+scM74zQrU="
+    "NQ7reZqY0tQjef9LBQwbs0gHjrdrroWrd+scM74zQrU="
 private const val VOUCHFLOW_PROD_INTERMEDIATE_PIN =
-    "sha256/brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
+    "brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
 
 class MainApplication : Application(), ReactApplication {
 
