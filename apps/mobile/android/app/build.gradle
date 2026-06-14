@@ -341,6 +341,22 @@ android {
                 "  ./gradlew :app:assembleRelease -Pvouchflow.apiKey=\$VOUCHFLOW_WRITE_KEY\n" +
                 "Source apps/api/.env.local first to populate VOUCHFLOW_WRITE_KEY in your shell.")
         }
+        // Guard the exact mismatch that broke v1.0.3 in production: a SANDBOX
+        // write key (vsk_sandbox_…) compiled with environment=production. The
+        // SDK then attests the device against the PRODUCTION Vouchflow endpoint
+        // using a sandbox key, which is rejected — so every Play-Store signup
+        // failed with `device_not_found`, and no server config could fix it
+        // (the bad key ships inside the APK). Fail the build instead of
+        // shipping that combination again.
+        def vouchflowEnv = project.findProperty('vouchflow.environment') ?: 'sandbox'
+        if (vouchflowEnv == 'production' && vouchflowKey.startsWith('vsk_sandbox')) {
+            throw new GradleException(
+                "vouchflow.environment=production but vouchflow.apiKey is a SANDBOX key " +
+                "(vsk_sandbox_…). A sandbox key cannot attest against production Vouchflow — " +
+                "every enrollment fails 'device_not_found' (this shipped in v1.0.3). Use the " +
+                "production write key (vsk_live_…), or build with " +
+                "-Pvouchflow.environment=sandbox to match the key.")
+        }
         buildConfigField "String", "VOUCHFLOW_API_KEY", "\"${vouchflowKey}\""
         buildConfigField "String", "VOUCHFLOW_ENVIRONMENT",
             "\"${project.findProperty('vouchflow.environment') ?: 'sandbox'}\""
