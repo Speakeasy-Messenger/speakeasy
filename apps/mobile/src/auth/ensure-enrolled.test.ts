@@ -23,6 +23,8 @@ vi.mock('./verify-device.js', () => ({
 
 import { ensureServerBinding } from './ensure-enrolled.js';
 import { ApiError } from '../api/client.js';
+import { useToast } from '../store/toast.js';
+import { DeviceVerificationCancelledError } from './verify-device-types.js';
 
 const signalProtocol = {
   generateIdentityKey: vi.fn(async () => 'pk-base64'),
@@ -42,6 +44,7 @@ beforeEach(() => {
   apiMock.enroll.mockReset();
   apiMock.rebindDevice.mockReset();
   verifyMock.mockReset();
+  useToast.setState({ message: undefined, nonce: 0 });
   useIdentity.setState({
     userId: 'silent-golden-hawk',
     deviceToken: 'dvt_test',
@@ -196,6 +199,53 @@ describe('ensureServerBinding', () => {
     expect(result).toBe('noop');
     // Identity must remain intact — never destroyed over a failed re-attest.
     expect(useIdentity.getState().userId).toBe('silent-golden-hawk');
+  });
+
+  // --- error UX: never fail silently on a re-attest failure (v1.0.8) ---
+
+  it('shows a toast when re-attestation throws a real error (e.g. device_not_owned)', async () => {
+    apiMock.enroll.mockRejectedValueOnce(new ApiError(401, 'device_not_found'));
+    verifyMock.mockRejectedValueOnce(
+      new Error('ServerError(statusCode=403, code=device_not_owned)'),
+    );
+
+    await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    // The "press Continue, nothing happens" regression: the user must get
+    // visible feedback, not a silent noop.
+    expect(useToast.getState().message).toMatch(/verify this device/i);
+  });
+
+  it('does NOT toast when the user explicitly cancels the verify prompt', async () => {
+    apiMock.enroll.mockRejectedValueOnce(new ApiError(401, 'device_not_found'));
+    verifyMock.mockRejectedValueOnce(new DeviceVerificationCancelledError());
+
+    await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(useToast.getState().message).toBeUndefined();
+  });
+
+  it('shows a toast when the fresh token is still server-rejected', async () => {
+    apiMock.enroll
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found'))
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found')); // fresh token rejected too
+    verifyMock.mockResolvedValueOnce({ deviceToken: 'dvt_fresh_prod' });
+
+    await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(useToast.getState().message).toMatch(/verify this device/i);
+  });
+
+  it('does NOT toast on a successful re-attest + recovery', async () => {
+    apiMock.enroll
+      .mockRejectedValueOnce(new ApiError(401, 'device_not_found'))
+      .mockResolvedValueOnce(undefined);
+    verifyMock.mockResolvedValueOnce({ deviceToken: 'dvt_fresh_prod' });
+
+    const result = await ensureServerBinding({ signalProtocol, vouchflow, forceReenroll: true });
+
+    expect(result).toBe('reenrolled');
+    expect(useToast.getState().message).toBeUndefined();
   });
 
   it('does NOT re-attest on identity_mismatch (re-attestation cannot fix it)', async () => {

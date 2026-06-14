@@ -3,6 +3,8 @@ import { ApiError } from '../api/client.js';
 import { useIdentity } from '../store/identity.js';
 import { diag } from '../diag/log.js';
 import { verifyDeviceWithExplanation } from './verify-device.js';
+import { DeviceVerificationCancelledError } from './verify-device-types.js';
+import { useToast } from '../store/toast.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { VouchflowClient } from '../native/vouchflow.js';
 
@@ -191,11 +193,37 @@ export async function ensureServerBinding(
       // verifyDeviceWithExplanation already persists the new token via
       // useIdentity.setDeviceToken; pass it straight into the retry.
       outcome = await attempt(fresh.deviceToken);
+      if (outcome !== 'reenrolled') {
+        // Fresh attestation succeeded but the server STILL rejected the
+        // token — e.g. the device is owned by another Vouchflow customer/
+        // environment (`device_not_owned`, the sandbox→production
+        // migration case) or confidence was too low. Surface it instead of
+        // failing silently.
+        notifyReattestFailed();
+      }
     } catch (verifyErr) {
       diag('auth', 're-attestation FAILED (non-fatal)', { err: String(verifyErr) });
+      // Don't nag when the user explicitly cancelled the prompt; surface
+      // every other failure (`device_not_owned`, attestation/network
+      // errors). Without this the verify sheet's Continue looks dead —
+      // reported as "press Continue, nothing happens".
+      if (!(verifyErr instanceof DeviceVerificationCancelledError)) {
+        notifyReattestFailed();
+      }
       return 'noop';
     }
   }
 
   return outcome === 'reenrolled' ? 'reenrolled' : 'noop';
+}
+
+/**
+ * User-visible feedback when device re-attestation fails. The recovery is
+ * otherwise invisible (it runs from the boot / WS-auth-failed paths), so a
+ * silent failure leaves the user staring at a dead "Continue".
+ */
+function notifyReattestFailed(): void {
+  useToast
+    .getState()
+    .show("Couldn't verify this device for your account. Please try again later.");
 }
