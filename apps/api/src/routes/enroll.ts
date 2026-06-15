@@ -99,6 +99,10 @@ export async function registerEnrollRoutes(
         await app.vouchflow.validate(token);
       } catch (err) {
         if (err instanceof VouchflowValidationError) {
+          // Log the rejection reason — without this an enroll 401
+          // (low_confidence, high_risk, device_not_found, …) is invisible
+          // server-side and "check the logs" comes up empty.
+          request.log.warn({ reason: err.reason, userId }, 'enroll rejected by vouchflow');
           return reply.code(401).send({ error: err.reason });
         }
         request.log.error({ err }, 'unexpected vouchflow error during enroll');
@@ -219,6 +223,7 @@ export async function registerEnrollRoutes(
         await app.vouchflow.validate(token);
       } catch (err) {
         if (err instanceof VouchflowValidationError) {
+          request.log.warn({ reason: err.reason, userId }, 'rebind rejected by vouchflow');
           return reply.code(401).send({ error: err.reason });
         }
         request.log.error({ err }, 'unexpected vouchflow error during rebind');
