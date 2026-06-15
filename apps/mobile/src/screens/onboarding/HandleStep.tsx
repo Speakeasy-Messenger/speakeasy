@@ -199,6 +199,12 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
       } else if (err instanceof ApiError && err.status === 409 && err.code === 'reserved') {
         setAvailability({ kind: 'reserved' });
         setError('That handle is reserved.');
+      } else if (err instanceof ApiError && err.status === 401 && err.code === 'low_confidence') {
+        // Server rejected the attestation below the production confidence
+        // floor — the SDK produced a verification, just a weak one. The
+        // usual cause is no screen lock / passkey on the phone. Guide the
+        // user instead of dead-ending at the raw code.
+        setError(VERIFY_SETUP_HELP);
       } else if (err instanceof ApiError) {
         setError(`Enrollment failed (${err.status}${err.code ? ` ${err.code}` : ''}).`);
       } else {
@@ -330,6 +336,17 @@ function focusBorderFor(s: AvailabilityState) {
   return { borderColor: TEXT_FAINT };
 }
 
+/**
+ * Shown when verification couldn't reach the required confidence — almost
+ * always because the phone has no screen lock / passkey, which is a core
+ * Vouchflow attestation signal. Surfaced for both the client-side
+ * `minimum_confidence_unmet` and the server-side `low_confidence` 401, which
+ * used to dead-end at an opaque "Enrollment failed (401 low_confidence)"
+ * with no hint of what to do (reported: a friend with no passkey set up).
+ */
+export const VERIFY_SETUP_HELP =
+  'Couldn’t verify this device. Set up a screen lock with fingerprint or face unlock (a passkey) in your phone’s settings, then try again.';
+
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
   switch (reason) {
     case 'biometric_cancelled':
@@ -337,9 +354,9 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
     case 'biometric_failed':
       return 'Biometric check failed. Try again, or use another sign-in method.';
     case 'biometric_unavailable':
-      return 'Biometric authentication is not set up on this device.';
+      return VERIFY_SETUP_HELP;
     case 'minimum_confidence_unmet':
-      return 'This device cannot be verified yet. Please try again later.';
+      return VERIFY_SETUP_HELP;
     case 'network_unavailable':
       return `Can't reach the room. Try again.`;
     case 'enrollment_failed':
