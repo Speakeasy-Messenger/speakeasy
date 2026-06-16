@@ -1,6 +1,7 @@
 package xyz.speakeasyapp.app.lockscreen
 
 import android.app.KeyguardManager
+import android.app.admin.DevicePolicyManager
 import android.content.Context
 import android.content.Intent
 import android.os.Build
@@ -65,9 +66,10 @@ class LockScreenModule(private val reactContext: ReactApplicationContext) :
     promise.resolve(km?.isDeviceSecure ?: false)
   }
 
-  /** Open the system security settings so the user can set up a lock. On
-   *  API 28+ this jumps straight to the set-credential flow; older devices
-   *  land on the security settings page. */
+  /** Open the system security settings so the user can set up a lock.
+   *  `DevicePolicyManager.ACTION_SET_NEW_PASSWORD` jumps straight to the
+   *  set-credential flow on every supported API; if an OEM restricts it we
+   *  fall back to the general security settings page below. */
   @ReactMethod
   fun openSecuritySettings(promise: Promise) {
     val activity = currentActivity
@@ -75,10 +77,7 @@ class LockScreenModule(private val reactContext: ReactApplicationContext) :
       promise.resolve(false)
       return
     }
-    val intent =
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
-            Intent(Settings.ACTION_SET_NEW_PASSWORD)
-        else Intent(Settings.ACTION_SECURITY_SETTINGS)
+    val intent = Intent(DevicePolicyManager.ACTION_SET_NEW_PASSWORD)
     intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
     try {
       activity.startActivity(intent)
