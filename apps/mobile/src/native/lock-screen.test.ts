@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { setShowWhenLocked, shouldShowOverLockScreen } from './lock-screen.js';
+import {
+  isDeviceSecure,
+  openSecuritySettings,
+  setShowWhenLocked,
+  shouldShowOverLockScreen,
+} from './lock-screen.js';
 
 describe('shouldShowOverLockScreen', () => {
   // The bug this guards: showWhenLocked used to be a static manifest flag,
@@ -32,5 +37,20 @@ describe('setShowWhenLocked', () => {
   it('no-ops safely when the native module is absent (non-Android test env)', () => {
     expect(() => setShowWhenLocked(true)).not.toThrow();
     expect(() => setShowWhenLocked(false)).not.toThrow();
+  });
+});
+
+describe('isDeviceSecure', () => {
+  // Fails OPEN when the native module is absent (iOS, vitest, web preview)
+  // so onboarding never wrongly shows the "set up a screen lock" prompt on
+  // a platform it can't actually inspect.
+  it('returns true when the native module is absent (non-Android test env)', async () => {
+    await expect(isDeviceSecure()).resolves.toBe(true);
+  });
+});
+
+describe('openSecuritySettings', () => {
+  it('no-ops safely when the native module is absent (non-Android test env)', async () => {
+    await expect(openSecuritySettings()).resolves.toBeUndefined();
   });
 });

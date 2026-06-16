@@ -1,6 +1,11 @@
 package xyz.speakeasyapp.app.lockscreen
 
+import android.app.KeyguardManager
+import android.content.Context
+import android.content.Intent
 import android.os.Build
+import android.provider.Settings
+import com.facebook.react.bridge.Promise
 import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
@@ -42,6 +47,53 @@ class LockScreenModule(private val reactContext: ReactApplicationContext) :
     activity.runOnUiThread {
       activity.setShowWhenLocked(enabled)
       activity.setTurnScreenOn(enabled)
+    }
+  }
+
+  /**
+   * Whether the device has a secure lock screen — a PIN, pattern,
+   * password, OR an enrolled biometric (fingerprint/face). This is exactly
+   * the "passkey" Vouchflow's attestation needs: with no lock, device
+   * verification can't reach the production confidence floor, so signup
+   * fails `low_confidence`. The onboarding flow checks this to guide the
+   * user to set up a lock instead of dead-ending — and to tell apart "no
+   * lock" from "has a lock but the device is otherwise un-attestable".
+   */
+  @ReactMethod
+  fun isDeviceSecure(promise: Promise) {
+    val km = reactContext.getSystemService(Context.KEYGUARD_SERVICE) as? KeyguardManager
+    promise.resolve(km?.isDeviceSecure ?: false)
+  }
+
+  /** Open the system security settings so the user can set up a lock. On
+   *  API 28+ this jumps straight to the set-credential flow; older devices
+   *  land on the security settings page. */
+  @ReactMethod
+  fun openSecuritySettings(promise: Promise) {
+    val activity = currentActivity
+    if (activity == null) {
+      promise.resolve(false)
+      return
+    }
+    val intent =
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P)
+            Intent(Settings.ACTION_SET_NEW_PASSWORD)
+        else Intent(Settings.ACTION_SECURITY_SETTINGS)
+    intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+    try {
+      activity.startActivity(intent)
+      promise.resolve(true)
+    } catch (e: Exception) {
+      // Some OEMs restrict ACTION_SET_NEW_PASSWORD — fall back to the
+      // general security settings page.
+      try {
+        val fallback = Intent(Settings.ACTION_SECURITY_SETTINGS)
+        fallback.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+        activity.startActivity(fallback)
+        promise.resolve(true)
+      } catch (e2: Exception) {
+        promise.resolve(false)
+      }
     }
   }
 }
