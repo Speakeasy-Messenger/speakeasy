@@ -22,12 +22,44 @@ import { NativeModules, Platform } from 'react-native';
 
 interface SpeakeasyLockScreenModule {
   setShowWhenLocked: (enabled: boolean) => void;
+  isDeviceSecure: () => Promise<boolean>;
+  openSecuritySettings: () => Promise<boolean>;
 }
 
 function nativeModule(): SpeakeasyLockScreenModule | undefined {
   if (Platform.OS !== 'android') return undefined;
   return (NativeModules as { SpeakeasyLockScreen?: SpeakeasyLockScreenModule })
     .SpeakeasyLockScreen;
+}
+
+/**
+ * Whether the device has a secure lock — PIN, pattern, password, or an
+ * enrolled biometric — which is exactly the "passkey" Vouchflow attestation
+ * needs to reach the production confidence floor. Used by onboarding to
+ * guide a lockless device to set one up (and to tell that apart from a
+ * has-a-lock-but-otherwise-un-attestable device).
+ *
+ * Fails OPEN (returns true) when the native module is unavailable — iOS,
+ * vitest, web preview — so we never show the "set up a lock" prompt to a
+ * platform we can't actually check.
+ */
+export async function isDeviceSecure(): Promise<boolean> {
+  try {
+    const mod = nativeModule();
+    if (!mod) return true;
+    return await mod.isDeviceSecure();
+  } catch {
+    return true;
+  }
+}
+
+/** Open the system security settings (set-credential flow on API 28+). */
+export async function openSecuritySettings(): Promise<void> {
+  try {
+    await nativeModule()?.openSecuritySettings();
+  } catch {
+    // Best effort — if it can't open, the user can reach Settings manually.
+  }
 }
 
 /**

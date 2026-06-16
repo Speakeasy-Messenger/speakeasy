@@ -10,6 +10,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../../components/Button.js';
+import { isDeviceSecure, openSecuritySettings } from '../../native/lock-screen.js';
 import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
 import { VouchflowClientError, type VouchflowErrorReason } from '../../native/vouchflow.js';
@@ -60,6 +61,10 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
   const [availability, setAvailability] = useState<AvailabilityState>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
+  // True when the device has no secure lock (no PIN/pattern/biometric) —
+  // surfaces a "Set up screen lock" deep link, the real fix for the
+  // low-confidence signup wall.
+  const [needsLock, setNeedsLock] = useState(false);
 
   const tokenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -125,6 +130,17 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     if (availability.kind !== 'available') return;
     setBusy(true);
     setError(undefined);
+    setNeedsLock(false);
+    // Fail fast before the biometric prompt: with no secure lock,
+    // attestation can't reach the production confidence floor, so verify()
+    // would just dead-end at low_confidence. Guide the user to set up a
+    // lock instead — the actual fix, surfaced before the failure.
+    if (!(await isDeviceSecure())) {
+      setError(VERIFY_SETUP_HELP);
+      setNeedsLock(true);
+      setBusy(false);
+      return;
+    }
     try {
       const verifyResult = await Promise.race([
         vouchflow.verify({ context: 'signup', minimumConfidence: 'medium' }),
@@ -199,6 +215,21 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
       } else if (err instanceof ApiError && err.status === 409 && err.code === 'reserved') {
         setAvailability({ kind: 'reserved' });
         setError('That handle is reserved.');
+      } else if (err instanceof ApiError && err.status === 401 && err.code === 'low_confidence') {
+        // Server rejected the attestation below the production confidence
+        // floor — the SDK produced a verification, just a weak one. The
+        // proactive isDeviceSecure() check should have caught a lockless
+        // device before verify(), but re-check here in case the lock was
+        // removed mid-flow (or the check failed open): no lock → the
+        // fixable "set up a lock" guidance + deep link; lock present →
+        // the device itself can't be attested, so "set up a lock" would
+        // mislead.
+        if (!(await isDeviceSecure())) {
+          setError(VERIFY_SETUP_HELP);
+          setNeedsLock(true);
+        } else {
+          setError(VERIFY_DEVICE_HELP);
+        }
       } else if (err instanceof ApiError) {
         setError(`Enrollment failed (${err.status}${err.code ? ` ${err.code}` : ''}).`);
       } else {
@@ -266,6 +297,14 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
             </Text>
           ) : null}
           <View style={styles.buttonStack}>
+            {needsLock ? (
+              <Button
+                label="Set up screen lock"
+                onPress={() => void openSecuritySettings()}
+                disabled={busy}
+                testID="onboarding-setup-lock"
+              />
+            ) : null}
             <Button
               label="Generate one for me"
               onPress={handleGenerate}
@@ -330,6 +369,23 @@ function focusBorderFor(s: AvailabilityState) {
   return { borderColor: TEXT_FAINT };
 }
 
+/**
+ * Shown when the device has NO secure lock — the fixable case. We detect
+ * this directly via `isDeviceSecure()` (a lock is exactly the "passkey"
+ * Vouchflow needs), so it's surfaced proactively before the biometric
+ * prompt and paired with a "Set up screen lock" deep link.
+ */
+export const VERIFY_SETUP_HELP =
+  'This device has no screen lock. Set up a PIN, pattern, or fingerprint/face unlock in your phone’s settings, then try again.';
+
+/**
+ * Shown when a lock IS present but verification still failed — i.e. the
+ * device itself can't be attested (too old, modified/rooted, or missing
+ * Google Play services). "Set up a lock" would be wrong here.
+ */
+export const VERIFY_DEVICE_HELP =
+  'Couldn’t verify this device. It may be too old, modified, or missing Google Play services.';
+
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
   switch (reason) {
     case 'biometric_cancelled':
@@ -337,9 +393,10 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
     case 'biometric_failed':
       return 'Biometric check failed. Try again, or use another sign-in method.';
     case 'biometric_unavailable':
-      return 'Biometric authentication is not set up on this device.';
     case 'minimum_confidence_unmet':
-      return 'This device cannot be verified yet. Please try again later.';
+      // No-lock is caught proactively before verify(), so reaching here
+      // means a lock is present but the device still couldn't attest.
+      return VERIFY_DEVICE_HELP;
     case 'network_unavailable':
       return `Can't reach the room. Try again.`;
     case 'enrollment_failed':
