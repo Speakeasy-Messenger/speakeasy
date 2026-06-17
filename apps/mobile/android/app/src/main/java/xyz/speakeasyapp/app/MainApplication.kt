@@ -22,6 +22,7 @@ import xyz.speakeasyapp.app.channelkey.ChannelKeyPackage
 import xyz.speakeasyapp.app.fileopener.FileOpenerPackage
 import xyz.speakeasyapp.app.lockscreen.LockScreenPackage
 import xyz.speakeasyapp.app.notif.NotifMessagingPackage
+import xyz.speakeasyapp.app.power.PowerPackage
 import xyz.speakeasyapp.app.signal.SignalProtocolPackage
 import xyz.speakeasyapp.app.version.VersionPackage
 import xyz.speakeasyapp.app.voicefilter.VoiceFilterPackage
@@ -43,6 +44,7 @@ class MainApplication : Application(), ReactApplication {
               add(VersionPackage())
               add(FileOpenerPackage())
               add(LockScreenPackage())
+              add(PowerPackage())
               add(NotifMessagingPackage())
               add(VoiceFilterPackage())
             }

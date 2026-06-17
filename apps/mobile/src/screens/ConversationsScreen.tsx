@@ -25,6 +25,7 @@ import { StatusSquare } from '../components/StatusSquare.js';
 import { useBlocks } from '../store/blocks.js';
 import { SettingsIcon } from '../components/icons/SettingsIcon.js';
 import { StoreResetBanner } from '../components/StoreResetBanner.js';
+import { BatteryOptBanner } from '../components/BatteryOptBanner.js';
 import { useColors } from '../theme/index.js';
 import { colors, fonts, space, text } from '../theme/index.js';
 import { font, motion, type } from '../theme/tokens.js';
@@ -258,6 +259,7 @@ export function ConversationsScreen({
       />
 
       <StoreResetBanner />
+      <BatteryOptBanner />
 
       <FlatList
         data={rows}

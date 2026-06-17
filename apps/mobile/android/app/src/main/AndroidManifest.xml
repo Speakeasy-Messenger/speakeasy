@@ -18,6 +18,21 @@
          PermissionsAndroid in push-notifications.ts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
+    <!-- Battery-optimization exemption. Speakeasy's 'rich' Android push is
+         data-only so the headless FCM handler can decrypt + render the
+         real message text — but Doze / App-Standby defers (or kills) that
+         handler for a battery-optimized app, so background pushes pile up
+         and only surface on the next foreground (the "delayed
+         notifications batch" report). This lets high-priority pushes wake
+         the app in the background; requested via a one-time, dismissable
+         in-app nudge (power/PowerModule.kt →
+         ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS), the same exemption
+         Signal/WhatsApp ask for. Like USE_FULL_SCREEN_INTENT this is a
+         sensitive permission: Speakeasy qualifies as a real-time
+         messaging + calling app, but Play may ask us to justify it at
+         review. -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+
     <!-- Phase 6 voice calling: WebRTC + ConnectionService prerequisites. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
