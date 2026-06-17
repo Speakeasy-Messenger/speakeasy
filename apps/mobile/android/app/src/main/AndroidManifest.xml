@@ -18,20 +18,19 @@
          PermissionsAndroid in push-notifications.ts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- Battery-optimization exemption. Speakeasy's 'rich' Android push is
-         data-only so the headless FCM handler can decrypt + render the
-         real message text — but Doze / App-Standby defers (or kills) that
-         handler for a battery-optimized app, so background pushes pile up
-         and only surface on the next foreground (the "delayed
-         notifications batch" report). This lets high-priority pushes wake
-         the app in the background; requested via a one-time, dismissable
-         in-app nudge (power/PowerModule.kt →
-         ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS), the same exemption
-         Signal/WhatsApp ask for. Like USE_FULL_SCREEN_INTENT this is a
-         sensitive permission: Speakeasy qualifies as a real-time
-         messaging + calling app, but Play may ask us to justify it at
-         review. -->
-    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS" />
+    <!-- NB: we deliberately do NOT declare
+         REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. The battery-optimization
+         nudge (power/PowerModule.kt) instead deep-links to the system
+         battery-settings screen, which needs no permission. Google Play
+         restricts the one-tap REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+         request action to a narrow allow-list (VoIP / fitness /
+         navigation / IoT) and rejects general messaging apps that
+         declare it, recommending high-priority FCM instead (which we
+         already use). Reading the current state via
+         PowerManager.isIgnoringBatteryOptimizations() needs no permission
+         either, so the in-app check + settings deep-link cover the whole
+         flow without the restricted permission. -->
+
 
     <!-- Phase 6 voice calling: WebRTC + ConnectionService prerequisites. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />

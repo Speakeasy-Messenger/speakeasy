@@ -79,8 +79,8 @@ export function BatteryOptBanner(): React.JSX.Element | null {
           Notifications arriving late?
         </Text>
         <Text style={[styles.supp, { color: theme.textMute, fontSize: type.caption.size }]}>
-          Android can hold messages in the background until you open the app. Allow background
-          activity so they reach you on time.
+          Android can delay messages until you open the app. Mark Speakeasy as unrestricted in
+          battery settings so they reach you on time.
         </Text>
 
         <Pressable
@@ -92,11 +92,11 @@ export function BatteryOptBanner(): React.JSX.Element | null {
             { backgroundColor: pressed ? theme.accentPressed : theme.accent },
           ]}
           accessibilityRole="button"
-          accessibilityLabel="Allow background activity"
+          accessibilityLabel="Open battery settings"
           testID="battery-opt-allow"
         >
           <Text style={[styles.primaryLabel, { color: theme.accentFg, fontSize: type.body.size }]}>
-            Allow background activity
+            Open battery settings
           </Text>
         </Pressable>
       </View>

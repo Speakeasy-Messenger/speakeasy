@@ -8,11 +8,15 @@ import { NativeModules, Platform } from 'react-native';
  * handler can decrypt + render the real message text. A data-only message
  * needs that handler to run, and Android defers/kills it for a
  * battery-optimized app — so background pushes batch up and only appear on
- * the next foreground. Whitelisting the app lets high-priority pushes wake
- * it in the background (the standard Signal/WhatsApp fix).
+ * the next foreground. Marking the app unrestricted lets high-priority
+ * pushes wake it in the background.
  *
- * No-op on platforms without the native module (iOS — APNs handles its own
- * background delivery — vitest, web preview).
+ * The request opens the system battery-optimization settings (a
+ * permission-free deep link); we deliberately avoid the one-tap
+ * REQUEST_IGNORE_BATTERY_OPTIMIZATIONS dialog because Google Play
+ * restricts that permission for messaging apps. No-op on platforms
+ * without the native module (iOS — APNs handles its own background
+ * delivery — vitest, web preview).
  */
 interface SpeakeasyPowerModule {
   isIgnoringBatteryOptimizations: () => Promise<boolean>;
@@ -45,9 +49,10 @@ export async function isIgnoringBatteryOptimizations(): Promise<boolean> {
 }
 
 /**
- * Show the system battery-optimization exemption dialog for this app.
- * Resolves `true` if a settings surface was opened, `false` off-Android or
- * if the OS refused both the direct request and the settings-list fallback.
+ * Open the system battery-optimization settings so the user can mark
+ * Speakeasy as unrestricted. Resolves `true` if a settings surface was
+ * opened, `false` off-Android or if the OS refused both the
+ * battery-optimization list and the app-details fallback.
  */
 export async function requestDisableBatteryOptimization(): Promise<boolean> {
   try {
