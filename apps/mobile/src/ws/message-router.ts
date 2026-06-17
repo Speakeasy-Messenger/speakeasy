@@ -177,6 +177,240 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
     return utf8FromBytes(decryptResult);
   }
 
+  // ── Direct-message buffer-and-retry ────────────────────────────────
+  //
+  // The direct analog of the group `pendingSkdms` await above. A direct
+  // message can land before the PreKey message that establishes its
+  // Signal session — e.g. a sender's establish-then-send pair drains out
+  // of order on a reconnect, or the two race on the wire. The later
+  // (non-establishing) message then fails to decrypt with "no session",
+  // and the old code dropped a permanent `[couldn't decrypt]` bubble with
+  // no retry — exactly the one-off amiiz failure.
+  //
+  // Instead we hold the ciphertext keyed by sender and replay it once a
+  // *later* message from that sender decrypts successfully (which means
+  // the session is now established). A timeout flushes it as the dead
+  // bubble if no establishing message ever arrives, so a genuinely
+  // undecryptable message (corrupt / never-established) still surfaces —
+  // just delayed, never wrong. We deliberately do NOT ack a buffered
+  // message: the server keeps the relay row as a backup until we either
+  // succeed or give up, so an app restart mid-window recovers on the next
+  // drain instead of losing the ciphertext.
+  interface BufferedDirect {
+    frame: { from?: string; message_id: string; sent_at?: number };
+    ciphertext: Uint8Array;
+    timer: ReturnType<typeof setTimeout>;
+  }
+  const pendingDirectRetry = new Map<string, BufferedDirect[]>();
+  const DIRECT_RETRY_TIMEOUT_MS = 12_000;
+  const MAX_BUFFERED_DIRECT_PER_SENDER = 50;
+
+  function isRecoverableDecryptError(err: unknown): boolean {
+    // `untrusted_identity` has its own actionable bubble and a retry won't
+    // fix it; everything else (notably the "no session yet" ordering race)
+    // gets one buffered retry window.
+    if (err instanceof SignalClientError) return err.reason !== 'untrusted_identity';
+    return true;
+  }
+
+  // Buffer a direct frame for retry. Returns true if buffered (caller skips
+  // render + ack); false if the per-sender cap is hit (fall back to the
+  // dead bubble so we never grow unbounded).
+  function bufferDirect(
+    senderId: string,
+    frame: BufferedDirect['frame'],
+    ciphertext: Uint8Array,
+  ): boolean {
+    let buf = pendingDirectRetry.get(senderId);
+    // Server may redeliver the still-unacked message; don't double-buffer.
+    if (buf?.some((b) => b.frame.message_id === frame.message_id)) return true;
+    if (buf && buf.length >= MAX_BUFFERED_DIRECT_PER_SENDER) return false;
+    if (!buf) {
+      buf = [];
+      pendingDirectRetry.set(senderId, buf);
+    }
+    const timer = setTimeout(() => {
+      const cur = pendingDirectRetry.get(senderId);
+      const idx = cur?.findIndex((b) => b.frame.message_id === frame.message_id) ?? -1;
+      if (!cur || idx === -1) return;
+      const [entry] = cur.splice(idx, 1);
+      if (cur.length === 0) pendingDirectRetry.delete(senderId);
+      diag('router', 'message: buffered decrypt timed out — giving up', {
+        msgId: frame.message_id,
+        peerFp: diagFingerprint(senderId),
+      });
+      void processDirectFrame(entry!.frame, entry!.ciphertext, senderId, true);
+    }, DIRECT_RETRY_TIMEOUT_MS);
+    buf.push({ frame, ciphertext, timer });
+    return true;
+  }
+
+  // A message from `senderId` just decrypted — the session is established,
+  // so replay anything we were holding for them.
+  function drainDirectRetry(senderId: string): void {
+    const buf = pendingDirectRetry.get(senderId);
+    if (!buf || buf.length === 0) return;
+    pendingDirectRetry.delete(senderId);
+    diag('router', 'message: session established — replaying buffered', {
+      peerFp: diagFingerprint(senderId),
+      count: buf.length,
+    });
+    for (const entry of buf) {
+      clearTimeout(entry.timer);
+      void processDirectFrame(entry.frame, entry.ciphertext, senderId, true);
+    }
+  }
+
+  // Process one direct message end-to-end: decrypt (or decode the
+  // plaintext self/@speaker path) → add to the conversation → ack →
+  // notify. `isReplay` is true for buffered retries; it suppresses
+  // re-buffering so a still-failing message gives up to the dead bubble
+  // after one attempt instead of looping.
+  async function processDirectFrame(
+    frame: { from?: string; message_id: string; sent_at?: number },
+    ciphertext: Uint8Array,
+    senderId: string,
+    isReplay: boolean,
+  ): Promise<void> {
+    const frameDesc = {
+      msgId: frame.message_id,
+      peerFp: diagFingerprint(senderId),
+      msgType: 'direct' as const,
+    };
+    try {
+      let bubble: string;
+      // `decryptedOk` gates the inbound notification — we don't want to
+      // drop "[couldn't decrypt]" placeholders into a banner toast.
+      let decryptedOk = false;
+      let attachments: Attachment[] | undefined;
+      let mentions: string[] | undefined;
+      if (senderId === deps.myUserId || isSpeakerHandle(senderId)) {
+        // Plaintext path: self-DM (raw utf-8, no self-session) and
+        // @speaker broadcasts (announcements aren't E2E). No libsignal
+        // decrypt — decode the v1 envelope directly.
+        const raw = utf8FromBytes(ciphertext);
+        const payload = decodePayload(raw);
+        bubble = payload.text ?? '';
+        attachments = payload.attachments;
+        mentions = payload.mentions;
+        decryptedOk = true;
+        diag('router', 'message: plaintext decoded', {
+          ...frameDesc,
+          textLen: bubble.length,
+          attachCount: attachments?.length ?? 0,
+          mentionCount: mentions?.length ?? 0,
+        });
+      } else {
+        try {
+          const plaintext = await deps.signalProtocol.decrypt(senderId, ciphertext);
+          // rc.58: decrypt succeeded → libsignal has an established
+          // session for this peer. Mark it so the next outbound encrypt
+          // skips the destructive ensureSessionWithPeer re-initiation.
+          noteSessionEstablishedWith(senderId);
+          const raw = utf8FromBytes(plaintext);
+          const payload = decodePayload(raw);
+          bubble = payload.text ?? '';
+          attachments = payload.attachments;
+          mentions = payload.mentions;
+          decryptedOk = true;
+          diag('router', 'message: signal decrypted', {
+            ...frameDesc,
+            textLen: bubble.length,
+            attachCount: attachments?.length ?? 0,
+          });
+        } catch (err) {
+          // No session yet (or another recoverable failure): hold and
+          // replay once a later message establishes the session, rather
+          // than dropping a permanent dead bubble. See the buffer doc.
+          if (!isReplay && isRecoverableDecryptError(err) && bufferDirect(senderId, frame, ciphertext)) {
+            diag('router', 'message: decrypt deferred — buffered for session', {
+              ...frameDesc,
+              err: String(err),
+            });
+            return;
+          }
+          bubble = decodeBubble(err as Error);
+          diag('router', 'message: signal decrypt FAILED → bubble', {
+            ...frameDesc,
+            isReplay,
+            bubble,
+          });
+        }
+      }
+      let conversationId: string;
+      try {
+        conversationId = deps.conversationIdFor('direct', senderId, deps.myUserId);
+      } catch (err) {
+        diag('router', 'conversationIdFor THREW', {
+          ...frameDesc,
+          me: deps.myUserId,
+          err: String(err),
+        });
+        return;
+      }
+      diag('router', 'add direct to conversation', {
+        convId: conversationId,
+        peerFp: diagFingerprint(senderId),
+        isSelf: senderId === deps.myUserId,
+        textLen: bubble.length,
+      });
+      // Prefer the server's authoritative send time so a backlog draining
+      // all at once keeps each message's real timestamp instead of
+      // collapsing onto "now". Falls back to receive time for pre-rc.51
+      // servers.
+      const inboundSentAt = frame.sent_at ?? Date.now();
+      try {
+        deps.addToConversation(conversationId, {
+          id: frame.message_id,
+          from: senderId,
+          text: bubble,
+          attachments,
+          mentions,
+          kind: 'direct',
+          sentAt: inboundSentAt,
+          stage: 'sent',
+        });
+        diag('router', 'addToConversation OK', { convId: conversationId });
+        if (attachments && senderId !== deps.myUserId) {
+          deps.onInboundAttachments?.(attachments);
+        }
+        // Implicit read receipts: the peer just sent us a message, so
+        // they've necessarily seen everything we sent in this conversation
+        // up to this point. Stamp our prior outbound bubbles as read.
+        if (senderId !== deps.myUserId) {
+          deps.markReadUpTo(conversationId, inboundSentAt);
+        }
+      } catch (err) {
+        diag('router', 'addToConversation THREW', {
+          convId: conversationId,
+          err: String(err),
+        });
+        return;
+      }
+      deps.ws.enqueueAck(frame.message_id);
+      diag('router', 'ack queued', { msgId: frame.message_id });
+      if (decryptedOk && senderId !== deps.myUserId) {
+        deps.notifyInbound?.({
+          msgId: frame.message_id,
+          from: senderId,
+          text: bubble,
+          target: { kind: 'direct', peerId: senderId },
+        });
+      }
+      // A real decrypt means the session is now established — replay
+      // anything we were holding for this sender (the ordering-race fix).
+      if (decryptedOk) drainDirectRetry(senderId);
+    } catch (err) {
+      // Catch-all so unhandled rejections never disappear into the WS
+      // subscriber's outer try/catch.
+      diag('router', 'direct IIFE CRASHED', {
+        ...frameDesc,
+        err: String(err),
+        stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
+      });
+    }
+  }
+
   return (frame: WsServerMsg) => {
     const breadcrumb: Record<string, unknown> = {};
     const f = frame as {
@@ -338,143 +572,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           // Capture it once so the rest of this branch can keep using
           // the existing logic without per-line non-null assertions.
           const senderId: string = frame.from;
-          void (async () => {
-            try {
-              let bubble: string;
-              // `decryptedOk` gates the inbound notification — we don't
-              // want to drop "[decrypt failed: …]" placeholders into a
-              // banner toast.
-              let decryptedOk = false;
-              // Self-DM round-trip — sender already has the plaintext on
-              // the optimistic bubble; the wire payload was utf-8 (no
-              // libsignal encrypt). Decode directly instead of running
-              // decrypt against a self-paired session that may not exist.
-              let attachments: Attachment[] | undefined;
-              let mentions: string[] | undefined;
-              if (senderId === deps.myUserId || isSpeakerHandle(senderId)) {
-                // Plaintext path: self-DM (raw utf-8, no self-session)
-                // and @speaker broadcasts (announcements aren't E2E).
-                // No libsignal decrypt — decode the v1 envelope directly.
-                const raw = utf8FromBytes(ciphertext);
-                const payload = decodePayload(raw);
-                bubble = payload.text ?? '';
-                attachments = payload.attachments;
-                mentions = payload.mentions;
-                decryptedOk = true;
-                diag('router', 'message: plaintext decoded', {
-                  ...frameDesc,
-                  textLen: bubble.length,
-                  attachCount: attachments?.length ?? 0,
-                  mentionCount: mentions?.length ?? 0,
-                });
-              } else {
-                try {
-                  const plaintext = await deps.signalProtocol.decrypt(
-                    senderId,
-                    ciphertext,
-                  );
-                  // rc.58: decrypt succeeded → libsignal has an
-                  // established session for this peer. Mark it so the
-                  // next outbound encrypt skips the destructive
-                  // ensureSessionWithPeer re-initiation. See
-                  // session.ts for the why.
-                  noteSessionEstablishedWith(senderId);
-                  const raw = utf8FromBytes(plaintext);
-                  const payload = decodePayload(raw);
-                  bubble = payload.text ?? '';
-                  attachments = payload.attachments;
-                  mentions = payload.mentions;
-                  decryptedOk = true;
-                  diag('router', 'message: signal decrypted', {
-                    ...frameDesc,
-                    textLen: bubble.length,
-                    attachCount: attachments?.length ?? 0,
-                  });
-                } catch (err) {
-                  bubble = decodeBubble(err as Error);
-                  diag('router', 'message: signal decrypt FAILED → bubble', {
-                    ...frameDesc,
-                    bubble,
-                  });
-                }
-              }
-              let conversationId: string;
-              try {
-                conversationId = deps.conversationIdFor(
-                  'direct',
-                  senderId,
-                  deps.myUserId,
-                );
-              } catch (err) {
-                diag('router', 'conversationIdFor THREW', {
-                  ...frameDesc,
-                  me: deps.myUserId,
-                  err: String(err),
-                });
-                return;
-              }
-              diag('router', 'add direct to conversation', {
-                convId: conversationId,
-                peerFp: diagFingerprint(senderId),
-                isSelf: senderId === deps.myUserId,
-                textLen: bubble.length,
-              });
-              // Prefer the server's authoritative send time so a backlog
-              // draining all at once keeps each message's real timestamp
-              // instead of collapsing onto "now" (bananaman 2026-06-05).
-              // Falls back to receive time for pre-rc.51 servers.
-              const inboundSentAt = frame.sent_at ?? Date.now();
-              try {
-                deps.addToConversation(conversationId, {
-                  id: frame.message_id,
-                  from: senderId,
-                  text: bubble,
-                  attachments,
-                  mentions,
-                  kind: 'direct',
-                  sentAt: inboundSentAt,
-                  stage: 'sent',
-                });
-                diag('router', 'addToConversation OK', { convId: conversationId });
-                if (attachments && senderId !== deps.myUserId) {
-                  deps.onInboundAttachments?.(attachments);
-                }
-                // Implicit read receipts: the peer just sent us a
-                // message, so they've necessarily seen everything we
-                // sent in this conversation up to this point. Stamp
-                // our prior outbound bubbles as read. Closes the gap
-                // when the peer's client doesn't emit `read` frames
-                // and outbound bubbles get stuck on a faded ✓✓.
-                if (senderId !== deps.myUserId) {
-                  deps.markReadUpTo(conversationId, inboundSentAt);
-                }
-              } catch (err) {
-                diag('router', 'addToConversation THREW', {
-                  convId: conversationId,
-                  err: String(err),
-                });
-                return;
-              }
-              deps.ws.enqueueAck(frame.message_id);
-              diag('router', 'ack queued', { msgId: frame.message_id });
-              if (decryptedOk && senderId !== deps.myUserId) {
-                deps.notifyInbound?.({
-                  msgId: frame.message_id,
-                  from: senderId,
-                  text: bubble,
-                  target: { kind: 'direct', peerId: senderId },
-                });
-              }
-            } catch (err) {
-              // Catch-all so unhandled rejections never disappear into
-              // the WS subscriber's outer try/catch.
-              diag('router', 'direct IIFE CRASHED', {
-                ...frameDesc,
-                err: String(err),
-                stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
-              });
-            }
-          })();
+          // Full processing (decrypt → store → ack → notify) lives in
+          // processDirectFrame, which also implements the buffer-and-retry
+          // for a message that arrives before its session-establishing
+          // PreKey. `false` = this is the live frame, not a replay.
+          void processDirectFrame(frame, ciphertext, senderId, false);
         } else if (frame.msg_type === 'group') {
           // Group/community messages always carry `from` — sealed
           // sender doesn't apply to fan-out frames. Type narrows

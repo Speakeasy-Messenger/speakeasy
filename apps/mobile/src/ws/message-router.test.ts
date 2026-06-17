@@ -187,20 +187,58 @@ describe('messageRouter — direct message frame', () => {
     expect(h.attachmentsSeen[0]).toEqual(att);
   });
 
-  it('decrypt failure → renders a placeholder bubble, still acks, does NOT notify', async () => {
-    const h = makeHarness();
-    vi.spyOn(h.signal, 'decrypt').mockRejectedValue(
-      new SignalClientError('unknown_error', 'boom'),
-    );
-    h.router(directFrame());
-    await flush();
+  it('recoverable decrypt failure → buffered (no bubble/ack), then dead bubble + ack after timeout', async () => {
+    // A no-session-yet failure with no establishing message ever arriving:
+    // held for retry, then flushed as the placeholder once the timeout
+    // fires — never a wrong-but-immediate dead bubble.
+    vi.useFakeTimers();
+    try {
+      const h = makeHarness();
+      vi.spyOn(h.signal, 'decrypt').mockRejectedValue(
+        new SignalClientError('decrypt_failed', 'no session'),
+      );
+      h.router(directFrame());
+      await vi.advanceTimersByTimeAsync(0); // let the async processing settle
 
-    expect(h.added).toHaveLength(1);
-    expect(h.added[0]?.msg.text).toBe('[couldn’t decrypt this message]');
-    // ack still fires so the server drops the buffered row
-    expect(h.acks).toEqual(['m-1']);
-    // no banner for a failed decrypt
-    expect(h.notified).toHaveLength(0);
+      // Held — nothing rendered or acked yet (server keeps the relay row).
+      expect(h.added).toHaveLength(0);
+      expect(h.acks).toHaveLength(0);
+
+      // No establishing message arrives → give up and render the bubble.
+      await vi.advanceTimersByTimeAsync(12_000);
+      expect(h.added).toHaveLength(1);
+      expect(h.added[0]?.msg.text).toBe('[couldn’t decrypt this message]');
+      expect(h.acks).toEqual(['m-1']); // ack now fires so the server drops the row
+      expect(h.notified).toHaveLength(0); // no banner for a failed decrypt
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('buffers a no-session failure and replays it once a later message establishes the session', async () => {
+    const h = makeHarness();
+    // First decrypt loses the race with its session-establishing PreKey;
+    // every later decrypt (the establishing message + the replay) succeeds.
+    const realDecrypt = h.signal.decrypt.bind(h.signal);
+    let calls = 0;
+    vi.spyOn(h.signal, 'decrypt').mockImplementation(async (peer: string, ct: Uint8Array) => {
+      calls += 1;
+      if (calls === 1) throw new SignalClientError('decrypt_failed', 'no session');
+      return realDecrypt(peer, ct);
+    });
+
+    h.router(directFrame({ message_id: 'm-1', ciphertext: makeDirectCiphertext('first') }));
+    h.router(
+      directFrame({ message_id: 'm-2', ciphertext: makeDirectCiphertext('second'), sent_at: 1001 }),
+    );
+    await flush();
+    await flush(); // let the drained replay's async decrypt settle
+
+    // Both surfaced — the buffered 'first' was replayed after 'second'
+    // established the session, instead of a permanent dead bubble.
+    expect(h.added.map((a) => a.msg.text).sort()).toEqual(['first', 'second']);
+    expect(h.acks.sort()).toEqual(['m-1', 'm-2']);
+    expect(h.notified.map((n) => n.msgId).sort()).toEqual(['m-1', 'm-2']);
   });
 
   it('untrusted-identity decrypt failure → identity-changed bubble', async () => {
