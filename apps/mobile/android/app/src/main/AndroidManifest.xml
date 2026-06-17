@@ -18,19 +18,6 @@
          PermissionsAndroid in push-notifications.ts. -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
-    <!-- NB: we deliberately do NOT declare
-         REQUEST_IGNORE_BATTERY_OPTIMIZATIONS. The battery-optimization
-         nudge (power/PowerModule.kt) instead deep-links to the system
-         battery-settings screen, which needs no permission. Google Play
-         restricts the one-tap REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
-         request action to a narrow allow-list (VoIP / fitness /
-         navigation / IoT) and rejects general messaging apps that
-         declare it, recommending high-priority FCM instead (which we
-         already use). Reading the current state via
-         PowerManager.isIgnoringBatteryOptimizations() needs no permission
-         either, so the in-app check + settings deep-link cover the whole
-         flow without the restricted permission. -->
-
 
     <!-- Phase 6 voice calling: WebRTC + ConnectionService prerequisites. -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
