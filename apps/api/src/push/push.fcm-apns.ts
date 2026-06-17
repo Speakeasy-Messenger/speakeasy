@@ -89,6 +89,44 @@ export function buildIosPushData(
 }
 
 /**
+ * Build the FCM message for one Android bucket (devices sharing the same
+ * title/body/privacy). The privacy split is the whole point:
+ *
+ * 'rich' → data-only (no `notification` block) so the headless handler
+ *   runs to decrypt the forwarded ciphertext and render the real text.
+ * 'private' → an `android.notification` block so the OS renders the banner
+ *   immediately even with the process dead. Private devices opt out of the
+ *   decrypted preview, so they gain nothing from the data-only path but
+ *   pay its cost: Android defers/kills a data-only message's handler in
+ *   Doze / App-Standby, so the banner only surfaces on the next foreground
+ *   (the "batch of delayed notifications" report). Routed to the
+ *   IMPORTANCE_HIGH `speakeasy_default` channel pre-created in MainActivity.
+ *
+ * The `data` block rides along either way for tap-routing (conversation_id)
+ * and the foreground/onMessage path. Exported so the privacy split is
+ * unit-testable without a Firebase mock.
+ */
+export function buildAndroidPushMessage(
+  notice: PushDeliveryNotice,
+  opts: { title: string; body: string; privacy: 'rich' | 'private'; tokens: string[] },
+): admin.messaging.MulticastMessage {
+  const { title, body, privacy, tokens } = opts;
+  const data: Record<string, string> = { ...buildBasePushData(notice), title, body };
+  if (notice.messageId) data.message_id = notice.messageId;
+  if (notice.senderId) data.sender_id = notice.senderId;
+  // Ciphertext only for 'rich' devices — 'private' devices opt out of the
+  // content preview, so they never receive it.
+  if (ciphertextEligible(notice) && privacy === 'rich') {
+    data.ciphertext = notice.ciphertext!;
+  }
+  const android: admin.messaging.AndroidConfig = { priority: 'high' };
+  if (privacy === 'private') {
+    android.notification = { title, body, channelId: 'speakeasy_default' };
+  }
+  return { data, android, tokens };
+}
+
+/**
  * Production push provider — FCM (Android) + APNs (iOS).
  *
  * Android is **data-only**: no `notification` block, so the headless
@@ -163,9 +201,6 @@ export class FcmApnsPushProvider implements PushProvider {
     // devices still degrade gracefully when the message can't be
     // attributed.
     const kind = notice.kind ?? 'message';
-    // Base data block — present on every platform. The mobile client
-    // reads conversation_id + notify_kind for tap routing.
-    const baseData = buildBasePushData(notice);
     // Bucket by (title, body, platform, privacy) so each bucket maps to
     // one FCM payload. Android is data-only (the headless handler
     // renders + may decrypt); iOS keeps a notification block.
@@ -192,12 +227,6 @@ export class FcmApnsPushProvider implements PushProvider {
       }
     }
 
-    // Whether the ciphertext can ride along for on-device decryption:
-    // a real message (not a call), the server knows the sender (not
-    // sealed — the device needs the sender to address the decrypt),
-    // and it fits FCM's data-payload cap.
-    const canForwardCiphertext = ciphertextEligible(notice);
-
     // Track which tokens went into which send so we can correlate
     // per-response error codes back to the original FCM tokens in the
     // failure handler below. `sendEachForMulticast` returns
@@ -205,26 +234,14 @@ export class FcmApnsPushProvider implements PushProvider {
     // is the lightest way to carry that mapping out of the loop.
     const sends: { send: Promise<admin.messaging.BatchResponse>; tokens: string[] }[] = [];
     for (const { title, body, platform, privacy, tokens } of buckets.values()) {
-      // Android is data-only — no `notification` block. A message with
-      // one would be OS-rendered and the headless background handler
-      // would never run, so it could neither decrypt nor coalesce. The
-      // handler builds the banner from this data: `title`/`body` are
-      // the fallback copy, and when `ciphertext` is present it decrypts
-      // it on-device and shows the real text.
+      // Android delivery splits by privacy — see buildAndroidPushMessage.
+      // 'rich' stays data-only (headless handler decrypts + renders the
+      // real text); 'private' gets a real notification block so the OS
+      // shows the banner immediately even with the process dead, instead
+      // of the data-only message being deferred by Doze until the next
+      // foreground.
       if (platform === 'android') {
-        const data: Record<string, string> = { ...baseData, title, body };
-        if (notice.messageId) data.message_id = notice.messageId;
-        if (notice.senderId) data.sender_id = notice.senderId;
-        // Ciphertext only for 'rich' devices — 'private' devices opt
-        // out of content preview, so they never receive it.
-        if (canForwardCiphertext && privacy === 'rich') {
-          data.ciphertext = notice.ciphertext!;
-        }
-        const payload: admin.messaging.MulticastMessage = {
-          data,
-          android: { priority: 'high' as const },
-          tokens,
-        };
+        const payload = buildAndroidPushMessage(notice, { title, body, privacy, tokens });
         sends.push({
           send: admin.messaging(this.app).sendEachForMulticast(payload),
           tokens,
