@@ -705,6 +705,34 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         deps.userNotifier.notify(msg.to, skdmFrame);
         return;
       }
+      case 'skdm_request': {
+        // A recipient couldn't decrypt one of `to`'s group messages
+        // (no SenderKey state) and is asking `to` to re-distribute their
+        // SKDM. Relayed LIVE only — no relay row, no push. It's an
+        // idempotent control message; if `to` is offline the requester
+        // re-asks on the next undecryptable message once `to` is sending
+        // again. Both parties must be members of the group, so this can't
+        // be used to probe or spam arbitrary users.
+        if (!msg.to || !msg.group_id) {
+          sendError(socket, 'bad_skdm_request', 'skdm_request requires to, group_id');
+          return;
+        }
+        if (msg.to === session.userId) {
+          sendError(socket, 'invalid_target', 'cannot request skdm from self');
+          return;
+        }
+        const members = await deps.groups.listMembers(msg.group_id);
+        if (!members.includes(session.userId) || !members.includes(msg.to)) {
+          sendError(socket, 'not_a_member', 'requester and target must both be group members');
+          return;
+        }
+        deps.userNotifier.notify(msg.to, {
+          type: 'skdm_request' as const,
+          from: session.userId,
+          group_id: msg.group_id,
+        });
+        return;
+      }
       case 'call_offer':
       case 'call_answer':
       case 'call_ice':

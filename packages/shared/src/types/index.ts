@@ -132,6 +132,16 @@ export type WsClientMsg =
    * dispatches as a separate frame type to the recipient.
    */
   | { type: 'skdm'; to: string; group_id: string; ciphertext: string }
+  /**
+   * Ask `to` to re-send their Sender Key Distribution Message (SKDM) for
+   * `group_id`. Sent by a recipient that failed to decrypt a group message
+   * with `no_session` — i.e. it has no SenderKey state for that sender,
+   * because it joined the group after the sender last distributed, the
+   * sender's prior SKDM was lost, or the recipient reinstalled. The server
+   * relays it to `to`, who re-bootstraps the requester. No ciphertext —
+   * it's a control frame.
+   */
+  | { type: 'skdm_request'; to: string; group_id: string }
   // ----- Voice call signaling (1:1 only — see Call* types below) -----
   /**
    * `kind` is a plaintext hint (the encrypted SDP carries the same value)
@@ -220,6 +230,15 @@ export type WsServerMsg =
       ciphertext: string;
       message_id: MessageId;
     }
+  /**
+   * Inbound SKDM re-request — counterpart to the client-side
+   * `skdm_request`. `from` couldn't decrypt one of our group messages and
+   * is asking us to re-send our SenderKey for `group_id`. The receiving
+   * client clears its "already bootstrapped `from`" mark and re-sends the
+   * SKDM. Best-effort + idempotent — no ack, no relay buffer; if it's
+   * missed, the requester re-asks on the next undecryptable message.
+   */
+  | { type: 'skdm_request'; from: UserId; group_id: string }
   /**
    * Server-pushed signal: this user's one-time-prekey pool is below
    * threshold. The mobile client should mint + upload a fresh batch via
