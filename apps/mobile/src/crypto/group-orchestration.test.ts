@@ -165,6 +165,28 @@ describe('makeGroupOrchestrator', () => {
     expect(sent[3]!.frame.type).toBe('message');
   });
 
+  it('redistributeSenderKey re-sends an SKDM to a single peer (answers skdm_request)', async () => {
+    clearSessionCache();
+    const { ws, sent } = makeFakeWs();
+    const orch = makeGroupOrchestrator({
+      api: makeFakeApi(bundleFor('any')),
+      signalProtocol: new MockSignalProtocolClient(),
+      groupMessaging: new MockGroupMessagingClient(),
+      ws,
+      getDeviceToken: async () => 'dvt_test',
+      getOrCreateDistributionId: () => DIST_ID,
+    });
+
+    // A member who can't decrypt our messages asked us to re-send. We push
+    // exactly one SKDM, to just them — no group message, no fan-out.
+    await orch.redistributeSenderKey('grp-1', 'carol');
+    expect(sent.length).toBe(1);
+    expect(sent[0]!.frame.type).toBe('skdm');
+    const skdm = sent[0]!.frame as Extract<WsClientMsg, { type: 'skdm' }>;
+    expect(skdm.to).toBe('carol');
+    expect(skdm.group_id).toBe('grp-1');
+  });
+
   it('handleIncomingSkdm decrypts via 1:1, installs SenderKey, acks', async () => {
     clearSessionCache();
     // Two parallel mock universes — alice (sender) and bob (recipient).

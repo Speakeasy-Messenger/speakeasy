@@ -66,6 +66,14 @@ export interface GroupOrchestrator {
     ciphertext: string;
     message_id: string;
   }): Promise<void>;
+  /**
+   * Re-send our SenderKey (SKDM) to a single peer — the answer to an
+   * `skdm_request` from a member who can't decrypt our group messages
+   * (they joined after we last distributed, reinstalled, or missed the
+   * original SKDM). Re-mints + re-sends unconditionally; idempotent on the
+   * receiver (`processSenderKeyDistribution` is safe to replay).
+   */
+  redistributeSenderKey(groupId: string, peer: string): Promise<void>;
   /** Drop bootstrap state — call on identity rotation / sign-out. */
   reset(): void;
 }
@@ -143,6 +151,29 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
         ciphertext: bytesToB64(ciphertext),
         msg_type: 'group',
       });
+    },
+
+    async redistributeSenderKey(groupId: string, peer: string): Promise<void> {
+      const distributionId = deps.getOrCreateDistributionId(groupId);
+      // Re-mint the SKDM (idempotent on the bytes when no rotation has
+      // happened) and push it to just this peer.
+      const skdm = await deps.groupMessaging.createSenderKeyDistribution(distributionId);
+      const deviceToken = await deps.getDeviceToken();
+      // The 1:1 session must exist before we can encrypt the SKDM to them.
+      await ensureSessionWithPeer({
+        api: deps.api,
+        signalProtocol: deps.signalProtocol,
+        deviceToken,
+        peerUserId: peer,
+      });
+      const wrapped = await deps.signalProtocol.encrypt(peer, skdm);
+      await sendOrWait({
+        type: 'skdm',
+        to: peer,
+        group_id: groupId,
+        ciphertext: bytesToB64(wrapped),
+      });
+      markBootstrapped(groupId, peer);
     },
 
     async handleIncomingSkdm(frame): Promise<void> {

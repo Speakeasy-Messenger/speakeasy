@@ -880,6 +880,16 @@ export default function App() {
         });
         useConversations.getState().setFrozen(cid, true);
       },
+      // A group member couldn't decrypt our messages (no SenderKey state —
+      // they joined after we last distributed, reinstalled, or missed the
+      // SKDM) and asked us to re-send it. Re-distribute to just them.
+      onSkdmRequest: (from, groupId) =>
+        orchestrator.redistributeSenderKey(groupId, from).catch((err) =>
+          diag('app', 'redistributeSenderKey failed (non-fatal)', {
+            groupId,
+            err: String(err),
+          }),
+        ),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
       markDelivered: (msgId) =>

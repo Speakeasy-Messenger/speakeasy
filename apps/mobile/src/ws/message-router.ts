@@ -3,7 +3,7 @@ import type {
   GroupMessagingModule,
   SignalProtocolModule,
 } from '@speakeasy/crypto';
-import { SignalClientError } from '@speakeasy/crypto';
+import { GroupMessagingClientError, SignalClientError } from '@speakeasy/crypto';
 import {
   decodePayload,
   isSpeakerHandle,
@@ -145,6 +145,13 @@ export interface MessageRouterDeps {
    * tombstone path can omit it.
    */
   onPeerDeleted?: (handle: string) => void;
+  /**
+   * A peer asked us (via an `skdm_request` frame) to re-send our SenderKey
+   * for a group they can't decrypt our messages in. Wired to the group
+   * orchestrator's `redistributeSenderKey(groupId, peer)`. Optional so
+   * router unit tests can omit it.
+   */
+  onSkdmRequest?: (from: string, groupId: string) => void | Promise<void>;
   /** Optional structured logger. Omitted in production unless a caller wires one. */
   log?: (msg: string, ctx?: Record<string, unknown>) => void;
 }
@@ -411,6 +418,232 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
     }
   }
 
+  // ── Group-message buffer + SKDM re-request ─────────────────────────
+  //
+  // The group analog of the direct buffer above, for the OTHER cause of a
+  // missing sender key: not an in-flight SKDM (handled by `pendingSkdms`),
+  // but one that was never received at all — the recipient joined the
+  // group after the sender last distributed, the sender's SKDM was lost,
+  // or the recipient reinstalled. The group decrypt then fails `no_session`
+  // ("missing sender key state for distribution ID …") with nothing in
+  // flight to wait for.
+  //
+  // We hold the message, ask the sender to re-send their SKDM
+  // (`skdm_request`, rate-limited per sender+group), and replay the
+  // buffered messages once that SKDM is processed. A timeout flushes the
+  // dead bubble if the key never arrives. Like the direct buffer, a held
+  // message is NOT acked, so the server keeps the relay row as a backup.
+  interface BufferedGroup {
+    frame: { from?: string; message_id: string; conversation_id: string; sent_at?: number };
+    ciphertext: Uint8Array;
+    timer: ReturnType<typeof setTimeout>;
+  }
+  const pendingGroupRetry = new Map<string, BufferedGroup[]>();
+  const GROUP_RETRY_TIMEOUT_MS = 15_000;
+  const MAX_BUFFERED_GROUP_PER_SENDER = 100;
+  // Per (sender\0group) timestamp of the last skdm_request we sent, so a
+  // backlog of undecryptable messages from one sender fires a single
+  // request, not one per message.
+  const lastSkdmRequestAt = new Map<string, number>();
+  const SKDM_REQUEST_COOLDOWN_MS = 10_000;
+
+  function isMissingSenderKey(err: unknown): boolean {
+    // Production throws a GroupMessagingClientError (`.reason`); be tolerant
+    // of the plain `{ code }` shape too (mock + any unwrapped native reject)
+    // so the recovery path doesn't hinge on the error class.
+    if (err instanceof GroupMessagingClientError) return err.reason === 'no_session';
+    const code =
+      (err as { reason?: string } | null)?.reason ?? (err as { code?: string } | null)?.code;
+    return code === 'no_session';
+  }
+
+  function requestSkdm(senderId: string, groupId: string): void {
+    const key = `${senderId} ${groupId}`;
+    const last = lastSkdmRequestAt.get(key) ?? 0;
+    const now = Date.now();
+    if (now - last < SKDM_REQUEST_COOLDOWN_MS) return;
+    lastSkdmRequestAt.set(key, now);
+    diag('router', 'group: requesting SKDM re-send', {
+      peerFp: diagFingerprint(senderId),
+      groupId,
+    });
+    deps.ws.enqueueSend({ type: 'skdm_request', to: senderId, group_id: groupId });
+  }
+
+  // Buffer a group frame for retry. Returns true if buffered (caller skips
+  // render + ack); false if the per-sender cap is hit.
+  function bufferGroup(
+    senderId: string,
+    frame: BufferedGroup['frame'],
+    ciphertext: Uint8Array,
+  ): boolean {
+    let buf = pendingGroupRetry.get(senderId);
+    if (buf?.some((b) => b.frame.message_id === frame.message_id)) return true;
+    if (buf && buf.length >= MAX_BUFFERED_GROUP_PER_SENDER) return false;
+    if (!buf) {
+      buf = [];
+      pendingGroupRetry.set(senderId, buf);
+    }
+    const timer = setTimeout(() => {
+      const cur = pendingGroupRetry.get(senderId);
+      const idx = cur?.findIndex((b) => b.frame.message_id === frame.message_id) ?? -1;
+      if (!cur || idx === -1) return;
+      const [entry] = cur.splice(idx, 1);
+      if (cur.length === 0) pendingGroupRetry.delete(senderId);
+      diag('router', 'group: buffered decrypt timed out — giving up', {
+        msgId: frame.message_id,
+        peerFp: diagFingerprint(senderId),
+      });
+      void processGroupFrame(entry!.frame, entry!.ciphertext, senderId, true);
+    }, GROUP_RETRY_TIMEOUT_MS);
+    buf.push({ frame, ciphertext, timer });
+    return true;
+  }
+
+  // An SKDM from `senderId` was just installed — replay anything we were
+  // holding for them. Called from the `skdm` case after handleIncomingSkdm.
+  function drainGroupRetry(senderId: string): void {
+    const buf = pendingGroupRetry.get(senderId);
+    if (!buf || buf.length === 0) return;
+    pendingGroupRetry.delete(senderId);
+    diag('router', 'group: SKDM installed — replaying buffered', {
+      peerFp: diagFingerprint(senderId),
+      count: buf.length,
+    });
+    for (const entry of buf) {
+      clearTimeout(entry.timer);
+      void processGroupFrame(entry.frame, entry.ciphertext, senderId, true);
+    }
+  }
+
+  // Process one group message end-to-end. `isReplay` is true for buffered
+  // retries (suppresses re-buffering / re-requesting so a still-failing
+  // message gives up to the dead bubble after one attempt).
+  async function processGroupFrame(
+    frame: { from?: string; message_id: string; conversation_id: string; sent_at?: number },
+    ciphertext: Uint8Array,
+    groupSenderId: string,
+    isReplay: boolean,
+  ): Promise<void> {
+    try {
+      // If an SKDM from the same sender is mid-flight (both arrived
+      // together on a buffer drain after a reconnect), wait for it so the
+      // SenderKey is installed before we try to decrypt.
+      const pendingSkdm = pendingSkdms.get(groupSenderId);
+      if (pendingSkdm) {
+        diag('router', 'group: awaiting in-flight SKDM', {
+          msgId: frame.message_id,
+          from: groupSenderId,
+        });
+        await pendingSkdm;
+        diag('router', 'group: SKDM settled, proceeding', {
+          msgId: frame.message_id,
+          from: groupSenderId,
+        });
+      }
+      let bubble: string;
+      let groupAttachments: Attachment[] | undefined;
+      let groupMentions: string[] | undefined;
+      let decryptedOk = false;
+      try {
+        const plaintext = await deps.groupMessaging.decryptFromGroupMember(
+          groupSenderId,
+          ciphertext,
+        );
+        const raw = utf8FromBytes(plaintext);
+        const payload = decodePayload(raw);
+        bubble = payload.text ?? '';
+        groupAttachments = payload.attachments;
+        groupMentions = payload.mentions;
+        decryptedOk = true;
+        diag('router', 'group: decrypted', {
+          msgId: frame.message_id,
+          peerFp: diagFingerprint(groupSenderId),
+          textLen: bubble.length,
+          attachCount: groupAttachments?.length ?? 0,
+        });
+      } catch (err) {
+        // No SenderKey state for this sender: hold the message, ask them
+        // to re-distribute their SKDM, and replay once it lands — instead
+        // of a permanent dead bubble. Only for a genuine missing-key (not
+        // a corrupt/duplicate message), and not on a replay.
+        if (
+          !isReplay &&
+          groupSenderId !== deps.myUserId &&
+          isMissingSenderKey(err) &&
+          bufferGroup(groupSenderId, frame, ciphertext)
+        ) {
+          requestSkdm(groupSenderId, frame.conversation_id);
+          diag('router', 'group: decrypt deferred — buffered, SKDM requested', {
+            msgId: frame.message_id,
+            from: groupSenderId,
+            err: String(err),
+          });
+          return;
+        }
+        bubble = decodeBubble(err as Error);
+        diag('router', 'group: decrypt FAILED → bubble', {
+          msgId: frame.message_id,
+          from: groupSenderId,
+          isReplay,
+          bubble,
+          err: String(err),
+        });
+      }
+      try {
+        deps.addToConversation(frame.conversation_id, {
+          id: frame.message_id,
+          from: groupSenderId,
+          text: bubble,
+          attachments: groupAttachments,
+          mentions: groupMentions,
+          kind: 'group',
+          sentAt: frame.sent_at ?? Date.now(),
+          stage: 'sent',
+        });
+        diag('router', 'group: addToConversation OK', {
+          convId: frame.conversation_id,
+          msgId: frame.message_id,
+        });
+        void deps
+          .ensureGroupHydrated(frame.conversation_id)
+          .catch((err) =>
+            diag('router', 'ensureGroupHydrated threw', {
+              groupId: frame.conversation_id,
+              err: String(err),
+            }),
+          );
+        if (groupAttachments && groupSenderId !== deps.myUserId) {
+          deps.onInboundAttachments?.(groupAttachments);
+        }
+      } catch (err) {
+        diag('router', 'group: addToConversation THREW', {
+          convId: frame.conversation_id,
+          msgId: frame.message_id,
+          err: String(err),
+        });
+        return;
+      }
+      deps.ws.enqueueAck(frame.message_id);
+      diag('router', 'group: ack queued', { msgId: frame.message_id });
+      if (decryptedOk && groupSenderId !== deps.myUserId) {
+        deps.notifyInbound?.({
+          msgId: frame.message_id,
+          from: groupSenderId,
+          text: bubble,
+          target: { kind: 'group', groupId: frame.conversation_id },
+        });
+      }
+    } catch (err) {
+      diag('router', 'group IIFE CRASHED', {
+        msgId: frame.message_id,
+        from: groupSenderId,
+        err: String(err),
+        stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
+      });
+    }
+  }
+
   return (frame: WsServerMsg) => {
     const breadcrumb: Record<string, unknown> = {};
     const f = frame as {
@@ -500,6 +733,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
                 msgId: messageId,
                 peerFp: diagFingerprint(senderId),
               });
+              // The SenderKey for this sender is now installed — replay
+              // any group messages we buffered waiting for it (the
+              // re-request recovery path), not just the in-flight ones
+              // `pendingSkdms` already covers.
+              drainGroupRetry(senderId);
             },
             (err) => {
               diag('router', 'skdm: handle FAILED', {
@@ -519,6 +757,20 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             pendingSkdms.delete(senderId);
           }
         });
+        return;
+      }
+
+      case 'skdm_request': {
+        // A peer couldn't decrypt one of our group messages and is asking
+        // us to re-send our SenderKey for the group. Re-distribute it (the
+        // orchestrator clears its "already bootstrapped this peer" mark and
+        // sends a fresh SKDM). Best-effort — failures just mean the peer
+        // re-asks on their next undecryptable message.
+        diag('router', 'skdm_request: received', {
+          peerFp: diagFingerprint(frame.from),
+          groupId: frame.group_id,
+        });
+        void deps.onSkdmRequest?.(frame.from, frame.group_id);
         return;
       }
 
@@ -588,118 +840,11 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             return;
           }
           const groupSenderId: string = frame.from;
-          // Server stamps the group id as conversation_id on the frame
-          // (added when group messages can't carry it inside the
-          // ciphertext envelope). Bucket directly into that group.
-          void (async () => {
-            try {
-              // If an SKDM from the same sender is mid-flight (e.g.
-              // both arrived together on a buffer drain after a
-              // reconnect), wait for it to finish so the SenderKey is
-              // installed before we try to decrypt.
-              const pendingSkdm = pendingSkdms.get(groupSenderId);
-              if (pendingSkdm) {
-                diag('router', 'group: awaiting in-flight SKDM', {
-                  msgId: frame.message_id,
-                  from: groupSenderId,
-                });
-                await pendingSkdm;
-                diag('router', 'group: SKDM settled, proceeding', {
-                  msgId: frame.message_id,
-                  from: groupSenderId,
-                });
-              }
-              let bubble: string;
-              let groupAttachments: Attachment[] | undefined;
-              let groupMentions: string[] | undefined;
-              let decryptedOk = false;
-              try {
-                const plaintext = await deps.groupMessaging.decryptFromGroupMember(
-                  groupSenderId,
-                  ciphertext,
-                );
-                const raw = utf8FromBytes(plaintext);
-                const payload = decodePayload(raw);
-                bubble = payload.text ?? '';
-                groupAttachments = payload.attachments;
-                groupMentions = payload.mentions;
-                decryptedOk = true;
-                diag('router', 'group: decrypted', {
-                  msgId: frame.message_id,
-                  peerFp: diagFingerprint(groupSenderId),
-                  textLen: bubble.length,
-                  attachCount: groupAttachments?.length ?? 0,
-                });
-              } catch (err) {
-                bubble = decodeBubble(err as Error);
-                diag('router', 'group: decrypt FAILED → bubble', {
-                  msgId: frame.message_id,
-                  from: groupSenderId,
-                  bubble,
-                  err: String(err),
-                });
-              }
-              try {
-                deps.addToConversation(frame.conversation_id, {
-                  id: frame.message_id,
-                  from: groupSenderId,
-                  text: bubble,
-                  attachments: groupAttachments,
-                  mentions: groupMentions,
-                  kind: 'group',
-                  // Server send time so a backlog drain keeps real
-                  // per-message timestamps (bananaman 2026-06-05).
-                  sentAt: frame.sent_at ?? Date.now(),
-                  stage: 'sent',
-                });
-                diag('router', 'group: addToConversation OK', {
-                  convId: frame.conversation_id,
-                  msgId: frame.message_id,
-                });
-                // Make sure the room's metadata (name, members) is
-                // hydrated locally so the chat AppBar + send path
-                // work — see ensureGroupHydrated docs.
-                void deps
-                  .ensureGroupHydrated(frame.conversation_id)
-                  .catch((err) =>
-                    diag('router', 'ensureGroupHydrated threw', {
-                      groupId: frame.conversation_id,
-                      err: String(err),
-                    }),
-                  );
-                if (groupAttachments && groupSenderId !== deps.myUserId) {
-                  deps.onInboundAttachments?.(groupAttachments);
-                }
-              } catch (err) {
-                diag('router', 'group: addToConversation THREW', {
-                  convId: frame.conversation_id,
-                  msgId: frame.message_id,
-                  err: String(err),
-                });
-                return;
-              }
-              deps.ws.enqueueAck(frame.message_id);
-              diag('router', 'group: ack queued', { msgId: frame.message_id });
-              if (decryptedOk && groupSenderId !== deps.myUserId) {
-                deps.notifyInbound?.({
-                  msgId: frame.message_id,
-                  from: groupSenderId,
-                  text: bubble,
-                  target: { kind: 'group', groupId: frame.conversation_id },
-                });
-              }
-            } catch (err) {
-              // Catch-all so any unhandled rejection makes it to the
-              // on-device Diagnostics screen instead of vanishing into
-              // the WS subscriber's outer try/catch.
-              diag('router', 'group IIFE CRASHED', {
-                msgId: frame.message_id,
-                from: groupSenderId,
-                err: String(err),
-                stack: (err as { stack?: string }).stack?.slice(0, 240) ?? '',
-              });
-            }
-          })();
+          // Full processing (await in-flight SKDM → decrypt → store → ack
+          // → notify) lives in processGroupFrame, which also buffers a
+          // `no_session` failure and re-requests the sender's SKDM. `false`
+          // = live frame, not a replay.
+          void processGroupFrame(frame, ciphertext, groupSenderId, false);
         } else {
           // Community message arrived but the UI isn't wired yet.
           //

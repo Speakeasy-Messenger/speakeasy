@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   encodePayload,
   type Attachment,
+  type WsClientMsg,
   type WsServerMsg,
 } from '@speakeasy/shared';
 import { MockGroupMessagingClient, SignalClientError } from '@speakeasy/crypto';
@@ -58,6 +59,8 @@ interface Harness {
   /** Recorded (conversationId, msg) pairs from addToConversation. */
   added: Array<{ conversationId: string; msg: ChatMessage }>;
   acks: string[];
+  /** Frames handed to ws.enqueueSend (e.g. skdm_request). */
+  sends: WsClientMsg[];
   notified: Array<Parameters<NonNullable<MessageRouterDeps['notifyInbound']>>[0]>;
   attachmentsSeen: Attachment[][];
 }
@@ -67,6 +70,7 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
   const group = new MockGroupMessagingClient({ tag: 'me' });
   const added: Harness['added'] = [];
   const acks: string[] = [];
+  const sends: WsClientMsg[] = [];
   const notified: Harness['notified'] = [];
   const attachmentsSeen: Attachment[][] = [];
 
@@ -78,6 +82,9 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
     ws: {
       enqueueAck: (id: string) => {
         acks.push(id);
+      },
+      enqueueSend: (m: WsClientMsg) => {
+        sends.push(m);
       },
     } as unknown as MessageRouterDeps['ws'],
     orchestrator: {} as MessageRouterDeps['orchestrator'],
@@ -101,6 +108,7 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
     group,
     added,
     acks,
+    sends,
     notified,
     attachmentsSeen,
   };
@@ -377,27 +385,91 @@ describe('messageRouter — group / sender-key path', () => {
     });
   });
 
-  it('group decrypt failure (no SenderKey) → placeholder bubble, still acks, no notify', async () => {
-    const DIST = 'dist-grp-2';
+  it('group no-SenderKey failure → buffers, requests the SKDM, no ack; dead bubble after timeout', async () => {
+    vi.useFakeTimers();
+    try {
+      const DIST = 'dist-grp-2';
+      const sender = new MockGroupMessagingClient({ tag: 'bob' });
+      await sender.createSenderKeyDistribution(DIST);
+      const ct = await makeGroupCiphertext(sender, DIST, 'unreadable');
+
+      const h = makeHarness(); // receiver never processed the SKDM
+      h.router({
+        type: 'message',
+        from: 'bob',
+        ciphertext: ct,
+        message_id: 'g-2',
+        msg_type: 'group',
+        conversation_id: 'grp-xyz',
+      } as WsServerMsg);
+      await vi.advanceTimersByTimeAsync(0);
+
+      // Held: nothing rendered/acked, and we asked bob to re-send the SKDM.
+      expect(h.added).toHaveLength(0);
+      expect(h.acks).toHaveLength(0);
+      expect(h.sends).toEqual([{ type: 'skdm_request', to: 'bob', group_id: 'grp-xyz' }]);
+
+      // bob never answers → give up: dead bubble + ack so the server drops it.
+      await vi.advanceTimersByTimeAsync(15_000);
+      expect(h.added).toHaveLength(1);
+      expect(h.added[0]?.msg.text).toBe('[couldn’t decrypt this message]');
+      expect(h.acks).toEqual(['g-2']);
+      expect(h.notified).toHaveLength(0);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('group no-SenderKey failure → replays after the requested SKDM is installed', async () => {
+    const DIST = 'dist-grp-recover';
     const sender = new MockGroupMessagingClient({ tag: 'bob' });
     await sender.createSenderKeyDistribution(DIST);
-    const ct = await makeGroupCiphertext(sender, DIST, 'unreadable');
+    const ct = await makeGroupCiphertext(sender, DIST, 'now readable');
+    const skdmBytes = await sender.createSenderKeyDistribution(DIST);
 
-    const h = makeHarness(); // receiver never processed the SKDM
+    // The SKDM that bob re-sends in response to our request installs the key.
+    const h = makeHarness({
+      orchestrator: {
+        handleIncomingSkdm: vi.fn(async () => {
+          await h.group.processSenderKeyDistribution('bob', skdmBytes);
+        }),
+      } as unknown as MessageRouterDeps['orchestrator'],
+    });
+
+    // 1) Group message we can't decrypt yet → buffered + skdm_request.
     h.router({
       type: 'message',
       from: 'bob',
       ciphertext: ct,
-      message_id: 'g-2',
+      message_id: 'g-r',
       msg_type: 'group',
       conversation_id: 'grp-xyz',
     } as WsServerMsg);
     await flush();
+    expect(h.added).toHaveLength(0);
+    expect(h.sends).toEqual([{ type: 'skdm_request', to: 'bob', group_id: 'grp-xyz' }]);
+
+    // 2) bob answers with the SKDM → installs the key → buffered msg replays.
+    h.router({
+      type: 'skdm',
+      from: 'bob',
+      group_id: 'grp-xyz',
+      ciphertext: 'mock',
+      message_id: 's-r',
+    } as WsServerMsg);
+    await flush();
+    await flush();
 
     expect(h.added).toHaveLength(1);
-    expect(h.added[0]?.msg.text).toBe('[couldn’t decrypt this message]');
-    expect(h.acks).toEqual(['g-2']);
-    expect(h.notified).toHaveLength(0);
+    expect(h.added[0]?.msg.text).toBe('now readable');
+    expect(h.acks).toContain('g-r');
+  });
+
+  it('skdm_request frame → fires onSkdmRequest with the sender + group', () => {
+    const onSkdmRequest = vi.fn();
+    const h = makeHarness({ onSkdmRequest });
+    h.router({ type: 'skdm_request', from: 'dave', group_id: 'grp-xyz' } as WsServerMsg);
+    expect(onSkdmRequest).toHaveBeenCalledWith('dave', 'grp-xyz');
   });
 
   it('group message awaits an in-flight SKDM from the same sender before decrypting', async () => {

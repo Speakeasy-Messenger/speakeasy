@@ -751,6 +751,31 @@ describe('ws SKDM envelope — Phase 5b carry-over', () => {
     expect(typeof frame.message_id).toBe('string');
   });
 
+  it('relays a live skdm_request to the target as an `skdm_request` frame', async () => {
+    const groupId = newGroupId();
+    await groupRepo.create({ groupId, createdBy: 'alice-blue-fox' });
+    await groupRepo.addMember({ groupId, userId: 'bob-red-bear', addedBy: 'alice-blue-fox' });
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    // bob can't decrypt alice's group messages → asks alice to re-send.
+    b.ws.send(JSON.stringify({ type: 'skdm_request', to: 'alice-blue-fox', group_id: groupId }));
+    const frame = (await a.q.next()) as { type: string; from: string; group_id: string };
+    expect(frame.type).toBe('skdm_request');
+    expect(frame.from).toBe('bob-red-bear');
+    expect(frame.group_id).toBe(groupId);
+  });
+
+  it('rejects an skdm_request when requester and target are not co-members', async () => {
+    const groupId = newGroupId();
+    await groupRepo.create({ groupId, createdBy: 'alice-blue-fox' });
+    // bob is NOT a member of the group.
+    const b = await authedSocket('bob-red-bear');
+    b.ws.send(JSON.stringify({ type: 'skdm_request', to: 'alice-blue-fox', group_id: groupId }));
+    const frame = (await b.q.next()) as { type: string; code: string };
+    expect(frame.type).toBe('error');
+    expect(frame.code).toBe('not_a_member');
+  });
+
   it('drains buffered skdm on recipient reconnect', async () => {
     const groupId = newGroupId();
     const a = await authedSocket('alice-blue-fox');
