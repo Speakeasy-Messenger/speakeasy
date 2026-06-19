@@ -899,11 +899,24 @@ export default function App() {
       markReadUpTo: (convId, readAt) =>
         useConversations.getState().markReadUpTo(convId, readAt),
       ensureGroupHydrated: async (groupId) => {
-        // Skip if already populated with members. We re-fetch every
-        // hour at most via metadataFetchedAt — for now any non-empty
-        // member set means we don't need to round-trip again.
+        // Refetch when we've never seen the group OR our roster is stale.
+        //
+        // The earlier "skip if any members known" froze a member's roster
+        // forever: an existing member never learned about someone who
+        // joined later, so its send path never had the newcomer in
+        // `members` to bootstrap — and the newcomer could never decrypt
+        // that member's group messages ("missing sender key state",
+        // amiiz→chloropine in "White lightening"). Re-fetching on a
+        // staleness window lets every active member pick up roster changes
+        // and bootstrap new members proactively on their next send.
         const existing = useGroups.getState().byId[groupId];
-        if (existing && existing.members.length > 0) return;
+        const ROSTER_STALE_MS = 5 * 60 * 1000;
+        const fresh =
+          existing != null &&
+          existing.members.length > 0 &&
+          existing.metadataFetchedAt != null &&
+          Date.now() - existing.metadataFetchedAt < ROSTER_STALE_MS;
+        if (fresh) return;
         const dt = await getToken().catch(() => undefined);
         if (!dt) return;
         try {
