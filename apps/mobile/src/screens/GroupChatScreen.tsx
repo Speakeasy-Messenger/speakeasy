@@ -125,7 +125,20 @@ export function GroupChatScreen({
   // [group not loaded] errors here). The fetch is idempotent + cached
   // by metadataFetchedAt, so the cost is one round-trip on first open.
   useEffect(() => {
-    if (group && group.members.length > 0) return;
+    // Refresh the roster on open when it's missing OR stale. Re-fetching
+    // (rather than the old "skip if any members known") is what lets an
+    // existing member learn about someone who joined later — without it
+    // their send path never bootstraps the newcomer's SenderKey and the
+    // newcomer can't decrypt their group messages (amiiz→chloropine in
+    // "White lightening"). One round-trip on open, then cached for the
+    // staleness window.
+    const ROSTER_STALE_MS = 5 * 60 * 1000;
+    const fresh =
+      group != null &&
+      group.members.length > 0 &&
+      group.metadataFetchedAt != null &&
+      Date.now() - group.metadataFetchedAt < ROSTER_STALE_MS;
+    if (fresh) return;
     void (async () => {
       try {
         let dt = useIdentity.getState().deviceToken;
