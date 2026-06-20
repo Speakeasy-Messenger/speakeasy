@@ -1,0 +1,10 @@
+app_identifier("xyz.speakeasyapp.app")
+apple_id("dani@trustysquire.ai")
+
+# Apple Developer Portal team (used for code signing + provisioning).
+team_id("89KT3SWYAF")
+
+# App Store Connect team id — only needed if the Apple ID belongs to more
+# than one ASC team. With App Store Connect API-key auth (see Fastfile)
+# the team is inferred from the key, so this is intentionally left unset.
+# itc_team_id("...")

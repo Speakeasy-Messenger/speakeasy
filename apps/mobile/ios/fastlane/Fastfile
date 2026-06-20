@@ -1,0 +1,110 @@
+# Speakeasy iOS — fastlane lanes.
+#
+# Auth: App Store Connect API key (no Apple ID password / 2FA). The key
+# parts are injected via env (sourced from the squire vault locally, and
+# from GitHub Actions secrets in CI):
+#   ASC_KEY_ID            — the key id (e.g. YJV2ZFM84L)
+#   ASC_ISSUER_ID         — the issuer UUID
+#   ASC_KEY_CONTENT       — the .p8 private key contents (PEM, with newlines)
+#   ASC_KEY_CONTENT_BASE64 — "true" if ASC_KEY_CONTENT is base64-encoded
+# Signing: fastlane match (git storage — Speakeasy-Messenger/speakeasy-certs),
+#   unlocked with MATCH_PASSWORD.
+#
+# Pods must be installed first (USE_FRAMEWORKS=static — LibSignalClient is a
+# Swift pod). The CI workflow + the `pods` lane handle that.
+
+default_platform(:ios)
+
+APP_IDENTIFIER = "xyz.speakeasyapp.app".freeze
+WORKSPACE = "Speakeasy.xcworkspace".freeze
+SCHEME = "Speakeasy".freeze
+TEAM_ID = "89KT3SWYAF".freeze
+PROFILE = "match AppStore #{APP_IDENTIFIER}".freeze
+
+def asc_api_key
+  app_store_connect_api_key(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key_content: ENV.fetch("ASC_KEY_CONTENT"),
+    is_key_content_base64: ENV["ASC_KEY_CONTENT_BASE64"] == "true",
+    in_house: false,
+  )
+end
+
+# Pin manual signing + the match profile on the app target at build time,
+# so we never depend on whatever signing the checked-in pbxproj happens to
+# carry. Ephemeral on CI; on a dev Mac it edits the project — `git checkout`
+# the pbxproj afterward if you don't want the change.
+def pin_signing
+  update_code_signing_settings(
+    path: "Speakeasy.xcodeproj",
+    use_automatic_signing: false,
+    team_id: TEAM_ID,
+    bundle_identifier: APP_IDENTIFIER,
+    code_sign_identity: "Apple Distribution",
+    profile_name: PROFILE,
+    targets: ["Speakeasy"],
+  )
+end
+
+platform :ios do
+  desc "Install CocoaPods (USE_FRAMEWORKS=static for the LibSignalClient Swift pod)"
+  lane :pods do
+    sh("cd .. && USE_FRAMEWORKS=static pod install")
+  end
+
+  desc "Create/refresh the App Store signing cert + profile via match (run once locally)"
+  lane :certs do
+    match(type: "appstore", readonly: false, api_key: asc_api_key)
+  end
+
+  desc "Sync signing (read-only — for CI, after `certs` has populated the repo)"
+  lane :signing do
+    match(type: "appstore", readonly: true, api_key: asc_api_key)
+  end
+
+  desc "Build + upload to TestFlight"
+  lane :beta do
+    key = asc_api_key
+    match(type: "appstore", readonly: is_ci, api_key: key)
+    pin_signing
+    build_app(
+      workspace: WORKSPACE,
+      scheme: SCHEME,
+      export_method: "app-store",
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE } },
+      output_directory: "build",
+      output_name: "Speakeasy.ipa",
+      clean: true,
+    )
+    upload_to_testflight(
+      api_key: key,
+      skip_waiting_for_build_processing: true,
+      distribute_external: false,
+    )
+  end
+
+  desc "Build + upload to the App Store (NOT auto-submitted for review)"
+  lane :release do
+    key = asc_api_key
+    match(type: "appstore", readonly: is_ci, api_key: key)
+    pin_signing
+    build_app(
+      workspace: WORKSPACE,
+      scheme: SCHEME,
+      export_method: "app-store",
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE } },
+      output_directory: "build",
+      output_name: "Speakeasy.ipa",
+      clean: true,
+    )
+    upload_to_app_store(
+      api_key: key,
+      submit_for_review: false, # flip to true once the listing is review-ready
+      force: true, # skip the HTML metadata preview prompt
+      skip_screenshots: true,
+      skip_metadata: false,
+      precheck_include_in_app_purchases: false,
+    )
+  end
+end
