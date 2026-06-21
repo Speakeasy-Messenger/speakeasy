@@ -32,8 +32,6 @@
 		<key>NSAllowsLocalNetworking</key>
 		<true/>
 	</dict>
-	<key>NSLocationWhenInUseUsageDescription</key>
-	<string></string>
 	<!-- Phase 5b iOS: required for Vouchflow's biometric verify step (Face ID
 	     prompts use this string). Wording mirrors the Android Vouchflow
 	     onboarding tone. -->
@@ -48,6 +46,12 @@
 	     omitting it crashes the app the moment a video call starts. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Speakeasy needs the camera for video calls. The video stream is end-to-end encrypted with the peer; nothing is recorded or stored on a server.</string>
+	<!-- Attachments: react-native-image-picker's launchImageLibrary reads from
+	     the photo library so you can pick photos/videos to send. iOS requires
+	     this purpose string whenever the binary references the Photos API —
+	     omitting it fails App Store ingestion with ITMS-90683. -->
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Speakeasy needs access to your photo library so you can choose photos and videos to send in an end-to-end encrypted chat. Anything you don't select stays on your device and is never uploaded.</string>
 	<!-- Export compliance. Speakeasy uses encryption only for standard,
 	     mass-market purposes (E2E messaging/calls via libsignal + HTTPS),
 	     which qualifies for the exemptions in Category 5 Part 2 of the U.S.
