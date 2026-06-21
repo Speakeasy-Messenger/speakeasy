@@ -57,6 +57,8 @@ export interface AttachWsOptions {
   userNotifier: UserNotifier;
   /** Optional persistent event log — recipient of call-route diagnostics. */
   eventLog?: EventLogRepo;
+  /** Optional iOS VoIP (CallKit) push sender — fires on call_offer. */
+  apnsVoip?: import('../push/apns-voip.js').ApnsVoipSender;
   /** Path on which to accept upgrades. Default: /ws */
   path?: string;
 }
@@ -103,6 +105,7 @@ export function attachWebsocket(
         ackBuffer,
         userNotifier: opts.userNotifier,
         eventLog: opts.eventLog,
+        apnsVoip: opts.apnsVoip,
         log: app.log,
       });
     });

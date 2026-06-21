@@ -3,7 +3,11 @@ import { requireAuth } from '../auth/vouchflow.js';
 import type { DevicesRepo } from '../db/devices.js';
 
 interface PushTokenBody {
-  push_token: string;
+  /** FCM/APNs banner token. Optional when registering ONLY a voip_token. */
+  push_token?: string;
+  /** iOS PushKit (VoIP) token for CallKit incoming-call wake-ups. Sent on
+   * its own request (the PushKit token arrives separately from the FCM one). */
+  voip_token?: string;
   platform: 'ios' | 'android';
   /** Optional. Drives the FCM/APNs banner copy. Omitting leaves the
    * stored value alone — Settings can update it independently of a
@@ -27,9 +31,12 @@ export async function registerDeviceRoutes(
       schema: {
         body: {
           type: 'object',
-          required: ['push_token', 'platform'],
+          required: ['platform'],
+          // Must carry at least one token (FCM banner and/or PushKit VoIP).
+          anyOf: [{ required: ['push_token'] }, { required: ['voip_token'] }],
           properties: {
             push_token: { type: 'string', minLength: 1 },
+            voip_token: { type: 'string', minLength: 1 },
             platform: { type: 'string', enum: ['ios', 'android'] },
             notification_privacy: { type: 'string', enum: ['rich', 'private'] },
           },
@@ -52,13 +59,24 @@ export async function registerDeviceRoutes(
       // with zero devices holding the live token (tester15 incident,
       // 2026-05-14: `push.no_devices` for every message during the
       // window between identity recovery and the next WS auth).
-      await opts.devices.setPushToken({
-        deviceToken,
-        userId,
-        pushToken: request.body.push_token,
-        platform: request.body.platform,
-        notificationPrivacy: request.body.notification_privacy,
-      });
+      if (request.body.push_token) {
+        await opts.devices.setPushToken({
+          deviceToken,
+          userId,
+          pushToken: request.body.push_token,
+          platform: request.body.platform,
+          notificationPrivacy: request.body.notification_privacy,
+        });
+      }
+      // iOS PushKit (VoIP) token — registered on its own request for CallKit
+      // incoming-call wake-ups (the PushKit token arrives separately).
+      if (request.body.voip_token) {
+        await opts.devices.setVoipToken({
+          deviceToken,
+          userId,
+          voipToken: request.body.voip_token,
+        });
+      }
       return reply.code(200).send({ ok: true });
     },
   );

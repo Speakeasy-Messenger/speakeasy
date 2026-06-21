@@ -31,6 +31,7 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       deviceToken: r.deviceToken,
       userId: r.userId,
       pushToken: r.pushToken ?? undefined,
+      voipToken: r.voipToken ?? undefined,
       platform: (r.platform as 'ios' | 'android') ?? undefined,
       notificationPrivacy:
         (r.notificationPrivacy as NotificationPrivacy | null) ?? undefined,
@@ -157,6 +158,46 @@ export class DrizzleDevicesRepo implements DevicesRepo {
     });
   }
 
+  async setVoipToken(args: {
+    deviceToken: string;
+    voipToken: string;
+    userId?: string;
+  }): Promise<void> {
+    const db = getDb();
+    // Same insert-on-conflict-then-rotate shape as setPushToken (a PushKit
+    // token is device-installation-scoped). Independent voip_token column.
+    await db.transaction(async (tx) => {
+      if (args.userId !== undefined) {
+        await tx
+          .insert(devices)
+          .values({
+            deviceToken: args.deviceToken,
+            userId: args.userId,
+            voipToken: args.voipToken,
+            platform: 'ios',
+          })
+          .onConflictDoUpdate({
+            target: devices.deviceToken,
+            set: { voipToken: args.voipToken, platform: 'ios' },
+          });
+      } else {
+        await tx
+          .update(devices)
+          .set({ voipToken: args.voipToken, platform: 'ios' })
+          .where(eq(devices.deviceToken, args.deviceToken));
+      }
+      await tx
+        .update(devices)
+        .set({ voipToken: null })
+        .where(
+          and(
+            eq(devices.voipToken, args.voipToken),
+            ne(devices.deviceToken, args.deviceToken),
+          ),
+        );
+    });
+  }
+
   async reportPushError(args: { deviceToken: string; error: string }): Promise<void> {
     const db = getDb();
     await db
@@ -171,6 +212,14 @@ export class DrizzleDevicesRepo implements DevicesRepo {
       .update(devices)
       .set({ pushToken: null, lastPushError: args.reason })
       .where(eq(devices.pushToken, args.pushToken));
+  }
+
+  async clearVoipToken(args: { voipToken: string; reason: string }): Promise<void> {
+    const db = getDb();
+    await db
+      .update(devices)
+      .set({ voipToken: null, lastPushError: args.reason })
+      .where(eq(devices.voipToken, args.voipToken));
   }
 
   async setSupportedCallKinds(args: {

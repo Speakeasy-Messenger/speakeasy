@@ -9,6 +9,8 @@ import {
 import type { Connections } from './connections.js';
 import type { Presence } from '../presence/presence.js';
 import type { PushProvider } from '../push/push.js';
+import type { ApnsVoipSender } from '../push/apns-voip.js';
+import type { DevicesRepo } from '../db/devices.js';
 import type { UserNotifier } from './user-notifier.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { EventLogRepo } from '../db/event-log.js';
@@ -72,6 +74,15 @@ export interface CallRouterDeps {
    * harnesses without it keep working (video is then never refused).
    */
   users?: UserRepo;
+  /**
+   * iOS VoIP push sender (CallKit). When configured, a `call_offer` also
+   * fires a direct-APNs VoIP push to the callee's iOS PushKit tokens so the
+   * native call UI rings even from a killed state. Optional — absent in tests
+   * and when APNs isn't configured (the call still rings via the regular push
+   * + live WS routing). `devices` is the lookup for those VoIP tokens.
+   */
+  apnsVoip?: ApnsVoipSender;
+  devices?: DevicesRepo;
 }
 
 export type CallFrameClient = Extract<
@@ -199,6 +210,41 @@ export async function routeCallFrame(
           'call push notify failed',
         ),
       );
+
+    // iOS CallKit: also fire a direct-APNs VoIP push so the callee's iPhone
+    // rings via the native incoming-call UI even from a killed state (FCM
+    // can't deliver VoIP pushes). Best-effort; the regular push above is the
+    // Android + fallback path. A 410/Unregistered clears the dead token.
+    if (deps.apnsVoip && deps.devices) {
+      const { apnsVoip, devices } = deps;
+      void (async () => {
+        try {
+          const rows = await devices.listForUser(msg.to);
+          const voipTokens = rows
+            .filter((d) => d.platform === 'ios' && d.voipToken)
+            .map((d) => d.voipToken as string);
+          if (voipTokens.length === 0) return;
+          const payload = {
+            call_id: String(msg.call_id),
+            handle: senderUserId,
+            caller_name: senderUserId,
+            has_video: offerKind === 'video',
+          };
+          await Promise.all(
+            voipTokens.map(async (token) => {
+              const res = await apnsVoip.sendVoipPush(token, payload);
+              if (!res.ok && (res.status === 410 || res.reason === 'Unregistered')) {
+                await devices
+                  .clearVoipToken({ voipToken: token, reason: `apns:${res.reason ?? res.status}` })
+                  .catch(() => {});
+              }
+            }),
+          );
+        } catch (err) {
+          deps.log.warn({ err, recipientId: msg.to }, 'voip push failed');
+        }
+      })();
+    }
   }
 
   // -- missed-call push on caller-cancel ------------------------------

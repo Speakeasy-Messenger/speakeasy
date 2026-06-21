@@ -89,6 +89,8 @@ interface Deps {
   userNotifier: UserNotifier;
   /** Optional persistent event log — recipient of call-route diagnostics. */
   eventLog?: import('../db/event-log.js').EventLogRepo;
+  /** Optional iOS VoIP (CallKit) push sender — fires on call_offer. */
+  apnsVoip?: import('../push/apns-voip.js').ApnsVoipSender;
 }
 
 interface AuthedSession {

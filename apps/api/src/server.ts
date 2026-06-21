@@ -72,6 +72,7 @@ import { createAckBuffer, type AckBuffer } from './ws/ack-buffer.js';
 import { createRedisAckBuffer } from './ws/ack-buffer.redis.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
 import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
+import { apnsVoipFromEnv } from './push/apns-voip.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
 import { registerDeviceRoutes } from './routes/devices.js';
@@ -259,6 +260,12 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // @speaker broadcast route can deliver through the same relay + push.
   const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
   const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
+  // iOS CallKit: direct-APNs VoIP push sender (undefined when the APNs .p8
+  // env isn't configured — calls still ring via the regular push + live WS).
+  const apnsVoip = apnsVoipFromEnv();
+  app.log.info(
+    apnsVoip ? 'APNs VoIP configured — CallKit incoming-call pushes enabled' : 'APNs VoIP not configured — CallKit incoming-call pushes disabled',
+  );
   // Deferred from above so we can pass devices + connections for
   // Private Call's `supported_call_kinds` UNION aggregation.
   await registerUserRoutes(app, { repo, devices, connections, deletedHandles });
@@ -343,6 +350,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       ackBuffer,
       userNotifier,
       eventLog,
+      apnsVoip,
     });
     if (redis) {
       app.addHook('onClose', async () => {

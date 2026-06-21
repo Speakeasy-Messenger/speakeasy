@@ -87,6 +87,34 @@ export class InMemoryDevicesRepo implements DevicesRepo {
     }
   }
 
+  async setVoipToken(args: {
+    deviceToken: string;
+    voipToken: string;
+    userId?: string;
+  }): Promise<void> {
+    let device = this.devices.get(args.deviceToken);
+    if (!device && args.userId !== undefined) {
+      device = {
+        deviceToken: args.deviceToken,
+        userId: args.userId,
+        enrolledAt: new Date(),
+        lastSeen: new Date(),
+      };
+      this.devices.set(args.deviceToken, device);
+    }
+    if (device) {
+      device.voipToken = args.voipToken;
+      device.platform = 'ios'; // VoIP/PushKit is iOS-only
+    }
+    // Rotation: a PushKit token is device-installation-scoped — clear it off
+    // any other row that held it (mirrors setPushToken).
+    for (const [otherToken, otherDevice] of this.devices) {
+      if (otherToken !== args.deviceToken && otherDevice.voipToken === args.voipToken) {
+        otherDevice.voipToken = undefined;
+      }
+    }
+  }
+
   async reportPushError(args: { deviceToken: string; error: string }): Promise<void> {
     const device = this.devices.get(args.deviceToken);
     if (device) {
@@ -98,6 +126,15 @@ export class InMemoryDevicesRepo implements DevicesRepo {
     for (const device of this.devices.values()) {
       if (device.pushToken === args.pushToken) {
         device.pushToken = undefined;
+        device.lastPushError = args.reason;
+      }
+    }
+  }
+
+  async clearVoipToken(args: { voipToken: string; reason: string }): Promise<void> {
+    for (const device of this.devices.values()) {
+      if (device.voipToken === args.voipToken) {
+        device.voipToken = undefined;
         device.lastPushError = args.reason;
       }
     }
