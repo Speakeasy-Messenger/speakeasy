@@ -38,6 +38,16 @@
 // .plist the app throws "No Firebase App '[DEFAULT]'" at startup and never
 // renders. (Counterpart of Android's google-services.json + auto-init.)
 #import <FirebaseCore/FirebaseCore.h>
+// CallKit / VoIP push: PushKit wakes the app for an incoming call (even from
+// a killed state); the AppDelegate must report it to CallKit (via RNCallKeep)
+// inside the push handler BEFORE the completion handler, or iOS 13+ terminates
+// the app and may stop delivering VoIP pushes. RNVoipPushNotificationManager
+// (react-native-voip-push-notification) wraps PKPushRegistry + forwards the
+// token/payload to JS; RNCallKeep (react-native-callkeep) drives the CallKit
+// system call UI. The regular FCM/APNs banner path above is unchanged — VoIP
+// pushes use a separate APNs topic (<bundleId>.voip) the server sends directly.
+#import "RNVoipPushNotificationManager.h"
+#import "RNCallKeep.h"
 
 // Phase 5j Private Call: hook SpeakeasyAudioDevice into
 // react-native-webrtc so EVERY call (audio / video / private)
@@ -143,7 +153,65 @@ static void SpeakeasyWriteCrash(NSException *exception)
   WebRTCModuleOptions *rtcOptions = [WebRTCModuleOptions sharedInstance];
   rtcOptions.audioDevice = [[SpeakeasyAudioDevice alloc] init];
 
+  // CallKit / VoIP push: register the PKPushRegistry here, ASAP at launch —
+  // doing it from JS can be too late to receive a VoIP push that woke the app.
+  // The token is forwarded to JS via the `register` event and posted to the
+  // server (voip_token), which sends incoming-call VoIP pushes to it directly.
+  [RNVoipPushNotificationManager voipRegistration];
+
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
+}
+
+#pragma mark - PushKit (VoIP push) — CallKit incoming calls
+
+// The VoIP push token changed — forward to JS (`register` event) so it can be
+// posted to the server as the device's voip_token.
+- (void)pushRegistry:(PKPushRegistry *)registry
+    didUpdatePushCredentials:(PKPushCredentials *)credentials
+                     forType:(PKPushType)type
+{
+  [RNVoipPushNotificationManager didUpdatePushCredentials:credentials forType:(NSString *)type];
+}
+
+// An incoming-call VoIP push arrived (possibly with the app killed). iOS 13+
+// REQUIRES reporting it to CallKit before `completion()` or it terminates the
+// app. We report immediately via RNCallKeep (native, no JS needed), then let
+// JS finish wiring the call (connect WS, drain the buffered offer) — the
+// callkeep `answerCall` event routes into the orchestrator (callkeep-bridge).
+- (void)pushRegistry:(PKPushRegistry *)registry
+    didReceiveIncomingPushWithPayload:(PKPushPayload *)payload
+                              forType:(PKPushType)type
+                withCompletionHandler:(void (^)(void))completion
+{
+  NSDictionary *data = payload.dictionaryPayload;
+  // call_id is the CallKit call UUID; the orchestrator keys the live call by
+  // the same id so answerCall/endCall map back to the right call.
+  NSString *uuid = data[@"call_id"] ?: [[NSUUID UUID] UUIDString];
+  NSString *handle = data[@"handle"] ?: @"";
+  NSString *callerName = data[@"caller_name"] ?: handle;
+  BOOL hasVideo = [data[@"has_video"] boolValue];
+
+  // Cache the completion handler so JS can signal completion once it has
+  // started bringing up the call (onVoipNotificationCompleted).
+  [RNVoipPushNotificationManager addCompletionHandler:uuid completionHandler:completion];
+
+  // Forward the payload to JS (`notification` event).
+  [RNVoipPushNotificationManager didReceiveIncomingPushWithPayload:payload forType:(NSString *)type];
+
+  // REQUIRED before completion(): report to CallKit so the system shows the
+  // incoming-call UI and the app isn't terminated.
+  [RNCallKeep reportNewIncomingCall:uuid
+                             handle:handle
+                         handleType:@"generic"
+                           hasVideo:hasVideo
+                localizedCallerName:callerName
+                    supportsHolding:NO
+                       supportsDTMF:NO
+                   supportsGrouping:NO
+                 supportsUngrouping:NO
+                        fromPushKit:YES
+                            payload:data
+              withCompletionHandler:nil];
 }
 
 - (NSURL *)sourceURLForBridge:(RCTBridge *)bridge

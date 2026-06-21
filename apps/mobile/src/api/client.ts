@@ -698,6 +698,32 @@ export class ApiClient {
     throw new ApiError(res.status, code);
   }
 
+  /**
+   * Register the device's iOS VoIP (PushKit) token so the server can send
+   * incoming-call VoIP pushes to it (a separate APNs topic from the FCM
+   * banner token above). iOS-only; the regular push token still flows
+   * through registerPushToken().
+   */
+  async registerVoipToken(deviceToken: string, voipToken: string): Promise<void> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/devices/push-token`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify({ voip_token: voipToken, platform: 'ios' }),
+    });
+    if (res.status === 200) return;
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
   /** Report a push registration failure to the server for remote diagnosis. */
   async reportPushError(
     deviceToken: string,

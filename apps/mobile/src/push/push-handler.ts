@@ -1059,7 +1059,7 @@ export async function handleInlineReplyFromData(args: {
  * no-op and let the foreground bring the WS up normally. Best-effort:
  * never throws into the message handler.
  */
-async function prewarmWsForIncomingCall(): Promise<void> {
+export async function prewarmWsForIncomingCall(): Promise<void> {
   try {
     const ws = peekWsClient();
     if (!ws) return;

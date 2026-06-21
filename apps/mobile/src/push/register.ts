@@ -1,6 +1,9 @@
 import { api, pushNotifications } from '../services.js';
 import { useSettings } from '../store/settings.js';
 import { diag } from '../diag/log.js';
+import { startVoipPush } from './voip-push.js';
+import { prewarmWsForIncomingCall } from './push-handler.js';
+import { getCachedDeviceTokenOrThrow } from '../auth/verify-device.js';
 
 /**
  * Short-lived in-flight + recency cache to collapse the burst of
@@ -145,6 +148,23 @@ async function doRegisterPushToken(deviceToken: string): Promise<RegisterResult>
       privacy,
     );
     diag('push', 'token registered');
+    // iOS only: also bring up the VoIP (PushKit) registration so incoming
+    // calls can wake the app via CallKit. Idempotent + no-op off iOS / when
+    // the native module is absent. Separate from the FCM token above (VoIP
+    // pushes use a distinct APNs topic the server sends directly).
+    if (pushResult.platform === 'ios') {
+      startVoipPush({
+        getDeviceToken: () => {
+          try {
+            return getCachedDeviceTokenOrThrow();
+          } catch {
+            return undefined;
+          }
+        },
+        registerVoipToken: (dt, voipToken) => api.registerVoipToken(dt, voipToken),
+        prewarmForIncomingCall: prewarmWsForIncomingCall,
+      });
+    }
     return 'registered';
   } catch (err) {
     diag('push', 'register failed', { err: String(err) });
