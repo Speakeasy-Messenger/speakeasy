@@ -88,6 +88,26 @@ describe('collectProductionConfigErrors', () => {
     ).toEqual([]);
   });
 
+  it('allows a low floor only with the explicit ALLOW_LOW_CONFIDENCE_TEST ack', () => {
+    // Bounded integration-test exception (e.g. enrolling an iOS Simulator,
+    // which can never produce App Attest). Inert unless explicitly set.
+    expect(
+      collectProductionConfigErrors({
+        ...validProdEnv(),
+        VOUCHFLOW_MIN_CONFIDENCE: 'low',
+        ALLOW_LOW_CONFIDENCE_TEST: '1',
+      }),
+    ).toEqual([]);
+    // The ack only covers `low`; a bogus value still fails.
+    expect(
+      collectProductionConfigErrors({
+        ...validProdEnv(),
+        VOUCHFLOW_MIN_CONFIDENCE: 'bogus',
+        ALLOW_LOW_CONFIDENCE_TEST: '1',
+      }).join('\n'),
+    ).toMatch(/VOUCHFLOW_MIN_CONFIDENCE/);
+  });
+
   it('flags METRICS_ENABLED=1 without a METRICS_TOKEN', () => {
     expect(
       collectProductionConfigErrors({ ...validProdEnv(), METRICS_ENABLED: '1' }).join('\n'),
