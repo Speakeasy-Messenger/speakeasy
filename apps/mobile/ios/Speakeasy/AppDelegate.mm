@@ -1,6 +1,14 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+// Deep links: forwards inbound URLs to RN's Linking so App.tsx's handler
+// (→ utils/handle-link parseAdd) sees them. Covers BOTH the custom scheme
+// (speakeasy://add?handle=…, via openURL) AND Universal Links
+// (https://speakeasyapp.xyz/add?handle=…, via continueUserActivity — paired
+// with the applinks:speakeasyapp.xyz Associated-Domains entitlement + the
+// hosted apple-app-site-association). Without these forwards iOS drops the
+// link and the app never routes it.
+#import <React/RCTLinkingManager.h>
 // RN 0.77: RCTAppDelegate now requires a dependency provider (it feeds
 // the new-architecture module/codegen registry). The pod is pulled in
 // automatically by use_react_native! in the Podfile. Set it in
@@ -24,6 +32,12 @@
 // declarations to ObjC. The "Speakeasy-Swift.h" name is derived from the
 // product module name (PRODUCT_NAME).
 #import "Speakeasy-Swift.h"
+// Firebase: @react-native-firebase requires a configured default FIRApp
+// before the JS bundle imports `@react-native-firebase/messaging`
+// (index.js). Without `[FIRApp configure]` + a bundled GoogleService-Info
+// .plist the app throws "No Firebase App '[DEFAULT]'" at startup and never
+// renders. (Counterpart of Android's google-services.json + auto-init.)
+#import <FirebaseCore/FirebaseCore.h>
 
 // Phase 5j Private Call: hook SpeakeasyAudioDevice into
 // react-native-webrtc so EVERY call (audio / video / private)
@@ -88,6 +102,12 @@ static void SpeakeasyWriteCrash(NSException *exception)
   // crash during init (e.g. Vouchflow.configure) is still captured.
   NSSetUncaughtExceptionHandler(&SpeakeasyWriteCrash);
 
+  // Configure Firebase before the RN bridge starts (the JS bundle imports
+  // firebase messaging at load). Reads the bundled GoogleService-Info.plist.
+  if ([FIRApp defaultApp] == nil) {
+    [FIRApp configure];
+  }
+
   self.moduleName = @"Speakeasy";
   // RN 0.77: required dependency provider for new-arch module setup.
   self.dependencyProvider = [RCTAppDependencyProvider new];
@@ -138,6 +158,26 @@ static void SpeakeasyWriteCrash(NSException *exception)
 #else
   return [[NSBundle mainBundle] URLForResource:@"main" withExtension:@"jsbundle"];
 #endif
+}
+
+// Custom-scheme deep links (speakeasy://add?handle=…).
+- (BOOL)application:(UIApplication *)application
+            openURL:(NSURL *)url
+            options:(NSDictionary<UIApplicationOpenURLOptionsKey, id> *)options
+{
+  return [RCTLinkingManager application:application openURL:url options:options];
+}
+
+// Universal Links (https://speakeasyapp.xyz/add?handle=…). Requires the
+// applinks:speakeasyapp.xyz Associated-Domains entitlement and the AASA file
+// hosted at https://speakeasyapp.xyz/.well-known/apple-app-site-association.
+- (BOOL)application:(UIApplication *)application
+continueUserActivity:(nonnull NSUserActivity *)userActivity
+ restorationHandler:(nonnull void (^)(NSArray<id<UIUserActivityRestoring>> *_Nullable))restorationHandler
+{
+  return [RCTLinkingManager application:application
+                  continueUserActivity:userActivity
+                    restorationHandler:restorationHandler];
 }
 
 @end

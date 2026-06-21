@@ -1,0 +1,166 @@
+name: Release iOS (TestFlight / App Store)
+
+# iOS counterpart of the Android release pipeline (release.yml +
+# release-play.yml). Builds a signed IPA via fastlane match (App Store
+# Connect API key auth) and uploads to TestFlight (lane: beta) or the App
+# Store (lane: release).
+#
+# TestFlight is the iOS analog of Android's Play Internal Testing track: a
+# closed tester list, no Apple review for internal testers — so `beta` is
+# safe to run per RC, the same way release-play.yml pushes every tag to the
+# Internal track. `release` (App Store) is the analog of play-promote.yml's
+# Production promotion and DOES go through Apple review.
+#
+# Triggers:
+#   - push a tag `ios-*` (e.g. ios-1.0.0, ios-beta-3) → TestFlight (beta lane)
+#   - manual workflow_dispatch → choose beta or release
+# A distinct `ios-*` tag namespace keeps this from also firing the Android
+# release workflows (which trigger on alpha-*/v*).
+#
+# ── One-time setup (CANNOT be done from CI; see ios/fastlane/README-RELEASE.md) ──
+#   1. Create the App Store Connect app record for xyz.speakeasyapp.app
+#      (fastlane produce, or the ASC UI).
+#   2. Run `bundle exec fastlane ios certs` ONCE on a Mac — creates the
+#      distribution cert + profile and pushes them to the private
+#      speakeasy-certs repo. CI runs match READ-ONLY and only consumes what
+#      that produced.
+#   3. Set the GitHub Actions secrets below.
+#
+# ── Required secrets ──
+#   ASC_KEY_ID, ASC_ISSUER_ID   — App Store Connect API key id + issuer uuid
+#   ASC_KEY_CONTENT             — the .p8 private key contents (PEM, newlines)
+#   MATCH_PASSWORD              — the match repo passphrase
+#   MATCH_DEPLOY_KEY            — SSH private key with READ access to
+#                                speakeasy-certs (match clones it over SSH)
+#   VOUCHFLOW_WRITE_KEY         — PRODUCTION Vouchflow key (same secret the
+#                                Android release uses)
+#   FIREBASE_IOS_PLIST_B64      — base64 of the real GoogleService-Info.plist
+
+on:
+  push:
+    tags: ['ios-*']
+  workflow_dispatch:
+    inputs:
+      lane:
+        description: 'fastlane lane (beta = TestFlight, release = App Store)'
+        type: choice
+        options: [beta, release]
+        default: beta
+
+concurrency:
+  # Never cancel an in-flight upload — a half-uploaded build wastes an ASC
+  # processing slot. Serialize instead.
+  group: release-ios-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  release-ios:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    env:
+      LANE: ${{ github.event.inputs.lane || 'beta' }}
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Cache libsignal prebuilt FFI
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/org.signal.libsignal
+          key: libsignal-${{ runner.os }}-v0.59.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace packages
+        run: npm run build
+
+      - name: Deterministic release gate
+        # Same gate as the Android release.yml — fail before sinking time
+        # into signing + a slow archive if lint/types/tests are red.
+        run: |
+          npm run lint
+          npm run typecheck
+          npm run test
+
+      - name: Write Vouchflow.plist (production)
+        # A release artifact must talk to PRODUCTION Vouchflow, not the
+        # sandbox default the .example carries (mirrors the Android release's
+        # -Pvouchflow.environment=production).
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
+            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set."; exit 1
+          fi
+          sed -e "s|vsk_sandbox_replace_with_real_key|${VOUCHFLOW_WRITE_KEY}|" \
+              -e "s|<string>sandbox</string>|<string>production</string>|" \
+              Vouchflow.plist.example > Vouchflow.plist
+          plutil -lint Vouchflow.plist
+
+      - name: Write GoogleService-Info.plist
+        env:
+          FIREBASE_IOS_PLIST_B64: ${{ secrets.FIREBASE_IOS_PLIST_B64 }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          if [ -z "$FIREBASE_IOS_PLIST_B64" ]; then
+            echo "::error::FIREBASE_IOS_PLIST_B64 secret is not set."; exit 1
+          fi
+          echo "$FIREBASE_IOS_PLIST_B64" | base64 --decode > GoogleService-Info.plist
+          plutil -lint GoogleService-Info.plist
+
+      - name: Wire iOS project (entitlements + bundled plists)
+        working-directory: apps/mobile/ios
+        run: |
+          gem install xcodeproj --no-document
+          ruby tools/wire-ios-project.rb
+
+      - name: Set up SSH key for match (speakeasy-certs read access)
+        env:
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
+        run: |
+          if [ -z "$MATCH_DEPLOY_KEY" ]; then
+            echo "::error::MATCH_DEPLOY_KEY secret is not set — match cannot clone speakeasy-certs."; exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$MATCH_DEPLOY_KEY" > ~/.ssh/match_key
+          chmod 600 ~/.ssh/match_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          {
+            echo "Host github.com"
+            echo "  IdentityFile ~/.ssh/match_key"
+            echo "  IdentitiesOnly yes"
+          } >> ~/.ssh/config
+
+      - name: bundle install (fastlane + cocoapods)
+        working-directory: apps/mobile/ios
+        run: bundle install
+
+      - name: pod install
+        working-directory: apps/mobile/ios
+        run: USE_FRAMEWORKS=static pod install
+
+      - name: fastlane ${{ env.LANE }}
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          # Monotonic CFBundleVersion — TestFlight rejects duplicate build
+          # numbers. github.run_number increases per run of THIS workflow.
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: bundle exec fastlane ios "$LANE"

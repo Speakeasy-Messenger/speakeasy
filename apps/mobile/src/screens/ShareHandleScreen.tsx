@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import {
   Pressable,
   Share,
@@ -46,6 +46,16 @@ export function ShareHandleScreen({ onBack }: Props): React.ReactElement {
     (myUserId ? defaultAnimalForUser(myUserId) : 'fox');
 
   const [copiedAt, setCopiedAt] = useState<number | null>(null);
+  // Track the "copied" reset timer so it can be cleared on unmount (and
+  // coalesced on a rapid re-copy) — a stray setTimeout firing setCopiedAt
+  // after the screen unmounts warns about updating an unmounted component.
+  const copyTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(
+    () => () => {
+      if (copyTimer.current) clearTimeout(copyTimer.current);
+    },
+    [],
+  );
 
   if (!myUserId) {
     // Defensive — this screen is only routable when enrolled.
@@ -62,7 +72,8 @@ export function ShareHandleScreen({ onBack }: Props): React.ReactElement {
   function handleCopy() {
     Clipboard.setString(myUserId!);
     setCopiedAt(Date.now());
-    setTimeout(() => setCopiedAt(null), 2000);
+    if (copyTimer.current) clearTimeout(copyTimer.current);
+    copyTimer.current = setTimeout(() => setCopiedAt(null), 2000);
   }
 
   // Spec §5.4 Share via…: share the https Universal/App Link. It's now a

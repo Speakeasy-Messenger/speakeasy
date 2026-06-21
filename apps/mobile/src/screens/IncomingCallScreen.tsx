@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Handle } from '../components/Handle.js';
@@ -10,6 +10,10 @@ import { refreshProfile } from '../store/refresh-profile.js';
 import { font, space, type as typeScale } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
+import {
+  permissionErrorKind,
+  showOpenSettingsAlert,
+} from '../permissions/runtime.js';
 
 interface Props {
   orchestrator: CallOrchestrator;
@@ -56,6 +60,9 @@ export function IncomingCallScreen({
 }: Props) {
   const themed = useColors();
   const active = useCalls((s) => s.active);
+  // Guard against a double-tap (or tapping both buttons) racing two
+  // accept/decline calls before the screen dismisses.
+  const [resolving, setResolving] = useState(false);
   const ringing = active?.stage === 'incoming_ringing' ? active : undefined;
   // Peer is the live caller when ringing, else the pending push peer.
   const peerId = ringing?.peerUserId ?? connectingPeerId;
@@ -69,7 +76,13 @@ export function IncomingCallScreen({
   const showConnecting = !ringing && !!connectingPeerId;
   useEffect(() => {
     if (!showConnecting) return undefined;
-    const t = setTimeout(() => onCancelConnecting?.(), 15000);
+    // 8s, down from 15s: if the offer hasn't drained over the WS by now the
+    // caller has almost certainly hung up (a pre-offer cancel is dropped by
+    // the orchestrator's no-active-call guard, so it can't dismiss this
+    // placeholder for us). Shorter = less time stuck "connecting…" on an
+    // abandoned call. The orchestrator separately drops any offer that does
+    // drain late for a cancelled callId, so this won't cut off a real call.
+    const t = setTimeout(() => onCancelConnecting?.(), 8000);
     return () => clearTimeout(t);
   }, [showConnecting, onCancelConnecting]);
 
@@ -178,21 +191,45 @@ export function IncomingCallScreen({
       <View style={styles.actions}>
         <Pressable
           testID="incoming-decline"
+          disabled={resolving}
           onPress={() => {
+            if (resolving) return;
+            setResolving(true);
             orchestrator.decline();
             onResolved();
           }}
-          style={[styles.btnDecline, { borderColor: themed.divider }]}
+          style={[
+            styles.btnDecline,
+            { borderColor: themed.divider },
+            resolving && styles.btnResolving,
+          ]}
         >
           <Text style={[styles.btnDeclineText, { color: themed.ink }]}>Decline</Text>
         </Pressable>
         <Pressable
           testID="incoming-accept"
+          disabled={resolving}
           onPress={() => {
-            void orchestrator.accept();
+            if (resolving) return;
+            setResolving(true);
+            // Don't fire-and-forget: if mic permission is denied, accept()
+            // rejects and the call ends — without this .catch the rejection
+            // is swallowed and the call silently vanishes with no reason.
+            // Surface the settings alert on a plain 'denied'
+            // (never_ask_again is already alerted inside ensure()).
+            orchestrator.accept().catch((err: unknown) => {
+              const perr = permissionErrorKind(err);
+              if (perr && perr.result === 'denied') {
+                showOpenSettingsAlert(perr.kind);
+              }
+            });
             onResolved();
           }}
-          style={[styles.btnAccept, { backgroundColor: themed.primary }]}
+          style={[
+            styles.btnAccept,
+            { backgroundColor: themed.primary },
+            resolving && styles.btnResolving,
+          ]}
         >
           <Text style={[styles.btnAcceptText, { color: BRASS_BTN_INK }]}>Accept</Text>
         </Pressable>
@@ -260,4 +297,5 @@ const styles = StyleSheet.create({
     fontSize: 14,
     letterSpacing: 0.5,
   },
+  btnResolving: { opacity: 0.5 },
 });

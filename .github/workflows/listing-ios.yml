@@ -1,0 +1,60 @@
+name: Sync App Store listing
+
+# iOS counterpart of play-listing.yml. Manually-triggered workflow that pushes
+# the App Store listing metadata (name, subtitle, description, keywords,
+# promo text, URLs) + screenshots to App Store Connect via fastlane deliver —
+# WITHOUT uploading a build.
+#
+# Separate from release-ios.yml because:
+#   - Binary upload happens per `ios-*` tag (every build).
+#   - Listing edits are rare (a copy revision, a new screenshot). Bundling
+#     them onto every build would churn the metadata folder needlessly.
+#
+# Trigger: `gh workflow run listing-ios.yml` or the GitHub UI "Run workflow"
+# button. Reads from apps/mobile/ios/fastlane/metadata/<locale>/ and
+# apps/mobile/ios/fastlane/screenshots/<locale>/ on the branch you trigger
+# from — whatever is in the tree is what gets pushed.
+#
+# Auth: App Store Connect API key (same secrets as release-ios.yml).
+#
+# NOTE: the App Privacy "nutrition label", age-rating questionnaire, and
+# pricing/availability are NOT settable via deliver — see
+# apps/mobile/ios/STORE_LISTING.md for the one-time ASC web-UI steps.
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_screenshots:
+        description: 'Skip screenshot upload (metadata text only)'
+        type: boolean
+        default: false
+
+concurrency:
+  group: listing-ios
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  listing-ios:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+
+      - name: bundle install (fastlane)
+        working-directory: apps/mobile/ios
+        run: bundle install
+
+      - name: fastlane ios listing
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          SKIP_SCREENSHOTS: ${{ inputs.skip_screenshots }}
+        run: bundle exec fastlane ios listing

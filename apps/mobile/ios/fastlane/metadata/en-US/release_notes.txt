@@ -1,0 +1,6 @@
+First TestFlight build of Speakeasy.
+
+• End-to-end encrypted messages and calls (Signal Protocol)
+• Anonymous handles — no phone number, email, or real name
+• Voice-masked Private Calls (Smoke, Velvet, Glass)
+• Group rooms up to 50, same E2E guarantees

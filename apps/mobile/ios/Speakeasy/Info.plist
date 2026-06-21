@@ -48,13 +48,27 @@
 	     omitting it crashes the app the moment a video call starts. -->
 	<key>NSCameraUsageDescription</key>
 	<string>Speakeasy needs the camera for video calls. The video stream is end-to-end encrypted with the peer; nothing is recorded or stored on a server.</string>
+	<!-- Export compliance. Speakeasy uses encryption only for standard,
+	     mass-market purposes (E2E messaging/calls via libsignal + HTTPS),
+	     which qualifies for the exemptions in Category 5 Part 2 of the U.S.
+	     EAR — the same basis Signal/WhatsApp rely on. Declaring it here
+	     (false = "no non-exempt encryption / exemption applies") stops App
+	     Store Connect prompting "Missing Compliance" on every TestFlight
+	     build. If legal prefers to file an annual self-classification report
+	     instead, flip this to <true/> and complete the export questionnaire. -->
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<false/>
 	<!-- VoIP + audio background modes — VoIP keeps the app's network
 	     stack alive so an in-flight call survives a screen lock; audio
-	     keeps the call audio session running while the screen is off. -->
+	     keeps the call audio session running while the screen is off.
+	     remote-notification lets a data/content-available push wake the
+	     app in the background to decrypt + post the message notification
+	     (parity with Android's FCM background message handling). -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>voip</string>
+		<string>remote-notification</string>
 	</array>
 	<!-- Deep link: speakeasy://add?handle=<handle>. Encoded in user QR
 	     codes so the iOS camera can hand off to Speakeasy directly. -->

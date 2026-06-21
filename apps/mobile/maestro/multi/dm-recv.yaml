@@ -1,0 +1,9 @@
+appId: xyz.speakeasyapp.app
+name: ${HANDLE} receives DM ${MSG} from ${PEER}
+---
+# The DM peer renders in the conversation list with the @ handle prefix
+# ("@alice"). Maestro text matchers are full-match regexes, so a bare
+# "alice" does NOT match "@alice" — wrap in .* to match the prefixed row.
+- extendedWaitUntil: { visible: { text: ".*${PEER}.*" }, timeout: 30000 }
+- tapOn: { text: ".*${PEER}.*" }
+- extendedWaitUntil: { visible: { text: "${MSG}" }, timeout: 30000 }

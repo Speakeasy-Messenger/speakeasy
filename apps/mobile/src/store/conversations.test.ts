@@ -263,12 +263,38 @@ describe('useConversations', () => {
   });
 
   it('markRead sets lastReadAt; subsequent messages are unread', () => {
+    // Unread is now counted by ARRIVAL time (receivedAt), not sentAt — set
+    // receivedAt explicitly so the test is deterministic rather than relying
+    // on the add()-time Date.now() colliding with lastReadAt in the same ms.
     const now = Date.now();
-    useConversations.getState().add(CONV, { ...baseMsg('m1'), sentAt: now - 2000 });
-    useConversations.getState().markRead(CONV);
-    useConversations.getState().add(CONV, { ...baseMsg('m2'), sentAt: now + 1000 });
-    useConversations.getState().add(CONV, { ...baseMsg('m3'), sentAt: now + 2000 });
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('m1'), sentAt: now - 2000, receivedAt: now - 2000 });
+    useConversations.getState().markRead(CONV); // lastReadAt ≈ now
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('m2'), sentAt: now + 1000, receivedAt: now + 1000 });
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('m3'), sentAt: now + 2000, receivedAt: now + 2000 });
     expect(useConversations.getState().unreadCountFor(CONV)).toBe(2);
+  });
+
+  it('counts a late-buffered message (old sentAt, late receivedAt) as unread', () => {
+    // The exact bug: the server buffers a message while the recipient is
+    // offline and relays it with its original (old) sentAt. It was SENT
+    // before the user last read, but DELIVERED after. Counting by sentAt
+    // would silently drop it from the unread badge (returns 0); counting by
+    // receivedAt correctly marks it unread.
+    const now = Date.now();
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('read-1'), sentAt: now - 5000, receivedAt: now - 5000 });
+    useConversations.getState().markRead(CONV); // lastReadAt ≈ now
+    useConversations
+      .getState()
+      .add(CONV, { ...baseMsg('buffered'), sentAt: now - 4000, receivedAt: now + 1000 });
+    expect(useConversations.getState().unreadCountFor(CONV)).toBe(1);
   });
 
   it('markRead marks all existing messages as read', () => {

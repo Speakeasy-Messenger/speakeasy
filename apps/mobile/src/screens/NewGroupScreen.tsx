@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useRef, useState } from 'react';
 import {
   KeyboardAvoidingView,
   Platform,
@@ -43,9 +43,10 @@ const ROOM_MEMBER_CAP = 50;
  * with a brass `Create` action when the room passes validation.
  * Members are added one at a time via the Find Someone sheet in
  * `add-to-room` mode — no comma-separated paste, no out-of-band
- * handle handling. Default TTL is 24h per spec §4.6 (more
- * aggressive than 1:1's 7d default to compensate for multi-party
- * spread risk).
+ * handle handling. Default TTL is 7 days — matching DEFAULT_TTL_SECONDS
+ * and the 1:1 default (see the `ttl` useState below). (Spec §4.6
+ * originally proposed a more aggressive 24h group default; the build
+ * settled on 7d for consistency with DMs.)
  *
  * Server contract is preserved from the old screen: `createGroup`
  * mints a room id, then `addGroupMember` per peer. The single-call
@@ -67,6 +68,14 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
   const [error, setError] = useState<string | undefined>();
   const [busy, setBusy] = useState(false);
   const [findOpen, setFindOpen] = useState(false);
+
+  // Idempotency across retries: createGroup mints a fresh server-side
+  // group id, so naively re-running handleCreate after a mid-way
+  // addGroupMember failure would mint a SECOND group and orphan the
+  // first. Persist the minted id (and the members already added) so a
+  // retry resumes the same group instead of duplicating it.
+  const createdGroupIdRef = useRef<string | null>(null);
+  const addedMembersRef = useRef<Set<string>>(new Set());
 
   const trimmedName = name.trim();
   const isValid =
@@ -106,10 +115,19 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
         setError('Sign in again — device token missing.');
         return;
       }
-      const { group_id } = await api.createGroup(deviceToken, trimmedName);
+      // Reuse the group minted on a prior (partially-failed) attempt
+      // rather than creating a new one each retry.
+      let group_id = createdGroupIdRef.current;
+      if (!group_id) {
+        group_id = (await api.createGroup(deviceToken, trimmedName)).group_id;
+        createdGroupIdRef.current = group_id;
+      }
       for (const member of members) {
+        // Skip members already added on a previous attempt.
+        if (addedMembersRef.current.has(member)) continue;
         try {
           await api.addGroupMember(deviceToken, group_id, member);
+          addedMembersRef.current.add(member);
         } catch (memberErr) {
           const e = memberErr as { code?: string; status?: number };
           diag('group', 'create: addGroupMember FAILED', {
@@ -135,6 +153,9 @@ export function NewGroupScreen({ onCreated, onCancel }: Props) {
       // group; this is a known follow-up.
       openGroup(group_id);
       setTtl(group_id, ttl);
+      // Full success — clear the retry state so a reused screen starts fresh.
+      createdGroupIdRef.current = null;
+      addedMembersRef.current = new Set();
       onCreated(group_id);
     } catch (err: unknown) {
       const e = err as { name?: string; message?: string; code?: string; status?: number };

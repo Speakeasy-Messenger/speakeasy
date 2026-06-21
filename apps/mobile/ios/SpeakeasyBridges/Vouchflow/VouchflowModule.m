@@ -24,4 +24,23 @@ RCT_EXTERN_METHOD(verify:(NSString *)context
                   resolver:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 
+// The Swift class implements all four @objc methods, but only methods
+// declared via RCT_EXTERN_METHOD here are visible on NativeModules.Vouchflow.
+// Without these three the email-OTP attestation fallback path (requestFallback
+// → submitFallbackOtp) and the cached-token read are unreachable from JS on
+// iOS, breaking parity with Android's VouchflowModule.kt. Selectors mirror the
+// @objc signatures in VouchflowModule.swift exactly.
+RCT_EXTERN_METHOD(requestFallback:(NSString *)email
+                  reason:(NSString *)reason
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(submitFallbackOtp:(NSString *)sessionId
+                  otp:(NSString *)otp
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
+RCT_EXTERN_METHOD(getCachedDeviceToken:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+
 @end

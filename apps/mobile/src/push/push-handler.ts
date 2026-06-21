@@ -1254,6 +1254,23 @@ export function usePushNavigation(
       if (startupHandledRef.current) return;
       startupHandledRef.current = true;
       try {
+        // iOS: the server sends an APNs `notification` block, so the OS
+        // renders the banner itself (notifee never posts it) and every
+        // Android tap-slot below is null on iOS. Firebase Messaging still
+        // surfaces the launching tap with its data payload — route it
+        // through the same pipeline. buildIosPushData carries
+        // conversation_id/notify_kind/msg_type, so toPersistedPush resolves.
+        if (Platform.OS === 'ios') {
+          const initialMsg = await messaging().getInitialNotification();
+          const idata = initialMsg?.data as FcmData | undefined;
+          if (idata && !cancelled) {
+            const p = toPersistedPush(idata);
+            if (p) {
+              await route(p, 'ios-cold-start');
+              return;
+            }
+          }
+        }
         // Native messaging notification tap (takes precedence — these
         // are the messaging notifications shipping from rc.124+).
         const nativeTap = await NotifMessaging.consumePendingTap();
@@ -1325,10 +1342,23 @@ export function usePushNavigation(
       })();
     });
 
+    // iOS warm tap: app backgrounded, user taps the OS-rendered banner.
+    // notifee's foreground/background events never see OS banners, and the
+    // Android consumePendingTap/consumeRawPush slots stay empty, so Firebase
+    // Messaging's onNotificationOpenedApp is the only signal for an iOS tap.
+    const iosOpenedUnsub =
+      Platform.OS === 'ios'
+        ? messaging().onNotificationOpenedApp((rm) => {
+            const p = toPersistedPush((rm?.data ?? {}) as FcmData);
+            if (p && !cancelled) void route(p, 'ios-opened');
+          })
+        : undefined;
+
     return () => {
       cancelled = true;
       fgUnsub();
       appStateSub.remove();
+      iosOpenedUnsub?.();
     };
   }, [hydrated, userId, navReady, navRef, callOrchestrator]);
 }

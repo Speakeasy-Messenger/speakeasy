@@ -143,7 +143,7 @@ export function ensureCameraPermission(): Promise<PermissionResult> {
   return ensure('camera', rn().PermissionsAndroid.PERMISSIONS.CAMERA);
 }
 
-function showOpenSettingsAlert(kind: PermKind): void {
+export function showOpenSettingsAlert(kind: PermKind): void {
   const { title, body } = COPY[kind];
   const { Alert, Linking } = rn();
   Alert.alert(title, body, [
@@ -155,4 +155,27 @@ function showOpenSettingsAlert(kind: PermKind): void {
       },
     },
   ]);
+}
+
+/**
+ * Classify an error thrown out of the call media path
+ * (`ensureLocalStream` throws `Error('<kind> permission <result>')` when a
+ * runtime permission isn't granted — webrtc-peer.ts). Returns the kind +
+ * result so a call-start UI can give the user feedback instead of failing
+ * silently. Returns null for non-permission errors (busy / self-call / a
+ * generic getUserMedia rejection), which callers should leave to diag().
+ *
+ * Note: `never_ask_again` is already surfaced by `ensure()` via
+ * `showOpenSettingsAlert`, so callers should only re-alert for `denied`.
+ */
+export function permissionErrorKind(
+  err: unknown,
+): { kind: PermKind; result: 'denied' | 'never_ask_again' } | null {
+  const msg = err instanceof Error ? err.message : String(err);
+  const m = /^(mic|camera) permission (denied|never_ask_again)$/.exec(msg);
+  if (!m) return null;
+  return {
+    kind: m[1] as PermKind,
+    result: m[2] as 'denied' | 'never_ask_again',
+  };
 }

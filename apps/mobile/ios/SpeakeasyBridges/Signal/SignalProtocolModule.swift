@@ -219,33 +219,43 @@ class SignalProtocolModule: NSObject {
             let typeByte = raw[0]
             let body = Array(raw.suffix(from: 1))
 
-            let plaintext: [UInt8]
-            switch typeByte {
-            case 0x03:
-                let msg = try PreKeySignalMessage(bytes: body)
-                // libsignal: free-function decrypt for PreKey message.
-                plaintext = try signalDecryptPreKey(
-                    message: msg,
-                    from: peerAddr,
-                    sessionStore: store,
-                    identityStore: store,
-                    preKeyStore: store,
-                    signedPreKeyStore: store,
-                    kyberPreKeyStore: store,
-                    context: context
-                )
-            case 0x02:
-                let msg = try SignalMessage(bytes: body)
-                plaintext = try signalDecrypt(
-                    message: msg,
-                    from: peerAddr,
-                    sessionStore: store,
-                    identityStore: store,
-                    context: context
-                )
-            default:
+            guard typeByte == 0x03 || typeByte == 0x02 else {
                 reject("decrypt_failed", "unknown ciphertext type byte 0x\(String(typeByte, radix: 16))", nil)
                 return
+            }
+
+            // Idempotent decrypt: a re-presented ciphertext (dropped WS ack →
+            // server redelivery on reconnect, or — once it ships — the push
+            // NSE decrypting the same message) returns the cached plaintext
+            // instead of re-running the single-use Double Ratchet, which would
+            // throw duplicatedMessage and surface a spurious "[decrypt failed]"
+            // bubble. The ratchet still runs exactly once on a true first
+            // decrypt; its errors propagate unchanged. Mirrors Android's
+            // DecryptCache (signal/DecryptCache.kt).
+            let plaintext = try DecryptCache.decryptCached(ciphertext: Array(raw)) {
+                if typeByte == 0x03 {
+                    let msg = try PreKeySignalMessage(bytes: body)
+                    // libsignal: free-function decrypt for PreKey message.
+                    return try signalDecryptPreKey(
+                        message: msg,
+                        from: peerAddr,
+                        sessionStore: store,
+                        identityStore: store,
+                        preKeyStore: store,
+                        signedPreKeyStore: store,
+                        kyberPreKeyStore: store,
+                        context: context
+                    )
+                } else {
+                    let msg = try SignalMessage(bytes: body)
+                    return try signalDecrypt(
+                        message: msg,
+                        from: peerAddr,
+                        sessionStore: store,
+                        identityStore: store,
+                        context: context
+                    )
+                }
             }
             resolve(Data(plaintext).base64EncodedString())
         } catch SignalError.untrustedIdentity(_) {
@@ -281,6 +291,38 @@ class SignalProtocolModule: NSObject {
         } catch {
             reject("has_session_failed", error.localizedDescription, error)
         }
+    }
+
+    // MARK: - Peer / store reset
+
+    /// Forget a peer's saved identity + session so the next
+    /// initiateSession re-TOFUs their rotated identity. Backs the
+    /// "[couldn't decrypt] → reset" recovery path (ChatScreen). Mirrors
+    /// Android SignalProtocolModule.resetPeer.
+    @objc(resetPeer:resolver:rejecter:)
+    func resetPeer(_ peerUserId: NSString,
+                   resolver resolve: @escaping RCTPromiseResolveBlock,
+                   rejecter reject: @escaping RCTPromiseRejectBlock) {
+        do {
+            ensureRestored()
+            let store = try SpeakeasySignalStore.require()
+            try store.clearPeerIdentity(peerUserId as String)
+            resolve(nil)
+        } catch {
+            reject("reset_peer_failed", error.localizedDescription, error)
+        }
+    }
+
+    /// Permanently wipe the entire Signal store — drop the in-memory
+    /// handle and delete the encrypted SQLCipher DB. Backs account
+    /// deletion so a re-enrollment starts from an empty store. Mirrors
+    /// Android SignalProtocolModule.wipeStore.
+    @objc(wipeStore:rejecter:)
+    func wipeStore(_ resolve: @escaping RCTPromiseResolveBlock,
+                   rejecter reject: @escaping RCTPromiseRejectBlock) {
+        SpeakeasySignalStore.reset()
+        SpeakeasyDb.shared.wipe()
+        resolve(nil)
     }
 
     // MARK: - Helpers

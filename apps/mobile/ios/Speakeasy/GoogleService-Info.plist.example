@@ -1,0 +1,40 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  iOS Firebase config — copy to Speakeasy/GoogleService-Info.plist
+  (gitignored) and fill in the real values from the Firebase console
+  (project speakeasy-5e009 → iOS app xyz.speakeasyapp.app → Download
+  GoogleService-Info.plist). Counterpart of Android's
+  android/app/google-services.json.
+
+  Required so AppDelegate's [FIRApp configure] succeeds and
+  @react-native-firebase/messaging (imported at index.js startup) finds a
+  default app. Must be in the Speakeasy target's Copy Bundle Resources.
+
+  In CI the real file is materialized from a secret/vault entry
+  (firebase-ios / speakeasy → plist_xml).
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>API_KEY</key>
+  <string>REPLACE_WITH_IOS_API_KEY</string>
+  <key>GCM_SENDER_ID</key>
+  <string>614125392027</string>
+  <key>BUNDLE_ID</key>
+  <string>xyz.speakeasyapp.app</string>
+  <key>PROJECT_ID</key>
+  <string>speakeasy-5e009</string>
+  <key>STORAGE_BUCKET</key>
+  <string>speakeasy-5e009.firebasestorage.app</string>
+  <key>IS_GCM_ENABLED</key>
+  <true/>
+  <key>IS_SIGNIN_ENABLED</key>
+  <true/>
+  <key>IS_ANALYTICS_ENABLED</key>
+  <false/>
+  <key>IS_ADS_ENABLED</key>
+  <false/>
+  <key>GOOGLE_APP_ID</key>
+  <string>1:614125392027:ios:REPLACE_WITH_IOS_APP_HASH</string>
+</dict>
+</plist>

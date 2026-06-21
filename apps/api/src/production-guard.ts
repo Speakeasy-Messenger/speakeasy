@@ -121,10 +121,26 @@ export function collectProductionConfigErrors(
   }
 
   const minConfidence = env.VOUCHFLOW_MIN_CONFIDENCE;
-  if (minConfidence && minConfidence !== 'medium' && minConfidence !== 'high') {
+  // ALLOW_LOW_CONFIDENCE_TEST=1 is an explicit, operator-acknowledged
+  // exception that permits a `low` floor in production for a bounded
+  // integration test (e.g. enrolling an iOS Simulator, which has no Secure
+  // Enclave and so can never produce App Attest → Vouchflow scores it `low`;
+  // see vouchflow-server#8 for the durable device-scoped fix). It is inert
+  // unless explicitly set, and the runtime logs a loud warning whenever the
+  // floor is non-default. Real (attested) devices are unaffected — they
+  // still score medium/high. Unset it (and VOUCHFLOW_MIN_CONFIDENCE) to
+  // restore the strict floor.
+  const allowLowConfidenceTest = env.ALLOW_LOW_CONFIDENCE_TEST === '1';
+  if (
+    minConfidence &&
+    minConfidence !== 'medium' &&
+    minConfidence !== 'high' &&
+    !(minConfidence === 'low' && allowLowConfidenceTest)
+  ) {
     errors.push(
       `VOUCHFLOW_MIN_CONFIDENCE=${minConfidence} is below the production ` +
-        'floor of "medium".',
+        'floor of "medium". Set ALLOW_LOW_CONFIDENCE_TEST=1 to acknowledge ' +
+        'a deliberate, bounded test exception.',
     );
   }
 

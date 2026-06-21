@@ -115,12 +115,17 @@ class GroupMessagingModule: NSObject {
             let store = try SpeakeasySignalStore.require()
             let senderAddr = try ProtocolAddress(name: senderUserId as String, deviceId: deviceId)
             let bytes = Array(b64(ciphertextB64 as String))
-            let plaintext = try groupDecrypt(
-                bytes,
-                from: senderAddr,
-                store: store,
-                context: context
-            )
+            // Idempotent decrypt: a re-presented SenderKey ciphertext returns
+            // the cached plaintext instead of re-running the single-use ratchet
+            // (which throws duplicatedMessage). Mirrors Android's DecryptCache.
+            let plaintext = try DecryptCache.decryptCached(ciphertext: bytes) {
+                try groupDecrypt(
+                    bytes,
+                    from: senderAddr,
+                    store: store,
+                    context: context
+                )
+            }
             resolve(Data(plaintext).base64EncodedString())
         } catch SignalError.sessionNotFound(_) {
             reject("no_session", "no SenderKey from this sender", nil)

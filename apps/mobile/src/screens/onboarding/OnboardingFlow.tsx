@@ -63,7 +63,9 @@ export function OnboardingFlow({ onEnrolled }: Props): React.ReactElement {
       if (!claimed) {
         // Defensive — shouldn't hit. State machine guarantees the
         // claimed identity exists before transitioning to face.
-        setStep('handle');
+        // Render the handle step directly to recover — do NOT setStep here.
+        // setState during render restarts the render and can warn "cannot
+        // update while rendering". onClaimed drives the real transition.
         return <HandleStep onClaimed={(args) => { setClaimed(args); setStep('face'); }} />;
       }
       return (
@@ -88,7 +90,9 @@ export function OnboardingFlow({ onEnrolled }: Props): React.ReactElement {
       if (!claimed) {
         // Same defensive path as 'face' — shouldn't hit; recover by
         // restarting the handle flow.
-        setStep('handle');
+        // Render the handle step directly to recover — do NOT setStep here.
+        // setState during render restarts the render and can warn "cannot
+        // update while rendering". onClaimed drives the real transition.
         return <HandleStep onClaimed={(args) => { setClaimed(args); setStep('face'); }} />;
       }
       return (
@@ -102,7 +106,9 @@ export function OnboardingFlow({ onEnrolled }: Props): React.ReactElement {
     case 'invite':
       if (!claimed) {
         // Same defensive path as 'face' / 'permissions'.
-        setStep('handle');
+        // Render the handle step directly to recover — do NOT setStep here.
+        // setState during render restarts the render and can warn "cannot
+        // update while rendering". onClaimed drives the real transition.
         return <HandleStep onClaimed={(args) => { setClaimed(args); setStep('face'); }} />;
       }
       return (

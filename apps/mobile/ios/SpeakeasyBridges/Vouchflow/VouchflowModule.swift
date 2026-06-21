@@ -252,6 +252,13 @@ class VouchflowModule: NSObject {
         case .attestationUnavailable:   return ("unknown_error",             "device attestation unavailable")
         case .keychainAccessDenied:     return ("account_store_access_denied", "keychain access denied")
         case .sessionExpiredRepeatedly: return ("unknown_error",             "session expired")
+        // Added in VouchflowSDK 2.3.0. Map explicitly (rather than letting
+        // them fall to @unknown default) — both are non-recoverable
+        // signature/serialization failures; surface as a hard error. (The
+        // SDK-internal __sessionExpiredInternal case is intentionally left
+        // to @unknown default — it's SPI, not part of the public contract.)
+        case .payloadSignatureRejected: return ("unknown_error",             "payload signature rejected")
+        case .canonicalizationFailed:   return ("unknown_error",             "request canonicalization failed")
         @unknown default:               return ("unknown_error",             "unknown VouchflowError")
         }
     }

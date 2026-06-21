@@ -79,3 +79,6 @@ generated/
 *.jks
 *.keystore
 !apps/mobile/android/app/debug.keystore
+
+# CodeGraph local index (not source)
+.codegraph/
