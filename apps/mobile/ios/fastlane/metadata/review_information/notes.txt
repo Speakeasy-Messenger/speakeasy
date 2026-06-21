@@ -1,0 +1,23 @@
+No account, phone number, or email is required to use Speakeasy — please do
+not request demo credentials.
+
+Getting in:
+1. Launch the app and tap "Open the door."
+2. The app generates an anonymous cryptographic identity on-device and asks
+   you to pick a handle (e.g. @reviewer) and a face/avatar. That's the whole
+   sign-up — nothing is sent off the device about who you are.
+
+Testing messaging + calls (needs two installs):
+3. Install on a second device (or a second TestFlight install). On each,
+   open the handle screen to see your @handle + QR code.
+4. On device A, add device B by scanning B's QR (or pasting B's handle), then
+   start a chat or a Private Call.
+5. All messages and calls are end-to-end encrypted (Signal Protocol); calls
+   additionally apply a voice-masking filter. The server only ever sees
+   ciphertext.
+
+Notes:
+- Private Calls require microphone permission; messaging needs no special
+  permissions.
+- There is no central directory — you can only reach someone whose handle or
+  QR you already have, by design.
