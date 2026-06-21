@@ -739,6 +739,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.speakeasyapp.app;
 				PRODUCT_NAME = Speakeasy;
 				PROVISIONING_PROFILE_SPECIFIER = "match AppStore xyz.speakeasyapp.app";
+				TARGETED_DEVICE_FAMILY = "1";
 				SWIFT_INCLUDE_PATHS = "$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi";
 				SWIFT_OBJC_BRIDGING_HEADER = "SpeakeasyBridges/Speakeasy-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -782,6 +783,7 @@
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.speakeasyapp.app;
 				PRODUCT_NAME = Speakeasy;
 				PROVISIONING_PROFILE_SPECIFIER = "match AppStore xyz.speakeasyapp.app";
+				TARGETED_DEVICE_FAMILY = "1";
 				SWIFT_INCLUDE_PATHS = "$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi";
 				SWIFT_OBJC_BRIDGING_HEADER = "SpeakeasyBridges/Speakeasy-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
