@@ -1,0 +1,13 @@
+appId: xyz.speakeasyapp.app
+name: "${HANDLE} DMs ${PEER} - ${MSG}"
+---
+- tapOn: { id: "conversations-fab" }
+- tapOn: { id: "find-sheet-input" }
+- inputText: ${PEER}
+- extendedWaitUntil: { visible: { id: "find-sheet-result" }, timeout: 15000 }
+- tapOn: { id: "find-sheet-result" }
+- extendedWaitUntil: { visible: { id: "chat-input" }, timeout: 15000 }
+- tapOn: { id: "chat-input" }
+- inputText: ${MSG}
+- tapOn: { id: "chat-send" }
+- assertVisible: { text: "${MSG}" }

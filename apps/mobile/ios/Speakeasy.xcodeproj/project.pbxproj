@@ -9,43 +9,46 @@
 /* Begin PBXBuildFile section */
 		00E356F31AD99517003FC87E /* SpeakeasyTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 00E356F21AD99517003FC87E /* SpeakeasyTests.m */; };
 		0167CE09ED535EFADAFCCFF5 /* SignalProtocolModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337313E3F3F8D27F527D47C3 /* SignalProtocolModule.swift */; };
+		039730D28D76856A4B272F09 /* FeatureWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF18248BF73728FE0759C4A /* FeatureWindow.swift */; };
+		0A37A6A614665075BDA7E7AB /* LatencyGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */; };
 		13B07FBC1A68108700A75B9A /* AppDelegate.mm in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB01A68108700A75B9A /* AppDelegate.mm */; };
 		13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB51A68108700A75B9A /* Images.xcassets */; };
 		13B07FC11A68108700A75B9A /* main.m in Sources */ = {isa = PBXBuildFile; fileRef = 13B07FB71A68108700A75B9A /* main.m */; };
 		14BCAC180BBDC8A908FA79AC /* VouchflowBootstrap.swift in Sources */ = {isa = PBXBuildFile; fileRef = 732E584329434C8C38B0C8D1 /* VouchflowBootstrap.swift */; };
+		1A869038CE1B907EE30AD01E /* GoogleService-Info.plist in Resources */ = {isa = PBXBuildFile; fileRef = 7294DF801B0E2B45438B2D46 /* GoogleService-Info.plist */; };
 		2670BA9F4C8A7FDD8EA4CC5D /* SqlCipherSignalProtocolStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 9A4271312895EEC919D6BD78 /* SqlCipherSignalProtocolStore.swift */; };
 		36CC56116ED7941C90F7D79A /* SignalProtocolModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 3364DF8A4C466E2E451FA030 /* SignalProtocolModule.m */; };
 		39FCF750BF31B495A466EA67 /* Pods_Speakeasy.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = C54FDF6DBBBEF8599A785AB8 /* Pods_Speakeasy.framework */; };
 		55BDED2AAA4650B6FF54DC8C /* GroupMessagingModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 4D94E7DB24BAB5E2B77E00B5 /* GroupMessagingModule.m */; };
 		578427435DB05A5BC84EC86F /* SpeakeasyDb.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4B6B56EBE5C4B89000F5A852 /* SpeakeasyDb.swift */; };
-		DBDBDBDBDBDBDBDB00000001 /* DbKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */; };
-		DBDBDBDBDBDBDBDB00000003 /* SpeakeasyDbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000004 /* SpeakeasyDbModule.swift */; };
-		DBDBDBDBDBDBDBDB00000005 /* SpeakeasyDbModule.m in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000006 /* SpeakeasyDbModule.m */; };
 		5D91DCC8B08CC06D8F384337 /* VouchflowSDK in Frameworks */ = {isa = PBXBuildFile; productRef = 1BD051D05D30B64C12D48FF8 /* VouchflowSDK */; };
 		665C3523E54C833C48728EA0 /* ChannelKeyModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8AB743423C1F0613508C5D48 /* ChannelKeyModule.swift */; };
 		690B25EC8D6B236CDEB84B49 /* PrivacyInfo.xcprivacy in Resources */ = {isa = PBXBuildFile; fileRef = 13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */; };
+		6E19975EE6864C3FD96F643F /* VouchflowSDK in Embed Frameworks */ = {isa = PBXBuildFile; productRef = 1BD051D05D30B64C12D48FF8 /* VouchflowSDK */; settings = {ATTRIBUTES = (CodeSignOnCopy, RemoveHeadersOnCopy, ); }; };
+		7FA586E986EF1256F4495056 /* GranularPitchShifter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */; };
 		81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */ = {isa = PBXBuildFile; fileRef = 81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */; };
 		854D93F731958008CBD51615 /* ChannelKeyModule.m in Sources */ = {isa = PBXBuildFile; fileRef = F83BF22B04FF8D13918A835F /* ChannelKeyModule.m */; };
 		87275DB2F742FA5F54DD49B8 /* Pods_Speakeasy_SpeakeasyTests.framework in Frameworks */ = {isa = PBXBuildFile; fileRef = CECA043AA4A9798429E64C84 /* Pods_Speakeasy_SpeakeasyTests.framework */; };
 		8AA3B14638A0994F86541699 /* VersionModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 9C72FE1798FE0F1427C3D8B1 /* VersionModule.m */; };
 		8B8A8190DDE8FECB7D464269 /* VouchflowModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 4960CDE5753A41F373A65ECC /* VouchflowModule.swift */; };
 		8ECA24D7D6832AEC8E75E57F /* VersionModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7DE124ED68947922E1FC79A1 /* VersionModule.swift */; };
-		A18BA49A77AAE2F5050B06EF /* GroupMessagingModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8FD18E4BC464D3EE592EE50 /* GroupMessagingModule.swift */; };
-		A6228E42B6AF2AF39222A8C3 /* VouchflowModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 889C6AF3A8C90260ABFB30B7 /* VouchflowModule.m */; };
-		B5532321519E60E237FE61B9 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1882DB5A9CE9B8416D49950F /* Schema.swift */; };
-		D5A9FAAAB09116C6D298D776 /* SpeakeasySignalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BBF1CABFBA936E75A390758 /* SpeakeasySignalStore.swift */; };
 		95E4F09E9D584D3D8DE4E294 /* VoiceFilterModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */; };
+		9D2B093E3DEA6048750CC6A5 /* SpeakeasyAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */; };
+		A18BA49A77AAE2F5050B06EF /* GroupMessagingModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = D8FD18E4BC464D3EE592EE50 /* GroupMessagingModule.swift */; };
+		A1B2C3D4E5F60718293A4B5C /* Fft1024.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E6F7081929A3B4C5D6E7F8 /* Fft1024.swift */; };
+		A6228E42B6AF2AF39222A8C3 /* VouchflowModule.m in Sources */ = {isa = PBXBuildFile; fileRef = 889C6AF3A8C90260ABFB30B7 /* VouchflowModule.m */; };
+		B2C3D4E5F60718293A4B5C6D /* PhaseVocoderPitchShifter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F7081929A3B4C5D6E7F8A9 /* PhaseVocoderPitchShifter.swift */; };
+		B5532321519E60E237FE61B9 /* Schema.swift in Sources */ = {isa = PBXBuildFile; fileRef = 1882DB5A9CE9B8416D49950F /* Schema.swift */; };
+		C56315D3497A6AB8F688066E /* ActiveFilterHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */; };
+		D5A9FAAAB09116C6D298D776 /* SpeakeasySignalStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = 8BBF1CABFBA936E75A390758 /* SpeakeasySignalStore.swift */; };
+		DBDBDBDBDBDBDBDB00000001 /* DbKeyStore.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */; };
+		DBDBDBDBDBDBDBDB00000003 /* SpeakeasyDbModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000004 /* SpeakeasyDbModule.swift */; };
+		DBDBDBDBDBDBDBDB00000005 /* SpeakeasyDbModule.m in Sources */ = {isa = PBXBuildFile; fileRef = DBDBDBDBDBDBDBDB00000006 /* SpeakeasyDbModule.m */; };
+		E47BBA35A060BADE0196050C /* Vouchflow.plist in Resources */ = {isa = PBXBuildFile; fileRef = F331E0225AEE2A44B8F40EF6 /* Vouchflow.plist */; };
+		F1E25D7EDEB45A3C40F8DA57 /* VoiceFilterDsp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */; };
 		F23DF6AFEDFDD9E5F81B9171 /* VoiceFilterModule.m in Sources */ = {isa = PBXBuildFile; fileRef = D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */; };
 		F4D7268090E0A841F6DC5099 /* SampleFilter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */; };
-		C56315D3497A6AB8F688066E /* ActiveFilterHolder.swift in Sources */ = {isa = PBXBuildFile; fileRef = 79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */; };
-		0A37A6A614665075BDA7E7AB /* LatencyGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */; };
-		7FA586E986EF1256F4495056 /* GranularPitchShifter.swift in Sources */ = {isa = PBXBuildFile; fileRef = 47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */; };
-		F1E25D7EDEB45A3C40F8DA57 /* VoiceFilterDsp.swift in Sources */ = {isa = PBXBuildFile; fileRef = 349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */; };
-		A1B2C3D4E5F60718293A4B5C /* Fft1024.swift in Sources */ = {isa = PBXBuildFile; fileRef = D5E6F7081929A3B4C5D6E7F8 /* Fft1024.swift */; };
 		FF512B0184D10718293A4B5C /* Fft512.swift in Sources */ = {isa = PBXBuildFile; fileRef = FF512F0184D10718293A4B5C /* Fft512.swift */; };
-		B2C3D4E5F60718293A4B5C6D /* PhaseVocoderPitchShifter.swift in Sources */ = {isa = PBXBuildFile; fileRef = E6F7081929A3B4C5D6E7F8A9 /* PhaseVocoderPitchShifter.swift */; };
-		9D2B093E3DEA6048750CC6A5 /* SpeakeasyAudioDevice.swift in Sources */ = {isa = PBXBuildFile; fileRef = 0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */; };
-		039730D28D76856A4B272F09 /* FeatureWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF18248BF73728FE0759C4A /* FeatureWindow.swift */; };
 /* End PBXBuildFile section */
 
 /* Begin PBXContainerItemProxy section */
@@ -58,10 +61,25 @@
 		};
 /* End PBXContainerItemProxy section */
 
+/* Begin PBXCopyFilesBuildPhase section */
+		B362FA4CC2EC74B474B6FCDD /* Embed Frameworks */ = {
+			isa = PBXCopyFilesBuildPhase;
+			buildActionMask = 2147483647;
+			dstPath = "";
+			dstSubfolderSpec = 10;
+			files = (
+				6E19975EE6864C3FD96F643F /* VouchflowSDK in Embed Frameworks */,
+			);
+			name = "Embed Frameworks";
+			runOnlyForDeploymentPostprocessing = 0;
+		};
+/* End PBXCopyFilesBuildPhase section */
+
 /* Begin PBXFileReference section */
 		00E356EE1AD99517003FC87E /* SpeakeasyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpeakeasyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		00E356F11AD99517003FC87E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		00E356F21AD99517003FC87E /* SpeakeasyTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SpeakeasyTests.m; sourceTree = "<group>"; };
+		0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyAudioDevice.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Speakeasy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Speakeasy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FAF1A68108700A75B9A /* AppDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = AppDelegate.h; path = Speakeasy/AppDelegate.h; sourceTree = "<group>"; };
 		13B07FB01A68108700A75B9A /* AppDelegate.mm */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.cpp.objcpp; name = AppDelegate.mm; path = Speakeasy/AppDelegate.mm; sourceTree = "<group>"; };
@@ -70,18 +88,22 @@
 		13B07FB71A68108700A75B9A /* main.m */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.objc; name = main.m; path = Speakeasy/main.m; sourceTree = "<group>"; };
 		13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = text.plist.xml; name = PrivacyInfo.xcprivacy; path = Speakeasy/PrivacyInfo.xcprivacy; sourceTree = "<group>"; };
 		1882DB5A9CE9B8416D49950F /* Schema.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Schema.swift; sourceTree = "<group>"; };
+		2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterModule.swift; sourceTree = "<group>"; };
 		3364DF8A4C466E2E451FA030 /* SignalProtocolModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = SignalProtocolModule.m; sourceTree = "<group>"; };
 		337313E3F3F8D27F527D47C3 /* SignalProtocolModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SignalProtocolModule.swift; sourceTree = "<group>"; };
+		349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterDsp.swift; sourceTree = "<group>"; };
 		3B4392A12AC88292D35C810B /* Pods-Speakeasy.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Speakeasy.debug.xcconfig"; path = "Target Support Files/Pods-Speakeasy/Pods-Speakeasy.debug.xcconfig"; sourceTree = "<group>"; };
+		47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GranularPitchShifter.swift; sourceTree = "<group>"; };
 		4960CDE5753A41F373A65ECC /* VouchflowModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VouchflowModule.swift; sourceTree = "<group>"; };
 		4B6B56EBE5C4B89000F5A852 /* SpeakeasyDb.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyDb.swift; sourceTree = "<group>"; };
-		DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DbKeyStore.swift; sourceTree = "<group>"; };
-		DBDBDBDBDBDBDBDB00000004 /* SpeakeasyDbModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyDbModule.swift; sourceTree = "<group>"; };
-		DBDBDBDBDBDBDBDB00000006 /* SpeakeasyDbModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = SpeakeasyDbModule.m; sourceTree = "<group>"; };
 		4D94E7DB24BAB5E2B77E00B5 /* GroupMessagingModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = GroupMessagingModule.m; sourceTree = "<group>"; };
 		5709B34CF0A7D63546082F79 /* Pods-Speakeasy.release.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Speakeasy.release.xcconfig"; path = "Target Support Files/Pods-Speakeasy/Pods-Speakeasy.release.xcconfig"; sourceTree = "<group>"; };
 		5B7EB9410499542E8C5724F5 /* Pods-Speakeasy-SpeakeasyTests.debug.xcconfig */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.xcconfig; name = "Pods-Speakeasy-SpeakeasyTests.debug.xcconfig"; path = "Target Support Files/Pods-Speakeasy-SpeakeasyTests/Pods-Speakeasy-SpeakeasyTests.debug.xcconfig"; sourceTree = "<group>"; };
+		6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LatencyGuard.swift; sourceTree = "<group>"; };
+		6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleFilter.swift; sourceTree = "<group>"; };
+		7294DF801B0E2B45438B2D46 /* GoogleService-Info.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = "GoogleService-Info.plist"; path = "Speakeasy/GoogleService-Info.plist"; sourceTree = "<group>"; };
 		732E584329434C8C38B0C8D1 /* VouchflowBootstrap.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VouchflowBootstrap.swift; sourceTree = "<group>"; };
+		79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ActiveFilterHolder.swift; sourceTree = "<group>"; };
 		7DE124ED68947922E1FC79A1 /* VersionModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VersionModule.swift; sourceTree = "<group>"; };
 		81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = file.storyboard; name = LaunchScreen.storyboard; path = Speakeasy/LaunchScreen.storyboard; sourceTree = "<group>"; };
 		889C6AF3A8C90260ABFB30B7 /* VouchflowModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = VouchflowModule.m; sourceTree = "<group>"; };
@@ -93,21 +115,18 @@
 		C54FDF6DBBBEF8599A785AB8 /* Pods_Speakeasy.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Speakeasy.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CECA043AA4A9798429E64C84 /* Pods_Speakeasy_SpeakeasyTests.framework */ = {isa = PBXFileReference; explicitFileType = wrapper.framework; includeInIndex = 0; path = Pods_Speakeasy_SpeakeasyTests.framework; sourceTree = BUILT_PRODUCTS_DIR; };
 		CEEEC8420421A5A610255760 /* Speakeasy-Bridging-Header.h */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.h; path = "Speakeasy-Bridging-Header.h"; sourceTree = "<group>"; };
-		D8FD18E4BC464D3EE592EE50 /* GroupMessagingModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupMessagingModule.swift; sourceTree = "<group>"; };
-		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
-		F83BF22B04FF8D13918A835F /* ChannelKeyModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = ChannelKeyModule.m; sourceTree = "<group>"; };
-		2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterModule.swift; sourceTree = "<group>"; };
-		D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = VoiceFilterModule.m; sourceTree = "<group>"; };
-		6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SampleFilter.swift; sourceTree = "<group>"; };
-		79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = ActiveFilterHolder.swift; sourceTree = "<group>"; };
-		6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = LatencyGuard.swift; sourceTree = "<group>"; };
-		47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GranularPitchShifter.swift; sourceTree = "<group>"; };
-		349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = VoiceFilterDsp.swift; sourceTree = "<group>"; };
 		D5E6F7081929A3B4C5D6E7F8 /* Fft1024.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Fft1024.swift; sourceTree = "<group>"; };
-		FF512F0184D10718293A4B5C /* Fft512.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Fft512.swift; sourceTree = "<group>"; };
-		E6F7081929A3B4C5D6E7F8A9 /* PhaseVocoderPitchShifter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhaseVocoderPitchShifter.swift; sourceTree = "<group>"; };
-		0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyAudioDevice.swift; sourceTree = "<group>"; };
+		D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = VoiceFilterModule.m; sourceTree = "<group>"; };
+		D8FD18E4BC464D3EE592EE50 /* GroupMessagingModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = GroupMessagingModule.swift; sourceTree = "<group>"; };
+		DBDBDBDBDBDBDBDB00000002 /* DbKeyStore.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = DbKeyStore.swift; sourceTree = "<group>"; };
+		DBDBDBDBDBDBDBDB00000004 /* SpeakeasyDbModule.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyDbModule.swift; sourceTree = "<group>"; };
+		DBDBDBDBDBDBDBDB00000006 /* SpeakeasyDbModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = SpeakeasyDbModule.m; sourceTree = "<group>"; };
 		DCF18248BF73728FE0759C4A /* FeatureWindow.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = FeatureWindow.swift; sourceTree = "<group>"; };
+		E6F7081929A3B4C5D6E7F8A9 /* PhaseVocoderPitchShifter.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = PhaseVocoderPitchShifter.swift; sourceTree = "<group>"; };
+		ED297162215061F000B7C4FE /* JavaScriptCore.framework */ = {isa = PBXFileReference; lastKnownFileType = wrapper.framework; name = JavaScriptCore.framework; path = System/Library/Frameworks/JavaScriptCore.framework; sourceTree = SDKROOT; };
+		F331E0225AEE2A44B8F40EF6 /* Vouchflow.plist */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = text.plist.xml; name = Vouchflow.plist; path = Speakeasy/Vouchflow.plist; sourceTree = "<group>"; };
+		F83BF22B04FF8D13918A835F /* ChannelKeyModule.m */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.c.objc; path = ChannelKeyModule.m; sourceTree = "<group>"; };
+		FF512F0184D10718293A4B5C /* Fft512.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = Fft512.swift; sourceTree = "<group>"; };
 /* End PBXFileReference section */
 
 /* Begin PBXFrameworksBuildPhase section */
@@ -158,6 +177,8 @@
 				81AB9BB72411601600AC10FF /* LaunchScreen.storyboard */,
 				13B07FB71A68108700A75B9A /* main.m */,
 				13B07FB81A68108700A75B9A /* PrivacyInfo.xcprivacy */,
+				7294DF801B0E2B45438B2D46 /* GoogleService-Info.plist */,
+				F331E0225AEE2A44B8F40EF6 /* Vouchflow.plist */,
 			);
 			name = Speakeasy;
 			sourceTree = "<group>";
@@ -197,6 +218,20 @@
 			name = Frameworks;
 			sourceTree = "<group>";
 		};
+		2E422B0DB989E917559C6660 /* dsp */ = {
+			isa = PBXGroup;
+			children = (
+				6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */,
+				47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */,
+				349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */,
+				D5E6F7081929A3B4C5D6E7F8 /* Fft1024.swift */,
+				FF512F0184D10718293A4B5C /* Fft512.swift */,
+				E6F7081929A3B4C5D6E7F8A9 /* PhaseVocoderPitchShifter.swift */,
+			);
+			name = dsp;
+			path = dsp;
+			sourceTree = "<group>";
+		};
 		3074ADAB80AE13264AA979E3 /* Db */ = {
 			isa = PBXGroup;
 			children = (
@@ -209,6 +244,21 @@
 			name = Db;
 			path = SpeakeasyBridges/Db;
 			sourceTree = SOURCE_ROOT;
+		};
+		5F97DB8AD427DF475B359896 /* VoiceFilter */ = {
+			isa = PBXGroup;
+			children = (
+				2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */,
+				D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */,
+				6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */,
+				79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */,
+				0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */,
+				DCF18248BF73728FE0759C4A /* FeatureWindow.swift */,
+				2E422B0DB989E917559C6660 /* dsp */,
+			);
+			name = VoiceFilter;
+			path = VoiceFilter;
+			sourceTree = "<group>";
 		};
 		832341AE1AAA6A7D00B99B32 /* Libraries */ = {
 			isa = PBXGroup;
@@ -288,35 +338,6 @@
 			path = SpeakeasyBridges;
 			sourceTree = SOURCE_ROOT;
 		};
-		5F97DB8AD427DF475B359896 /* VoiceFilter */ = {
-			isa = PBXGroup;
-			children = (
-				2F5188A78D25B0E5FB859093 /* VoiceFilterModule.swift */,
-				D77E59A5BAE0588F54CE54D4 /* VoiceFilterModule.m */,
-				6E83DFCF470F5C3F1EA64A1C /* SampleFilter.swift */,
-				79E49073ECB4FB8149C264B2 /* ActiveFilterHolder.swift */,
-				0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */,
-				DCF18248BF73728FE0759C4A /* FeatureWindow.swift */,
-				2E422B0DB989E917559C6660 /* dsp */,
-			);
-			name = VoiceFilter;
-			path = VoiceFilter;
-			sourceTree = "<group>";
-		};
-		2E422B0DB989E917559C6660 /* dsp */ = {
-			isa = PBXGroup;
-			children = (
-				6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */,
-				47E2A1868AA995263A531EEF /* GranularPitchShifter.swift */,
-				349B5E17DEB402C1C9CE256C /* VoiceFilterDsp.swift */,
-				D5E6F7081929A3B4C5D6E7F8 /* Fft1024.swift */,
-				FF512F0184D10718293A4B5C /* Fft512.swift */,
-				E6F7081929A3B4C5D6E7F8A9 /* PhaseVocoderPitchShifter.swift */,
-			);
-			name = dsp;
-			path = dsp;
-			sourceTree = "<group>";
-		};
 /* End PBXGroup section */
 
 /* Begin PBXNativeTarget section */
@@ -353,6 +374,7 @@
 				00EEFC60759A1932668264C0 /* [CP] Embed Pods Frameworks */,
 				E235C05ADACE081382539298 /* [CP] Copy Pods Resources */,
 				2A2861B17AECAD28BF04B03C /* [CP-User] [RNFB] Core Configuration */,
+				B362FA4CC2EC74B474B6FCDD /* Embed Frameworks */,
 			);
 			buildRules = (
 			);
@@ -420,6 +442,8 @@
 				81AB9BB82411601600AC10FF /* LaunchScreen.storyboard in Resources */,
 				13B07FBF1A68108700A75B9A /* Images.xcassets in Resources */,
 				690B25EC8D6B236CDEB84B49 /* PrivacyInfo.xcprivacy in Resources */,
+				1A869038CE1B907EE30AD01E /* GoogleService-Info.plist in Resources */,
+				E47BBA35A060BADE0196050C /* Vouchflow.plist in Resources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
 		};
@@ -688,7 +712,11 @@
 				"CARGO_BUILD_TARGET[sdk=iphonesimulator*][arch=*]" = "x86_64-apple-ios";
 				"CARGO_BUILD_TARGET[sdk=iphonesimulator*][arch=arm64]" = "aarch64-apple-ios-sim";
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = Speakeasy/Speakeasy.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 89KT3SWYAF;
 				ENABLE_BITCODE = NO;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
@@ -702,7 +730,7 @@
 				);
 				LIBSIGNAL_FFI_BUILD_PATH = "target/$(CARGO_BUILD_TARGET)/release";
 				LIBSIGNAL_FFI_LIB_TO_LINK = "$(LIBSIGNAL_FFI_TEMP_DIR)/$(LIBSIGNAL_FFI_BUILD_PATH)/libsignal_ffi.a";
-				LIBSIGNAL_FFI_TEMP_DIR = "$(BUILD_DIR)/../Intermediates.noindex/Pods.build/libsignal_ffi";
+				LIBSIGNAL_FFI_TEMP_DIR = "$(OBJROOT)/Pods.build/libsignal_ffi";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -710,6 +738,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.speakeasyapp.app;
 				PRODUCT_NAME = Speakeasy;
+				PROVISIONING_PROFILE_SPECIFIER = "match AppStore xyz.speakeasyapp.app";
 				SWIFT_INCLUDE_PATHS = "$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi";
 				SWIFT_OBJC_BRIDGING_HEADER = "SpeakeasyBridges/Speakeasy-Bridging-Header.h";
 				SWIFT_OPTIMIZATION_LEVEL = "-Onone";
@@ -727,7 +756,11 @@
 				"CARGO_BUILD_TARGET[sdk=iphonesimulator*][arch=*]" = "x86_64-apple-ios";
 				"CARGO_BUILD_TARGET[sdk=iphonesimulator*][arch=arm64]" = "aarch64-apple-ios-sim";
 				CLANG_ENABLE_MODULES = YES;
-				CURRENT_PROJECT_VERSION = 1;
+				CODE_SIGN_ENTITLEMENTS = Speakeasy/Speakeasy.entitlements;
+				CODE_SIGN_IDENTITY = "Apple Distribution";
+				CODE_SIGN_STYLE = Manual;
+				CURRENT_PROJECT_VERSION = 2;
+				DEVELOPMENT_TEAM = 89KT3SWYAF;
 				HEADER_SEARCH_PATHS = (
 					"$(inherited)",
 					"$(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi",
@@ -740,7 +773,7 @@
 				);
 				LIBSIGNAL_FFI_BUILD_PATH = "target/$(CARGO_BUILD_TARGET)/release";
 				LIBSIGNAL_FFI_LIB_TO_LINK = "$(LIBSIGNAL_FFI_TEMP_DIR)/$(LIBSIGNAL_FFI_BUILD_PATH)/libsignal_ffi.a";
-				LIBSIGNAL_FFI_TEMP_DIR = "$(BUILD_DIR)/../Intermediates.noindex/Pods.build/libsignal_ffi";
+				LIBSIGNAL_FFI_TEMP_DIR = "$(OBJROOT)/Pods.build/libsignal_ffi";
 				MARKETING_VERSION = 1.0;
 				OTHER_LDFLAGS = (
 					"$(inherited)",
@@ -748,6 +781,7 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.speakeasyapp.app;
 				PRODUCT_NAME = Speakeasy;
+				PROVISIONING_PROFILE_SPECIFIER = "match AppStore xyz.speakeasyapp.app";
 				SWIFT_INCLUDE_PATHS = "$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi";
 				SWIFT_OBJC_BRIDGING_HEADER = "SpeakeasyBridges/Speakeasy-Bridging-Header.h";
 				SWIFT_VERSION = 5.0;
@@ -967,7 +1001,7 @@
 			repositoryURL = "https://github.com/vouchflow/ios-sdk";
 			requirement = {
 				kind = exactVersion;
-				version = 2.1.1;
+				version = 2.3.0;
 			};
 		};
 /* End XCRemoteSwiftPackageReference section */

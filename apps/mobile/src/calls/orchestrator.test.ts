@@ -11,9 +11,16 @@ import { MockSignalProtocolClient } from '../native/mock-signal-protocol.js';
 import { CallOrchestrator } from './orchestrator.js';
 import type { CallPeer, CallPeerFactory } from './types.js';
 
+type ConnState =
+  | 'connecting'
+  | 'connected'
+  | 'failed'
+  | 'closed'
+  | 'disconnected';
+
 class MockPeer implements CallPeer {
   private iceListeners = new Set<(c: CallIceCandidate) => void>();
-  private connListeners = new Set<(s: 'connecting' | 'connected' | 'failed' | 'closed') => void>();
+  private connListeners = new Set<(s: ConnState) => void>();
   private animationListeners = new Set<(payload: Uint8Array) => void>();
   micMuted = false;
   speakerOn = false;
@@ -35,9 +42,7 @@ class MockPeer implements CallPeer {
     this.iceListeners.add(cb);
     return () => this.iceListeners.delete(cb);
   }
-  onConnectionStateChange(
-    cb: (s: 'connecting' | 'connected' | 'failed' | 'closed') => void,
-  ): () => void {
+  onConnectionStateChange(cb: (s: ConnState) => void): () => void {
     this.connListeners.add(cb);
     return () => this.connListeners.delete(cb);
   }
@@ -50,7 +55,7 @@ class MockPeer implements CallPeer {
   close(): void {
     this.closed = true;
   }
-  emitConnState(s: 'connecting' | 'connected' | 'failed' | 'closed'): void {
+  emitConnState(s: ConnState): void {
     for (const c of this.connListeners) c(s);
   }
   openAnimationDataChannel(): void {
@@ -282,6 +287,31 @@ describe('CallOrchestrator', () => {
     expect(h.finishedCallee[0]?.reason).toBe('no_answer');
   });
 
+  it('drops a buffered offer that drains after the caller already cancelled', async () => {
+    const h = makeOrchHarness();
+    const fakeOffer = Buffer.from(
+      JSON.stringify({ v: 1, sdp: 'x', candidates: [] }),
+    ).toString('base64');
+    // Pre-offer cancel: the caller hung up before their offer drained to
+    // us, so only the call_end arrives first — no active call on our side.
+    await h.callee.handleFrame({
+      type: 'call_end',
+      from: 'carol',
+      call_id: 'call-late',
+      reason: 'cancel',
+    });
+    expect(h.callee.getActive()).toBeUndefined();
+    // The server now drains the buffered offer for that same, already-dead
+    // call. It must NOT ring — the call is abandoned.
+    await h.callee.handleFrame({
+      type: 'call_offer',
+      from: 'carol',
+      call_id: 'call-late',
+      ciphertext: fakeOffer,
+    });
+    expect(h.callee.getActive()).toBeUndefined();
+  });
+
   it('busy: a second incoming offer while in a call is rejected', async () => {
     const h = makeOrchHarness();
     await h.caller.startOutgoing('bob');
@@ -371,6 +401,30 @@ describe('CallOrchestrator', () => {
       expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe(
         'filter_failure',
       );
+    });
+
+    it('disconnected ICE flap flags reconnecting (cosmetic) and recovers on connected', async () => {
+      const h = makeOrchHarness();
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      await h.callee.accept();
+      await h.pump();
+      h.callerPeer().emitConnState('connected');
+      h.calleePeer().emitConnState('connected');
+      expect(h.caller.getActive()?.stage).toBe('connected');
+      expect(h.caller.getActive()?.reconnecting).toBeFalsy();
+
+      // ICE flap: the connection drops to 'disconnected'. This must NOT end
+      // the call — it only flags reconnecting so the UI shows "Reconnecting…".
+      h.callerPeer().emitConnState('disconnected');
+      expect(h.caller.getActive()?.stage).toBe('connected');
+      expect(h.caller.getActive()?.reconnecting).toBe(true);
+      expect(h.finishedCaller).toHaveLength(0);
+
+      // Recovery back to 'connected' clears the flag.
+      h.callerPeer().emitConnState('connected');
+      expect(h.caller.getActive()?.stage).toBe('connected');
+      expect(h.caller.getActive()?.reconnecting).toBe(false);
     });
 
     it('callee receives wire filter_failure → stores peer_filter_failure locally', async () => {

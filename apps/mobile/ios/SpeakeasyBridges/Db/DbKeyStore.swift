@@ -51,17 +51,45 @@ enum DbKeyStore {
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else { return nil }
+        guard status == errSecSuccess, let data = item as? Data else {
+            // errSecItemNotFound is the normal "fresh install" path. ANY other
+            // status (notably errSecMissingEntitlement -34018, which sim builds
+            // without a provisioned keychain-access-group hit) means the read
+            // failed — the caller will then re-key and WIPE the encrypted store,
+            // losing all Signal sessions + message history. Never let that be
+            // silent; it's the root cause of "couldn't decrypt this message"
+            // after a relaunch (the session the secret protected is gone).
+            if status != errSecItemNotFound {
+                NSLog("[DbKeyStore] load failed: OSStatus \(status) — store will re-key & WIPE; sessions/history lost. (-34018 = keychain entitlement missing, common on unsigned simulator builds)")
+            }
+            return nil
+        }
         return String(data: data, encoding: .utf8)
     }
 
     /// Persist `secret` as the db root secret. Overwrites any prior value.
-    static func store(_ secret: String) {
+    /// Returns `true` iff the secret is now durably stored (verified by a
+    /// read-back); a `false` return means the next launch will re-key and
+    /// wipe — the caller logs the loss path.
+    @discardableResult
+    static func store(_ secret: String) -> Bool {
         SecItemDelete(baseQuery() as CFDictionary)
         var add = baseQuery()
         add[kSecValueData as String] = Data(secret.utf8)
         add[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        SecItemAdd(add as CFDictionary, nil)
+        let status = SecItemAdd(add as CFDictionary, nil)
+        if status != errSecSuccess {
+            NSLog("[DbKeyStore] store failed: OSStatus \(status) — db root secret NOT persisted; history will reset every launch until this succeeds. (-34018 = keychain entitlement missing, common on unsigned simulator builds)")
+            return false
+        }
+        // Read-back guard: confirm the write is actually retrievable. Catches
+        // platforms/configs where SecItemAdd reports success but the item is
+        // not readable on the next access path.
+        if load() == nil {
+            NSLog("[DbKeyStore] store succeeded but read-back returned nil — keychain not persisting; history will reset every launch")
+            return false
+        }
+        return true
     }
 
     /// Drop the stored secret. Used by account deletion alongside

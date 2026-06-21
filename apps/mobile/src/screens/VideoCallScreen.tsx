@@ -86,10 +86,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     return () => clearInterval(t);
   }, [active?.stage, active?.connectedAt]);
 
-  // Auto-dismiss after the orchestrator clears `active`.
+  // Auto-dismiss after the orchestrator clears `active`. 300ms to match
+  // CallScreen: 1200ms made a user-initiated hangup feel broken (the screen
+  // lingered ~1.2s after End, so testers re-called thinking it failed). The
+  // call_end propagates + tears down both sides in ~0.3s.
   useEffect(() => {
     if (!active) {
-      const t = setTimeout(onClosed, 1200);
+      const t = setTimeout(onClosed, 300);
       return () => clearTimeout(t);
     }
   }, [active, onClosed]);
@@ -133,7 +136,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     outgoing_ringing: 'Ringing',
     incoming_ringing: 'Incoming',
     connecting: 'Connecting',
-    connected: elapsed || '00:00',
+    // While an ICE flap is recovering, show "Reconnecting…" rather than a
+    // timer that keeps ticking as if the call were healthy.
+    connected: active.reconnecting ? 'Reconnecting…' : elapsed || '00:00',
     ended: 'Call ended',
   };
 

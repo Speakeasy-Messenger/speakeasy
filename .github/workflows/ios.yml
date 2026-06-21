@@ -79,6 +79,35 @@ jobs:
             Vouchflow.plist.example > Vouchflow.plist
           plutil -lint Vouchflow.plist
 
+      - name: Write GoogleService-Info.plist
+        # apps/mobile/ios/Speakeasy/GoogleService-Info.plist is gitignored —
+        # the iOS counterpart of Android's google-services.json. Now that the
+        # project bundles it (Copy Bundle Resources), the build needs it
+        # present or it fails "Build input file cannot be found". Provided as
+        # a base64-encoded secret (the whole plist). Firebase iOS config keys
+        # are bundle-restricted and not strictly secret, but we keep it out of
+        # git to match the Vouchflow.plist convention.
+        env:
+          FIREBASE_IOS_PLIST_B64: ${{ secrets.FIREBASE_IOS_PLIST_B64 }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          if [ -z "$FIREBASE_IOS_PLIST_B64" ]; then
+            echo "::error::FIREBASE_IOS_PLIST_B64 secret is not set."
+            echo "::error::Set it: base64 -i GoogleService-Info.plist | gh secret set FIREBASE_IOS_PLIST_B64"
+            exit 1
+          fi
+          echo "$FIREBASE_IOS_PLIST_B64" | base64 --decode > GoogleService-Info.plist
+          plutil -lint GoogleService-Info.plist
+
+      - name: Wire iOS project (entitlements + bundled plists)
+        # Idempotent xcodeproj patch — adds CODE_SIGN_ENTITLEMENTS and the two
+        # plists to Copy Bundle Resources if the committed pbxproj is missing
+        # them. No-op once the wired pbxproj is committed.
+        working-directory: apps/mobile/ios
+        run: |
+          gem install xcodeproj --no-document
+          ruby tools/wire-ios-project.rb
+
       - name: pod install
         working-directory: apps/mobile/ios
         # USE_FRAMEWORKS=static is required — LibSignalClient is a Swift

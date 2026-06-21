@@ -41,7 +41,7 @@ class WebRtcCallPeer implements CallPeer {
   private remoteStream?: MediaStream;
   private localIceCb?: (c: CallIceCandidate) => void;
   private connStateCb?: (
-    s: 'connecting' | 'connected' | 'failed' | 'closed',
+    s: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
   ) => void;
   private remoteStreamCb?: (url: string | undefined) => void;
   private startedManager = false;
@@ -158,11 +158,17 @@ class WebRtcCallPeer implements CallPeer {
         // reassertAudioRoute() for the callee-mic bug this addresses.
         this.reassertAudioRoute();
       }
-      if (s === 'connecting' || s === 'connected' || s === 'failed' || s === 'closed') {
+      if (
+        s === 'connecting' ||
+        s === 'connected' ||
+        s === 'failed' ||
+        s === 'closed' ||
+        s === 'disconnected'
+      ) {
+        // 'disconnected' is an ICE flap (WebRTC may recover; if not, a
+        // terminal 'failed'/'closed' follows). The orchestrator treats it
+        // as cosmetic-only — a "Reconnecting…" hint, never an end-state.
         this.connStateCb?.(s);
-      } else if (s === 'disconnected') {
-        // ICE flap. WebRTC may recover; if not, we'll see `failed`
-        // shortly. Don't surface this as a terminal end-state.
       }
     });
     pcAny.addEventListener('iceconnectionstatechange', () => {
@@ -325,7 +331,9 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   onConnectionStateChange(
-    cb: (s: 'connecting' | 'connected' | 'failed' | 'closed') => void,
+    cb: (
+      s: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
+    ) => void,
   ): () => void {
     this.connStateCb = cb;
     return () => {

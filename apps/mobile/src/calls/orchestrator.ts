@@ -40,6 +40,14 @@ import { FilterError, setFilterBypass } from '../native/voice-filter.js';
 const RING_TIMEOUT_MS = 45_000;
 
 /**
+ * How long a cancelled/ended callId is remembered so a buffered offer for
+ * the SAME call — drained late after the caller already hung up — is dropped
+ * instead of ringing an abandoned call. Comfortably covers the server's
+ * offer-buffer redelivery window without growing unbounded.
+ */
+const CANCELLED_CALL_TTL_MS = 60_000;
+
+/**
  * Frames the orchestrator emits — sent by the caller via the WS client.
  * Kept narrow on purpose: the orchestrator never reaches into the WS
  * client directly, so call logic is independently testable.
@@ -135,6 +143,13 @@ export interface CallHistoryEntry {
  */
 export class CallOrchestrator {
   private active?: ActiveCall;
+  /**
+   * callId → timestamp of recently cancelled/ended calls that had no live
+   * `active` call when the `call_end` arrived (the caller hung up before
+   * their offer drained to us). A buffered offer for one of these drains
+   * late and would otherwise ring an abandoned call. Pruned by TTL.
+   */
+  private readonly recentlyCancelled = new Map<string, number>();
   /**
    * When the call entered 'connecting' (SDP exchanged, ICE/DTLS starting).
    * Used to measure the tech-only setup latency — connecting→connected,
@@ -556,6 +571,17 @@ export class CallOrchestrator {
     callId: string,
     ciphertextB64: string,
   ): Promise<void> {
+    if (this.recentlyCancelled.has(callId)) {
+      // The caller already sent call_end for this callId (they hung up
+      // before/around when the server buffered their offer). Drop the
+      // late-drained offer so we don't ring an abandoned call.
+      this.recentlyCancelled.delete(callId);
+      diag('call', 'dropping buffered offer for already-cancelled call', {
+        fromUserId,
+        callId,
+      });
+      return;
+    }
     if (this.active) {
       // Re-delivered offer for the call we're ALREADY handling — ignore
       // it, don't busy-reject our own call. The server now always buffers
@@ -724,6 +750,13 @@ export class CallOrchestrator {
     reason: CallEndReason,
   ): void {
     if (!this.active || this.active.callId !== callId || this.active.peerUserId !== fromUserId) {
+      // No live call matches this end. Most often the caller cancelled
+      // before their offer drained to us (we may still be showing the
+      // "connecting" placeholder). Remember the callId so a buffered offer
+      // for it, drained late, is dropped instead of ringing an abandoned
+      // call. A call_end always means that call is over, so recording it
+      // here unconditionally is safe.
+      this.rememberCancelled(callId);
       return;
     }
     diag('call', 'handleIncomingEnd', { reason, callId, fromUserId, stage: this.active.stage });
@@ -794,7 +827,18 @@ export class CallOrchestrator {
         callId: this.active.callId,
       });
       if (state === 'connected') {
-        this.transition('connected', { connectedAt: this.now() });
+        // Clear any 'reconnecting' flag — the ICE flap recovered.
+        this.transition('connected', {
+          connectedAt: this.now(),
+          reconnecting: false,
+        });
+      } else if (state === 'disconnected') {
+        // ICE flap after a live connection. Cosmetic only — flag it so the
+        // call UI can show "Reconnecting…" and not a misleading running
+        // timer. A real drop surfaces as 'failed'/'closed' right after.
+        if (this.active.stage === 'connected' && !this.active.reconnecting) {
+          this.setActive({ ...this.active, reconnecting: true });
+        }
       } else if (state === 'failed') {
         this.endLocally('failed');
       } else if (state === 'closed') {
@@ -1080,5 +1124,16 @@ export class CallOrchestrator {
 
   private now(): number {
     return (this.deps.now ?? Date.now)();
+  }
+
+  /** Remember a cancelled/ended callId (TTL-pruned) so a late buffered
+   *  offer for it is dropped rather than ringing an abandoned call. */
+  private rememberCancelled(callId: string): void {
+    const at = this.now();
+    this.recentlyCancelled.set(callId, at);
+    const cutoff = at - CANCELLED_CALL_TTL_MS;
+    for (const [id, ts] of this.recentlyCancelled) {
+      if (ts < cutoff) this.recentlyCancelled.delete(id);
+    }
   }
 }

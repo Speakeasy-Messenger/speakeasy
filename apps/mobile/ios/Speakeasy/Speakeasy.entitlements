@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  App entitlements for the Speakeasy target.
+
+  Wired into the project via CODE_SIGN_ENTITLEMENTS (Debug + Release) by
+  tools/wire-ios-project.rb. Counterpart of Android's push + App-Links setup.
+
+  aps-environment = production: the only fastlane match profile is the
+  App Store *distribution* profile (Matchfile type "appstore"), and TestFlight
+  + App Store both use the production APNs environment. Without this key a
+  signed build cannot register with APNs, so @react-native-firebase/messaging
+  getToken() never resolves an APNs token and push never arrives. (If a
+  `development` match type is ever added for on-device debug builds, pair it
+  with a Debug-config entitlements file carrying aps-environment=development.)
+
+  associated-domains: enables Universal Links for https://speakeasyapp.xyz/add
+  so a tapped add-handle / QR link opens the app directly (parity with
+  Android's autoVerify App Links intent-filter). Requires the AASA file hosted
+  at https://speakeasyapp.xyz/.well-known/apple-app-site-association and the
+  domain enabled on the provisioning profile.
+-->
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>aps-environment</key>
+  <string>production</string>
+  <key>com.apple.developer.associated-domains</key>
+  <array>
+    <string>applinks:speakeasyapp.xyz</string>
+  </array>
+</dict>
+</plist>

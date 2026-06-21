@@ -6,3 +6,4 @@ Vouchflow.plist
 # We vendor the source tree but exclude the .git dir.
 Vendor/libsignal/.git/
 Vendor/libsignal/target/
+GoogleService-Info.plist

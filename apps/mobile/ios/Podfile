@@ -89,5 +89,21 @@ target 'Speakeasy' do
         Pod::UI.puts "[Speakeasy] Patched fmt base.h: FMT_USE_CONSTEVAL forced 0 (Xcode 16.3+ consteval fix)".green
       end
     end
+
+    # SQLCipher must be the ONLY sqlite3 the app links. Some pod pulls in the
+    # SYSTEM libsqlite3 via `-l"sqlite3"` in the aggregate target's
+    # OTHER_LDFLAGS. The system sqlite3 has no encryption, so its sqlite3_key
+    # shadows SQLCipher's and returns SQLITE_MISUSE (rc=21) at runtime — the
+    # encrypted Signal store can't open ("identity_key_failed"), so the iOS
+    # app can't send/receive. Strip the system sqlite3 link from every
+    # aggregate target so SQLCipher's symbols win. (Caught 2026-06-21 running
+    # the app on the iOS simulator; affects device builds too. The documented
+    # SQLCipher-with-CocoaPods fix.)
+    installer.aggregate_targets.each do |aggregate_target|
+      aggregate_target.xcconfigs.each do |config_name, config_file|
+        config_file.libraries.delete('sqlite3')
+        config_file.save_as(aggregate_target.xcconfig_path(config_name))
+      end
+    end
   end
 end

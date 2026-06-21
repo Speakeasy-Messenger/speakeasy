@@ -1,0 +1,25 @@
+Speakeasy is a private messenger built on the premise that you shouldn't have to hand over your phone number, your email, or your real name to talk to someone you trust.
+
+When you sign up, you pick a handle — anything you want, like @alice or @midnight_traveler — and the app generates a fresh cryptographic identity on your device. No personal information ever leaves your phone. Nothing about who you are gets sent anywhere.
+
+WHAT YOU GET
+
+• End-to-end encryption on every message and call, using the Signal Protocol. The server only ever sees ciphertext — even the team that runs Speakeasy cannot read your messages.
+
+• Anonymous identity. Your handle is yours. There is no phone number to look up, no email to compromise, no real name to leak in a breach.
+
+• Private Calls with voice masking. When you call a friend, your voice goes through one of three customizable filters (Smoke, Velvet, or Glass) before it reaches them — even your peer hears a different voice from your actual one. Pick the voice that fits.
+
+• Group rooms with the same end-to-end guarantees as 1:1 chats. Up to 50 members per room.
+
+• No ads. No analytics tied to a real-world identity. No data-broker pipelines. The business model is paid subscriptions for advanced features, not selling your data.
+
+YOUR DATA STAYS YOURS
+
+Speakeasy does not collect personal information. Read the full privacy policy at https://speakeasyapp.xyz/privacy/ for the technical details of what is and isn't kept on our servers.
+
+If you delete your account, we delete your handle (releasing it back to the pool), your prekey bundle, and your encrypted message-relay buffer. Messages already delivered to your peers stay on their devices — we cannot reach into someone else's phone to delete them.
+
+QUESTIONS
+
+Send mail to hello@speakeasyapp.xyz. We read everything.

@@ -1,0 +1,9 @@
+appId: xyz.speakeasyapp.app
+name: enroll ${HANDLE}
+---
+- tapOn: { text: "Wait", optional: true }
+- runFlow:
+    file: ../_enroll-with-handle.yaml
+    env:
+      HANDLE: ${HANDLE}
+- assertVisible: { id: "conversations-userid" }

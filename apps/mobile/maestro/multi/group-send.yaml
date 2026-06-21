@@ -1,0 +1,20 @@
+appId: xyz.speakeasyapp.app
+name: ${HANDLE} creates group ${GROUP}, adds ${PEER}, sends ${MSG}
+---
+- tapOn: { id: "conversations-fab" }
+- tapOn: { id: "find-sheet-create-room" }
+- extendedWaitUntil: { visible: { id: "new-group-screen" }, timeout: 10000 }
+- tapOn: { id: "new-group-add-member" }
+- tapOn: { id: "find-sheet-input" }
+- inputText: ${PEER}
+- extendedWaitUntil: { visible: { id: "find-sheet-result" }, timeout: 15000 }
+- tapOn: { id: "find-sheet-result" }
+- tapOn: { id: "new-group-name-input" }
+- inputText: ${GROUP}
+- hideKeyboard
+- tapOn: { id: "new-group-create" }
+- extendedWaitUntil: { visible: { id: "chat-input" }, timeout: 15000 }
+- tapOn: { id: "chat-input" }
+- inputText: ${MSG}
+- tapOn: { id: "chat-send" }
+- assertVisible: { text: "${MSG}" }

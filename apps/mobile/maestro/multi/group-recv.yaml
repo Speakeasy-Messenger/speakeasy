@@ -1,0 +1,6 @@
+appId: xyz.speakeasyapp.app
+name: ${HANDLE} receives ${MSG} in group ${GROUP}
+---
+- extendedWaitUntil: { visible: { text: "${GROUP}" }, timeout: 30000 }
+- tapOn: { text: "${GROUP}" }
+- extendedWaitUntil: { visible: { text: "${MSG}" }, timeout: 30000 }

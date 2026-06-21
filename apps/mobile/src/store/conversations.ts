@@ -676,7 +676,15 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     const c = get().byId[conversationId];
     if (!c) return 0;
     if (!c.lastReadAt) return c.messages.length;
-    return c.messages.filter((m) => m.sentAt > c.lastReadAt!).length;
+    // Count by ARRIVAL time (receivedAt), not sentAt. The server buffers
+    // messages while the recipient is offline and relays them with their
+    // original (old) sentAt; comparing sentAt > lastReadAt would silently
+    // drop those late-delivered messages from the unread badge. receivedAt
+    // is stamped on every add (see add()), so it reflects when the message
+    // actually landed relative to the last read. This is the "unread
+    // indicator" concern the localOrderKey docblock defers to here.
+    return c.messages.filter((m) => (m.receivedAt ?? m.sentAt) > c.lastReadAt!)
+      .length;
   },
 
   hydrate: async () => {

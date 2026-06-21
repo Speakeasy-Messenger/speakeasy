@@ -385,7 +385,9 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
     outgoing_ringing: 'Ringing',
     incoming_ringing: 'Incoming',
     connecting: 'Connecting',
-    connected: elapsed || '00:00',
+    // While an ICE flap is recovering, show "Reconnecting…" rather than a
+    // timer that keeps ticking as if the call were healthy.
+    connected: active.reconnecting ? 'Reconnecting…' : elapsed || '00:00',
     ended: 'Call ended',
   };
 

@@ -236,6 +236,19 @@ final class SqlCipherSignalProtocolStore:
         )
     }
 
+    // MARK: - Peer reset
+
+    /// Forget everything about a peer: their TOFU-saved identity and any
+    /// established session. The next `initiateSession(peerUserId, …)` then
+    /// re-fetches the peer's PreKey bundle and re-TOFUs their (rotated)
+    /// identity. Mirrors Android's
+    /// SqlCipherSignalProtocolStore.clearPeerIdentity (identities + sessions,
+    /// across every device_id for that name).
+    func clearPeerIdentity(_ name: String) throws {
+        try exec("DELETE FROM identities WHERE name = ?", bind: [.text(name)])
+        try exec("DELETE FROM sessions WHERE name = ?", bind: [.text(name)])
+    }
+
     static func loadFromDb(_ db: OpaquePointer) throws -> SqlCipherSignalProtocolStore? {
         var stmt: OpaquePointer?
         defer { sqlite3_finalize(stmt) }

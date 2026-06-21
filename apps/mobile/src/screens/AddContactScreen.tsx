@@ -26,14 +26,31 @@ export function AddContactScreen({
   onCreateRoom,
 }: Props): React.ReactElement {
   const themed = useColors();
+  // FindSomeoneSheet.handleResultTap calls onPickPeer() and THEN onClose().
+  // Here every callback is a `navigation.replace(...)` (this sheet IS the
+  // screen, not an overlay), so the trailing onClose → replace('Home')
+  // clobbers the onPickPeer → replace('Chat') and the user lands back on an
+  // empty Home instead of the chat they tapped. Latch on the first
+  // navigating action so the trailing onClose becomes a no-op. (Bug surfaced
+  // running the iOS deep-link/QR add flow on the simulator, 2026-06.)
+  const navigatedRef = React.useRef(false);
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
       <FindSomeoneSheet
         visible
         initialHandle={handle}
-        onClose={onClose}
-        onPickPeer={onOpenChat}
-        onCreateRoom={onCreateRoom}
+        onClose={() => {
+          if (navigatedRef.current) return;
+          onClose();
+        }}
+        onPickPeer={(picked) => {
+          navigatedRef.current = true;
+          onOpenChat(picked);
+        }}
+        onCreateRoom={() => {
+          navigatedRef.current = true;
+          onCreateRoom();
+        }}
       />
     </SafeAreaView>
   );

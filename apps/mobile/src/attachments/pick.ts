@@ -127,7 +127,14 @@ export async function pickFromCamera(): Promise<Attachment | null> {
     maxHeight: PHOTO_MAX_H,
     quality: PHOTO_QUALITY,
     includeBase64: true,
-    saveToPhotos: true,
+    // saveToPhotos:false — do NOT write the capture to the camera roll.
+    // (1) Brand: "say it, leave nothing" — a photo shot to send shouldn't
+    //     silently persist to the device gallery. (2) Crash safety: on iOS
+    //     saveToPhotos:true makes react-native-image-picker call
+    //     UIImageWriteToSavedPhotosAlbum, which SIGABRTs without
+    //     NSPhotoLibraryAddUsageDescription in Info.plist. The captured
+    //     image is still sent (it's in base64); it just isn't archived.
+    saveToPhotos: false,
   });
   if (result.didCancel || !result.assets?.[0]) return null;
   const asset = result.assets[0];

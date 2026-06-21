@@ -69,6 +69,13 @@ export interface ActiveCall {
   /** Speakerphone routing toggle (vs earpiece). */
   speakerOn: boolean;
   /**
+   * True while the WebRTC connection has flapped to 'disconnected' after
+   * having connected (an ICE blip that WebRTC may auto-recover). Purely
+   * cosmetic — drives the in-call "Reconnecting…" label; the call is NOT
+   * ended (a real drop surfaces as 'failed'/'closed' shortly after).
+   */
+  reconnecting?: boolean;
+  /**
    * User-facing call kind. 'audio'/'video' are the historical defaults;
    * 'private' (Phase 5j) renders the peer's animated animal with a
    * voice-filtered audio stream. Set at startOutgoing time on the
@@ -100,8 +107,13 @@ export interface CallPeer {
   addRemoteIce(payload: CallIcePayload): Promise<void>;
   /** Subscribe to locally-discovered ICE candidates (trickle). */
   onLocalIce(cb: (candidate: CallIceCandidate) => void): () => void;
-  /** Subscribe to ICE/DTLS connection-state changes. */
-  onConnectionStateChange(cb: (state: 'connecting' | 'connected' | 'failed' | 'closed') => void): () => void;
+  /** Subscribe to ICE/DTLS connection-state changes. 'disconnected' is an
+   * ICE flap (cosmetic "Reconnecting…" hint), not a terminal end-state. */
+  onConnectionStateChange(
+    cb: (
+      state: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
+    ) => void,
+  ): () => void;
   /**
    * Phase 5 — subscribe to per-track audio levels (RMS in [0, 1]) so
    * the in-call animal portraits can drive their mouth scale from the

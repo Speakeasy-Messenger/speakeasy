@@ -39,6 +39,10 @@ import { VideoCallScreen } from '../screens/VideoCallScreen.js';
 import { useCalls } from '../store/calls.js';
 import { useIdentity } from '../store/identity.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
+import {
+  permissionErrorKind,
+  showOpenSettingsAlert,
+} from '../permissions/runtime.js';
 
 export type RootStack = {
   Onboarding: undefined;
@@ -303,10 +307,18 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                           try {
                             await callOrchestrator.startOutgoing(peerId, kind);
                             navigation.navigate('Call');
-                          } catch {
-                            // already busy / self-call / camera denied;
-                            // ignore — orchestrator surfaces details
-                            // via diag()
+                          } catch (err) {
+                            // A denied mic/camera permission must not fail
+                            // silently — the call screen never opens, so
+                            // without feedback the user thinks the app is
+                            // broken and re-dials. Surface the settings
+                            // alert on a plain 'denied' (never_ask_again is
+                            // already alerted inside ensure()). busy /
+                            // self-call still go to diag() only.
+                            const perr = permissionErrorKind(err);
+                            if (perr && perr.result === 'denied') {
+                              showOpenSettingsAlert(perr.kind);
+                            }
                           }
                         }
                       : undefined
