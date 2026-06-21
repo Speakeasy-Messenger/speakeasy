@@ -188,6 +188,9 @@ export const devices = pgTable(
       .notNull()
       .references(() => users.id, { onDelete: 'cascade' }),
     pushToken: text('push_token'),
+    /** iOS PushKit (VoIP) token — incoming-call CallKit wake-ups (0022).
+     *  Separate from push_token: VoIP pushes go direct-APNs to <bundle>.voip. */
+    voipToken: text('voip_token'),
     platform: text('platform'),
     // 'rich' or 'private'. Drives FCM/APNs system-banner copy. NULL is
     // interpreted as 'rich' at read-time so pre-Phase-5d-knob rows

@@ -19,6 +19,8 @@ export interface DeviceRecord {
   deviceToken: string;
   userId: string;
   pushToken?: string;
+  /** iOS PushKit (VoIP) token for CallKit incoming-call wake-ups. */
+  voipToken?: string;
   platform?: 'ios' | 'android';
   notificationPrivacy?: NotificationPrivacy;
   lastPushError?: string;
@@ -84,6 +86,18 @@ export interface DevicesRepo {
     userId?: string;
   }): Promise<void>;
 
+  /**
+   * Set the iOS PushKit (VoIP) token for a device (CallKit incoming-call
+   * wake-ups). Mirrors `setPushToken`'s insert-on-conflict-by-userId so a
+   * fresh deviceToken can register its VoIP token before the WS upserts the
+   * row. Independent column — does not touch push_token.
+   */
+  setVoipToken(args: {
+    deviceToken: string;
+    voipToken: string;
+    userId?: string;
+  }): Promise<void>;
+
   /** Record why the last push-token registration failed (e.g. "android_post_notifications_denied", "native_module_missing"). Cleared on next successful setPushToken. */
   reportPushError(args: { deviceToken: string; error: string }): Promise<void>;
 
@@ -99,6 +113,10 @@ export interface DevicesRepo {
    * next registration knows it was reaped, not user-revoked.
    */
   clearPushToken(args: { pushToken: string; reason: string }): Promise<void>;
+
+  /** Null out the voip_token column on any row holding it — called when APNs
+   *  returns 410/Unregistered for a VoIP push (the PushKit token is dead). */
+  clearVoipToken(args: { voipToken: string; reason: string }): Promise<void>;
 
   /**
    * Persist the device's declared `supported_call_kinds` on WS auth.
