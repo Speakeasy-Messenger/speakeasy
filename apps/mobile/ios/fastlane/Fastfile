@@ -77,6 +77,11 @@ platform :ios do
 
   desc "Build + upload to TestFlight"
   lane :beta do
+    # Create a dedicated, unlocked keychain with the signing key's partition
+    # list set for NON-INTERACTIVE codesign. Without this, codesign blocks on
+    # a GUI "allow access" prompt that never comes — on a CI runner it hangs
+    # until the job timeout; over SSH it fails with errSecInternalComponent.
+    setup_ci(force: true)
     key = asc_api_key
     match(type: "appstore", readonly: is_ci, api_key: key)
     pin_signing
@@ -99,6 +104,7 @@ platform :ios do
 
   desc "Build + upload to the App Store (NOT auto-submitted for review)"
   lane :release do
+    setup_ci(force: true) # non-interactive codesign keychain — see beta lane.
     key = asc_api_key
     match(type: "appstore", readonly: is_ci, api_key: key)
     pin_signing
