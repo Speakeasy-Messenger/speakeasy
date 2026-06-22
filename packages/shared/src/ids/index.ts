@@ -131,6 +131,24 @@ export function newMessageId(): string {
   return ulid();
 }
 
+/**
+ * Decode the millisecond timestamp embedded in a ULID's first 10
+ * characters (Crockford base32, 48-bit time component). Returns null
+ * for a non-ULID / unparseable id so callers can fall back.
+ */
+export function ulidTimeMs(id: string): number | null {
+  if (typeof id !== 'string' || id.length < 10) return null;
+  const ENC = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+  let ms = 0;
+  const head = id.slice(0, 10).toUpperCase();
+  for (let i = 0; i < head.length; i++) {
+    const idx = ENC.indexOf(head[i]!);
+    if (idx === -1) return null;
+    ms = ms * 32 + idx;
+  }
+  return ms;
+}
+
 /** A bare ULID, as produced by `newMessageId()`. */
 export const MESSAGE_ID_REGEX = /^[0-9A-HJKMNP-TV-Z]{26}$/;
 

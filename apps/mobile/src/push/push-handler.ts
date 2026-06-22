@@ -34,7 +34,7 @@ import notifee, {
   type Notification,
 } from '@notifee/react-native';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import { decodePayload, newMessageId } from '@speakeasy/shared';
+import { decodePayload, newMessageId, ulidTimeMs } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
@@ -832,7 +832,11 @@ async function displayPushNotification(data: FcmData): Promise<void> {
           title: data.title,
           messages: [
             ...prior,
-            { text, timestamp: Date.now(), person: { id: peer, name: '@' + peer } },
+            {
+              text,
+              timestamp: ulidTimeMs(data.message_id ?? '') ?? Date.now(),
+              person: { id: peer, name: '@' + peer },
+            },
           ],
           // Inline reply works for both 1:1 and groups now — group send
           // is reachable headlessly (SenderKey store + distributionId +

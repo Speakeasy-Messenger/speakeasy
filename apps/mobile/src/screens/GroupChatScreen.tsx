@@ -18,7 +18,11 @@ import { diag } from '../diag/log.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
 import { AppBar } from '../components/AppBar.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
-import { SEND_TEXT_MAX_CHARS } from '../components/rich-message-text.js';
+import {
+  SEND_TEXT_ATTACHMENT_MAX_CHARS,
+  SEND_TEXT_MAX_CHARS,
+  longTextToAttachment,
+} from '../components/rich-message-text.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { MediaViewerScreen } from './MediaViewerScreen.js';
@@ -186,10 +190,17 @@ export function GroupChatScreen({
   const [input, setInput] = useState('');
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
+  // Mirrors `input` but updated synchronously in the change handler so
+  // `handleSend` reads the freshest committed value. Mitigates the
+  // Android IME composing-region race where the trailing word/char of
+  // setState hadn't flushed by the time the send fired (last chars
+  // dropped on send).
+  const latestInputRef = useRef('');
 
   /** Detect `@` + partial handle in the current input. */
   const handleInputChange = useCallback((text: string) => {
     setInput(text);
+    latestInputRef.current = text;
     // Find the last `@` that isn't preceded by a non-space char (i.e. start-of-line or after space)
     const match = /(?:^|\s)@([a-z0-9_]*)$/i.exec(text);
     if (match) {
@@ -204,9 +215,10 @@ export function GroupChatScreen({
     // Replace the trailing `@query` with `@handle `
     setInput((prev) => {
       const idx = prev.lastIndexOf('@');
-      if (idx === -1) return prev + `@${handle} `;
-      const prefix = prev.slice(0, idx);
-      return prefix + `@${handle} `;
+      const next =
+        idx === -1 ? prev + `@${handle} ` : prev.slice(0, idx) + `@${handle} `;
+      latestInputRef.current = next;
+      return next;
     });
     setMentionQuery(null);
     inputRef.current?.focus();
@@ -277,9 +289,14 @@ export function GroupChatScreen({
   }, [messages, groupId, ttlSecondsFor, setStage, remove]);
 
   function handleSend() {
-    const trimmed = input.trim();
+    // Read from the synchronous ref first — it holds the freshest
+    // committed value even if the setState behind `input` hasn't flushed
+    // (Android composing-region drop). Fall back to `input`.
+    const raw = latestInputRef.current || input;
+    const trimmed = raw.trim();
     if (!trimmed) return;
     setInput('');
+    latestInputRef.current = '';
     setMentionQuery(null);
     const mentions = parseMentions(trimmed);
     void sendOutbound({ text: trimmed, mentions: mentions.length ? mentions : undefined });
@@ -290,8 +307,8 @@ export function GroupChatScreen({
   // is identical on the receiving side. Attachments go through the
   // sender-key fan-out, just like text.
   async function sendOutbound(opts: { text?: string; attachments?: Attachment[]; mentions?: string[] }) {
-    const text = opts.text?.trim() || undefined;
-    const attachments = opts.attachments?.length ? opts.attachments : undefined;
+    let text = opts.text?.trim() || undefined;
+    let attachments = opts.attachments?.length ? opts.attachments : undefined;
     if (!text && !attachments) return;
     if (!group) {
       add(groupId, {
@@ -305,13 +322,16 @@ export function GroupChatScreen({
       return;
     }
     const localId = newMessageId();
-    // Same long-message hard cap as the 1:1 send path
-    // (ChatScreen.sendOutbound). See SEND_TEXT_MAX_CHARS for why.
-    if (text && text.length > SEND_TEXT_MAX_CHARS) {
-      diag('chat', 'group send: text too long — stamped as too_long', {
+    // Over-length text isn't dropped: it rides the attachment path as a
+    // text/plain `message.txt` file (the same large-payload path images
+    // use). Only the extreme case (past SEND_TEXT_ATTACHMENT_MAX_CHARS,
+    // where even base64'd it blows the raw attachment budget) keeps the
+    // legacy `too_long` failure. Mirrors ChatScreen.sendOutbound.
+    if (text && text.length > SEND_TEXT_ATTACHMENT_MAX_CHARS) {
+      diag('chat', 'group send: text too long even for .txt attachment — too_long', {
         groupId,
         textLength: text.length,
-        limit: SEND_TEXT_MAX_CHARS,
+        limit: SEND_TEXT_ATTACHMENT_MAX_CHARS,
       });
       add(groupId, {
         id: localId,
@@ -324,6 +344,16 @@ export function GroupChatScreen({
         sendFailure: 'too_long',
       });
       return;
+    }
+    if (text && text.length > SEND_TEXT_MAX_CHARS) {
+      diag('chat', 'group send: long text → text/plain attachment', {
+        groupId,
+        textLength: text.length,
+        limit: SEND_TEXT_MAX_CHARS,
+      });
+      const txtAttachment = longTextToAttachment(text);
+      attachments = [...(attachments ?? []), txtAttachment];
+      text = undefined;
     }
     add(groupId, {
       id: localId,
@@ -559,6 +589,11 @@ export function GroupChatScreen({
               ref={inputRef}
               placeholder="say something…"
               placeholderTextColor={themed.slate}
+              // Reduces the Android IME composing-span that can drop the
+              // trailing word on send. autoCorrect is intentionally left
+              // on; disabling it (autoCorrect={false}) is the fallback if
+              // device testing still shows trailing-char drops.
+              autoComplete="off"
               onSubmitEditing={hasInput ? handleSend : undefined}
               returnKeyType="send"
               multiline

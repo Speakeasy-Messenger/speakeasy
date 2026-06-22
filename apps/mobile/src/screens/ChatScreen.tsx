@@ -31,7 +31,11 @@ import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { CallTypeSheet } from '../components/CallTypeSheet.js';
-import { SEND_TEXT_MAX_CHARS } from '../components/rich-message-text.js';
+import {
+  SEND_TEXT_ATTACHMENT_MAX_CHARS,
+  SEND_TEXT_MAX_CHARS,
+  longTextToAttachment,
+} from '../components/rich-message-text.js';
 import { FrozenInputBar } from '../components/FrozenInputBar.js';
 import { CameraIcon, PaperclipIcon } from '../components/icons/InputBarIcons.js';
 import { PhoneIcon } from '../components/icons/CallIcons.js';
@@ -165,6 +169,16 @@ export function ChatScreen({
   const [attachOpen, setAttachOpen] = useState(false);
 
   const [input, setInput] = useState('');
+  // Mirrors `input` but updated synchronously in the change handler so
+  // `handleSend` reads the freshest committed value. Mitigates the
+  // Android IME composing-region race where the trailing word/char of
+  // setState hadn't flushed by the time the send fired (last chars
+  // dropped on send).
+  const latestInputRef = useRef('');
+  const handleInputChange = useCallback((text: string) => {
+    setInput(text);
+    latestInputRef.current = text;
+  }, []);
   const [draftContentHeight, setDraftContentHeight] = useState(0);
   const [draftViewportHeight, setDraftViewportHeight] = useState(0);
   // Tap a photo/gif in the bubble → render this attachment fullscreen
@@ -337,9 +351,14 @@ export function ChatScreen({
   }, [messages, conversationId, ttlSecondsFor, setStage, remove]);
 
   function handleSend() {
-    const trimmed = input.trim();
+    // Read from the synchronous ref first — it holds the freshest
+    // committed value even if the setState behind `input` hasn't flushed
+    // (Android composing-region drop). Fall back to `input`.
+    const raw = latestInputRef.current || input;
+    const trimmed = raw.trim();
     if (!trimmed) return;
     setInput('');
+    latestInputRef.current = '';
     const mentions = parseMentions(trimmed);
     void sendOutbound({
       text: trimmed,
@@ -381,23 +400,23 @@ export function ChatScreen({
     attachments?: Attachment[];
     mentions?: string[];
   }) {
-    const text = opts.text?.trim() || undefined;
-    const attachments = opts.attachments?.length ? opts.attachments : undefined;
+    let text = opts.text?.trim() || undefined;
+    let attachments = opts.attachments?.length ? opts.attachments : undefined;
     const mentions = opts.mentions?.length ? opts.mentions : undefined;
     if (!text && !attachments) return;
     const id = newMessageId();
-    // Long-message hard cap. We stamp the optimistic bubble as a
-    // `too_long` failure WITHOUT dispatching — long-form text doesn't
-    // fit the WS/FCM/Signal envelope chain, and retrying is futile.
-    // The bubble renders with a non-tappable "TOO LONG TO SEND" cue
-    // so the user knows to shorten + try again instead of mashing
-    // "tap to resend" forever.
-    if (text && text.length > SEND_TEXT_MAX_CHARS) {
-      diag('chat', 'send: text too long — stamped as too_long', {
+    // Over-length text isn't dropped: it rides the attachment path as a
+    // text/plain `message.txt` file (the same large-payload path images
+    // use), with no inline text. Only the extreme case (past
+    // SEND_TEXT_ATTACHMENT_MAX_CHARS, where even base64'd it blows the
+    // raw attachment budget) keeps the legacy `too_long` failure with a
+    // non-tappable "TOO LONG TO SEND" cue.
+    if (text && text.length > SEND_TEXT_ATTACHMENT_MAX_CHARS) {
+      diag('chat', 'send: text too long even for .txt attachment — too_long', {
         convId: conversationId,
         peerId,
         textLength: text.length,
-        limit: SEND_TEXT_MAX_CHARS,
+        limit: SEND_TEXT_ATTACHMENT_MAX_CHARS,
       });
       add(conversationId, {
         id,
@@ -412,6 +431,16 @@ export function ChatScreen({
         sendFailure: 'too_long',
       });
       return;
+    }
+    if (text && text.length > SEND_TEXT_MAX_CHARS) {
+      diag('chat', 'send: long text → text/plain attachment', {
+        convId: conversationId,
+        peerId,
+        textLength: text.length,
+        limit: SEND_TEXT_MAX_CHARS,
+      });
+      attachments = [...(attachments ?? []), longTextToAttachment(text)];
+      text = undefined;
     }
     // Optimistic local echo — render immediately, encrypt + send
     // in the background.
@@ -878,13 +907,18 @@ export function ChatScreen({
                 testID="chat-input"
                 style={[styles.input, { color: themed.ink }]}
                 value={input}
-                onChangeText={setInput}
+                onChangeText={handleInputChange}
                 onLayout={(e) => setDraftViewportHeight(e.nativeEvent.layout.height)}
                 onContentSizeChange={(e) =>
                   setDraftContentHeight(e.nativeEvent.contentSize.height)
                 }
                 placeholder="say something…"
                 placeholderTextColor={themed.slate}
+                // Reduces the Android IME composing-span that can drop the
+                // trailing word on send. autoCorrect is intentionally left
+                // on; disabling it (autoCorrect={false}) is the fallback if
+                // device testing still shows trailing-char drops.
+                autoComplete="off"
                 onSubmitEditing={hasInput ? handleSend : undefined}
                 returnKeyType="send"
                 multiline
