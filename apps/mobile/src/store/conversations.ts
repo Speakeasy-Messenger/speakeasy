@@ -307,7 +307,7 @@ function attachmentsMatch(
   return true;
 }
 
-async function persist(byId: Record<string, ConversationState>): Promise<void> {
+async function persistNow(byId: Record<string, ConversationState>): Promise<void> {
   try {
     await secureKv.set(STORAGE_KEY, JSON.stringify(byId));
   } catch {
@@ -315,6 +315,34 @@ async function persist(byId: Record<string, ConversationState>): Promise<void> {
     // of truth for the current session. Before enrollment the encrypted
     // DB isn't open yet; that rejection lands here and is ignored.
   }
+}
+
+// Coalesce rapid store mutations (notably a backlog of buffered messages
+// draining on chat-open) into ONE encrypted write. Previously every mutation
+// JSON.stringify'd the whole store and wrote SQLCipher on the JS thread, so a
+// drained backlog blocked a render per message — the "messages trickle in
+// ~500ms apart" lag. Trailing debounce: first mutation arms a timer; later
+// mutations within the window just update the snapshot; one write fires.
+const PERSIST_DEBOUNCE_MS = 400;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+let persistSnapshot: Record<string, ConversationState> | null = null;
+function schedulePersist(byId: Record<string, ConversationState>): void {
+  persistSnapshot = byId;
+  if (persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    const snap = persistSnapshot;
+    persistSnapshot = null;
+    if (snap) void persistNow(snap);
+  }, PERSIST_DEBOUNCE_MS);
+}
+/** Force an immediate write of the latest pending snapshot. Call before the
+ * app can be killed (AppState -> background) so a debounced write isn't lost. */
+export async function flushConversationsPersist(): Promise<void> {
+  if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
+  const snap = persistSnapshot ?? useConversations.getState().byId;
+  persistSnapshot = null;
+  await persistNow(snap);
 }
 
 export const useConversations = create<ConversationsState>((set, get) => ({
@@ -333,7 +361,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
     return id;
   },
 
@@ -344,7 +372,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         byId: { ...s.byId, [groupId]: emptyConversation('group') },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   add: (conversationId, msg) => {
@@ -434,7 +462,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         _pendingReceipts: nextPending,
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   setStage: (conversationId, msgId, stage) =>
@@ -491,7 +519,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           },
         };
       }
-      void persist(next);
+      schedulePersist(next);
       return { byId: next };
     }),
 
@@ -529,7 +557,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           },
         };
       }
-      void persist(next);
+      schedulePersist(next);
       return { byId: next };
     }),
 
@@ -548,7 +576,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       if (!touched) return s;
       return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   setSendFailure: (conversationId, msgId, reason) => {
@@ -569,7 +597,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       if (!touched) return s;
       return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   markReadUpTo: (conversationId, readAt) => {
@@ -587,7 +615,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       if (!touched) return s;
       return { byId: { ...s.byId, [conversationId]: { ...c, messages } } };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   remove: (conversationId, msgId) => {
@@ -604,7 +632,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   removeConversation: (conversationId) => {
@@ -613,7 +641,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       const { [conversationId]: _gone, ...rest } = s.byId;
       return { byId: rest };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   setTtl: (conversationId, ttl) => {
@@ -621,7 +649,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       const c = s.byId[conversationId] ?? emptyConversation('direct');
       return { byId: { ...s.byId, [conversationId]: { ...c, ttl } } };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   setPersistence: (conversationId, persistenceEnabled) => {
@@ -631,7 +659,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         byId: { ...s.byId, [conversationId]: { ...c, persistenceEnabled } },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   setMuted: (conversationId, muted) => {
@@ -641,7 +669,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         byId: { ...s.byId, [conversationId]: { ...c, muted } },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   setFrozen: (conversationId, frozen) => {
@@ -651,7 +679,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         byId: { ...s.byId, [conversationId]: { ...c, frozen } },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   ttlSecondsFor: (conversationId) => {
@@ -669,7 +697,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         byId: { ...s.byId, [conversationId]: { ...c, lastReadAt: Date.now() } },
       };
     });
-    void persist(get().byId);
+    schedulePersist(get().byId);
   },
 
   unreadCountFor: (conversationId) => {

@@ -18,7 +18,7 @@ import { GroupMarkCacheWarmer } from './src/avatars/GroupMarkCacheWarmer.js';
 import { useIdentity } from './src/store/identity.js';
 import { useBlocks } from './src/store/blocks.js';
 import { useOwnership } from './src/store/ownership.js';
-import { useConversations } from './src/store/conversations.js';
+import { useConversations, flushConversationsPersist } from './src/store/conversations.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
@@ -1064,6 +1064,11 @@ export default function App() {
         // Best-effort: a failure here doesn't block the rest of the
         // background handler.
         void persistDiagNow();
+        // Force out any debounced conversations write before the OS can
+        // kill the backgrounded process — otherwise a coalesced persist
+        // armed in the last 400ms window (e.g. a just-drained backlog)
+        // would be lost on a background-kill.
+        void flushConversationsPersist();
         // Close the WS proactively so the server routes incoming
         // messages through push instead of the (still-alive)
         // WebSocket. Without this, Android can keep the TCP socket

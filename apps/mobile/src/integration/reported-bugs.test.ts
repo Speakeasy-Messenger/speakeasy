@@ -304,9 +304,10 @@ describe('reported bug — read receipt re-sent on every chat remount', () => {
       useConversations.getState().byId[convId]!.messages[0]!.readReceiptSent,
     ).toBe(true);
 
-    // Let the persist() side-effect flush, then simulate a cold start:
-    // wipe in-memory state and re-hydrate from disk.
-    await new Promise((r) => setTimeout(r, 5));
+    // Let the debounced persist side-effect flush, then simulate a cold
+    // start: wipe in-memory state and re-hydrate from disk. The store now
+    // coalesces writes on a 400ms trailing debounce, so wait past that.
+    await new Promise((r) => setTimeout(r, 450));
     useConversations.setState({ byId: {}, hydrated: false });
     await useConversations.getState().hydrate();
 

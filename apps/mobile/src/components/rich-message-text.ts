@@ -3,8 +3,12 @@
  *
  * Kept free of any react-native import so it can be unit-tested under
  * Vitest — importing a file that calls `StyleSheet.create` at module
- * load throws in the test environment.
+ * load throws in the test environment. (`../utils/bytes.js` is itself a
+ * pure Hermes-safe module with no react-native import, so it's safe.)
  */
+
+import type { Attachment } from '@speakeasy/shared';
+import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 
 /**
  * Messages longer than this are truncated in the bubble with a
@@ -26,6 +30,30 @@ export const LONG_MESSAGE_CHARS = 600;
  * messages still mysteriously fail, lower it.
  */
 export const SEND_TEXT_MAX_CHARS = 16_000;
+
+/**
+ * Absolute upper bound on text we'll convert to a .txt attachment.
+ * Above this, even a base64-encoded text/plain attachment blows past
+ * the ~800KB raw attachment budget, so we keep the legacy `too_long`
+ * failure for this extreme case only. ~700k UTF-8 chars ≈ ~933k base64
+ * bytes worst case; well past any legitimate message.
+ */
+export const SEND_TEXT_ATTACHMENT_MAX_CHARS = 700_000;
+
+/**
+ * Convert an over-length message body into a `text/plain` file
+ * attachment so it rides the (large-payload-capable) attachment path
+ * instead of being dropped as `too_long`. Used by both chat composers
+ * when `text.length > SEND_TEXT_MAX_CHARS`.
+ */
+export function longTextToAttachment(text: string): Attachment {
+  return {
+    kind: 'file',
+    mime: 'text/plain',
+    data: bytesToB64(utf8ToBytes(text)),
+    name: 'message.txt',
+  };
+}
 
 // http/https URLs and bare `www.` links. Trailing sentence punctuation
 // is trimmed off the match below so "see http://x.com." keeps the period
