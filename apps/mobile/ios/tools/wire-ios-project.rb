@@ -28,6 +28,17 @@ PROJECT = File.expand_path('Speakeasy.xcodeproj', IOS_DIR)
 TARGET_NAME = 'Speakeasy'
 ENTITLEMENTS = 'Speakeasy/Speakeasy.entitlements'
 RESOURCE_PLISTS = ['GoogleService-Info.plist', 'Vouchflow.plist'].freeze
+# Brand fonts (BricolageGrotesque) live in Speakeasy/Fonts/ and are declared in
+# Info.plist's UIAppFonts. They only resolve at runtime if they're also in the
+# app target's Copy Bundle Resources — otherwise iOS silently falls back to the
+# system font (Android bundles them via android/app/src/main/assets/fonts).
+FONT_FILES = [
+  'BricolageGrotesque-Regular.ttf',
+  'BricolageGrotesque-Medium.ttf',
+  'BricolageGrotesque-SemiBold.ttf',
+  'BricolageGrotesque-Bold.ttf',
+  'BricolageGrotesque-ExtraBold.ttf'
+].freeze
 
 project = Xcodeproj::Project.open(PROJECT)
 target = project.targets.find { |t| t.name == TARGET_NAME }
@@ -57,6 +68,30 @@ RESOURCE_PLISTS.each do |fname|
   resolved = ref.real_path.to_s
   unless resolved.end_with?("/Speakeasy/#{fname}")
     raise "BAD PATH for #{fname}: #{resolved} (expected …/Speakeasy/#{fname})"
+  end
+
+  in_resources = target.resources_build_phase.files_references.include?(ref)
+  unless in_resources
+    target.add_resources([ref])
+    changed << "added #{fname} to Copy Bundle Resources"
+  end
+end
+
+FONT_FILES.each do |fname|
+  ref = group.files.find { |f| f.display_name == fname }
+  if ref.nil?
+    # Same path discipline as the plists above: pass the ABSOLUTE on-disk path
+    # (ios/Speakeasy/Fonts/<fname>) so xcodeproj derives the right group-
+    # relative path ("Speakeasy/Fonts/<fname>") off the pathless Speakeasy
+    # group. A bare filename would wrongly resolve to ios/<fname>.
+    ref = group.new_reference(File.join(IOS_DIR, 'Speakeasy', 'Fonts', fname))
+    changed << "added file ref #{fname}"
+  end
+
+  # Verify the ref resolves under ios/Speakeasy/Fonts/ (guard against bad path).
+  resolved = ref.real_path.to_s
+  unless resolved.end_with?("/Speakeasy/Fonts/#{fname}")
+    raise "BAD PATH for #{fname}: #{resolved} (expected …/Speakeasy/Fonts/#{fname})"
   end
 
   in_resources = target.resources_build_phase.files_references.include?(ref)
