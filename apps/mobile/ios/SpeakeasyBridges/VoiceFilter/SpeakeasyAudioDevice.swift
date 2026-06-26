@@ -25,9 +25,14 @@
 //
 //  CallKit cohabitation: AVAudioSession is configured for voice
 //  chat mode (.playAndRecord + .voiceChat) — same options CallKit
-//  expects. We don't activate the session ourselves (CallKit owns
-//  activation); the engine starts inside the CallKit
-//  audioSessionDidActivate hook on the existing audio code path.
+//  expects. CallKit normally activates the session before recording
+//  starts, but a cold launch-to-answer (and the non-CallKit ring
+//  path) can call startRecording before activation lands — so
+//  installInputTapIfNeeded() defensively activates the session and
+//  validates the input format before installing the capture tap.
+//  (Handing installTap a not-yet-ready 0 Hz / 0-channel format throws
+//  an uncatchable ObjC exception that aborts the app — see that
+//  method. Build-10 accept crash, 2026-06-26.)
 //
 //  Route changes: AVAudioSession.routeChangeNotification triggers
 //  notifyAudioInputParametersChange / Output so the native ADM
@@ -316,7 +321,37 @@ final class SpeakeasyAudioDevice: NSObject {
     if inputTapInstalled { return }
     guard delegate != nil else { return }
 
-    let inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    // `inputNode.outputFormat(forBus:0)` returns a degenerate 0 Hz /
+    // 0-channel format until the AVAudioSession is active *with a live
+    // input route*. Handing that format to `installTap` throws an
+    // uncatchable ObjC NSException (the CoreAudio
+    // `IsFormatSampleRateAndChannelCountValid(format)` assertion) which
+    // `abort()`s the whole process — this was the call-accept crash on
+    // asiangamble's iPhone (build 10, SIGABRT in
+    // -[AVAudioNode installTapOnBus:]). The header note above assumed
+    // CallKit always activates the session before startRecording, but a
+    // cold launch-to-answer (and the non-CallKit ring path) races that
+    // activation, so the format isn't ready yet. Force the session
+    // active, re-read, and *never* install a tap with an invalid format.
+    var inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    if !SpeakeasyAudioDevice.isUsableFormat(inputFormat) {
+      try? AVAudioSession.sharedInstance().setActive(true)
+      inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    }
+    guard SpeakeasyAudioDevice.isUsableFormat(inputFormat) else {
+      // Input route still unresolved (mid device-switch, session not yet
+      // active, mic not granted). Leave `inputTapInstalled` false and
+      // bail WITHOUT throwing — startRecording proceeds with playout
+      // only, and the next startRecording / routeChange retries once the
+      // route settles. A deferred tap means a brief one-way-silent
+      // window; an aborted process means a hard crash. We choose the
+      // former.
+      NSLog(
+        "[Speakeasy] input format not ready (rate=%f ch=%u) — deferring tap install",
+        inputFormat.sampleRate, inputFormat.channelCount)
+      return
+    }
+
     let sampleRate = inputFormat.sampleRate
     let channelCount = min(Int(inputFormat.channelCount), 2)
 
@@ -332,6 +367,14 @@ final class SpeakeasyAudioDevice: NSObject {
       self.handleCapturedBuffer(buffer, time: time, sampleRate: sampleRate, channels: channelCount)
     }
     inputTapInstalled = true
+  }
+
+  /// An AVAudioFormat is only safe to hand to `installTap` when both its
+  /// sample rate and channel count are non-zero — otherwise CoreAudio's
+  /// `IsFormatSampleRateAndChannelCountValid` assertion throws an
+  /// uncatchable ObjC exception that aborts the app.
+  private static func isUsableFormat(_ format: AVAudioFormat) -> Bool {
+    format.sampleRate > 0 && format.channelCount > 0
   }
 
   /// Convert the Float32 deinterleaved capture buffer to PCM16
