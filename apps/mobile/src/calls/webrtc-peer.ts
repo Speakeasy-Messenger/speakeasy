@@ -98,6 +98,20 @@ class WebRtcCallPeer implements CallPeer {
     // UI toggle and the actual audio route agree the instant the call
     // connects — no double-tap to reconcile.
     this.speakerOn = mediaKind === 'video';
+    // Force the TURN relay when we actually have a TURN server. Real-device
+    // testing (bananaman 2026-06-26, Android↔iOS on 5G) showed ICE nominating
+    // a fragile `host↔host` UDP pair — it held ~6s, the cellular path rebound,
+    // and with no ICE-restart wired the call went straight to `failed` instead
+    // of falling back to the 10 relay candidates it had gathered. On cellular
+    // / symmetric-NAT the only reliable path is the relay anyway, and the media
+    // is DTLS-SRTP with Signal-authenticated SDP (orchestrator.ts) so a hostile
+    // relay can't MITM. We still allow `all` when only STUN was issued (TURN
+    // fetch failed) so a same-LAN call can connect at all rather than gather
+    // zero candidates.
+    const hasTurn = iceServers.some((s) => {
+      const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
+      return urls.some((u) => typeof u === 'string' && u.toLowerCase().startsWith('turn'));
+    });
     this.pc = new RTCPeerConnection({
       iceServers: iceServers.map((s) => ({
         urls: s.urls,
@@ -107,6 +121,7 @@ class WebRtcCallPeer implements CallPeer {
       // `bundle-policy: max-bundle` keeps audio on a single
       // ICE/DTLS pair — one less moving part to NAT-traverse.
       bundlePolicy: 'max-bundle',
+      iceTransportPolicy: hasTurn ? 'relay' : 'all',
     });
 
     // RN-WebRTC's EventTarget shim doesn't expose addEventListener via
