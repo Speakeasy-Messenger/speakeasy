@@ -25,9 +25,14 @@
 //
 //  CallKit cohabitation: AVAudioSession is configured for voice
 //  chat mode (.playAndRecord + .voiceChat) — same options CallKit
-//  expects. We don't activate the session ourselves (CallKit owns
-//  activation); the engine starts inside the CallKit
-//  audioSessionDidActivate hook on the existing audio code path.
+//  expects. CallKit normally activates the session before recording
+//  starts, but a cold launch-to-answer (and the non-CallKit ring
+//  path) can call startRecording before activation lands — so
+//  installInputTapIfNeeded() defensively activates the session and
+//  validates the input format before installing the capture tap.
+//  (Handing installTap a not-yet-ready 0 Hz / 0-channel format throws
+//  an uncatchable ObjC exception that aborts the app — see that
+//  method. Build-10 accept crash, 2026-06-26.)
 //
 //  Route changes: AVAudioSession.routeChangeNotification triggers
 //  notifyAudioInputParametersChange / Output so the native ADM
@@ -103,6 +108,13 @@ final class SpeakeasyAudioDevice: NSObject {
   private let engine = AVAudioEngine()
   private var sourceNode: AVAudioSourceNode?
   private var inputTapInstalled = false
+  /// When the input format isn't ready yet (session not active for input),
+  /// the tap install is deferred and re-attempted on this schedule rather
+  /// than left silently uninstalled. Bounded so a genuinely dead input
+  /// route ends the call (route-lost) instead of looping forever.
+  private var tapRetryScheduled = false
+  private var tapRetryCount = 0
+  private static let maxTapRetries = 25 // ~2.5s at the 100ms cadence below
   private var captureScratch: UnsafeMutablePointer<Int16>?
   private var captureScratchCount: Int = 0
   /// Phase 5j PR-G — rolling 33ms (1600-sample at 48kHz) feature
@@ -211,6 +223,7 @@ final class SpeakeasyAudioDevice: NSObject {
       engine.inputNode.removeTap(onBus: 0)
       inputTapInstalled = false
     }
+    tapRetryCount = 0
     isRecording = false
     if !isPlaying {
       tearDownEngine()
@@ -316,7 +329,37 @@ final class SpeakeasyAudioDevice: NSObject {
     if inputTapInstalled { return }
     guard delegate != nil else { return }
 
-    let inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    // `inputNode.outputFormat(forBus:0)` returns a degenerate 0 Hz /
+    // 0-channel format until the AVAudioSession is active *with a live
+    // input route*. Handing that format to `installTap` throws an
+    // uncatchable ObjC NSException (the CoreAudio
+    // `IsFormatSampleRateAndChannelCountValid(format)` assertion) which
+    // `abort()`s the whole process — this was the call-accept crash on
+    // asiangamble's iPhone (build 10, SIGABRT in
+    // -[AVAudioNode installTapOnBus:]). The header note above assumed
+    // CallKit always activates the session before startRecording, but a
+    // cold launch-to-answer (and the non-CallKit ring path) races that
+    // activation, so the format isn't ready yet. Force the session
+    // active, re-read, and *never* install a tap with an invalid format.
+    var inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    if !SpeakeasyAudioDevice.isUsableFormat(inputFormat) {
+      try? AVAudioSession.sharedInstance().setActive(true)
+      inputFormat = engine.inputNode.outputFormat(forBus: 0)
+    }
+    guard SpeakeasyAudioDevice.isUsableFormat(inputFormat) else {
+      // Input route still unresolved (mid device-switch, session not yet
+      // active, mic not granted). Don't throw and don't install a bad
+      // tap (that aborts the process) — schedule a retry so the mic
+      // capture actually comes up a beat later instead of leaving the
+      // call permanently one-way-silent.
+      NSLog(
+        "[Speakeasy] input format not ready (rate=%f ch=%u) — retry %d/%d",
+        inputFormat.sampleRate, inputFormat.channelCount,
+        tapRetryCount, SpeakeasyAudioDevice.maxTapRetries)
+      scheduleTapRetry()
+      return
+    }
+
     let sampleRate = inputFormat.sampleRate
     let channelCount = min(Int(inputFormat.channelCount), 2)
 
@@ -332,6 +375,42 @@ final class SpeakeasyAudioDevice: NSObject {
       self.handleCapturedBuffer(buffer, time: time, sampleRate: sampleRate, channels: channelCount)
     }
     inputTapInstalled = true
+    tapRetryCount = 0
+  }
+
+  /// An AVAudioFormat is only safe to hand to `installTap` when both its
+  /// sample rate and channel count are non-zero — otherwise CoreAudio's
+  /// `IsFormatSampleRateAndChannelCountValid` assertion throws an
+  /// uncatchable ObjC exception that aborts the app.
+  private static func isUsableFormat(_ format: AVAudioFormat) -> Bool {
+    format.sampleRate > 0 && format.channelCount > 0
+  }
+
+  /// Re-attempt the input tap install ~100ms later (on the ADM thread,
+  /// where the route-change restart also installs it). Bounded: once the
+  /// budget is exhausted we surface route-lost so the call ends cleanly
+  /// rather than running on with a dead mic.
+  private func scheduleTapRetry() {
+    if tapRetryScheduled { return }
+    if tapRetryCount >= SpeakeasyAudioDevice.maxTapRetries {
+      NSLog("[Speakeasy] input never became ready — ending call (route lost)")
+      NotificationCenter.default.post(name: .speakeasyVoiceFilterRouteLost, object: self)
+      return
+    }
+    tapRetryScheduled = true
+    tapRetryCount += 1
+    DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) { [weak self] in
+      guard let self else { return }
+      self.tapRetryScheduled = false
+      // Only still relevant if we're meant to be capturing and haven't.
+      guard self.isRecording, !self.inputTapInstalled, self.delegate != nil else { return }
+      self.delegate?.dispatchAsync { [weak self] in
+        guard let self else { return }
+        do { try self.installInputTapIfNeeded() } catch {
+          NSLog("[Speakeasy] tap retry failed: %@", String(describing: error))
+        }
+      }
+    }
   }
 
   /// Convert the Float32 deinterleaved capture buffer to PCM16
@@ -488,6 +567,7 @@ final class SpeakeasyAudioDevice: NSObject {
           self.engine.inputNode.removeTap(onBus: 0)
           self.inputTapInstalled = false
         }
+        self.tapRetryCount = 0
         self.sourceNode = nil
         do {
           if let delegate = self.delegate {
