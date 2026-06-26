@@ -430,15 +430,12 @@ function MemberRow({
           <Text style={[styles.creatorBadge, { color: themed.primary }]}>
             CREATOR
           </Text>
-        ) : (
-          <Text style={[styles.memberStatusLine, { color: themed.slate }]}>
-            {/* Presence isn't tracked client-side yet — assume offline.
-                When presence wires up (per spec §3.6) flip these to
-                "in the room" for online + "last in Xh ago" for offline
-                with a known last-seen. */}
-            offline
-          </Text>
-        )}
+        ) : null}
+        {/* No presence line for non-creators. This app is concealment-first
+            and deliberately doesn't broadcast presence (see PrivacyScreen).
+            The list previously hardcoded "offline" for everyone, which read
+            like a live — and always-wrong — signal. Show handle/role only
+            until real presence is a deliberate product call (spec §3.6). */}
       </View>
       {showRemove && onRemove ? (
         <Pressable
