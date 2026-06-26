@@ -384,7 +384,9 @@ export const VERIFY_SETUP_HELP =
  * Google Play services). "Set up a lock" would be wrong here.
  */
 export const VERIFY_DEVICE_HELP =
-  'Couldn’t verify this device. It may be too old, modified, or missing Google Play services.';
+  Platform.OS === 'ios'
+    ? 'Couldn’t verify this device. It may be too old, jailbroken, or unable to complete a security check.'
+    : 'Couldn’t verify this device. It may be too old, modified, or missing Google Play services.';
 
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
   switch (reason) {
