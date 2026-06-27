@@ -209,6 +209,34 @@ if speakeasy_group
 end
 
 # ---------------------------------------------------------------------------
+# SecureKv persistence registration — THE iOS "chats keep deleting" root cause.
+# SecureKvModule.{swift,m} live in SpeakeasyBridges/Db. The generic .swift loop
+# above compiles the .swift, but it IGNORES .m — and SecureKvModule.m is the
+# `RCT_EXTERN_REMAP_MODULE(SecureKv, SecureKvModule, NSObject)` registration.
+# Without it compiled, the Swift class exists but is NEVER registered with the
+# RN bridge, so `NativeModules.SecureKv` is undefined: every secureKv.get/set
+# throws "SecureKv native module unavailable", ALL local persistence silently
+# fails, and chats vanish on every relaunch (confirmed in a build-18 diag).
+# The sibling SpeakeasyDbModule.{swift,m} were committed into the project, but
+# SecureKv's pair was never added — to the project OR this script. Wire both
+# into the app target's Sources (absolute-path refs; idempotent).
+if speakeasy_group
+  %w[
+    SpeakeasyBridges/Db/SecureKvModule.swift
+    SpeakeasyBridges/Db/SecureKvModule.m
+  ].each do |rel|
+    abs = File.join(IOS_DIR, rel)
+    fname = File.basename(rel)
+    ref = project.files.find { |f| f.real_path.to_s == abs } ||
+          speakeasy_group.new_reference(abs)
+    unless target.source_build_phase.files_references.include?(ref)
+      target.add_file_references([ref])
+      changed << "added #{fname} to app Sources (SecureKv registration fix)"
+    end
+  end
+end
+
+# ---------------------------------------------------------------------------
 # Share Extension target ("Share → Speakeasy"). Created here — no Xcode GUI.
 # The PR's ios-build (simulator) runs this script + xcodebuild, so a bad
 # mutation surfaces there; release signing (match) is wired separately.
