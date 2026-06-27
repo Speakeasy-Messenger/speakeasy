@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Linking, StatusBar, View } from 'react-native';
+import { AppState, Linking, Platform, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   conversationIdForCommunity,
@@ -61,6 +61,7 @@ import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // ships in the bundle for the future lazy-start callsite (orchestrator
 // or CallScreen mount).
 import { diag, loadPersistedDiag, persistDiagNow } from './src/diag/log.js';
+import { appVersion, appBuild } from './src/version.js';
 import { requestStartupPermissions } from './src/permissions/startup.js';
 import { tryRegisterPushToken } from './src/push/register.js';
 import { parseAdd } from './src/utils/handle-link.js';
@@ -229,6 +230,18 @@ export default function App() {
   // has run. Declared up here (not next to its useEffect below)
   // because `showSplash` needs it.
   const [recoveryDone, setRecoveryDone] = useState(false);
+
+  // Self-identify the binary at the top of every diag session so a forwarded
+  // log says exactly which build produced it — no more guessing "are they on
+  // the fixed build?" from a report.
+  useEffect(() => {
+    diag('app', 'launch', {
+      version: appVersion(),
+      build: appBuild(),
+      platform: Platform.OS,
+    });
+  }, []);
+
   useEffect(() => {
     // The 1500ms artificial floor is a first-launch-after-install
     // brand moment — not something to repeat on every cold start.
