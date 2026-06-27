@@ -50,10 +50,14 @@ const msg = (id: string): ChatMessage => ({
 
 describe('conversations persist debounce', () => {
   beforeEach(async () => {
-    vi.useFakeTimers();
     setSpy.mockClear();
     // reset() awaits secureKv.delete (mocked) and clears in-memory state.
     await useConversations.getState().reset();
+    // Open the persist gate: hydrate confirms a successful (mocked → null)
+    // read, required before persistNow will write (anti-clobber guard).
+    // Production always hydrates at launch before any persist.
+    await useConversations.getState().hydrate();
+    vi.useFakeTimers();
     setSpy.mockClear();
   });
 

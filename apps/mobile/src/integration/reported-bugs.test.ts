@@ -280,6 +280,9 @@ describe('reported bug — read receipt re-sent on every chat remount', () => {
   beforeEach(async () => {
     __resetAsyncStorageMock();
     await useConversations.getState().reset();
+    // Hydrate once so the persist gate opens (anti-clobber guard blocks all
+    // writes until a successful read is confirmed — mirrors launch order).
+    await useConversations.getState().hydrate();
   });
   afterEach(async () => {
     await useConversations.getState().reset();

@@ -11,6 +11,7 @@ import {
 } from '@speakeasy/shared';
 import type { DisappearingStage } from '../components/disappearing-stage.js';
 import { ttlAnchorMs } from '../feed/ttl-timing.js';
+import { diag } from '../diag/log.js';
 
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
@@ -308,13 +309,59 @@ function attachmentsMatch(
   return true;
 }
 
+// Persistence is GATED until hydrate() confirms a successful READ from disk
+// (real data OR a genuine empty). Until then we must NOT write. On a cold
+// launch the encrypted DB may not be open yet — its passphrase derives from
+// the device token, which loads async (see secure-kv.ts), so secureKv.get can
+// REJECT. If we treated that rejection as "no data" and then persisted, we'd
+// overwrite the good on-disk history with an empty store: a silent, permanent
+// wipe. This is the JS-layer twin of the native conservative-wipe guard, and
+// the root cause of the "chats keep deleting on iOS" reports (cold relaunches
+// race the DB-open).
+let persistGateOpen = false;
+let hydrateAttempts = 0;
+let hydrateRetryTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Retry hydrate (with backoff) after a READ failure, until the DB is ready
+ * and the gate opens. Until then writes stay blocked so disk data is safe. */
+function scheduleHydrateRetry(): void {
+  if (persistGateOpen || hydrateRetryTimer) return;
+  if (hydrateAttempts >= 20) {
+    diag('persist', 'hydrate retries exhausted — staying read-only to protect disk', {});
+    return;
+  }
+  const delay = Math.min(1000 * 2 ** Math.min(hydrateAttempts, 4), 10_000); // 1,2,4,8,10,10…s
+  hydrateRetryTimer = setTimeout(() => {
+    hydrateRetryTimer = null;
+    void useConversations.getState().hydrate();
+  }, delay);
+}
+
 async function persistNow(byId: Record<string, ConversationState>): Promise<void> {
+  const convCount = Object.keys(byId).length;
+  let msgCount = 0;
+  for (const c of Object.values(byId)) msgCount += c.messages.length;
+  if (!persistGateOpen) {
+    // Hydrate hasn't confirmed a successful read yet — writing now could
+    // clobber good disk data with a not-yet-loaded (empty) store.
+    diag('persist', 'write skipped — hydrate unconfirmed (anti-clobber)', {
+      convCount,
+      msgCount,
+    });
+    return;
+  }
   try {
     await secureKv.set(STORAGE_KEY, JSON.stringify(byId));
-  } catch {
-    // Persistence failure is non-fatal — in-memory state is the source
-    // of truth for the current session. Before enrollment the encrypted
-    // DB isn't open yet; that rejection lands here and is ignored.
+    diag('persist', 'wrote', { convCount, msgCount });
+  } catch (err) {
+    // In-memory state remains the source of truth for the session; surface
+    // the failure (previously swallowed) so a persistent write problem is
+    // visible in a Diagnostics dump instead of looking like silent data loss.
+    diag('persist', 'WRITE FAILED — kept in memory', {
+      convCount,
+      msgCount,
+      err: String(err),
+    });
   }
 }
 
@@ -723,8 +770,28 @@ export const useConversations = create<ConversationsState>((set, get) => ({
     // that has this code. Idempotent — a no-op once it's gone. The old
     // history is intentionally not migrated into the encrypted store.
     void AsyncStorage.removeItem(STORAGE_KEY).catch(() => {});
+    let raw: string | null;
     try {
-      const raw = await secureKv.get(STORAGE_KEY);
+      raw = await secureKv.get(STORAGE_KEY);
+    } catch (err) {
+      // READ FAILED — almost always the encrypted DB isn't open yet on a cold
+      // launch (passphrase derives from the device token, loaded async). This
+      // is NOT "no data": do NOT open the persist gate and do NOT clobber the
+      // disk. Release the splash so the UI isn't stuck, and retry — the read
+      // succeeds once the DB is ready, at which point the real history loads.
+      diag('persist', 'hydrate READ FAILED — retrying, NOT wiping', {
+        err: String(err),
+        attempt: hydrateAttempts + 1,
+      });
+      hydrateAttempts += 1;
+      set({ hydrated: true });
+      scheduleHydrateRetry();
+      return;
+    }
+    // The read SUCCEEDED (string or genuine null) → the DB is functional, so
+    // whatever we load (including empty) is the real truth, and writes are now
+    // safe. Open the gate in `finally`.
+    try {
       if (raw) {
         const parsed = JSON.parse(raw) as Record<string, ConversationState>;
         // Drop any messages whose TTL has already expired (the local
@@ -733,7 +800,10 @@ export const useConversations = create<ConversationsState>((set, get) => ({
         // resurrected expired bubbles).
         const now = Date.now();
         const filtered: Record<string, ConversationState> = {};
+        let diskMsgs = 0;
+        let keptMsgs = 0;
         for (const [id, c] of Object.entries(parsed)) {
+          diskMsgs += c.messages.length;
           // Re-sort by send time. Builds before v1.0.10 persisted messages
           // in arrival (receivedAt) order, so a conversation that received
           // a late backlog batch is stored out of sent-order. Stable sort
@@ -741,6 +811,7 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           const sorted = [...c.messages].sort((a, b) => a.sentAt - b.sentAt);
           if (c.persistenceEnabled) {
             filtered[id] = { ...c, messages: sorted };
+            keptMsgs += sorted.length;
             continue;
           }
           const ttlSec = TTL_OPTIONS[c.ttl];
@@ -749,16 +820,33 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           // sentAt — see ttlAnchorMs. A message received recently but sent
           // long ago (offline-buffered backlog, common on iOS) must keep its
           // full TTL instead of being dropped here on the next cold start.
-          filtered[id] = {
-            ...c,
-            messages: sorted.filter((m) => now - ttlAnchorMs(m) < ttlMs),
-          };
+          const kept = sorted.filter((m) => now - ttlAnchorMs(m) < ttlMs);
+          filtered[id] = { ...c, messages: kept };
+          keptMsgs += kept.length;
         }
         set({ byId: filtered });
+        diag('persist', 'hydrate OK', {
+          convs: Object.keys(filtered).length,
+          diskMsgs,
+          keptMsgs,
+          ttlDropped: diskMsgs - keptMsgs,
+        });
+      } else {
+        diag('persist', 'hydrate OK — no stored data', {});
       }
-    } catch {
-      // Corrupt / missing → keep empty state.
+    } catch (err) {
+      // Read worked but the blob is corrupt. The DB is fine, so it's safe to
+      // proceed; keep current (empty) state rather than throwing.
+      diag('persist', 'hydrate PARSE FAILED — keeping current state', {
+        err: String(err),
+      });
     } finally {
+      persistGateOpen = true;
+      hydrateAttempts = 0;
+      if (hydrateRetryTimer) {
+        clearTimeout(hydrateRetryTimer);
+        hydrateRetryTimer = null;
+      }
       set({ hydrated: true });
     }
   },
