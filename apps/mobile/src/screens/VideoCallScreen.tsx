@@ -14,6 +14,7 @@ import {
   SpeakerIcon,
 } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
+import { pip } from '../native/pip.js';
 import { useCalls } from '../store/calls.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, type as typeScale } from '../theme/tokens.js';
@@ -56,6 +57,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // corner bubble (default once connected); true = local full-screen /
   // remote in the bubble. Tapping the bubble toggles it.
   const [swapped, setSwapped] = useState(false);
+  // Android system-PiP (the floating window after pressing Home). While in
+  // it we hide the overlay chrome so only the video shows in the small frame.
+  const [inPip, setInPip] = useState(false);
 
   // Chat-history bubble for call end is emitted from the orchestrator's
   // onCallFinished deps callback in App.tsx (rc.55). Was previously a
@@ -83,6 +87,18 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       unsub();
     };
   }, [orchestrator, active?.callId]);
+
+  // Android PiP: mark a video call on-screen so pressing Home floats it
+  // into a PiP window (iOS uses the RTCView iosPIP prop instead). Hide the
+  // overlay chrome while in the small PiP frame. No-op on iOS.
+  useEffect(() => {
+    pip.setVideoCallActive(true);
+    const unsub = pip.onPipModeChanged(setInPip);
+    return () => {
+      pip.setVideoCallActive(false);
+      unsub();
+    };
+  }, []);
 
   // Live duration counter once connected.
   useEffect(() => {
@@ -190,6 +206,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
       )}
 
+      {/* Overlay chrome — hidden while floating in the Android PiP window
+          (the small frame only has room for the video itself). */}
+      {!inPip ? (
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar: peer handle + stage label. Translucent over the
             video stream so the user can read it without it taking
@@ -275,6 +294,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           </Pressable>
         </View>
       </SafeAreaView>
+      ) : null}
     </View>
   );
 }
