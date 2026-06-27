@@ -145,13 +145,25 @@ static void SpeakeasyWriteCrash(NSException *exception)
     NSLog(@"Vouchflow.configure failed: %@", vouchflowErr.localizedDescription);
   }
 
-  // Phase 5j Private Call: install our custom RTCAudioDevice BEFORE
-  // the React Native bridge initializes (which constructs the
-  // WebRTCModule, which reads WebRTCModuleOptions). Once set,
-  // every PeerConnectionFactory created by react-native-webrtc
-  // uses our SpeakeasyAudioDevice for capture + playback.
-  WebRTCModuleOptions *rtcOptions = [WebRTCModuleOptions sharedInstance];
-  rtcOptions.audioDevice = [[SpeakeasyAudioDevice alloc] init];
+  // Call audio: use react-native-webrtc's STOCK audio device on iOS.
+  //
+  // We previously installed a custom RTCAudioDevice (SpeakeasyAudioDevice, a
+  // from-scratch AVAudioEngine pipeline) to power voice-masking + avatar
+  // lip-sync. On real devices it never delivered working call audio — it
+  // crashed on cold-launch accept, captured silence, and broke up playout
+  // (iOS↔Android calls were unusable across builds 3–12, all directions),
+  // while Android (stock audio path) worked fine. Real-time iOS audio can't
+  // be debugged from the Linux dev box, so rather than keep shipping blind
+  // guesses we fall back to the battle-tested stock ADM so calls actually
+  // work. SpeakeasyAudioDevice stays in the tree; re-wire it here only once
+  // its capture/playout are verified on a physical device (instrument first).
+  //
+  // Trade-off: voice-masking + avatar lip-sync are inactive on iOS calls
+  // until then. They were 100% non-functional anyway (the engine they ride
+  // on was broken), so this loses no working behavior — it restores calls.
+  //
+  //   WebRTCModuleOptions *rtcOptions = [WebRTCModuleOptions sharedInstance];
+  //   rtcOptions.audioDevice = [[SpeakeasyAudioDevice alloc] init];
 
   // CallKit / VoIP push: register the PKPushRegistry here, ASAP at launch —
   // doing it from JS can be too late to receive a VoIP push that woke the app.
