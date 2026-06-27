@@ -20,6 +20,9 @@ WORKSPACE = "Speakeasy.xcworkspace".freeze
 SCHEME = "Speakeasy".freeze
 TEAM_ID = "89KT3SWYAF".freeze
 PROFILE = "match AppStore #{APP_IDENTIFIER}".freeze
+# Share Extension target — its own bundle id + match profile (App Group).
+EXT_IDENTIFIER = "xyz.speakeasyapp.app.ShareExtension".freeze
+EXT_PROFILE = "match AppStore #{EXT_IDENTIFIER}".freeze
 
 def asc_api_key
   app_store_connect_api_key(
@@ -44,6 +47,16 @@ def pin_signing
     code_sign_identity: "Apple Distribution",
     profile_name: PROFILE,
     targets: ["Speakeasy"],
+  )
+  # Same, for the Share Extension target (its own bundle id + profile).
+  update_code_signing_settings(
+    path: "Speakeasy.xcodeproj",
+    use_automatic_signing: false,
+    team_id: TEAM_ID,
+    bundle_identifier: EXT_IDENTIFIER,
+    code_sign_identity: "Apple Distribution",
+    profile_name: EXT_PROFILE,
+    targets: ["ShareExtension"],
   )
 end
 
@@ -90,7 +103,7 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       export_method: "app-store",
-      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE } },
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE } },
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,
@@ -113,7 +126,7 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       export_method: "app-store",
-      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE } },
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE } },
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,
