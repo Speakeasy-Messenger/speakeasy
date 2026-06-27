@@ -55,6 +55,7 @@ import type { DisappearingStage } from '../components/DisappearingMessageBubble.
 import { SystemMessageRow } from '../components/SystemMessageRow.js';
 import { DateSeparatorRow } from '../components/DateSeparatorRow.js';
 import { withDateSeparators } from '../feed/with-date-separators.js';
+import { dissolveDelayMs, ttlAnchorMs } from '../feed/ttl-timing.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
 import { useShare } from '../store/share.js';
 import { useUiState } from '../store/ui.js';
@@ -333,7 +334,10 @@ export function ChatScreen({
     if (ttlSec === null) return; // persistence on
     const timers: Array<ReturnType<typeof setTimeout>> = [];
     for (const m of messages) {
-      const elapsedMs = Date.now() - m.sentAt;
+      // Anchor on receivedAt (see ttlAnchorMs) so the live engine and the
+      // cold-start hydrate filter agree — otherwise a late-delivered message
+      // hydrate keeps would get dissolved immediately here on open.
+      const elapsedMs = Date.now() - ttlAnchorMs(m);
       const ttlMs = ttlSec * 1000;
       if (m.stage === 'sent') {
         timers.push(
@@ -346,9 +350,11 @@ export function ChatScreen({
       // Clamp to 0 and ALWAYS schedule the tail so a message that expired
       // while the app was closed — or whose dissolve started last session
       // and persisted mid-stage — still completes and is removed, instead
-      // of sticking half-faded forever (bananaman 2026-06-05). See the
-      // GroupChatScreen TTL engine for the full rationale.
-      const dissolveAt = Math.max(ttlMs - elapsedMs, 0);
+      // of sticking half-faded forever (bananaman 2026-06-05). The upper
+      // INT32 clamp (see dissolveDelayMs) stops a 'month' TTL from wrapping
+      // negative and insta-purging the chat on open — the iOS "history
+      // vanishes right after I leave" bug.
+      const dissolveAt = dissolveDelayMs(ttlMs, elapsedMs);
       timers.push(
         setTimeout(() => setStage(conversationId, m.id, 'disappearing'), dissolveAt),
         setTimeout(() => setStage(conversationId, m.id, 'almost-gone'), dissolveAt + 600),

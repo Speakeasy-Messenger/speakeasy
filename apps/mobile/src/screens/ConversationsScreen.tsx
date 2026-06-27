@@ -110,13 +110,24 @@ export function ConversationsScreen({
   const setPendingShare = useShare((s) => s.setPendingText);
 
   const directRows: DirectRow[] = Object.entries(conversationsById)
-    .filter(([_, c]) => c.kind === 'direct' && !!c.peerUserId)
+    .filter(([_, c]) => c.kind === 'direct')
     .map(([conversationId, c]) => {
+      // Normally openDirect stamps peerUserId at creation. But a direct
+      // conversation first touched by a system-only add() (e.g. an incoming
+      // call log before any message was exchanged) can be created without it,
+      // and the old `!!c.peerUserId` filter then hid the row entirely even
+      // though it had real history. Recover the peer from the first inbound
+      // (non-me, non-system) message; only skip the row if the peer is truly
+      // underivable (nothing to render an avatar/handle from).
+      const peerUserId =
+        c.peerUserId ??
+        c.messages.find((m) => m.from !== 'me' && m.from !== 'system')?.from;
+      if (!peerUserId) return null;
       const last = c.messages[c.messages.length - 1];
       return {
         kind: 'direct' as const,
         conversationId,
-        peerUserId: c.peerUserId!,
+        peerUserId,
         preview: last?.text ?? 'No messages yet',
         previewIsSelf: last?.from === 'me',
         sortKey: last?.sentAt ?? c.createdAt,
@@ -124,7 +135,8 @@ export function ConversationsScreen({
         lastActivityAt: last?.sentAt ?? c.createdAt,
         muted: !!c.muted,
       };
-    });
+    })
+    .filter((r): r is DirectRow => r !== null);
 
   const groupRows: GroupRow[] = Object.entries(groupsById).map(([groupId, g]) => {
     const conv = conversationsById[groupId];
@@ -564,8 +576,14 @@ function BurningRow({
           easing: Easing.out(Easing.cubic),
           useNativeDriver: false,
         }),
-      ]).start(({ finished }) => {
-        if (!finished) return;
+      ]).start(() => {
+        // Complete the burn even if the animation was interrupted
+        // (finished:false — e.g. the row unmounts mid-dissolve, which iOS
+        // does readily). The burn is a committed destructive action; the
+        // old `if (!finished) return` left the conversation un-removed AND
+        // the global burningConversationId poisoned, which blocked future
+        // burns and could leave the row stuck collapsed. removeConvo is
+        // idempotent, so completing on either outcome is safe.
         removeConvo(conversationId);
         useUiState.getState().setBurningConversationId(undefined);
       });

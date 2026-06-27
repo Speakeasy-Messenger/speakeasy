@@ -29,7 +29,11 @@ const OPTIONS: ReadonlyArray<{
 ];
 
 interface Props {
-  value: Exclude<TtlOption, 'off'>;
+  // Accepts the full TtlOption: when the stored value is 'off' (never expire)
+  // no cell highlights, honestly showing "no timer set" rather than silently
+  // displaying '7d'. Groups always pass a concrete option, so this widening
+  // is transparent to them; onChange still only ever emits a real TTL.
+  value: TtlOption;
   onChange: (next: Exclude<TtlOption, 'off'>) => void;
   disabled?: boolean;
 }
