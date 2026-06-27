@@ -150,14 +150,17 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // flowing. Until then (dialing / ringing / connecting) the user's OWN
   // feed is full-screen; when the peer's video arrives it migrates to the
   // corner bubble. Tapping the bubble swaps which feed is full-screen.
-  // The LOCAL feed is always mirrored (selfie preview) wherever it shows;
-  // the remote feed is never mirrored.
+  //
+  // Mirroring: neither feed is mirrored. A tester reported her own
+  // self-preview looked left-right flipped ("sides inverted") — the
+  // conventional selfie-mirror. She wants it un-mirrored (as a photo /
+  // as the peer sees her), so we render the local feed raw. The remote
+  // feed was never mirrored.
   const remoteActive = !!remoteUrl;
   const fullscreenIsLocal = !remoteActive || swapped;
   const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
   // The bubble only exists once both feeds are present (i.e. connected).
   const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
-  const pipIsLocal = !swapped;
 
   return (
     <View style={styles.root}>
@@ -168,7 +171,6 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
-          mirror={fullscreenIsLocal}
         />
       ) : (
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
@@ -204,7 +206,6 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               streamURL={pipUrl}
               style={StyleSheet.absoluteFill}
               objectFit="cover"
-              mirror={pipIsLocal}
               zOrder={1}
             />
           </Pressable>
