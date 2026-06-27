@@ -24,6 +24,17 @@ interface Props {
   onClosed: () => void;
 }
 
+// iOS Picture-in-Picture: when the app backgrounds during a video call,
+// auto-float the REMOTE video into a system PiP window so the user keeps
+// seeing the other person after leaving the app (iOS 15+, built into
+// react-native-webrtc's RTCView). Only the remote feed gets PiP — the
+// local camera suspends in the background, so PiP'ing it would freeze.
+const VIDEO_PIP_OPTS = {
+  enabled: true,
+  startAutomatically: true,
+  stopAutomatically: true,
+} as const;
+
 /**
  * Live video call surface — full-bleed remote stream, picture-in-picture
  * local preview, three controls (mute, hang up, flip camera).
@@ -171,6 +182,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
+          // PiP the remote feed when it's the full-screen one (default,
+          // not swapped) so backgrounding floats the caller.
+          iosPIP={fullscreenIsLocal ? undefined : VIDEO_PIP_OPTS}
         />
       ) : (
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
@@ -207,6 +221,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               style={StyleSheet.absoluteFill}
               objectFit="cover"
               zOrder={1}
+              // When swapped, the remote feed lives in the bubble — keep
+              // PiP attached to the remote feed so backgrounding still
+              // floats the caller (not the suspended local camera).
+              iosPIP={swapped ? VIDEO_PIP_OPTS : undefined}
             />
           </Pressable>
         ) : null}
