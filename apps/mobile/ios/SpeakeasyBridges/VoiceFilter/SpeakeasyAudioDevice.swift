@@ -117,6 +117,13 @@ final class SpeakeasyAudioDevice: NSObject {
   private static let maxTapRetries = 25 // ~2.5s at the 100ms cadence below
   private var captureScratch: UnsafeMutablePointer<Int16>?
   private var captureScratchCount: Int = 0
+  /// Reusable PCM16 buffer for the playout render callback. The render block
+  /// runs on the real-time audio thread; it must NEVER malloc/free there (the
+  /// allocator can block under memory pressure — e.g. a video call's frame
+  /// buffers — stalling the audio thread and shredding the audio). Grow-only,
+  /// pre-sized in setupEngineIfNeeded, freed in tearDownEngine after stop().
+  private var playoutScratch: UnsafeMutablePointer<Int16>?
+  private var playoutScratchCount: Int = 0
   /// Phase 5j PR-G — rolling 33ms (1600-sample at 48kHz) feature
   /// window. Accumulates mono Float samples post-filter; emits a
   /// `.speakeasyVoiceFilterFeatures` notification when full.
@@ -259,6 +266,16 @@ final class SpeakeasyAudioDevice: NSObject {
     let playoutSampleRate = outputFormat.sampleRate
     let playoutChannels = AVAudioChannelCount(min(outputFormat.channelCount, 2))
 
+    // Pre-size the playout scratch here (off the audio thread) so the render
+    // block never has to allocate. 4800 frames covers the largest IO buffer
+    // AVAudioEngine is known to request (100ms @ 48kHz).
+    let maxPlayoutInts = 4800 * Int(playoutChannels)
+    if playoutScratchCount < maxPlayoutInts {
+      if let p = playoutScratch { p.deallocate() }
+      playoutScratch = UnsafeMutablePointer<Int16>.allocate(capacity: maxPlayoutInts)
+      playoutScratchCount = maxPlayoutInts
+    }
+
     // Pull playout from native ADM via delegate.getPlayoutData.
     // The render block writes interleaved PCM16; we wrap it as a
     // Float32 buffer for AVAudioEngine.
@@ -281,16 +298,28 @@ final class SpeakeasyAudioDevice: NSObject {
         }
         return noErr
       }
-      // Allocate a temporary AudioBufferList holding PCM16 interleaved
-      // samples sized to the native ADM's expectation. We can't use the
-      // Float32 ABL directly — the delegate expects PCM16.
-      let pcm16Bytes = Int(frameCount) * Int(playoutChannels) * MemoryLayout<Int16>.size
+      // Reuse a grow-only scratch buffer for the PCM16 the delegate fills —
+      // NEVER malloc/free on this real-time render thread (that stalls under
+      // allocator pressure and breaks up the audio). Pre-sized in
+      // setupEngineIfNeeded; this guard only fires if the host ever asks for a
+      // bigger frame than expected.
+      let neededInts = Int(frameCount) * Int(playoutChannels)
+      if self.playoutScratchCount < neededInts {
+        if let p = self.playoutScratch { p.deallocate() }
+        self.playoutScratch = UnsafeMutablePointer<Int16>.allocate(capacity: neededInts)
+        self.playoutScratchCount = neededInts
+      }
+      guard let pcm16Scratch = self.playoutScratch else {
+        let abl = UnsafeMutableAudioBufferListPointer(audioBufferList)
+        for buf in abl { if let mData = buf.mData { memset(mData, 0, Int(buf.mDataByteSize)) } }
+        return noErr
+      }
+      let pcm16Bytes = neededInts * MemoryLayout<Int16>.size
+      memset(pcm16Scratch, 0, pcm16Bytes)
       var pcm16Buffer = AudioBuffer(
         mNumberChannels: UInt32(playoutChannels),
         mDataByteSize: UInt32(pcm16Bytes),
-        mData: malloc(pcm16Bytes))
-      defer { free(pcm16Buffer.mData) }
-      memset(pcm16Buffer.mData, 0, pcm16Bytes)
+        mData: UnsafeMutableRawPointer(pcm16Scratch))
       var pcm16Abl = AudioBufferList(mNumberBuffers: 1, mBuffers: pcm16Buffer)
 
       var flags = AudioUnitRenderActionFlags(rawValue: 0)
@@ -543,6 +572,13 @@ final class SpeakeasyAudioDevice: NSObject {
       captureScratch = nil
       captureScratchCount = 0
     }
+    // Safe to free here: engine.stop() above guarantees the render block is
+    // no longer running, so nothing on the audio thread can touch it.
+    if let p = playoutScratch {
+      p.deallocate()
+      playoutScratch = nil
+      playoutScratchCount = 0
+    }
   }
 
   // MARK: - Route changes
@@ -628,6 +664,7 @@ final class SpeakeasyAudioDevice: NSObject {
   deinit {
     NotificationCenter.default.removeObserver(self)
     if let p = captureScratch { p.deallocate() }
+    if let p = playoutScratch { p.deallocate() }
   }
 }
 
