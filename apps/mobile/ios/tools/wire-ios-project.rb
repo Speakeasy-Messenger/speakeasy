@@ -185,6 +185,84 @@ Dir.glob(File.join(IOS_DIR, 'SpeakeasyBridges', '**', '*.swift')).sort.each do |
   changed << "added #{fname} to Sources (#{File.basename(dir)} group)"
 end
 
+# ---------------------------------------------------------------------------
+# Share read module — ShareReceiveModule.{swift,m} live in a brand-new
+# SpeakeasyBridges/Share dir with no sibling already in the project, so the
+# generic .swift loop above can't anchor them (and it ignores .m entirely).
+# Add both to the app target's Sources with absolute-path refs (xcodeproj
+# derives the right group-relative path). Reuse the Speakeasy group.
+speakeasy_group = project.files.find { |f| f.display_name == 'AppDelegate.mm' }&.parent
+if speakeasy_group
+  %w[
+    SpeakeasyBridges/Share/ShareReceiveModule.swift
+    SpeakeasyBridges/Share/ShareReceiveModule.m
+  ].each do |rel|
+    abs = File.join(IOS_DIR, rel)
+    fname = File.basename(rel)
+    ref = project.files.find { |f| f.real_path.to_s == abs } ||
+          speakeasy_group.new_reference(abs)
+    unless target.source_build_phase.files_references.include?(ref)
+      target.add_file_references([ref])
+      changed << "added #{fname} to app Sources"
+    end
+  end
+end
+
+# ---------------------------------------------------------------------------
+# Share Extension target ("Share → Speakeasy"). Created here — no Xcode GUI.
+# The PR's ios-build (simulator) runs this script + xcodebuild, so a bad
+# mutation surfaces there; release signing (match) is wired separately.
+EXT_NAME = 'ShareExtension'
+ext = project.targets.find { |t| t.name == EXT_NAME }
+if ext.nil?
+  deployment =
+    target.build_configurations.first.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] || '15.1'
+  ext = project.new_target(:app_extension, EXT_NAME, :ios, deployment, nil, :swift)
+  changed << 'created ShareExtension target'
+end
+
+ext_group = project.main_group.groups.find { |g| g.display_name == EXT_NAME } ||
+            project.main_group.new_group(EXT_NAME, EXT_NAME)
+sw_ref = ext_group.files.find { |f| f.display_name == 'ShareViewController.swift' } ||
+         ext_group.new_reference(File.join(IOS_DIR, EXT_NAME, 'ShareViewController.swift'))
+unless ext.source_build_phase.files_references.include?(sw_ref)
+  ext.add_file_references([sw_ref])
+end
+['Info.plist', 'ShareExtension.entitlements'].each do |fname|
+  next if ext_group.files.find { |f| f.display_name == fname }
+  ext_group.new_reference(File.join(IOS_DIR, EXT_NAME, fname))
+end
+
+swift_ver = target.build_configurations.first.build_settings['SWIFT_VERSION'] || '5.0'
+ext.build_configurations.each do |config|
+  bs = config.build_settings
+  bs['PRODUCT_BUNDLE_IDENTIFIER'] = 'xyz.speakeasyapp.app.ShareExtension'
+  bs['INFOPLIST_FILE'] = "#{EXT_NAME}/Info.plist"
+  bs['CODE_SIGN_ENTITLEMENTS'] = "#{EXT_NAME}/ShareExtension.entitlements"
+  bs['SWIFT_VERSION'] = swift_ver
+  bs['TARGETED_DEVICE_FAMILY'] = '1'
+  bs['SKIP_INSTALL'] = 'YES'
+  bs['GENERATE_INFOPLIST_FILE'] = 'NO'
+  bs['MARKETING_VERSION'] = '1.0'
+  bs['CURRENT_PROJECT_VERSION'] = '1'
+  bs['LD_RUNPATH_SEARCH_PATHS'] =
+    ['$(inherited)', '@executable_path/Frameworks', '@executable_path/../../Frameworks']
+end
+
+# Depend on + embed the .appex into the app's PlugIns.
+target.add_dependency(ext) unless target.dependencies.any? { |d| d.target == ext }
+embed = target.copy_files_build_phases.find { |p| p.symbol_dst_subfolder_spec == :plug_ins }
+if embed.nil?
+  embed = target.new_copy_files_build_phase('Embed App Extensions')
+  embed.symbol_dst_subfolder_spec = :plug_ins
+  changed << 'created Embed App Extensions phase'
+end
+unless embed.files.any? { |bf| bf.respond_to?(:file_ref) && bf.file_ref == ext.product_reference }
+  bf = embed.add_file_reference(ext.product_reference)
+  bf.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
+  changed << 'embedded ShareExtension.appex'
+end
+
 if changed.empty?
   puts 'wire-ios-project: already wired — no changes'
 else
