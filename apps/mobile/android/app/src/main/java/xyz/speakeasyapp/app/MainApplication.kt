@@ -23,6 +23,7 @@ import xyz.speakeasyapp.app.fileopener.FileOpenerPackage
 import xyz.speakeasyapp.app.lockscreen.LockScreenPackage
 import xyz.speakeasyapp.app.notif.NotifMessagingPackage
 import xyz.speakeasyapp.app.signal.SignalProtocolPackage
+import xyz.speakeasyapp.app.pip.PipPackage
 import xyz.speakeasyapp.app.version.VersionPackage
 import xyz.speakeasyapp.app.voicefilter.VoiceFilterPackage
 import xyz.speakeasyapp.app.vouchflow.VouchflowPackage
@@ -45,6 +46,7 @@ class MainApplication : Application(), ReactApplication {
               add(LockScreenPackage())
               add(NotifMessagingPackage())
               add(VoiceFilterPackage())
+              add(PipPackage())
             }
 
         override fun getJSMainModuleName(): String = "index"

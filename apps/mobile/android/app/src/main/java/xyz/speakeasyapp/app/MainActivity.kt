@@ -2,11 +2,15 @@ package xyz.speakeasyapp.app
 
 import android.app.NotificationChannel
 import android.app.NotificationManager
+import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
+import android.content.res.Configuration
 import android.os.Build
 import android.os.Bundle
+import android.util.Rational
 import com.facebook.react.ReactActivity
+import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
@@ -94,5 +98,80 @@ class MainActivity : ReactActivity() {
       // means "use system default", which is correct.
     }
     nm.createNotificationChannel(messagesChannel)
+  }
+
+  // ----- Picture-in-Picture (background video calls) -----------------
+  //
+  // While a video call is on screen, pressing Home should float the call
+  // into a PiP window instead of suspending it (the camera stops in the
+  // background either way, but the remote video keeps playing). JS toggles
+  // `videoCallActive` via SpeakeasyPip.setVideoCallActive when the video
+  // call screen mounts/unmounts.
+
+  // Named distinctly from the `videoCallActive` property to avoid a JVM
+  // signature clash with its generated static setter.
+  fun applyVideoCallActive(active: Boolean) {
+    videoCallActive = active
+    // Android 12+ auto-enters PiP on Home when params say so — no
+    // onUserLeaveHint needed. Refresh the params to reflect the new state.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      try {
+        setPictureInPictureParams(buildPipParams())
+      } catch (_: IllegalStateException) {
+        // Activity not in a state that accepts PiP params — ignore.
+      }
+    }
+  }
+
+  private fun buildPipParams(): PictureInPictureParams {
+    val builder = PictureInPictureParams.Builder()
+      // Portrait-ish call window. Android clamps to its allowed range.
+      .setAspectRatio(Rational(9, 16))
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      builder.setAutoEnterEnabled(videoCallActive)
+    }
+    return builder.build()
+  }
+
+  // Pre-Android-12 fallback: explicitly enter PiP when the user leaves
+  // (Home / app-switcher) during a video call. On 12+ autoEnter handles it.
+  override fun onUserLeaveHint() {
+    super.onUserLeaveHint()
+    if (
+      videoCallActive &&
+      Build.VERSION.SDK_INT in Build.VERSION_CODES.O until Build.VERSION_CODES.S &&
+      !isInPictureInPictureMode
+    ) {
+      try {
+        enterPictureInPictureMode(buildPipParams())
+      } catch (_: IllegalStateException) {
+        /* can't enter right now — ignore */
+      }
+    }
+  }
+
+  // Tell JS so the call UI can collapse to just the video in the PiP
+  // window (hide controls/handle that don't fit the small frame).
+  override fun onPictureInPictureModeChanged(
+    isInPictureInPictureMode: Boolean,
+    newConfig: Configuration,
+  ) {
+    super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    try {
+      (application as? MainApplication)
+        ?.reactNativeHost
+        ?.reactInstanceManager
+        ?.currentReactContext
+        ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
+        ?.emit("SpeakeasyPipModeChanged", isInPictureInPictureMode)
+    } catch (_: Throwable) {
+      /* best-effort UI hint */
+    }
+  }
+
+  companion object {
+    /** Set by JS while a video call screen is on top. Read on Home-press. */
+    @JvmStatic
+    var videoCallActive: Boolean = false
   }
 }

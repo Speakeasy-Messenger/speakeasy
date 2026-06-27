@@ -14,6 +14,7 @@ import {
   SpeakerIcon,
 } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
+import { pip } from '../native/pip.js';
 import { useCalls } from '../store/calls.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, type as typeScale } from '../theme/tokens.js';
@@ -23,6 +24,17 @@ interface Props {
   orchestrator: CallOrchestrator;
   onClosed: () => void;
 }
+
+// iOS Picture-in-Picture: when the app backgrounds during a video call,
+// auto-float the REMOTE video into a system PiP window so the user keeps
+// seeing the other person after leaving the app (iOS 15+, built into
+// react-native-webrtc's RTCView). Only the remote feed gets PiP — the
+// local camera suspends in the background, so PiP'ing it would freeze.
+const VIDEO_PIP_OPTS = {
+  enabled: true,
+  startAutomatically: true,
+  stopAutomatically: true,
+} as const;
 
 /**
  * Live video call surface — full-bleed remote stream, picture-in-picture
@@ -41,6 +53,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const [localUrl, setLocalUrl] = useState<string | undefined>();
   const [remoteUrl, setRemoteUrl] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState('');
+  // Picture-in-picture swap: false = remote full-screen / local in the
+  // corner bubble (default once connected); true = local full-screen /
+  // remote in the bubble. Tapping the bubble toggles it.
+  const [swapped, setSwapped] = useState(false);
+  // Android system-PiP (the floating window after pressing Home). While in
+  // it we hide the overlay chrome so only the video shows in the small frame.
+  const [inPip, setInPip] = useState(false);
 
   // Chat-history bubble for call end is emitted from the orchestrator's
   // onCallFinished deps callback in App.tsx (rc.55). Was previously a
@@ -68,6 +87,18 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       unsub();
     };
   }, [orchestrator, active?.callId]);
+
+  // Android PiP: mark a video call on-screen so pressing Home floats it
+  // into a PiP window (iOS uses the RTCView iosPIP prop instead). Hide the
+  // overlay chrome while in the small PiP frame. No-op on iOS.
+  useEffect(() => {
+    pip.setVideoCallActive(true);
+    const unsub = pip.onPipModeChanged(setInPip);
+    return () => {
+      pip.setVideoCallActive(false);
+      unsub();
+    };
+  }, []);
 
   // Live duration counter once connected.
   useEffect(() => {
@@ -142,19 +173,42 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     ended: 'Call ended',
   };
 
+  // Layout: the remote video only fills the screen once it's actually
+  // flowing. Until then (dialing / ringing / connecting) the user's OWN
+  // feed is full-screen; when the peer's video arrives it migrates to the
+  // corner bubble. Tapping the bubble swaps which feed is full-screen.
+  //
+  // Mirroring: neither feed is mirrored. A tester reported her own
+  // self-preview looked left-right flipped ("sides inverted") — the
+  // conventional selfie-mirror. She wants it un-mirrored (as a photo /
+  // as the peer sees her), so we render the local feed raw. The remote
+  // feed was never mirrored.
+  const remoteActive = !!remoteUrl;
+  const fullscreenIsLocal = !remoteActive || swapped;
+  const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
+  // The bubble only exists once both feeds are present (i.e. connected).
+  const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
+
   return (
     <View style={styles.root}>
-      {/* Remote stream — full-bleed black until media flows. */}
-      {remoteUrl ? (
+      {/* Full-screen feed — local while waiting, remote once it flows
+          (or local again when swapped). Black until any media exists. */}
+      {fullscreenUrl ? (
         <RTCView
-          streamURL={remoteUrl}
+          streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
+          // PiP the remote feed when it's the full-screen one (default,
+          // not swapped) so backgrounding floats the caller.
+          iosPIP={fullscreenIsLocal ? undefined : VIDEO_PIP_OPTS}
         />
       ) : (
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
       )}
 
+      {/* Overlay chrome — hidden while floating in the Android PiP window
+          (the small frame only has room for the video itself). */}
+      {!inPip ? (
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar: peer handle + stage label. Translucent over the
             video stream so the user can read it without it taking
@@ -172,16 +226,26 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           <Text style={styles.topStage}>{stageLabel[active.stage]}</Text>
         </View>
 
-        {/* Local picture-in-picture — top-right. Mirrored on the front
-            camera so the user sees a selfie-style preview. */}
-        {localUrl ? (
-          <RTCView
-            streamURL={localUrl}
+        {/* Corner bubble — the non-full-screen feed. Tap to swap which
+            feed is full-screen. Only shown once the peer's video is
+            flowing (before that, the local feed owns the full screen). */}
+        {pipUrl ? (
+          <Pressable
+            testID="video-call-pip"
             style={styles.pip}
-            objectFit="cover"
-            mirror
-            zOrder={1}
-          />
+            onPress={() => setSwapped((s) => !s)}
+          >
+            <RTCView
+              streamURL={pipUrl}
+              style={StyleSheet.absoluteFill}
+              objectFit="cover"
+              zOrder={1}
+              // When swapped, the remote feed lives in the bubble — keep
+              // PiP attached to the remote feed so backgrounding still
+              // floats the caller (not the suspended local camera).
+              iosPIP={swapped ? VIDEO_PIP_OPTS : undefined}
+            />
+          </Pressable>
         ) : null}
 
         {/* Bottom controls. Mute / hang up / flip camera. */}
@@ -230,6 +294,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           </Pressable>
         </View>
       </SafeAreaView>
+      ) : null}
     </View>
   );
 }
@@ -255,11 +320,14 @@ const styles = StyleSheet.create({
   },
   pip: {
     position: 'absolute',
-    top: 80,
+    // Sits below the top bar (handle + stage label) so the bubble no
+    // longer clips into it. Was 80, which slightly overlapped.
+    top: 116,
     right: space.md,
     width: 100,
     height: 140,
     backgroundColor: '#222',
+    overflow: 'hidden',
   },
   controls: {
     flexDirection: 'row',
