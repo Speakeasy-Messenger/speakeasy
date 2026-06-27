@@ -41,6 +41,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const [localUrl, setLocalUrl] = useState<string | undefined>();
   const [remoteUrl, setRemoteUrl] = useState<string | undefined>();
   const [elapsed, setElapsed] = useState('');
+  // Picture-in-picture swap: false = remote full-screen / local in the
+  // corner bubble (default once connected); true = local full-screen /
+  // remote in the bubble. Tapping the bubble toggles it.
+  const [swapped, setSwapped] = useState(false);
 
   // Chat-history bubble for call end is emitted from the orchestrator's
   // onCallFinished deps callback in App.tsx (rc.55). Was previously a
@@ -142,14 +146,29 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     ended: 'Call ended',
   };
 
+  // Layout: the remote video only fills the screen once it's actually
+  // flowing. Until then (dialing / ringing / connecting) the user's OWN
+  // feed is full-screen; when the peer's video arrives it migrates to the
+  // corner bubble. Tapping the bubble swaps which feed is full-screen.
+  // The LOCAL feed is always mirrored (selfie preview) wherever it shows;
+  // the remote feed is never mirrored.
+  const remoteActive = !!remoteUrl;
+  const fullscreenIsLocal = !remoteActive || swapped;
+  const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
+  // The bubble only exists once both feeds are present (i.e. connected).
+  const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
+  const pipIsLocal = !swapped;
+
   return (
     <View style={styles.root}>
-      {/* Remote stream — full-bleed black until media flows. */}
-      {remoteUrl ? (
+      {/* Full-screen feed — local while waiting, remote once it flows
+          (or local again when swapped). Black until any media exists. */}
+      {fullscreenUrl ? (
         <RTCView
-          streamURL={remoteUrl}
+          streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
+          mirror={fullscreenIsLocal}
         />
       ) : (
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
@@ -172,16 +191,23 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           <Text style={styles.topStage}>{stageLabel[active.stage]}</Text>
         </View>
 
-        {/* Local picture-in-picture — top-right. Mirrored on the front
-            camera so the user sees a selfie-style preview. */}
-        {localUrl ? (
-          <RTCView
-            streamURL={localUrl}
+        {/* Corner bubble — the non-full-screen feed. Tap to swap which
+            feed is full-screen. Only shown once the peer's video is
+            flowing (before that, the local feed owns the full screen). */}
+        {pipUrl ? (
+          <Pressable
+            testID="video-call-pip"
             style={styles.pip}
-            objectFit="cover"
-            mirror
-            zOrder={1}
-          />
+            onPress={() => setSwapped((s) => !s)}
+          >
+            <RTCView
+              streamURL={pipUrl}
+              style={StyleSheet.absoluteFill}
+              objectFit="cover"
+              mirror={pipIsLocal}
+              zOrder={1}
+            />
+          </Pressable>
         ) : null}
 
         {/* Bottom controls. Mute / hang up / flip camera. */}
@@ -255,11 +281,14 @@ const styles = StyleSheet.create({
   },
   pip: {
     position: 'absolute',
-    top: 80,
+    // Sits below the top bar (handle + stage label) so the bubble no
+    // longer clips into it. Was 80, which slightly overlapped.
+    top: 116,
     right: space.md,
     width: 100,
     height: 140,
     backgroundColor: '#222',
+    overflow: 'hidden',
   },
   controls: {
     flexDirection: 'row',
