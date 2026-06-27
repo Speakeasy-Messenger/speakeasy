@@ -46,12 +46,20 @@ final class VoiceFilterModule: RCTEventEmitter {
   override static func requiresMainQueueSetup() -> Bool { return false }
 
   override func constantsToExport() -> [AnyHashable: Any]! {
-    // Phase 5j Private Call — exposed to RC testers in 0.7.0-rc.3+.
-    // Was gated to `#if DEBUG` only; the founder flipped the flag
-    // for this RC so a release-signed build can exercise the full
-    // Private Call path on real hardware before the next production
-    // cut. Matches the Android-side flip in VoiceFilterModule.kt.
-    return ["isAvailable": true]
+    // FAIL-SAFE: iOS voice masking is currently UNAVAILABLE.
+    //
+    // The mask runs only inside SpeakeasyAudioDevice (the custom
+    // RTCAudioDevice). AppDelegate.mm disabled that ADM in build 13
+    // because it broke all call audio (reverted to stock WebRTC ADM).
+    // While it's disabled, wrapTrack installs the DSP into
+    // ActiveFilterHolder but nothing reads it — a "Private" call would
+    // transmit the user's REAL voice. Report isAvailable:false so the
+    // JS shim hides the Private row instead of silently leaking.
+    //
+    // Re-enable (set back to true) ONLY together with re-installing
+    // SpeakeasyAudioDevice in AppDelegate.mm and verifying masked audio
+    // on a real device + live peer. See RE-HOOK.md in this directory.
+    return ["isAvailable": false]
   }
 
   // MARK: - RCTEventEmitter
