@@ -220,6 +220,10 @@ if ext.nil?
   ext = project.new_target(:app_extension, EXT_NAME, :ios, deployment, nil, :swift)
   changed << 'created ShareExtension target'
 end
+# Name the product explicitly — without PRODUCT_NAME the target builds an
+# unnamed ".appex" and the embed step trips "Multiple commands produce .appex".
+ext.product_reference.name = "#{EXT_NAME}.appex"
+ext.product_reference.path = "#{EXT_NAME}.appex"
 
 ext_group = project.main_group.groups.find { |g| g.display_name == EXT_NAME } ||
             project.main_group.new_group(EXT_NAME, EXT_NAME)
@@ -236,6 +240,7 @@ end
 swift_ver = target.build_configurations.first.build_settings['SWIFT_VERSION'] || '5.0'
 ext.build_configurations.each do |config|
   bs = config.build_settings
+  bs['PRODUCT_NAME'] = '$(TARGET_NAME)'
   bs['PRODUCT_BUNDLE_IDENTIFIER'] = 'xyz.speakeasyapp.app.ShareExtension'
   bs['INFOPLIST_FILE'] = "#{EXT_NAME}/Info.plist"
   bs['CODE_SIGN_ENTITLEMENTS'] = "#{EXT_NAME}/ShareExtension.entitlements"
