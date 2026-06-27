@@ -1,10 +1,11 @@
-import { NativeModules, Platform } from 'react-native';
+import { NativeModules } from 'react-native';
 
 /**
- * Drains text shared into the app via the Android system share sheet
- * ("Share → Speakeasy"). Backed by the native SpeakeasyShare module, which
- * stashes the ACTION_SEND text from MainActivity. Android-only; resolves null
- * elsewhere or when nothing is pending.
+ * Drains text shared into the app via the system share sheet ("Share →
+ * Speakeasy"). Both platforms expose a `SpeakeasyShare` native module with the
+ * same shape: Android stashes the ACTION_SEND text from MainActivity; iOS
+ * reads it from the App Group container the Share Extension wrote to. Resolves
+ * null when nothing is pending or the module is unavailable.
  */
 interface NativeShare {
   consumePendingShare(): Promise<{ text: string } | null>;
@@ -13,7 +14,7 @@ interface NativeShare {
 const native = (NativeModules as { SpeakeasyShare?: NativeShare }).SpeakeasyShare;
 
 export async function consumePendingShare(): Promise<string | null> {
-  if (Platform.OS !== 'android' || !native) return null;
+  if (!native) return null;
   try {
     const result = await native.consumePendingShare();
     return result?.text ?? null;

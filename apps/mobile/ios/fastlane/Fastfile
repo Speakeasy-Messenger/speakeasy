@@ -20,6 +20,9 @@ WORKSPACE = "Speakeasy.xcworkspace".freeze
 SCHEME = "Speakeasy".freeze
 TEAM_ID = "89KT3SWYAF".freeze
 PROFILE = "match AppStore #{APP_IDENTIFIER}".freeze
+# Share Extension target — its own bundle id + match profile (App Group).
+EXT_IDENTIFIER = "xyz.speakeasyapp.app.ShareExtension".freeze
+EXT_PROFILE = "match AppStore #{EXT_IDENTIFIER}".freeze
 
 def asc_api_key
   app_store_connect_api_key(
@@ -45,6 +48,16 @@ def pin_signing
     profile_name: PROFILE,
     targets: ["Speakeasy"],
   )
+  # Same, for the Share Extension target (its own bundle id + profile).
+  update_code_signing_settings(
+    path: "Speakeasy.xcodeproj",
+    use_automatic_signing: false,
+    team_id: TEAM_ID,
+    bundle_identifier: EXT_IDENTIFIER,
+    code_sign_identity: "Apple Distribution",
+    profile_name: EXT_PROFILE,
+    targets: ["ShareExtension"],
+  )
 end
 
 # TestFlight/App Store reject a build whose CFBundleVersion (build number)
@@ -65,8 +78,12 @@ platform :ios do
     sh("cd .. && USE_FRAMEWORKS=static pod install")
   end
 
-  desc "Create/refresh the App Store signing cert + profile via match (run once locally)"
+  desc "Create/refresh the App Store signing cert + profiles via match. Run " \
+       "locally OR via the ios-certs.yml workflow_dispatch (needs a WRITE " \
+       "deploy key). Regenerates a profile per app_identifier in the Matchfile."
   lane :certs do
+    # Unlocked keychain for non-interactive cert install (CI / SSH).
+    setup_ci(force: true)
     match(type: "appstore", readonly: false, api_key: asc_api_key)
   end
 
@@ -90,7 +107,7 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       export_method: "app-store",
-      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE } },
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE } },
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,
@@ -113,7 +130,7 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       export_method: "app-store",
-      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE } },
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE } },
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,

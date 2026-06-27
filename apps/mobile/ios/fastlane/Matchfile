@@ -6,7 +6,7 @@ storage_mode("git")
 # signed via match too.
 type("appstore")
 
-app_identifier(["xyz.speakeasyapp.app"])
+app_identifier(["xyz.speakeasyapp.app", "xyz.speakeasyapp.app.ShareExtension"])
 
 # Auth is via the App Store Connect API key (see Fastfile `asc_api_key`),
 # so no Apple ID username is needed here. On CI, match runs read-only and
