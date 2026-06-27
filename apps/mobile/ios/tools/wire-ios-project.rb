@@ -268,6 +268,19 @@ unless embed.files.any? { |bf| bf.respond_to?(:file_ref) && bf.file_ref == ext.p
   changed << 'embedded ShareExtension.appex'
 end
 
+# Position the Embed App Extensions phase right after Link Binary — appended
+# at the END it forms a build cycle with the trailing RN/Pods script phases
+# ("error: Cycle inside Speakeasy"). Same fix the Embed Frameworks phase uses.
+fw_phase = target.frameworks_build_phase
+fw_idx = target.build_phases.index(fw_phase)
+cur_idx = target.build_phases.index(embed)
+if fw_idx && cur_idx && cur_idx != fw_idx + 1
+  target.build_phases.delete_at(cur_idx)
+  fw_idx = target.build_phases.index(fw_phase) # recompute after delete
+  target.build_phases.insert(fw_idx + 1, embed)
+  changed << 'positioned Embed App Extensions after Link Binary (cycle fix)'
+end
+
 if changed.empty?
   puts 'wire-ios-project: already wired — no changes'
 else
