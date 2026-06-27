@@ -61,6 +61,10 @@ enum SpeakeasyDbError: Error, CustomStringConvertible {
     case open(String)
     case key(String)
     case migration(String)
+    /// The db root secret couldn't be read this launch (keychain locked /
+    /// entitlement glitch), but it may still exist. We refuse to open rather
+    /// than wipe — the caller should retry (e.g. after unlock). Retryable.
+    case keyUnavailable(OSStatus)
 
     var description: String {
         switch self {
@@ -68,6 +72,7 @@ enum SpeakeasyDbError: Error, CustomStringConvertible {
         case .open(let m):        return "SpeakeasyDb open failed: \(m)"
         case .key(let m):         return "SpeakeasyDb key failed: \(m)"
         case .migration(let m):   return "SpeakeasyDb migration failed: \(m)"
+        case .keyUnavailable(let s): return "SpeakeasyDb key unavailable (OSStatus \(s)) — keychain read failed; refusing to wipe, retry after unlock."
         }
     }
 }
@@ -102,8 +107,9 @@ final class SpeakeasyDb {
         guard let token = Vouchflow.shared.cachedDeviceToken else {
             throw SpeakeasyDbError.notEnrolled
         }
+        _ = token // gates enrollment only; no longer keys the DB
         let dbPath = try databasePath()
-        let secret = resolveRootSecret(dbPath: dbPath, deviceToken: token)
+        let secret = try resolveRootSecret(dbPath: dbPath)
         let passphrase = derivePassphrase(rootSecret: secret)
 
         let db = try openOrRecover(dbPath: dbPath, passphrase: passphrase)
@@ -161,16 +167,38 @@ final class SpeakeasyDb {
     /// reliable way to reproduce it (the token may have rotated). The
     /// deterministic move is to wipe the orphan, seed fresh, and set the
     /// reset flag so JS can surface the loss to the user.
-    private func resolveRootSecret(dbPath: String, deviceToken: String) -> String {
-        if let existing = DbKeyStore.load() { return existing }
-        if FileManager.default.fileExists(atPath: dbPath) {
-            NSLog("[SpeakeasyDb] first launch with no db root secret + existing speakeasy.db — wiping orphan and starting fresh")
-            deleteDbFiles(dbPath: dbPath)
-            setResetFlag()
+    private func resolveRootSecret(dbPath: String) throws -> String {
+        switch DbKeyStore.loadResult() {
+        case .found(let existing):
+            return existing
+        case .unavailable(let status):
+            // The secret read FAILED (device locked right after a reboot/OS
+            // update, keychain entitlement glitch). The secret may still be
+            // there — wiping now would destroy all history for a transient
+            // error. Refuse to open; the JS layer retries after unlock. This
+            // is the core fix for "messages deleted on update".
+            NSLog("[SpeakeasyDb] db root secret unavailable (OSStatus \(status)) — NOT wiping; will retry next open")
+            throw SpeakeasyDbError.keyUnavailable(status)
+        case .absent:
+            // Definitively no secret. If a db file exists it's an orphan from
+            // the old token-derived scheme we can't reproduce the key for —
+            // back it up (don't destroy) and start fresh, surfacing the reset.
+            if FileManager.default.fileExists(atPath: dbPath) {
+                NSLog("[SpeakeasyDb] no db root secret + existing speakeasy.db — backing up orphan and starting fresh")
+                backupDbFiles(dbPath: dbPath)
+                setResetFlag()
+            }
+            let seed = randomSecret()
+            // Persist BEFORE creating the DB. If the secret can't be stored,
+            // do NOT create a database we won't be able to re-key next launch
+            // (that would be a silent wipe-on-every-restart). Surface as
+            // retryable instead.
+            if !DbKeyStore.store(seed) {
+                NSLog("[SpeakeasyDb] could not persist new db root secret — refusing to create an un-rekeyable DB")
+                throw SpeakeasyDbError.keyUnavailable(errSecIO)
+            }
+            return seed
         }
-        let seed = randomSecret()
-        DbKeyStore.store(seed)
-        return seed
     }
 
     /// Open the database, recreating it empty if the file cannot be
@@ -183,8 +211,12 @@ final class SpeakeasyDb {
         do {
             return try openKeyed(dbPath: dbPath, passphrase: passphrase)
         } catch SpeakeasyDbError.key(let msg) {
-            NSLog("[SpeakeasyDb] speakeasy.db unreadable (\(msg)) — recreating empty store")
-            deleteDbFiles(dbPath: dbPath)
+            // The secret loaded fine but the file won't decrypt with it
+            // (genuine corruption / SQLCipher format change). Back the file
+            // up rather than delete it, so the data is recoverable if we ever
+            // reproduce the key, then recreate an empty store so the app runs.
+            NSLog("[SpeakeasyDb] speakeasy.db unreadable with current key (\(msg)) — backing up and recreating empty store")
+            backupDbFiles(dbPath: dbPath)
             setResetFlag()
             return try openKeyed(dbPath: dbPath, passphrase: passphrase)
         }
@@ -227,10 +259,36 @@ final class SpeakeasyDb {
     }
 
     /// Delete the DB file and its `-journal` / `-wal` / `-shm` sidecars.
+    /// Used only by the user-initiated `wipe()` (account deletion). The
+    /// unexpected-reset paths use `backupDbFiles` instead — never destroy
+    /// data we weren't explicitly told to.
     private func deleteDbFiles(dbPath: String) {
         let fm = FileManager.default
         for suffix in ["", "-journal", "-wal", "-shm"] {
             try? fm.removeItem(atPath: dbPath + suffix)
+        }
+    }
+
+    /// Move the DB file (and sidecars) aside instead of deleting it, so an
+    /// unexpected reset is recoverable rather than destructive. Single-slot:
+    /// a prior `.orphan` backup is removed first so this can't grow without
+    /// bound. The contents stay encrypted; this preserves them for a future
+    /// recovery attempt (e.g. if the original key is recovered).
+    private func backupDbFiles(dbPath: String) {
+        let fm = FileManager.default
+        for suffix in ["", "-journal", "-wal", "-shm"] {
+            let src = dbPath + suffix
+            guard fm.fileExists(atPath: src) else { continue }
+            let dst = dbPath + ".orphan" + suffix
+            try? fm.removeItem(atPath: dst)
+            do {
+                try fm.moveItem(atPath: src, toPath: dst)
+            } catch {
+                // If the move fails for any reason, fall back to deleting the
+                // source so we don't leave a half-state that blocks recreate.
+                NSLog("[SpeakeasyDb] backup move failed (\(error)) — deleting \(suffix.isEmpty ? "db" : suffix)")
+                try? fm.removeItem(atPath: src)
+            }
         }
     }
 
