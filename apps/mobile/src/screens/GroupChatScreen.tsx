@@ -464,6 +464,12 @@ export function GroupChatScreen({
           </View>
         }
         subtitle={`${memberCount} IN THE ROOM · LEAVES IN ${ttlLabel}`}
+        // TTL is configured by tapping the "LEAVES IN <TTL>" sub-line here
+        // (parity with ChatScreen). The old composer TTL chip was removed —
+        // it was redundant with this and easy to hit by mistake.
+        onSubtitlePress={cycleTtl}
+        onSubtitleLongPress={() => setPersistence(groupId, true)}
+        subtitleA11yLabel={`Message lifetime: ${ttlLabel}. Tap to change.`}
       />
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
@@ -605,14 +611,6 @@ export function GroupChatScreen({
               // the indicator appears natively while scrolling.)
               scrollEnabled
             />
-            <Pressable
-              onPress={cycleTtl}
-              onLongPress={() => setPersistence(groupId, true)}
-              hitSlop={6}
-              style={styles.ttlChip}
-            >
-              <Text style={[styles.ttlText, { color: themed.slate }]}>{ttl.toUpperCase()}</Text>
-            </Pressable>
             {hasInput ? (
               <Pressable testID="chat-send" onPress={handleSend} hitSlop={6} style={styles.iconBtn}>
                 <SendIcon size={22} color={themed.primary} />
@@ -746,14 +744,5 @@ const styles = StyleSheet.create({
     paddingVertical: space.sm,
     fontFamily: font.regular,
     fontSize: type.body.size,
-  },
-  ttlChip: {
-    paddingHorizontal: space.sm,
-    paddingVertical: 8,
-  },
-  ttlText: {
-    fontFamily: type.meta.weight,
-    fontSize: type.meta.size,
-    letterSpacing: type.meta.size * type.meta.letterSpacingEm,
   },
 });
