@@ -8,6 +8,7 @@ import {
   SpeakerIcon,
 } from '../components/icons/CallIcons.js';
 import { CipherS } from '../brand/CipherS.js';
+import { isOutboundMaskActive } from '../native/voice-filter.js';
 import { Handle } from '../components/Handle.js';
 import { PortraitTile } from '../components/PortraitTile.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
@@ -59,6 +60,12 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
   const themed = useColors();
   const active = useCalls((s) => s.active);
   const myUserId = useIdentity((s) => s.userId);
+
+  // Whether THIS device actually masks the outbound voice. False on iOS (the
+  // call still connects, but the local mic rides unmasked — the masking ADM is
+  // disabled). Drives an honest mask chip instead of claiming "Voice masked"
+  // when we aren't. Device-constant, so read once.
+  const maskActive = isOutboundMaskActive();
 
   const peerProfile = useProfiles((s) =>
     active ? s.byUserId[active.peerUserId] : undefined,
@@ -536,37 +543,56 @@ export function CallScreen({ orchestrator, onClosed }: Props) {
           Sits ABOVE the round control row so it never reads as a casual
           peer of mute/speaker. */}
       {active.kind === 'private' ? (
-        <Pressable
-          testID="call-mask-chip"
-          onPress={onTapMask}
-          style={[
-            styles.maskChip,
-            {
-              backgroundColor: themed.pale,
-              borderColor: active.maskBypassed
-                ? callPalette.decline
-                : themed.primary,
-            },
-          ]}
-          accessibilityLabel={
-            active.maskBypassed
-              ? 'Your real voice is going out. Double-tap to mask it again.'
-              : 'Voice masked. Double-tap to reveal your real voice.'
-          }
-        >
-          {active.maskBypassed ? (
+        !maskActive ? (
+          // This device can't mask the outbound voice (iOS — the masking ADM
+          // is disabled). The call still connects, but be HONEST that the real
+          // voice is going out rather than showing "Voice masked". Non-
+          // interactive: there's no mask to drop. See voice-filter.ts.
+          <View
+            testID="call-mask-chip-unavailable"
+            style={[
+              styles.maskChip,
+              { backgroundColor: themed.pale, borderColor: callPalette.decline },
+            ]}
+            accessibilityLabel="Your voice is NOT masked on this device."
+          >
             <Text style={[styles.maskChipText, { color: callPalette.decline }]}>
-              ⚠ Real voice
+              ⚠ Not masked on this device
             </Text>
-          ) : (
-            <>
-              <CipherS size={14} color={themed.primary} />
-              <Text style={[styles.maskChipText, { color: themed.primary }]}>
-                Voice masked
+          </View>
+        ) : (
+          <Pressable
+            testID="call-mask-chip"
+            onPress={onTapMask}
+            style={[
+              styles.maskChip,
+              {
+                backgroundColor: themed.pale,
+                borderColor: active.maskBypassed
+                  ? callPalette.decline
+                  : themed.primary,
+              },
+            ]}
+            accessibilityLabel={
+              active.maskBypassed
+                ? 'Your real voice is going out. Double-tap to mask it again.'
+                : 'Voice masked. Double-tap to reveal your real voice.'
+            }
+          >
+            {active.maskBypassed ? (
+              <Text style={[styles.maskChipText, { color: callPalette.decline }]}>
+                ⚠ Real voice
               </Text>
-            </>
-          )}
-        </Pressable>
+            ) : (
+              <>
+                <CipherS size={14} color={themed.primary} />
+                <Text style={[styles.maskChipText, { color: themed.primary }]}>
+                  Voice masked
+                </Text>
+              </>
+            )}
+          </Pressable>
+        )
       ) : null}
 
       <View style={styles.controls}>
