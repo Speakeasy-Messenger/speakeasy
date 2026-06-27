@@ -28,5 +28,12 @@
   <array>
     <string>applinks:speakeasyapp.xyz</string>
   </array>
+  <!-- Shared container with the Share Extension. ShareViewController writes
+       the shared text here; ShareReceiveModule reads it on next foreground.
+       Must match ShareExtension.entitlements + both bundle IDs' profiles. -->
+  <key>com.apple.security.application-groups</key>
+  <array>
+    <string>group.xyz.speakeasyapp.app</string>
+  </array>
 </dict>
 </plist>
