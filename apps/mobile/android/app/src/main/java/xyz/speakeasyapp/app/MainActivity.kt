@@ -108,7 +108,9 @@ class MainActivity : ReactActivity() {
   // `videoCallActive` via SpeakeasyPip.setVideoCallActive when the video
   // call screen mounts/unmounts.
 
-  fun setVideoCallActive(active: Boolean) {
+  // Named distinctly from the `videoCallActive` property to avoid a JVM
+  // signature clash with its generated static setter.
+  fun applyVideoCallActive(active: Boolean) {
     videoCallActive = active
     // Android 12+ auto-enters PiP on Home when params say so — no
     // onUserLeaveHint needed. Refresh the params to reflect the new state.

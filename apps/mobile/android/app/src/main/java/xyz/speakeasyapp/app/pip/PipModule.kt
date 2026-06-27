@@ -25,7 +25,7 @@ class PipModule(reactContext: ReactApplicationContext) :
       MainActivity.videoCallActive = active
       return
     }
-    activity.runOnUiThread { activity.setVideoCallActive(active) }
+    activity.runOnUiThread { activity.applyVideoCallActive(active) }
   }
 
   // Required so JS `NativeEventEmitter(SpeakeasyPip)` doesn't warn.
