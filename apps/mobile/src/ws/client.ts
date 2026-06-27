@@ -274,8 +274,15 @@ export class SpeakeasyWsClient {
    */
   waitForAuthed(timeoutMs = 10_000): Promise<void> {
     if (this.state === 'authed') return Promise.resolve();
+    // Closed is the normal state after the app backgrounds (we proactively
+    // close the WS for push routing). A send fired right after foregrounding
+    // — before the AppState 'active' reconnect lands — used to reject here
+    // with "ws is closed; call connect() first", which the chat send path
+    // rendered as a literal "[send failed: … ws is closed]" bubble. Instead,
+    // kick a reconnect ourselves and fall through to await `authed`, so the
+    // send rides the reconnect rather than failing.
     if (this.state === 'closed') {
-      return Promise.reject(new Error('ws is closed; call connect() first'));
+      this.connect();
     }
     return new Promise((resolve, reject) => {
       const t = setTimeout(() => {
