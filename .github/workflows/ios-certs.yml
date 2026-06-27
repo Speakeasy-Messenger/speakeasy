@@ -1,0 +1,53 @@
+# Regenerate the App Store signing profiles via `fastlane ios certs`
+# (readonly:false → pushes to speakeasy-certs). Manual-only; needs a WRITE
+# deploy key (the normal MATCH_DEPLOY_KEY is read-only). Run this after the
+# Matchfile's app_identifier list changes (e.g. adding the ShareExtension) or
+# after enabling a new capability (App Groups) in the Developer portal —
+# match regenerates one profile per app_identifier.
+name: iOS certs (regenerate match profiles)
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  certs:
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Select newest Xcode
+        run: sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+
+      - name: Set up WRITE SSH key for match (push to speakeasy-certs)
+        env:
+          MATCH_DEPLOY_KEY_WRITE: ${{ secrets.MATCH_DEPLOY_KEY_WRITE }}
+        run: |
+          if [ -z "$MATCH_DEPLOY_KEY_WRITE" ]; then
+            echo "::error::MATCH_DEPLOY_KEY_WRITE secret is not set."; exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$MATCH_DEPLOY_KEY_WRITE" > ~/.ssh/match_key
+          chmod 600 ~/.ssh/match_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          {
+            echo "Host github.com"
+            echo "  IdentityFile ~/.ssh/match_key"
+            echo "  IdentitiesOnly yes"
+          } >> ~/.ssh/config
+
+      - name: bundle install (fastlane)
+        working-directory: apps/mobile/ios
+        run: bundle install
+
+      - name: fastlane ios certs (regenerate + push profiles)
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+        run: bundle exec fastlane ios certs

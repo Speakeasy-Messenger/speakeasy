@@ -78,8 +78,12 @@ platform :ios do
     sh("cd .. && USE_FRAMEWORKS=static pod install")
   end
 
-  desc "Create/refresh the App Store signing cert + profile via match (run once locally)"
+  desc "Create/refresh the App Store signing cert + profiles via match. Run " \
+       "locally OR via the ios-certs.yml workflow_dispatch (needs a WRITE " \
+       "deploy key). Regenerates a profile per app_identifier in the Matchfile."
   lane :certs do
+    # Unlocked keychain for non-interactive cert install (CI / SSH).
+    setup_ci(force: true)
     match(type: "appstore", readonly: false, api_key: asc_api_key)
   end
 
