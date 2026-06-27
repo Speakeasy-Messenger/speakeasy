@@ -40,6 +40,7 @@ import { StatusSquare } from '../components/StatusSquare.js';
 import { MutedIcon } from '../components/icons/MutedIcon.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
+import { useShare } from '../store/share.js';
 import { useUiState } from '../store/ui.js';
 import { useGroups } from '../store/groups.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
@@ -188,6 +189,13 @@ export function GroupChatScreen({
   }, [groupId]);
 
   const [input, setInput] = useState('');
+  // Prefill from a "Share → Speakeasy" hand-off when this group was picked
+  // from the share picker (one-shot; take() clears it).
+  useEffect(() => {
+    const shared = useShare.getState().take();
+    if (shared) setInput(shared);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const inputRef = useRef<TextInput>(null);
   // Mirrors `input` but updated synchronously in the change handler so

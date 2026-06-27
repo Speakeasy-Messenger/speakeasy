@@ -16,6 +16,7 @@ import {
   GET_STARTED_CARD_IDS,
 } from '../components/GetStartedCards.js';
 import { useOnboardingCards } from '../store/onboarding-cards.js';
+import { useShare } from '../store/share.js';
 import { Handle } from '../components/Handle.js';
 import { MutedIcon } from '../components/icons/MutedIcon.js';
 import { PeepholeMark } from '../components/PeepholeMark.js';
@@ -105,6 +106,8 @@ export function ConversationsScreen({
     userId ? s.byUserId[userId]?.selectedAvatarId : undefined,
   );
   const themed = useColors();
+  const pendingShare = useShare((s) => s.pendingText);
+  const setPendingShare = useShare((s) => s.setPendingText);
 
   const directRows: DirectRow[] = Object.entries(conversationsById)
     .filter(([_, c]) => c.kind === 'direct' && !!c.peerUserId)
@@ -258,6 +261,30 @@ export function ConversationsScreen({
       />
 
       <StoreResetBanner />
+
+      {pendingShare ? (
+        <View
+          testID="share-banner"
+          style={[styles.shareBanner, { backgroundColor: themed.primary }]}
+        >
+          <View style={styles.shareBannerBody}>
+            <Text style={[styles.shareBannerTitle, { color: themed.cream }]}>
+              Tap a chat to share into
+            </Text>
+            <Text
+              style={[styles.shareBannerText, { color: themed.cream }]}
+              numberOfLines={1}
+            >
+              {pendingShare}
+            </Text>
+          </View>
+          <Pressable onPress={() => setPendingShare(null)} hitSlop={10}>
+            <Text style={[styles.shareBannerCancel, { color: themed.cream }]}>
+              Cancel
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
 
       <FlatList
         data={rows}
@@ -609,6 +636,17 @@ function relativeTime(ms: number): string {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.cream },
+  shareBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: space.md,
+    paddingHorizontal: space.lg,
+    paddingVertical: space.sm,
+  },
+  shareBannerBody: { flex: 1 },
+  shareBannerTitle: { fontFamily: font.bold, fontSize: type.meta.size },
+  shareBannerText: { fontFamily: font.regular, fontSize: type.body.size },
+  shareBannerCancel: { fontFamily: font.medium, fontSize: type.body.size },
   headerSelfPlaceholder: { width: 28, height: 28 },
   headerHandle: {
     flex: 1,

@@ -15,6 +15,7 @@ import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
 import com.facebook.react.defaults.DefaultReactActivityDelegate
 import xyz.speakeasyapp.app.notif.NotifMessagingModule
+import xyz.speakeasyapp.app.share.ShareModule
 
 class MainActivity : ReactActivity() {
 
@@ -52,6 +53,7 @@ class MainActivity : ReactActivity() {
     // Notification tap that launched the Activity from a quit state —
     // stash the extras for JS to consume once the bundle is up.
     NotifMessagingModule.stashTap(intent)
+    ShareModule.stashShare(intent)
   }
 
   override fun onNewIntent(intent: Intent) {
@@ -61,6 +63,7 @@ class MainActivity : ReactActivity() {
     // resume). JS polls `consumePendingTap` on the next AppState
     // 'active' so the tap routes the same way as a cold start.
     NotifMessagingModule.stashTap(intent)
+    ShareModule.stashShare(intent)
   }
 
   /**

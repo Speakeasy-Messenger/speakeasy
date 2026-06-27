@@ -19,6 +19,8 @@ import { useIdentity } from './src/store/identity.js';
 import { useBlocks } from './src/store/blocks.js';
 import { useOwnership } from './src/store/ownership.js';
 import { useConversations, flushConversationsPersist } from './src/store/conversations.js';
+import { useShare } from './src/store/share.js';
+import { consumePendingShare } from './src/native/share-receive.js';
 import { useGroups } from './src/store/groups.js';
 import { useDistributionIds } from './src/store/distribution-ids.js';
 import { useSettings } from './src/store/settings.js';
@@ -383,6 +385,19 @@ export default function App() {
   // landing on the conversation list. Covers cold start, warm
   // resume, and deferred (background-handler persisted) taps.
   usePushNavigation(navRef, navReady, callOrchestrator);
+
+  // Cold-start "Share → Speakeasy": when launched from a killed state via the
+  // share sheet, the AppState 'active' change may not fire — drain the shared
+  // text once the navigator is ready and route to the conversation picker.
+  useEffect(() => {
+    if (!navReady) return;
+    void consumePendingShare().then((text) => {
+      if (text) {
+        useShare.getState().setPendingText(text);
+        navRef.current?.navigate('Home');
+      }
+    });
+  }, [navReady]);
 
   // Allow the app over the lock screen ONLY while a call is live.
   //
@@ -1054,6 +1069,14 @@ export default function App() {
           .catch(() => {
             /* best-effort */
           });
+        // Drain "Share → Speakeasy" text (Android share sheet) and route to
+        // the conversation list, which prompts the user to pick a chat.
+        void consumePendingShare().then((text) => {
+          if (text) {
+            useShare.getState().setPendingText(text);
+            navRef.current?.navigate('Home');
+          }
+        });
       } else if (next === 'background' || next === 'inactive') {
         // rc.10 — flush the diag buffer to AsyncStorage NOW, before
         // the OS gets a chance to kill the process. Without this,

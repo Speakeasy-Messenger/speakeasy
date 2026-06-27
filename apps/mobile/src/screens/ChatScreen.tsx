@@ -56,6 +56,7 @@ import { SystemMessageRow } from '../components/SystemMessageRow.js';
 import { DateSeparatorRow } from '../components/DateSeparatorRow.js';
 import { withDateSeparators } from '../feed/with-date-separators.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
+import { useShare } from '../store/share.js';
 import { useUiState } from '../store/ui.js';
 import { useIdentity } from '../store/identity.js';
 import { api, getWsClient, signalProtocol, vouchflow } from '../services.js';
@@ -169,6 +170,14 @@ export function ChatScreen({
   const [attachOpen, setAttachOpen] = useState(false);
 
   const [input, setInput] = useState('');
+  // If the user got here by sharing text into Speakeasy ("Share →
+  // Speakeasy" → pick this chat), prefill the composer with it. One-shot:
+  // take() clears the pending share so other chats opened later are unaffected.
+  useEffect(() => {
+    const shared = useShare.getState().take();
+    if (shared) setInput(shared);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
   // Mirrors `input` but updated synchronously in the change handler so
   // `handleSend` reads the freshest committed value. Mitigates the
   // Android IME composing-region race where the trailing word/char of
