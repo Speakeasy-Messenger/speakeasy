@@ -127,6 +127,31 @@ function getNative(): NativeVoiceFilterModule | undefined {
  * isn't registered, and false on platforms (e.g. web) where it
  * doesn't exist. False until proven true.
  */
+/**
+ * Pure availability decision, split out so it's unit-testable without the
+ * native bridge (the live `isPrivateCallAvailable` reads react-native via a
+ * lazy require that throws under vitest).
+ *
+ * iOS fail-safe (brand-promise critical): the iOS voice mask runs ONLY inside
+ * SpeakeasyAudioDevice, the custom RTCAudioDevice. That ADM was disabled in
+ * AppDelegate.mm in build 13 because it broke all call audio (we reverted to
+ * the stock WebRTC ADM). With it gone, `wrapTrack` still installs the DSP into
+ * ActiveFilterHolder and resolves "ok", but NOTHING reads that holder — so a
+ * "Private" call would send the user's REAL voice unmasked. Offering the option
+ * in that state is worse than not offering it at all. Until the iOS capture
+ * path is genuinely re-hooked (see ios/SpeakeasyBridges/VoiceFilter/RE-HOOK.md),
+ * Private calls are iOS-off. This mirrors the native `isAvailable:false` flip
+ * in VoiceFilterModule.swift; double-gated on purpose.
+ */
+export function decidePrivateCallAvailable(
+  os: string,
+  nativeIsAvailable: boolean,
+): boolean {
+  if (os !== 'ios' && os !== 'android') return false;
+  if (os === 'ios') return false; // fail-safe — see docblock
+  return nativeIsAvailable === true;
+}
+
 export function isPrivateCallAvailable(): boolean {
   let os: string;
   try {
@@ -134,10 +159,8 @@ export function isPrivateCallAvailable(): boolean {
   } catch {
     return false;
   }
-  if (os !== 'ios' && os !== 'android') return false;
   const native = getNative();
-  if (!native) return false;
-  return native.isAvailable === true;
+  return decidePrivateCallAvailable(os, native?.isAvailable === true);
 }
 
 /**

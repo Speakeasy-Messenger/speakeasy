@@ -40,6 +40,7 @@ import { StatusSquare } from '../components/StatusSquare.js';
 import { MutedIcon } from '../components/icons/MutedIcon.js';
 import type { DisappearingStage } from '../components/DisappearingMessageBubble.js';
 import { useConversations, type ChatMessage } from '../store/conversations.js';
+import { dissolveDelayMs, ttlAnchorMs } from '../feed/ttl-timing.js';
 import { useShare } from '../store/share.js';
 import { useUiState } from '../store/ui.js';
 import { useGroups } from '../store/groups.js';
@@ -266,7 +267,9 @@ export function GroupChatScreen({
     if (ttlSec === null) return;
     const timers: Array<ReturnType<typeof setTimeout>> = [];
     for (const m of messages) {
-      const elapsedMs = Date.now() - m.sentAt;
+      // Anchor on receivedAt (see ttlAnchorMs) so this engine and the
+      // cold-start hydrate filter agree on each message's age.
+      const elapsedMs = Date.now() - ttlAnchorMs(m);
       const ttlMs = ttlSec * 1000;
       if (m.stage === 'sent') {
         timers.push(
@@ -284,8 +287,9 @@ export function GroupChatScreen({
       // still completes and is removed, instead of sticking half-faded
       // forever (bananaman 2026-06-05). The old guard only scheduled
       // removal for 'sent'/'seen' messages with a positive countdown, which
-      // orphaned both cases.
-      const dissolveAt = Math.max(ttlMs - elapsedMs, 0);
+      // orphaned both cases. The upper INT32 clamp (see dissolveDelayMs)
+      // stops a 'month' TTL from wrapping negative and insta-purging.
+      const dissolveAt = dissolveDelayMs(ttlMs, elapsedMs);
       timers.push(
         setTimeout(() => setStage(groupId, m.id, 'disappearing'), dissolveAt),
         setTimeout(() => setStage(groupId, m.id, 'almost-gone'), dissolveAt + 600),

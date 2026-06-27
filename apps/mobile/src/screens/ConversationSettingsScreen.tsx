@@ -189,7 +189,7 @@ export function ConversationSettingsScreen({
             MESSAGES LEAVE IN
           </Text>
           <TTLSegmentedControl
-            value={ttl === 'off' ? 'week' : ttl}
+            value={ttl}
             onChange={(next) => setTtl(conversationId, next)}
           />
           <Text style={[styles.helper, { color: themed.slate }]}>

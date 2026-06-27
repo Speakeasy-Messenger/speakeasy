@@ -10,6 +10,7 @@ import {
   type TtlOption,
 } from '@speakeasy/shared';
 import type { DisappearingStage } from '../components/disappearing-stage.js';
+import { ttlAnchorMs } from '../feed/ttl-timing.js';
 
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
@@ -744,7 +745,14 @@ export const useConversations = create<ConversationsState>((set, get) => ({
           }
           const ttlSec = TTL_OPTIONS[c.ttl];
           const ttlMs = ttlSec === null ? Infinity : ttlSec * 1000;
-          filtered[id] = { ...c, messages: sorted.filter((m) => now - m.sentAt < ttlMs) };
+          // Anchor on receivedAt (when this device saw the message), NOT
+          // sentAt — see ttlAnchorMs. A message received recently but sent
+          // long ago (offline-buffered backlog, common on iOS) must keep its
+          // full TTL instead of being dropped here on the next cold start.
+          filtered[id] = {
+            ...c,
+            messages: sorted.filter((m) => now - ttlAnchorMs(m) < ttlMs),
+          };
         }
         set({ byId: filtered });
       }
