@@ -46,20 +46,18 @@ final class VoiceFilterModule: RCTEventEmitter {
   override static func requiresMainQueueSetup() -> Bool { return false }
 
   override func constantsToExport() -> [AnyHashable: Any]! {
-    // FAIL-SAFE: iOS voice masking is currently UNAVAILABLE.
-    //
-    // The mask runs only inside SpeakeasyAudioDevice (the custom
-    // RTCAudioDevice). AppDelegate.mm disabled that ADM in build 13
-    // because it broke all call audio (reverted to stock WebRTC ADM).
-    // While it's disabled, wrapTrack installs the DSP into
-    // ActiveFilterHolder but nothing reads it — a "Private" call would
-    // transmit the user's REAL voice. Report isAvailable:false so the
-    // JS shim hides the Private row instead of silently leaking.
-    //
-    // Re-enable (set back to true) ONLY together with re-installing
-    // SpeakeasyAudioDevice in AppDelegate.mm and verifying masked audio
-    // on a real device + live peer. See RE-HOOK.md in this directory.
-    return ["isAvailable": false]
+    // isAvailable = "iOS can place/accept a private call and it will
+    // CONNECT" — true. It does NOT mean the outbound voice is masked: the
+    // masking ADM (SpeakeasyAudioDevice) is disabled (build 13, it broke
+    // call audio), so wrapTrack is a no-op and the iOS leg rides UNMASKED.
+    // That's the prior, working behavior (an unmasked iOS leg + a masked
+    // peer). The JS `isOutboundMaskActive()` returns false on iOS so the
+    // call UI shows an honest "not masked on this device" indicator instead
+    // of pretending. Returning false here (the build-16 fail-safe) instead
+    // FAILED the call on accept — killing the only voice-call type on iOS.
+    // Flip the honest signal, not this, when masking is genuinely re-hooked
+    // (see RE-HOOK.md).
+    return ["isAvailable": true]
   }
 
   // MARK: - RCTEventEmitter

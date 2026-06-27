@@ -132,23 +132,37 @@ function getNative(): NativeVoiceFilterModule | undefined {
  * native bridge (the live `isPrivateCallAvailable` reads react-native via a
  * lazy require that throws under vitest).
  *
- * iOS fail-safe (brand-promise critical): the iOS voice mask runs ONLY inside
- * SpeakeasyAudioDevice, the custom RTCAudioDevice. That ADM was disabled in
- * AppDelegate.mm in build 13 because it broke all call audio (we reverted to
- * the stock WebRTC ADM). With it gone, `wrapTrack` still installs the DSP into
- * ActiveFilterHolder and resolves "ok", but NOTHING reads that holder — so a
- * "Private" call would send the user's REAL voice unmasked. Offering the option
- * in that state is worse than not offering it at all. Until the iOS capture
- * path is genuinely re-hooked (see ios/SpeakeasyBridges/VoiceFilter/RE-HOOK.md),
- * Private calls are iOS-off. This mirrors the native `isAvailable:false` flip
- * in VoiceFilterModule.swift; double-gated on purpose.
+ * "Available" means: this device can PLACE/ACCEPT a private (masked-intent)
+ * call and the call will connect. It does NOT promise the local outbound voice
+ * is actually masked — that is `decideOutboundMaskActive` below. iOS connects
+ * the call but cannot mask its own mic yet (the masking ADM is disabled, see
+ * RE-HOOK.md), so an iOS leg rides unmasked. We surface that honestly in the
+ * call UI rather than failing the call: failing closed here killed the ONLY
+ * voice-call type on iOS (the default "Call" is masked-audio), which broke all
+ * iOS calls in build 16. Connecting-unmasked is the prior, working behavior.
  */
 export function decidePrivateCallAvailable(
   os: string,
   nativeIsAvailable: boolean,
 ): boolean {
   if (os !== 'ios' && os !== 'android') return false;
-  if (os === 'ios') return false; // fail-safe — see docblock
+  return nativeIsAvailable === true;
+}
+
+/**
+ * Pure: will THIS device actually mask its own outbound voice on a private
+ * call? Distinct from `decidePrivateCallAvailable` (can the call connect).
+ * Android masks via the WebRtcAudioRecord capture fork. iOS does NOT — the
+ * masking ADM is disabled, so the local mic rides UNMASKED even though the
+ * call connects. The call UI reads this to show an honest "not masked on this
+ * device" indicator instead of implying the voice is disguised. Flip iOS to
+ * true here only when the iOS masking path is genuinely re-hooked (RE-HOOK.md).
+ */
+export function decideOutboundMaskActive(
+  os: string,
+  nativeIsAvailable: boolean,
+): boolean {
+  if (os !== 'android') return false; // iOS masking not wired yet
   return nativeIsAvailable === true;
 }
 
@@ -161,6 +175,21 @@ export function isPrivateCallAvailable(): boolean {
   }
   const native = getNative();
   return decidePrivateCallAvailable(os, native?.isAvailable === true);
+}
+
+/**
+ * True only when the local outbound voice is genuinely being masked. False on
+ * iOS (call still connects, but unmasked) — drives the honest call-UI banner.
+ */
+export function isOutboundMaskActive(): boolean {
+  let os: string;
+  try {
+    os = rn().Platform.OS;
+  } catch {
+    return false;
+  }
+  const native = getNative();
+  return decideOutboundMaskActive(os, native?.isAvailable === true);
 }
 
 /**
