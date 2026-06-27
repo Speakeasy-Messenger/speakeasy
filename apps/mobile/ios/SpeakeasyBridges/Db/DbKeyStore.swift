@@ -35,6 +35,22 @@ enum DbKeyStore {
     private static let service = "xyz.speakeasyapp.db"
     private static let account = "root-secret-v1"
 
+    /// Outcome of a root-secret read. The distinction is load-bearing: a
+    /// missing item (`absent`) is the safe "fresh install" path where seeding
+    /// a new secret is correct, but a *failed read* (`unavailable`) means the
+    /// secret may well still exist — re-keying then would WIPE all Signal
+    /// sessions + message history for what is often a transient error (device
+    /// locked right after a reboot/OS-update → errSecInteractionNotAllowed
+    /// -25308; missing keychain entitlement → -34018). The caller MUST NOT
+    /// wipe on `unavailable`. Collapsing these two into "nil" was the cause of
+    /// "all my messages disappeared after an update" + "couldn't decrypt this
+    /// message" (the session the secret protected got wiped).
+    enum LoadResult {
+        case found(String)
+        case absent
+        case unavailable(OSStatus)
+    }
+
     private static func baseQuery() -> [String: Any] {
         [
             kSecClass as String: kSecClassGenericPassword,
@@ -43,28 +59,37 @@ enum DbKeyStore {
         ]
     }
 
-    /// The persisted db root secret, or `nil` if none has been seeded yet.
-    static func load() -> String? {
+    /// Read the db root secret, distinguishing "no item" from "read failed".
+    static func loadResult() -> LoadResult {
         var query = baseQuery()
         query[kSecReturnData as String] = true
         query[kSecMatchLimit as String] = kSecMatchLimitOne
 
         var item: CFTypeRef?
         let status = SecItemCopyMatching(query as CFDictionary, &item)
-        guard status == errSecSuccess, let data = item as? Data else {
-            // errSecItemNotFound is the normal "fresh install" path. ANY other
-            // status (notably errSecMissingEntitlement -34018, which sim builds
-            // without a provisioned keychain-access-group hit) means the read
-            // failed — the caller will then re-key and WIPE the encrypted store,
-            // losing all Signal sessions + message history. Never let that be
-            // silent; it's the root cause of "couldn't decrypt this message"
-            // after a relaunch (the session the secret protected is gone).
-            if status != errSecItemNotFound {
-                NSLog("[DbKeyStore] load failed: OSStatus \(status) — store will re-key & WIPE; sessions/history lost. (-34018 = keychain entitlement missing, common on unsigned simulator builds)")
+        switch status {
+        case errSecSuccess:
+            guard let data = item as? Data, let s = String(data: data, encoding: .utf8) else {
+                // Item present but unreadable/garbled — treat as a read
+                // failure, NOT as absent. Never wipe on this.
+                NSLog("[DbKeyStore] item present but undecodable — treating as unavailable (will NOT wipe)")
+                return .unavailable(errSecDecode)
             }
-            return nil
+            return .found(s)
+        case errSecItemNotFound:
+            return .absent
+        default:
+            NSLog("[DbKeyStore] load failed: OSStatus \(status) — secret may exist; will NOT wipe, open will retry. (-25308 = device locked after reboot/OS update; -34018 = keychain entitlement missing on unsigned simulator builds)")
+            return .unavailable(status)
         }
-        return String(data: data, encoding: .utf8)
+    }
+
+    /// The persisted db root secret, or `nil` if absent **or unreadable**.
+    /// Prefer `loadResult()` on the open path so a transient read failure
+    /// isn't mistaken for "fresh install" and used to justify a wipe.
+    static func load() -> String? {
+        if case .found(let s) = loadResult() { return s }
+        return nil
     }
 
     /// Persist `secret` as the db root secret. Overwrites any prior value.

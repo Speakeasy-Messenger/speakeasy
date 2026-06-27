@@ -82,6 +82,15 @@ object SpeakeasyDb {
           "SpeakeasyDb cannot open: Vouchflow.cachedDeviceToken is null. " +
               "Run vouchflow.verify({context:'signup'}) before any Signal-store call.")
 
+  /**
+   * The db root secret couldn't be read this launch (Keystore unwrap failed /
+   * couldn't persist), but it may still exist. We refuse to open rather than
+   * wipe — the caller should retry. Retryable; NOT a data-loss condition.
+   */
+  class KeyUnavailableException(cause: Throwable?) :
+      IllegalStateException(
+          "SpeakeasyDb db root secret unavailable — refusing to wipe; retry later.", cause)
+
   @Volatile private var db: SQLiteDatabase? = null
 
   /** Native lib must be loaded once per process before opening any DB. */
@@ -98,10 +107,11 @@ object SpeakeasyDb {
       ensureNativeLoaded()
       // The token gates "is the app enrolled at all" — it no longer
       // keys the database. See class doc.
-      val token = Vouchflow.shared.cachedDeviceToken ?: throw NotEnrolledException()
+      // Token gates "is the app enrolled at all"; it no longer keys the DB.
+      Vouchflow.shared.cachedDeviceToken ?: throw NotEnrolledException()
       val dbFile = context.getDatabasePath(DB_FILENAME)
       dbFile.parentFile?.mkdirs()
-      val passphrase = derivePassphrase(resolveRootSecret(context, dbFile, token))
+      val passphrase = derivePassphrase(resolveRootSecret(context, dbFile))
       val opened = openOrRecover(context, dbFile, passphrase)
       Schema.applyMigrations(opened)
       db = opened
@@ -161,18 +171,36 @@ object SpeakeasyDb {
    * fresh random secret, and set the reset flag so JS can surface
    * the loss to the user.
    */
-  private fun resolveRootSecret(context: Context, dbFile: File, deviceToken: String): String {
-    DbKeyStore.load(context)?.let {
-      return it
+  private fun resolveRootSecret(context: Context, dbFile: File): String {
+    when (val r = DbKeyStore.loadResult(context)) {
+      is DbKeyStore.LoadResult.Found -> return r.secret
+      is DbKeyStore.LoadResult.Unavailable -> {
+        // The secret read FAILED (Keystore key invalidated / AEAD mismatch).
+        // It may still be there — wiping now would destroy all history for a
+        // transient error. Refuse to open; the caller retries. Core fix for
+        // "messages deleted on update".
+        Log.w(TAG, "db root secret unavailable — NOT wiping; will retry next open")
+        throw KeyUnavailableException(r.error)
+      }
+      is DbKeyStore.LoadResult.Absent -> {
+        // Definitively no secret. If a db file exists it's an orphan from the
+        // old token-derived scheme we can't reproduce the key for — back it up
+        // (don't destroy) and start fresh, surfacing the reset to JS.
+        if (dbFile.exists()) {
+          Log.w(TAG, "no db root secret + existing speakeasy.db — backing up orphan and starting fresh")
+          backupDbFiles(dbFile)
+          setResetFlag(context)
+        }
+        val seed = randomSecret()
+        // Persist BEFORE creating the DB. If it can't be stored, don't create
+        // a database we won't be able to re-key next launch (silent wipe loop).
+        if (!DbKeyStore.store(context, seed)) {
+          Log.w(TAG, "could not persist new db root secret — refusing to create an un-rekeyable DB")
+          throw KeyUnavailableException(null)
+        }
+        return seed
+      }
     }
-    if (dbFile.exists()) {
-      Log.w(TAG, "first launch with no db root secret + existing speakeasy.db — wiping orphan and starting fresh")
-      deleteDbFiles(dbFile)
-      setResetFlag(context)
-    }
-    val seed = randomSecret()
-    DbKeyStore.store(context, seed)
-    return seed
   }
 
   /**
@@ -191,8 +219,12 @@ object SpeakeasyDb {
     } catch (e: Throwable) {
       opened?.close()
       if (!isWrongKey(e)) throw e
-      Log.w(TAG, "speakeasy.db unreadable with current key — recreating empty store", e)
-      deleteDbFiles(dbFile)
+      // The secret loaded fine but the file won't decrypt with it (genuine
+      // corruption / SQLCipher format change). Back the file up rather than
+      // delete it — recoverable if we ever reproduce the key — then recreate
+      // an empty store so the app stays usable.
+      Log.w(TAG, "speakeasy.db unreadable with current key — backing up and recreating empty store", e)
+      backupDbFiles(dbFile)
       setResetFlag(context)
       return SQLiteDatabase.openOrCreateDatabase(dbFile, passphrase, null, null, null)
     }
@@ -213,11 +245,35 @@ object SpeakeasyDb {
         .commit()
   }
 
-  /** Delete the DB file and its `-journal` / `-wal` / `-shm` sidecars. */
+  /**
+   * Delete the DB file and its `-journal` / `-wal` / `-shm` sidecars. Used
+   * only by the user-initiated [wipe] (account deletion). The unexpected-reset
+   * paths use [backupDbFiles] instead — never destroy data we weren't told to.
+   */
   private fun deleteDbFiles(dbFile: File) {
     for (suffix in listOf("", "-journal", "-wal", "-shm")) {
       val f = File(dbFile.path + suffix)
       if (f.exists()) f.delete()
+    }
+  }
+
+  /**
+   * Move the DB file (and sidecars) aside instead of deleting it, so an
+   * unexpected reset is recoverable rather than destructive. Single-slot: a
+   * prior `.orphan` backup is removed first so it can't grow without bound.
+   * Contents stay encrypted; this preserves them for a future recovery attempt.
+   */
+  private fun backupDbFiles(dbFile: File) {
+    for (suffix in listOf("", "-journal", "-wal", "-shm")) {
+      val src = File(dbFile.path + suffix)
+      if (!src.exists()) continue
+      val dst = File(dbFile.path + ".orphan" + suffix)
+      if (dst.exists()) dst.delete()
+      if (!src.renameTo(dst)) {
+        // Fall back to delete so we don't leave a half-state blocking recreate.
+        Log.w(TAG, "backup rename failed — deleting ${if (suffix.isEmpty()) "db" else suffix}")
+        src.delete()
+      }
     }
   }
 
