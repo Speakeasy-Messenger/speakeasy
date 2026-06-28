@@ -77,6 +77,14 @@ routed only — never persisted to the relay buffer). Group calls deferred.
 - ✅ Server live-routing in `apps/api/src/ws/handler.ts` — fans out to
   every live device of the callee, pushes notify-only when offline (only
   for `call_offer`), drops other frames silently when offline.
+- ✅ Mid-call WS-drop teardown (`apps/api/src/ws/call-drop-monitor.ts`):
+  a swipe-away / process-kill severs the WS with no `call_end`, leaving
+  the peer stranded. The client keeps its WS open for the whole call, so
+  a drop while a call is active is abnormal — the server ends the call for
+  the peer with `call_end.reason = 'peer_disconnected'` after a ~10s grace
+  window, cancelled if the same device reconnects (a transient blip /
+  deploy the call rides through at the media layer). Keyed by deviceToken;
+  cross-instance via `UserNotifier`; the peer's client gates on `call_id`.
 - ✅ TURN credentials route `GET /v1/turn/credentials`,
   Vouchflow-gated. `TurnProvider` interface with `CloudflareTurnProvider`
   + `StaticTurnProvider` (STUN-only fallback). `turnProviderFromEnv()`

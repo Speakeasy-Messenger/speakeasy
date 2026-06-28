@@ -787,6 +787,15 @@ export class CallOrchestrator {
         // generic hangup so the UI doesn't get stuck.
         local = 'hangup';
         break;
+      case 'peer_disconnected':
+        // Server-originated: the peer's WS dropped mid-call (swipe-away /
+        // kill / lost network with no reconnect in the grace window) and
+        // the server ended the call on their behalf. Treat exactly like a
+        // hangup — a connected call shows its duration, an unanswered one
+        // shows missed. Same outcome as `default`, spelled out so the
+        // wire-reason → local-reason mapping stays complete.
+        local = this.active.stage === 'connected' ? 'completed' : 'hangup';
+        break;
       default:
         local = this.active.stage === 'connected' ? 'completed' : 'hangup';
     }

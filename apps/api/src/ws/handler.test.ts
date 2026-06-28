@@ -1704,3 +1704,133 @@ describe('ws sealed sender — Phase 5g (spec §13)', () => {
     expect(pushProvider.calls[0]!.senderId).toBeUndefined();
   });
 });
+
+describe('ws call-drop teardown — swipe-away ends the call for the peer', () => {
+  // A killed client can't send call_end. The client keeps its WS open for
+  // the whole call, so a mid-call WS drop is always abnormal — the server
+  // ends the call for the surviving peer after a grace window, unless the
+  // dropped device reconnects (a transient blip / deploy the call should
+  // ride through). Short grace so the test doesn't wait the production 10s.
+  const GRACE = 120;
+
+  beforeEach(async () => {
+    // Rebuild the module app with a short drop-grace, reusing the fixtures
+    // the outer beforeEach already created.
+    await app.close();
+    app = await buildServer({
+      validator: makeValidator(),
+      userRepo,
+      devicesRepo,
+      connections,
+      presence,
+      messagesRepo,
+      groupRepo,
+      communityRepo,
+      push: pushProvider,
+      deletedHandles: deletedHandlesRepo,
+      instanceId: 'test-instance-1',
+      callDropGraceMs: GRACE,
+      logger: false,
+    });
+    await app.listen({ port: 0, host: '127.0.0.1' });
+    const addr = app.server.address() as AddressInfo;
+    url = `ws://127.0.0.1:${addr.port}/ws`;
+  });
+
+  async function authed(
+    userId: string,
+    token = `dvt_${userId}`,
+  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+    const ws = await open();
+    const q = new MsgQueue(ws);
+    ws.send(JSON.stringify({ type: 'auth', token }));
+    expect(((await q.next()) as { type: string }).type).toBe('authed');
+    return { ws, q };
+  }
+
+  it('ends the call for the peer when a participant swipes the app away mid-call', async () => {
+    const alice = await authed('alice-blue-fox');
+    const bob = await authed('bob-red-bear');
+    // alice dials bob → alice's socket is now tracked as in a call.
+    alice.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: 'call-DROP-AAAAAAAAAAAAAAAAAA',
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    expect(((await bob.q.next()) as { type: string }).type).toBe('call_offer');
+
+    // Swipe-away: the OS kills the process, severing the WS with no call_end.
+    alice.ws.terminate();
+
+    // The server tells bob the call is over after the grace window.
+    const end = (await bob.q.next()) as {
+      type: string;
+      from: string;
+      call_id: string;
+      reason: string;
+    };
+    expect(end).toMatchObject({
+      type: 'call_end',
+      from: 'alice-blue-fox',
+      call_id: 'call-DROP-AAAAAAAAAAAAAAAAAA',
+      reason: 'peer_disconnected',
+    });
+  });
+
+  it('does NOT end the call when the WS drop follows a clean hangup', async () => {
+    const alice = await authed('alice-blue-fox');
+    const bob = await authed('bob-red-bear');
+    alice.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: 'call-CLEAN-BBBBBBBBBBBBBBBBB',
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    expect(((await bob.q.next()) as { type: string }).type).toBe('call_offer');
+
+    // alice hangs up cleanly — this clears the server-side call tracking.
+    alice.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'bob-red-bear',
+        call_id: 'call-CLEAN-BBBBBBBBBBBBBBBBB',
+        reason: 'hangup',
+      }),
+    );
+    expect(((await bob.q.next()) as { reason: string }).reason).toBe('hangup');
+
+    // alice's app later backgrounds and the WS closes normally — there must
+    // be NO second (peer_disconnected) call_end for the already-ended call.
+    alice.ws.terminate();
+    await expect(bob.q.next(GRACE + 150)).rejects.toThrow(/timeout/);
+  });
+
+  it('cancels the teardown when the same device reconnects within the grace window', async () => {
+    const alice = await authed('alice-blue-fox');
+    const bob = await authed('bob-red-bear');
+    alice.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: 'call-RECON-CCCCCCCCCCCCCCCCC',
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    expect(((await bob.q.next()) as { type: string }).type).toBe('call_offer');
+
+    // Transient blip: the WS drops but the call rides through at the media
+    // layer. Let the drop's close handler settle (arm the pending end),
+    // then the SAME device reconnects (same deviceToken) within the window.
+    alice.ws.terminate();
+    await new Promise((r) => setTimeout(r, 20));
+    await authed('alice-blue-fox'); // re-auth cancels the pending end
+
+    // bob must NOT receive a peer_disconnected — the call survived.
+    await expect(bob.q.next(GRACE + 150)).rejects.toThrow(/timeout/);
+  });
+});

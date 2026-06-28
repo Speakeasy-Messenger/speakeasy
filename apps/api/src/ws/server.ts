@@ -16,6 +16,7 @@ import { createCallOfferBuffer } from './call-offer-buffer.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import { createAckBuffer, type AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
+import { createCallDropMonitor } from './call-drop-monitor.js';
 import type { EventLogRepo } from '../db/event-log.js';
 
 export interface AttachWsOptions {
@@ -55,6 +56,13 @@ export interface AttachWsOptions {
    * routes layer that already uses it (e.g. prekey_low notifications).
    */
   userNotifier: UserNotifier;
+  /**
+   * Grace window (ms) the mid-call WS-drop monitor waits for a reconnect
+   * before ending the call for the peer. Optional — defaults to
+   * DEFAULT_CALL_DROP_GRACE_MS. Tests pass a small value so they don't
+   * have to wait the full window.
+   */
+  callDropGraceMs?: number;
   /** Optional persistent event log — recipient of call-route diagnostics. */
   eventLog?: EventLogRepo;
   /** Optional iOS VoIP (CallKit) push sender — fires on call_offer. */
@@ -79,6 +87,12 @@ export function attachWebsocket(
   const wss = new WebSocketServer({ noServer: true });
   const callBuffer = opts.callBuffer ?? createCallOfferBuffer();
   const ackBuffer = opts.ackBuffer ?? createAckBuffer();
+  const callDropMonitor = createCallDropMonitor({
+    userNotifier: opts.userNotifier,
+    log: app.log,
+    eventLog: opts.eventLog,
+    graceMs: opts.callDropGraceMs,
+  });
 
   app.server.on('upgrade', (req, socket, head) => {
     if (req.url !== path) {
@@ -104,6 +118,7 @@ export function attachWebsocket(
         callBuffer,
         ackBuffer,
         userNotifier: opts.userNotifier,
+        callDropMonitor,
         eventLog: opts.eventLog,
         apnsVoip: opts.apnsVoip,
         log: app.log,
@@ -134,6 +149,7 @@ export function attachWebsocket(
 
   app.addHook('onClose', async () => {
     unsubscribe();
+    callDropMonitor.clearAll();
     await opts.ackRouter.close();
     for (const client of wss.clients) client.terminate();
     await new Promise<void>((resolve) => wss.close(() => resolve()));
