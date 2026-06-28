@@ -38,6 +38,17 @@ const VIDEO_PIP_OPTS = {
   stopAutomatically: true,
 } as const;
 
+// A PiP/floating call window is physically tiny — its smaller dimension is
+// ~108–160dp (Android clamps our 9:16 request into that range), whereas the
+// smallest real phone screen is ≥ 320dp in its short axis, and split-screen
+// halves only ONE axis (so its short axis stays full-width). So "short side
+// below this" reliably means "we're in the small floating window", with a
+// wide safety margin. We collapse to just-the-video on this signal rather
+// than depending solely on the native PiP-mode event reaching JS — that
+// event round-trip (DeviceEventEmitter under bridgeless new-arch) has been
+// unreliable, but RN's window-resize reflow on the PiP config change is not.
+const PIP_COMPACT_MAX_SHORT_SIDE = 280;
+
 /**
  * Live video call surface — full-bleed remote stream, picture-in-picture
  * local preview, three controls (mute, hang up, flip camera).
@@ -68,13 +79,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // SurfaceView re-creates at the new window size (Android SurfaceViews keep
   // their pre-resize buffer otherwise → the feed fills only part of the bubble).
   const { width: winW, height: winH } = useWindowDimensions();
+  // The authoritative "collapse to just the video" signal. True when the
+  // native PiP event told us so OR — the reliable fallback — when the window
+  // has reflowed to the tiny floating size. Either path drives BOTH the
+  // chrome-hide and the SurfaceView remount, so the bubble shows only the
+  // counterparty's face even when the native event never arrives.
+  const compact = inPip || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE;
   useEffect(() => {
     diag('call', 'pip mode change', {
       inPip,
+      compact,
       winW: Math.round(winW),
       winH: Math.round(winH),
     });
-  }, [inPip, winW, winH]);
+  }, [inPip, compact, winW, winH]);
 
   // Chat-history bubble for call end is emitted from the orchestrator's
   // onCallFinished deps callback in App.tsx (rc.55). Was previously a
@@ -227,8 +245,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           // Remount on the PiP transition so the Android SurfaceView
           // re-creates at the new (PiP vs full) window size instead of
           // keeping its pre-resize buffer (which left the feed filling only
-          // part of the bubble).
-          key={`fs-${inPip}`}
+          // part of the bubble — the reported "narrow corner"). Keyed on
+          // `compact` (window-size derived) so it remounts even when the
+          // native PiP event doesn't arrive.
+          key={`fs-${compact}`}
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
@@ -242,9 +262,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
       )}
 
-      {/* Overlay chrome — hidden while floating in the Android PiP window
-          (the small frame only has room for the video itself). */}
-      {!inPip ? (
+      {/* Overlay chrome (top bar + controls) — hidden whenever we're in the
+          small floating window: it only has room for the video itself, and
+          keeping the top-bar @handle drawn inside the bubble was the reported
+          "top bar shouldn't be there" defect. Gated on `compact` so it
+          collapses on the window resize even if the native PiP event is
+          dropped. */}
+      {!compact ? (
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar: peer handle + stage label. Translucent over the
             video stream so the user can read it without it taking
