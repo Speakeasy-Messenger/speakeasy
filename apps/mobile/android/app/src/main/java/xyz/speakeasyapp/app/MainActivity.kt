@@ -192,10 +192,15 @@ class MainActivity : ReactActivity() {
 
   private fun emitJsEvent(name: String, value: Any) {
     try {
-      (application as? MainApplication)
-        ?.reactNativeHost
-        ?.reactInstanceManager
-        ?.currentReactContext
+      // Bridgeless (new arch): the live JS context is on `reactHost`, NOT
+      // `reactNativeHost.reactInstanceManager` — that's the legacy bridge path
+      // and is null under bridgeless, so the old chain silently no-op'd EVERY
+      // emit. That's why SpeakeasyPipModeChanged never reached JS (inPip never
+      // flipped → the call overlay stayed drawn inside the small PiP window =
+      // the "bubble dimension error") and SpeakeasyPipClosed never fired
+      // (dismissing the bubble didn't end the call).
+      val ctx = (application as? MainApplication)?.reactHost?.currentReactContext
+      ctx
         ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         ?.emit(name, value)
     } catch (_: Throwable) {
