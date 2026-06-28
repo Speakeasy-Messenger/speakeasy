@@ -32,4 +32,17 @@ export const pip = {
     );
     return () => sub.remove();
   },
+
+  /**
+   * Subscribe to the Android PiP window being DISMISSED (the user closed the
+   * bubble rather than expanding it back into the app). The call must end on
+   * this — otherwise the camera/mic/ring keep running headless. Returns an
+   * unsubscribe fn; no-op on non-Android.
+   */
+  onPipClosed(cb: () => void): () => void {
+    if (Platform.OS !== 'android' || !native) return () => {};
+    const emitter = new NativeEventEmitter(native as unknown as never);
+    const sub = emitter.addListener('SpeakeasyPipClosed', () => cb());
+    return () => sub.remove();
+  },
 };
