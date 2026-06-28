@@ -1,5 +1,13 @@
-import React, { useEffect, useRef } from 'react';
-import { Animated, Easing, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useMemo, useRef } from 'react';
+import {
+  Animated,
+  Easing,
+  PanResponder,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import type { Attachment } from '@speakeasy/shared';
 import { AttachmentView } from './AttachmentView.js';
 import { isEdgeToEdgeMedia } from './attachment-layout.js';
@@ -89,7 +97,24 @@ export interface DisappearingMessageBubbleProps {
    * Only wired by ChatScreen for sent bubbles.
    */
   onTapResend?: () => void;
+  /**
+   * When this message is a quote-reply, the quoted context to render as
+   * a block above the body. `from` is the display label the host already
+   * resolved ("you" for self-quotes, else the author handle).
+   */
+  replyTo?: { from: string; preview: string };
+  /**
+   * Enables swipe-to-reply on this bubble. Fires once when the user pulls
+   * the bubble past the trigger threshold and releases. Omit to disable
+   * the gesture (e.g. failed/own-pending bubbles).
+   */
+  onReply?: () => void;
 }
+
+/** Rightward pull (px) needed to commit a reply on release. */
+const REPLY_TRIGGER_PX = 56;
+/** Max pull (px) — clamps the drag so the bubble never slides off-screen. */
+const REPLY_MAX_PULL_PX = 80;
 
 interface StageTarget {
   opacity: number;
@@ -133,12 +158,61 @@ export function DisappearingMessageBubble({
   timestamp,
   sendFailure,
   onTapResend,
+  replyTo,
+  onReply,
 }: DisappearingMessageBubbleProps) {
   const themed = useColors();
   const opacity = useRef(new Animated.Value(1)).current;
   const scale = useRef(new Animated.Value(1)).current;
   const blur = useRef(new Animated.Value(0)).current;
   const heightFactor = useRef(new Animated.Value(1)).current;
+
+  // Swipe-to-reply. Drives a horizontal translate that follows the
+  // finger (rightward only, clamped) and fires `onReply` once when the
+  // pull crosses the trigger and the finger lifts. The Animated.Value
+  // and PanResponder are stable across renders; `onReply` is read
+  // through a ref so an inline host callback doesn't rebuild the
+  // responder mid-gesture. Driven on the JS thread to match the
+  // dissolve animations sharing this view (mixing drivers crashes).
+  const translateX = useRef(new Animated.Value(0)).current;
+  const replyArmed = useRef(false);
+  const onReplyRef = useRef(onReply);
+  onReplyRef.current = onReply;
+  const panResponder = useMemo(
+    () =>
+      PanResponder.create({
+        // Only claim the gesture for a clearly-horizontal rightward drag,
+        // so the inverted FlatList keeps owning vertical scroll.
+        onMoveShouldSetPanResponder: (_e, g) =>
+          !!onReplyRef.current &&
+          g.dx > 8 &&
+          Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+        onPanResponderMove: (_e, g) => {
+          const dx = Math.max(0, Math.min(g.dx, REPLY_MAX_PULL_PX));
+          translateX.setValue(dx);
+          replyArmed.current = dx >= REPLY_TRIGGER_PX;
+        },
+        onPanResponderRelease: () => {
+          const fire = replyArmed.current;
+          replyArmed.current = false;
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: false,
+            bounciness: 6,
+            speed: 18,
+          }).start();
+          if (fire) onReplyRef.current?.();
+        },
+        onPanResponderTerminate: () => {
+          replyArmed.current = false;
+          Animated.spring(translateX, {
+            toValue: 0,
+            useNativeDriver: false,
+          }).start();
+        },
+      }),
+    [translateX],
+  );
 
   useEffect(() => {
     const t = TARGETS[stage];
@@ -214,7 +288,7 @@ export function DisappearingMessageBubble({
     isFailed ? styles.sentFailed : null,
     {
       opacity,
-      transform: [{ scale }],
+      transform: [{ translateX }, { scale }],
       // height collapses in the 'gone' stage. Using maxHeight + scaleY would be
       // cleaner with native driver, but we want predictable collapse.
       // 600 covers a single 220-height photo grid + caption + padding;
@@ -226,11 +300,47 @@ export function DisappearingMessageBubble({
   const bubble = (
     <Animated.View
       style={bubbleStyle}
+      // Swipe-to-reply pan handlers. No-op when `onReply` is absent (the
+      // responder declines the gesture), so non-reply bubbles keep normal
+      // scroll behavior.
+      {...panResponder.panHandlers}
       // Expose the in-flight blur amount for callers that wire a real
       // BlurView / Gaussian filter — read via `bubbleRef.props.style`.
       // (When react-native-community/blur lands, swap to <BlurView blurAmount={blur._value}>.)
       accessibilityLabel={`message: ${text}`}
     >
+      {/* Quoted block — the message this one is replying to. A left accent
+          rule + the author label + a one-line preview. Tinted for legibility
+          on each bubble colour. Static (no jump-to-original in v1). */}
+      {replyTo ? (
+        <View
+          style={[
+            styles.replyQuote,
+            isSent
+              ? styles.replyQuoteOnSent
+              : { backgroundColor: themed.pale, borderLeftColor: accent.base },
+          ]}
+        >
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.replyQuoteAuthor,
+              { color: isSent ? accent.foreground : accent.base },
+            ]}
+          >
+            {replyTo.from}
+          </Text>
+          <Text
+            numberOfLines={1}
+            style={[
+              styles.replyQuotePreview,
+              isSent ? styles.replyQuoteTextOnSent : { color: themed.slate },
+            ]}
+          >
+            {replyTo.preview || ' '}
+          </Text>
+        </View>
+      ) : null}
       {attachments && attachments.length > 0 ? (
         <AttachmentView
           attachments={attachments}
@@ -386,6 +496,33 @@ const styles = StyleSheet.create({
     lineHeight: 20,
   },
   sentText: { color: accent.foreground },
+  // Quoted-reply block at the top of a bubble. Left accent rule + tinted
+  // surface so it reads as "this is the message being answered" without
+  // competing with the body below it.
+  replyQuote: {
+    borderLeftWidth: 3,
+    borderLeftColor: accent.base,
+    borderRadius: 8,
+    paddingVertical: space.xs,
+    paddingHorizontal: space.sm,
+    marginBottom: space.xs,
+  },
+  replyQuoteOnSent: {
+    // Translucent dark wash reads as "inset" on the brass sent bubble.
+    backgroundColor: 'rgba(0,0,0,0.16)',
+    borderLeftColor: accent.foreground,
+  },
+  replyQuoteAuthor: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    marginBottom: 1,
+  },
+  replyQuotePreview: {
+    fontFamily: font.regular,
+    fontSize: 13,
+    lineHeight: 17,
+  },
+  replyQuoteTextOnSent: { color: 'rgba(255,255,255,0.85)' },
   // Read receipt — small + low-contrast so it never competes with
   // the message content. Cream-on-brass would blend; we go ink at
   // ~55% opacity for a "barely there" footprint that's still

@@ -23,7 +23,9 @@ import {
   isSpeakerHandle,
   newMessageId,
   parseMentions,
+  replyPreviewFrom,
   type Attachment,
+  type ReplyContext,
 } from '@speakeasy/shared';
 import { appVersion } from '../version.js';
 import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
@@ -67,7 +69,7 @@ import { ensureSessionWithPeer, clearSessionCacheFor } from '../crypto/session.j
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 import { diag, diagFingerprint } from '../diag/log.js';
 import { colors, fonts, space } from '../theme/index.js';
-import { font, motion, type } from '../theme/tokens.js';
+import { accent, font, motion, type } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
 import { useConnection } from '../store/connection.js';
 import {
@@ -171,6 +173,23 @@ export function ChatScreen({
   const [attachOpen, setAttachOpen] = useState(false);
 
   const [input, setInput] = useState('');
+  // Quote-reply target: the message the composer is currently replying
+  // to (set by swiping a bubble). Null when composing a normal message.
+  // Cleared on send or when the user dismisses the reply banner.
+  const [replyTarget, setReplyTarget] = useState<ReplyContext | null>(null);
+  const startReply = useCallback(
+    (m: { id: string; from: string; text: string; attachments?: Attachment[] }) => {
+      setReplyTarget({
+        id: m.id,
+        // Store the real author handle ('me' resolves to the local id) so
+        // the recipient sees who they're quoting; the banner/bubble map it
+        // back to "you" for the local user at render time.
+        from: m.from === 'me' ? myUserId : m.from,
+        preview: replyPreviewFrom({ text: m.text, attachments: m.attachments }),
+      });
+    },
+    [myUserId],
+  );
   // If the user got here by sharing text into Speakeasy ("Share →
   // Speakeasy" → pick this chat), prefill the composer with it. One-shot:
   // take() clears the pending share so other chats opened later are unaffected.
@@ -419,6 +438,10 @@ export function ChatScreen({
     let attachments = opts.attachments?.length ? opts.attachments : undefined;
     const mentions = opts.mentions?.length ? opts.mentions : undefined;
     if (!text && !attachments) return;
+    // Consume the active reply target (set by swiping a bubble). Any send
+    // while a reply is pending — text, photo, or file — becomes a
+    // quote-reply, then the banner clears.
+    const reply = replyTarget ?? undefined;
     const id = newMessageId();
     // Over-length text isn't dropped: it rides the attachment path as a
     // text/plain `message.txt` file (the same large-payload path images
@@ -439,12 +462,14 @@ export function ChatScreen({
         text: text,
         attachments,
         mentions,
+        replyTo: reply,
         kind: 'direct',
         sentAt: Date.now(),
         stage: 'sent',
         delivered: false,
         sendFailure: 'too_long',
       });
+      if (reply) setReplyTarget(null);
       return;
     }
     if (text && text.length > SEND_TEXT_MAX_CHARS) {
@@ -473,6 +498,7 @@ export function ChatScreen({
       text: text ?? '',
       attachments,
       mentions,
+      replyTo: reply,
       kind: 'direct',
       sentAt: Date.now(),
       stage: 'sent',
@@ -482,7 +508,9 @@ export function ChatScreen({
       // "tap to resend" cue and resends under the same id.
       delivered: false,
     });
-    await dispatchOutbound({ id, text, attachments, mentions });
+    // Clear the reply banner now the optimistic echo carries the quote.
+    if (reply) setReplyTarget(null);
+    await dispatchOutbound({ id, text, attachments, mentions, replyTo: reply });
   }
 
   /**
@@ -497,6 +525,7 @@ export function ChatScreen({
     text?: string;
     attachments?: Attachment[];
     mentions?: string[];
+    replyTo?: ReplyContext;
   }) {
     diag('chat', 'send: retry', { msgId: msg.id, peerFp: diagFingerprint(peerId) });
     setSendFailure(conversationId, msg.id, undefined);
@@ -505,6 +534,7 @@ export function ChatScreen({
       text: msg.text,
       attachments: msg.attachments,
       mentions: msg.mentions,
+      replyTo: msg.replyTo,
     });
   }
 
@@ -519,8 +549,9 @@ export function ChatScreen({
     text?: string;
     attachments?: Attachment[];
     mentions?: string[];
+    replyTo?: ReplyContext;
   }) {
-    const { id, text, attachments, mentions } = args;
+    const { id, text, attachments, mentions, replyTo } = args;
     try {
       let deviceToken = useIdentity.getState().deviceToken;
       if (!deviceToken) {
@@ -544,7 +575,7 @@ export function ChatScreen({
       const isSelf = peerId === myUserId;
       // Pack the text + attachments into the v1 envelope. Pre-rebrand
       // peers see legacy raw utf-8 text — `decodePayload` handles both.
-      const plaintext = encodePayload({ v: 1, text, attachments, mentions });
+      const plaintext = encodePayload({ v: 1, text, attachments, mentions, replyTo });
       let ciphertext: Uint8Array;
       if (isSelf) {
         ciphertext = utf8ToBytes(plaintext);
@@ -612,7 +643,7 @@ export function ChatScreen({
               text: 'Trust + send',
               style: 'destructive',
               onPress: () =>
-                void resendAfterReset({ id, text, attachments, mentions }),
+                void resendAfterReset({ id, text, attachments, mentions, replyTo }),
             },
           ],
         );
@@ -638,6 +669,7 @@ export function ChatScreen({
     text?: string;
     attachments?: Attachment[];
     mentions?: string[];
+    replyTo?: ReplyContext;
   }) {
     try {
       await signalProtocol.resetPeer(peerId);
@@ -650,6 +682,7 @@ export function ChatScreen({
         text: opts.text,
         attachments: opts.attachments,
         mentions: opts.mentions,
+        replyTo: opts.replyTo,
       });
     } catch (err) {
       diag('chat', 'resend after reset FAILED', {
@@ -795,6 +828,32 @@ export function ChatScreen({
                 read={!!item.readAt}
                 timestamp={item.sentAt}
                 sendFailure={item.sendFailure}
+                // Existing quote shown above the body. Map the stored
+                // author handle back to "you" for the local user.
+                replyTo={
+                  item.replyTo
+                    ? {
+                        from:
+                          item.replyTo.from === myUserId
+                            ? 'you'
+                            : item.replyTo.from,
+                        preview: item.replyTo.preview,
+                      }
+                    : undefined
+                }
+                // Swipe a delivered bubble to quote-reply to it. Failed /
+                // in-flight own bubbles aren't reply targets.
+                onReply={
+                  item.sendFailure
+                    ? undefined
+                    : () =>
+                        startReply({
+                          id: item.id,
+                          from: item.from,
+                          text: item.text,
+                          attachments: item.attachments,
+                        })
+                }
                 onTapResend={
                   item.from === 'me' && item.sendFailure
                     ? () =>
@@ -803,6 +862,7 @@ export function ChatScreen({
                           text: item.text,
                           attachments: item.attachments,
                           mentions: item.mentions,
+                          replyTo: item.replyTo,
                         })
                     : undefined
                 }
@@ -893,6 +953,40 @@ export function ChatScreen({
             { backgroundColor: themed.cream, borderTopColor: themed.divider },
           ]}
         >
+          {/* Reply banner — the message the next send will quote. A left
+              accent rule, "Replying to <who>", a one-line preview, and a
+              ✕ to cancel. Appears only while a reply target is set. */}
+          {replyTarget ? (
+            <View
+              testID="chat-reply-banner"
+              style={[styles.replyBanner, { borderLeftColor: accent.base }]}
+            >
+              <View style={styles.replyBannerBody}>
+                <Text style={[styles.replyBannerTitle, { color: accent.base }]}>
+                  Replying to{' '}
+                  {replyTarget.from === myUserId ? 'you' : replyTarget.from}
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.replyBannerPreview, { color: themed.slate }]}
+                >
+                  {replyTarget.preview || ' '}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setReplyTarget(null)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel reply"
+                testID="chat-reply-cancel"
+                style={styles.replyBannerClose}
+              >
+                <Text style={[styles.replyBannerCloseGlyph, { color: themed.slate }]}>
+                  ✕
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.inputBar}>
             {/* @feedback is text-only — attachments aren't stored in
                 /v1/feedback yet. Hide the paperclip + camera buttons
@@ -1161,6 +1255,37 @@ const styles = StyleSheet.create({
     fontFamily: font.regular,
     fontSize: 13,
     textAlign: 'center',
+  },
+  // Reply banner above the input bar — left accent rule, who/preview,
+  // and a ✕. Sits inside the composer so it shares its horizontal inset.
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderLeftWidth: 3,
+    paddingLeft: space.sm,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
+    marginBottom: space.sm,
+  },
+  replyBannerBody: { flex: 1 },
+  replyBannerTitle: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    marginBottom: 1,
+  },
+  replyBannerPreview: {
+    fontFamily: font.regular,
+    fontSize: 13,
+  },
+  replyBannerClose: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replyBannerCloseGlyph: {
+    fontFamily: font.regular,
+    fontSize: 15,
   },
   inputBar: {
     flexDirection: 'row',

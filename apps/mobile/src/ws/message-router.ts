@@ -8,6 +8,7 @@ import {
   decodePayload,
   isSpeakerHandle,
   type Attachment,
+  type ReplyContext,
   type WsServerMsg,
 } from '@speakeasy/shared';
 import type { SpeakeasyWsClient } from './client.js';
@@ -291,6 +292,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
       let decryptedOk = false;
       let attachments: Attachment[] | undefined;
       let mentions: string[] | undefined;
+      let replyTo: ReplyContext | undefined;
       if (senderId === deps.myUserId || isSpeakerHandle(senderId)) {
         // Plaintext path: self-DM (raw utf-8, no self-session) and
         // @speaker broadcasts (announcements aren't E2E). No libsignal
@@ -300,6 +302,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         bubble = payload.text ?? '';
         attachments = payload.attachments;
         mentions = payload.mentions;
+        replyTo = payload.replyTo;
         decryptedOk = true;
         diag('router', 'message: plaintext decoded', {
           ...frameDesc,
@@ -319,6 +322,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           bubble = payload.text ?? '';
           attachments = payload.attachments;
           mentions = payload.mentions;
+          replyTo = payload.replyTo;
           decryptedOk = true;
           diag('router', 'message: signal decrypted', {
             ...frameDesc,
@@ -373,6 +377,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           text: bubble,
           attachments,
           mentions,
+          replyTo,
           kind: 'direct',
           sentAt: inboundSentAt,
           stage: 'sent',
@@ -544,6 +549,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
       let bubble: string;
       let groupAttachments: Attachment[] | undefined;
       let groupMentions: string[] | undefined;
+      let groupReplyTo: ReplyContext | undefined;
       let decryptedOk = false;
       try {
         const plaintext = await deps.groupMessaging.decryptFromGroupMember(
@@ -555,6 +561,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         bubble = payload.text ?? '';
         groupAttachments = payload.attachments;
         groupMentions = payload.mentions;
+        groupReplyTo = payload.replyTo;
         decryptedOk = true;
         diag('router', 'group: decrypted', {
           msgId: frame.message_id,
@@ -597,6 +604,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
           text: bubble,
           attachments: groupAttachments,
           mentions: groupMentions,
+          replyTo: groupReplyTo,
           kind: 'group',
           sentAt: frame.sent_at ?? Date.now(),
           stage: 'sent',
