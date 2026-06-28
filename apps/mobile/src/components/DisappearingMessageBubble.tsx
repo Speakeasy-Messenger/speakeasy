@@ -111,7 +111,7 @@ export interface DisappearingMessageBubbleProps {
   onReply?: () => void;
 }
 
-/** Rightward pull (px) needed to commit a reply on release. */
+/** Horizontal pull (px, either direction) needed to commit a reply on release. */
 const REPLY_TRIGGER_PX = 56;
 /** Max pull (px) — clamps the drag so the bubble never slides off-screen. */
 const REPLY_MAX_PULL_PX = 80;
@@ -167,13 +167,14 @@ export function DisappearingMessageBubble({
   const blur = useRef(new Animated.Value(0)).current;
   const heightFactor = useRef(new Animated.Value(1)).current;
 
-  // Swipe-to-reply. Drives a horizontal translate that follows the
-  // finger (rightward only, clamped) and fires `onReply` once when the
-  // pull crosses the trigger and the finger lifts. The Animated.Value
-  // and PanResponder are stable across renders; `onReply` is read
-  // through a ref so an inline host callback doesn't rebuild the
-  // responder mid-gesture. Driven on the JS thread to match the
-  // dissolve animations sharing this view (mixing drivers crashes).
+  // Swipe-to-reply. Drives a horizontal translate that follows the finger
+  // in EITHER direction (clamped) and fires `onReply` once the pull crosses
+  // the trigger and the finger lifts — left or right, whichever feels
+  // natural for the bubble's side. The Animated.Value and PanResponder are
+  // stable across renders; `onReply` is read through a ref so an inline host
+  // callback doesn't rebuild the responder mid-gesture. Driven on the JS
+  // thread to match the dissolve animations sharing this view (mixing
+  // drivers crashes).
   const translateX = useRef(new Animated.Value(0)).current;
   const replyArmed = useRef(false);
   const onReplyRef = useRef(onReply);
@@ -181,16 +182,21 @@ export function DisappearingMessageBubble({
   const panResponder = useMemo(
     () =>
       PanResponder.create({
-        // Only claim the gesture for a clearly-horizontal rightward drag,
-        // so the inverted FlatList keeps owning vertical scroll.
+        // Claim the gesture for a clearly-horizontal drag in either
+        // direction, so the FlatList keeps owning vertical scroll but a
+        // sideways swipe (left OR right) becomes a reply.
         onMoveShouldSetPanResponder: (_e, g) =>
           !!onReplyRef.current &&
-          g.dx > 8 &&
-          Math.abs(g.dx) > Math.abs(g.dy) * 1.6,
+          Math.abs(g.dx) > 6 &&
+          Math.abs(g.dx) > Math.abs(g.dy) * 1.2,
         onPanResponderMove: (_e, g) => {
-          const dx = Math.max(0, Math.min(g.dx, REPLY_MAX_PULL_PX));
+          // Follow the finger either way, clamped on both sides.
+          const dx = Math.max(
+            -REPLY_MAX_PULL_PX,
+            Math.min(g.dx, REPLY_MAX_PULL_PX),
+          );
           translateX.setValue(dx);
-          replyArmed.current = dx >= REPLY_TRIGGER_PX;
+          replyArmed.current = Math.abs(dx) >= REPLY_TRIGGER_PX;
         },
         onPanResponderRelease: () => {
           const fire = replyArmed.current;
