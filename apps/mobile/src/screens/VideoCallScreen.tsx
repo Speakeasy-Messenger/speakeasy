@@ -178,11 +178,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // feed is full-screen; when the peer's video arrives it migrates to the
   // corner bubble. Tapping the bubble swaps which feed is full-screen.
   //
-  // Mirroring: neither feed is mirrored. A tester reported her own
-  // self-preview looked left-right flipped ("sides inverted") — the
-  // conventional selfie-mirror. She wants it un-mirrored (as a photo /
-  // as the peer sees her), so we render the local feed raw. The remote
-  // feed was never mirrored.
+  // Mirroring: the LOCAL self-preview is mirrored (the selfie-mirror
+  // convention every video app uses — you see yourself as in a mirror),
+  // wherever it currently lives (full-screen while ringing, or the corner
+  // bubble once connected). The REMOTE feed is never mirrored — the peer
+  // must appear the right way round. We mirror whichever RTCView is showing
+  // `localUrl`. (Earlier this was rendered raw/un-mirrored; the un-mirrored
+  // preview reads as backwards to the user, so it's restored to mirrored.)
   const remoteActive = !!remoteUrl;
   const fullscreenIsLocal = !remoteActive || swapped;
   const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
@@ -198,6 +200,8 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
+          // Mirror only when this view is showing the local self-preview.
+          mirror={fullscreenUrl === localUrl}
           // PiP the remote feed when it's the full-screen one (default,
           // not swapped) so backgrounding floats the caller.
           iosPIP={fullscreenIsLocal ? undefined : VIDEO_PIP_OPTS}
@@ -240,6 +244,8 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               style={StyleSheet.absoluteFill}
               objectFit="cover"
               zOrder={1}
+              // Mirror only when the bubble is showing the local self-preview.
+              mirror={pipUrl === localUrl}
               // When swapped, the remote feed lives in the bubble — keep
               // PiP attached to the remote feed so backgrounding still
               // floats the caller (not the suspended local camera).
