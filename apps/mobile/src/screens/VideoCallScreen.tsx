@@ -94,11 +94,15 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   useEffect(() => {
     pip.setVideoCallActive(true);
     const unsub = pip.onPipModeChanged(setInPip);
+    // Closing the PiP bubble (vs expanding it back) must END the call —
+    // otherwise the camera/mic/ring keep running headless.
+    const unsubClosed = pip.onPipClosed(() => orchestrator.hangup());
     return () => {
       pip.setVideoCallActive(false);
       unsub();
+      unsubClosed();
     };
-  }, []);
+  }, [orchestrator]);
 
   // Live duration counter once connected.
   useEffect(() => {
@@ -185,7 +189,15 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // must appear the right way round. We mirror whichever RTCView is showing
   // `localUrl`. (Earlier this was rendered raw/un-mirrored; the un-mirrored
   // preview reads as backwards to the user, so it's restored to mirrored.)
-  const remoteActive = !!remoteUrl;
+  // Treat the remote feed as "active" (take the full screen, push local to the
+  // corner bubble) only once the call is actually CONNECTED — not the instant
+  // the remote track is added during negotiation. onRemoteStreamURL fires at
+  // track-add (mid-"connecting"), before any video flows, so gating on the
+  // URL alone flipped to a BLACK remote full-screen with the self-preview
+  // stuck in the corner while still "Connecting…" (reported on bananaman's
+  // side). Keep the local feed full-screen through dialing/ringing/connecting;
+  // migrate to the bubble when connected.
+  const remoteActive = !!remoteUrl && active.stage === 'connected';
   const fullscreenIsLocal = !remoteActive || swapped;
   const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
   // The bubble only exists once both feeds are present (i.e. connected).

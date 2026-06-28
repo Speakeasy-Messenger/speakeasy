@@ -155,20 +155,51 @@ class MainActivity : ReactActivity() {
 
   // Tell JS so the call UI can collapse to just the video in the PiP
   // window (hide controls/handle that don't fit the small frame).
+  // True between exiting PiP and the next lifecycle settle, so onStop vs
+  // onResume can tell a DISMISS (user closed the bubble → onStop) from an
+  // EXPAND (user reopened the app → onResume).
+  private var exitingPip = false
+
   override fun onPictureInPictureModeChanged(
     isInPictureInPictureMode: Boolean,
     newConfig: Configuration,
   ) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
+    emitJsEvent("SpeakeasyPipModeChanged", isInPictureInPictureMode)
+    if (!isInPictureInPictureMode) {
+      // Exiting PiP — but we don't yet know if it's a dismiss or an expand.
+      // onResume (expand) clears this; onStop (dismiss) acts on it.
+      exitingPip = true
+    }
+  }
+
+  override fun onResume() {
+    super.onResume()
+    // Reopened into the app — not a dismiss. Don't end the call.
+    exitingPip = false
+  }
+
+  override fun onStop() {
+    super.onStop()
+    if (exitingPip) {
+      // The user CLOSED the PiP bubble (didn't expand it). End the call so the
+      // camera/mic/dial tone don't keep running headless (reported: "close the
+      // bubble, the call keeps going"). JS hangs up on this event.
+      exitingPip = false
+      emitJsEvent("SpeakeasyPipClosed", true)
+    }
+  }
+
+  private fun emitJsEvent(name: String, value: Any) {
     try {
       (application as? MainApplication)
         ?.reactNativeHost
         ?.reactInstanceManager
         ?.currentReactContext
         ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
-        ?.emit("SpeakeasyPipModeChanged", isInPictureInPictureMode)
+        ?.emit(name, value)
     } catch (_: Throwable) {
-      /* best-effort UI hint */
+      /* best-effort */
     }
   }
 
