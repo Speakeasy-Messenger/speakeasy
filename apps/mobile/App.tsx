@@ -1052,7 +1052,17 @@ export default function App() {
       // isn't foregrounded-active, so chat content isn't exposed in the
       // app-switcher thumbnail or during a screen-off→on flash. Cleared
       // on 'active'. (See PrivacyCover — lightweight, no re-auth.)
-      useUiState.getState().setPrivacyCovered(next !== 'active');
+      //
+      // EXEMPT active calls: a video call backgrounds into a PiP window to
+      // KEEP SHOWING the live video — covering it paints the brand splash
+      // over the PiP bubble (no video) and, being pointerEvents:auto, eats
+      // taps so the user can't restore the app (reported: "bubble shows the
+      // splash, tapping doesn't return me"). The on-screen content during a
+      // call is the call UI, not chat, so there's nothing sensitive to hide.
+      // Mirrors the WS-close call exemption below. Checked synchronously so
+      // it's race-free vs the PiP-mode-change event.
+      const callActiveForCover = !!useCalls.getState().active;
+      useUiState.getState().setPrivacyCovered(next !== 'active' && !callActiveForCover);
       if (next === 'active') {
         const state = ws.getState();
         // `reconnecting` already has a timer pending — the WS client
