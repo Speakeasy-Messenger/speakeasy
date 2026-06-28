@@ -854,6 +854,44 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       });
     }
   }
+  // Rich device + a message push carrying a sender but NO ciphertext = the
+  // message was too large to forward (the >3.5KB FCM/APNs cap drops it),
+  // which in practice means a media attachment. Surface "📎 New attachment"
+  // instead of the generic "New message". Private-mode devices keep the
+  // generic banner (they opted out of content previews). Client-only: the
+  // server can't label it (E2E) and we deliberately don't leak the
+  // attachment TYPE through the push transport.
+  if (
+    conversationId &&
+    data.notify_kind === 'message' &&
+    data.sender_id &&
+    !data.ciphertext
+  ) {
+    if (!useSettings.getState().hydrated) await useSettings.getState().hydrate();
+    if (useSettings.getState().notificationPrivacy === 'rich') {
+      const peer = data.sender_id;
+      const prior = await loadNotifStack(conversationId);
+      await displayMessagingNotification({
+        conversationId,
+        peerHandle: peer,
+        msgType: data.msg_type ?? 'direct',
+        title: data.title,
+        messages: [
+          ...prior,
+          {
+            text: '📎 New attachment',
+            timestamp: ulidTimeMs(data.message_id ?? '') ?? Date.now(),
+            person: { id: peer, name: '@' + peer },
+          },
+        ],
+        withReply: true,
+      });
+      diag('push-bg', 'attachment notification displayed (ciphertext dropped)', {
+        conversationId,
+      });
+      return;
+    }
+  }
   // Calls get the full-screen ringing notification; everything else the
   // plain banner. (Message ciphertext already handled above and returned.)
   if (data.notify_kind === 'call') {
