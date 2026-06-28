@@ -30,6 +30,34 @@ export interface Attachment {
   name?: string;
 }
 
+/** Human noun for an attachment kind — for list previews + notifications. */
+export function attachmentNoun(kind: AttachmentKind): string {
+  switch (kind) {
+    case 'image':
+      return 'image';
+    case 'gif':
+      return 'GIF';
+    case 'file':
+      return 'file';
+  }
+}
+
+/**
+ * One-line preview for a message: its text if present, else a noun for its
+ * first attachment ("image" / "GIF" / "file"), else ''. Keeps an
+ * attachment-only message from rendering blank in the conversation list and
+ * (where the content is available) in notifications.
+ */
+export function messagePreviewText(m: {
+  text?: string;
+  attachments?: Attachment[];
+}): string {
+  const t = m.text?.trim();
+  if (t) return t;
+  const first = m.attachments?.[0];
+  return first ? attachmentNoun(first.kind) : '';
+}
+
 export interface MessagePayload {
   /** Schema version. Bump on breaking changes. */
   v: 1;

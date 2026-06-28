@@ -9,6 +9,7 @@ import {
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import { messagePreviewText } from '@speakeasy/shared';
 import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
 import {
@@ -128,7 +129,9 @@ export function ConversationsScreen({
         kind: 'direct' as const,
         conversationId,
         peerUserId,
-        preview: last?.text ?? 'No messages yet',
+        // Attachment-only messages have empty text — show "image"/"GIF"/"file"
+        // (with the sender prefix the tile adds) instead of a blank preview.
+        preview: last ? messagePreviewText(last) || 'No messages yet' : 'No messages yet',
         previewIsSelf: last?.from === 'me',
         sortKey: last?.sentAt ?? c.createdAt,
         unread: unreadCountFor(conversationId),
@@ -146,7 +149,7 @@ export function ConversationsScreen({
       groupId,
       name: g.name,
       memberCount: g.members.length,
-      preview: last?.text ?? 'No messages yet',
+      preview: last ? messagePreviewText(last) || 'No messages yet' : 'No messages yet',
       previewSender: last?.from,
       sortKey: last?.sentAt ?? g.createdAt,
       unread: conv ? unreadCountFor(groupId) : 0,
