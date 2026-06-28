@@ -3,6 +3,7 @@ import {
   Pressable,
   StyleSheet,
   Text,
+  useWindowDimensions,
   View,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
@@ -15,6 +16,7 @@ import {
 } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
 import { pip } from '../native/pip.js';
+import { diag } from '../diag/log.js';
 import { useCalls } from '../store/calls.js';
 import { space, useColors } from '../theme/index.js';
 import { callPalette, font, type as typeScale } from '../theme/tokens.js';
@@ -60,6 +62,19 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // Android system-PiP (the floating window after pressing Home). While in
   // it we hide the overlay chrome so only the video shows in the small frame.
   const [inPip, setInPip] = useState(false);
+  // PiP window dimensions. RN reflows to the small window on PiP enter; we use
+  // the live size to (a) diagnose the scaling report and (b) confirm inPip
+  // actually propagated. The fullscreen RTCView is also keyed on inPip so its
+  // SurfaceView re-creates at the new window size (Android SurfaceViews keep
+  // their pre-resize buffer otherwise → the feed fills only part of the bubble).
+  const { width: winW, height: winH } = useWindowDimensions();
+  useEffect(() => {
+    diag('call', 'pip mode change', {
+      inPip,
+      winW: Math.round(winW),
+      winH: Math.round(winH),
+    });
+  }, [inPip, winW, winH]);
 
   // Chat-history bubble for call end is emitted from the orchestrator's
   // onCallFinished deps callback in App.tsx (rc.55). Was previously a
@@ -209,6 +224,11 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           (or local again when swapped). Black until any media exists. */}
       {fullscreenUrl ? (
         <RTCView
+          // Remount on the PiP transition so the Android SurfaceView
+          // re-creates at the new (PiP vs full) window size instead of
+          // keeping its pre-resize buffer (which left the feed filling only
+          // part of the bubble).
+          key={`fs-${inPip}`}
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
