@@ -163,4 +163,13 @@ jobs:
           # Monotonic CFBundleVersion — TestFlight rejects duplicate build
           # numbers. github.run_number increases per run of THIS workflow.
           BUILD_NUMBER: ${{ github.run_number }}
-        run: bundle exec fastlane ios "$LANE"
+          # Marketing version (CFBundleShortVersionString), derived from the
+          # release tag the same way Android derives versionName. For a tag
+          # `ios-1.0.23` this is `1.0.23`; for a plain workflow_dispatch (no
+          # tag) it's empty and the Fastfile leaves the project value as-is.
+        run: |
+          if [ "${GITHUB_REF}" != "${GITHUB_REF#refs/tags/ios-}" ]; then
+            export MARKETING_VERSION="${GITHUB_REF#refs/tags/ios-}"
+            echo "Derived MARKETING_VERSION=$MARKETING_VERSION from tag"
+          fi
+          bundle exec fastlane ios "$LANE"
