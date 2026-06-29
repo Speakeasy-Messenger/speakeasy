@@ -8,7 +8,12 @@ import {
   newMessageId,
 } from '@speakeasy/shared';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import notifee from '@notifee/react-native';
+import notifee, { EventType } from '@notifee/react-native';
+import {
+  showOngoingCallNotification,
+  dismissOngoingCallNotification,
+  CALL_NOTIF_ACTIONS,
+} from './src/calls/call-notification.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
@@ -207,7 +212,17 @@ let _apfLastApply = 0;
 // overlay's animation length; keeps a stale event from pinning the eyes.
 const EVENT_HOLD_MS = 1600;
 
+// __DEV__-only: flip true (Metro reloads) to boot straight into the
+// standalone video-call test harness — see DevVideoCallHarness. Lets PiP /
+// resize / return be tested with the camera and no real call. Always false
+// in committed source; never reached in release (__DEV__ is false there).
+const DEV_VIDEO_HARNESS = false;
+
 export default function App() {
+  if (__DEV__ && DEV_VIDEO_HARNESS) {
+    const Harness = require('./src/screens/DevVideoCallHarness.js').DevVideoCallHarness;
+    return <Harness onClosed={() => {}} />;
+  }
   const userId = useIdentity((s) => s.userId);
   const deviceToken = useIdentity((s) => s.deviceToken);
   const hydrated = useIdentity((s) => s.hydrated);
@@ -1064,6 +1079,9 @@ export default function App() {
       const callActiveForCover = !!useCalls.getState().active;
       useUiState.getState().setPrivacyCovered(next !== 'active' && !callActiveForCover);
       if (next === 'active') {
+        // Back in the app → tear down the ongoing-call pill (the in-app
+        // call UI is now front-and-center). No-op if it wasn't showing. (#5)
+        void dismissOngoingCallNotification();
         const state = ws.getState();
         // `reconnecting` already has a timer pending — the WS client
         // turned `connect()` into a no-op for that state in the loop
@@ -1138,6 +1156,23 @@ export default function App() {
           }
         } else if (callActive) {
           diag('app', 'AppState background → keeping WS (call active)');
+          // Voice-call pill (#5): surface the ongoing-call notification so a
+          // backgrounded call stays visible + controllable — peer, live
+          // duration, Mute, End, tap-to-return. Android only; iOS gets the
+          // same from CallKit. Video calls also float into PiP; this is the
+          // sole affordance for audio calls (nothing else shows when bg'd).
+          const ac = useCalls.getState().active;
+          // Video calls float into the PiP bubble — showing the pill too
+          // would double up. The pill is for audio/'private' (masked audio)
+          // calls, which have no other backgrounded affordance.
+          if (ac && ac.kind !== 'video') {
+            void showOngoingCallNotification({
+              peerHandle: ac.peerUserId,
+              connectedAtMs: ac.connectedAt,
+              micMuted: ac.micMuted,
+              kind: ac.kind,
+            });
+          }
         }
       }
     });
@@ -1151,6 +1186,42 @@ export default function App() {
       ) {
         navRef.current?.navigate('IncomingCall');
       }
+      // #5 pill: drop it the moment the call ends (even while backgrounded).
+      if (prev?.active && !s.active) {
+        void dismissOngoingCallNotification();
+      }
+      // Keep the Mute/Unmute label current while backgrounded (re-display is
+      // idempotent on the same id). Only when backgrounded — never spawn the
+      // pill while the in-app call UI is foreground.
+      if (
+        s.active &&
+        prev?.active &&
+        s.active.micMuted !== prev.active.micMuted &&
+        AppState.currentState !== 'active'
+      ) {
+        void showOngoingCallNotification({
+          peerHandle: s.active.peerUserId,
+          connectedAtMs: s.active.connectedAt,
+          micMuted: s.active.micMuted,
+          kind: s.active.kind,
+        });
+      }
+    });
+
+    // #5 pill actions: Mute / End from the notification route to the call
+    // orchestrator. Tap-the-body (return-to-call) is handled by the action's
+    // launchActivity, which foregrounds the app — the call overlay then shows
+    // because useCalls.active is still set.
+    const callNotifUnsub = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type !== EventType.ACTION_PRESS) return;
+      const id = detail.pressAction?.id;
+      const active = useCalls.getState().active;
+      if (id === CALL_NOTIF_ACTIONS.mute && active && callOrch) {
+        callOrch.setMicMuted(!active.micMuted);
+      } else if (id === CALL_NOTIF_ACTIONS.end && callOrch) {
+        callOrch.hangup();
+        void dismissOngoingCallNotification();
+      }
     });
 
     return () => {
@@ -1158,6 +1229,8 @@ export default function App() {
       lifecycleSub.remove();
       unsubscribe();
       callsUnsub();
+      callNotifUnsub();
+      void dismissOngoingCallNotification();
       setCallOrchestrator(undefined);
       ws.close();
     };

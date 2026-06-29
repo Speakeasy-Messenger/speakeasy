@@ -247,7 +247,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           // keeping its pre-resize buffer (which left the feed filling only
           // part of the bubble — the reported "narrow corner"). Keyed on
           // `compact` (window-size derived) so it remounts even when the
-          // native PiP event doesn't arrive.
+          // native PiP event doesn't arrive. (The ~250ms placeholder on PiP
+          // entry is Android's own surface-reestablish behavior, not this
+          // remount — verified identical with a stable key.)
           key={`fs-${compact}`}
           streamURL={fullscreenUrl}
           style={styles.remoteView}

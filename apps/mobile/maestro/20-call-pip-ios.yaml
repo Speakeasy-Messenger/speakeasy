@@ -1,0 +1,90 @@
+# Maestro flow: iOS video-call PiP + return transition (Tier C — real device)
+#
+# Targets video-call bug #4 (iOS shows no PiP bubble when backgrounded)
+# and #2 (black screen on return). The Android emulator can't reproduce
+# either — iOS PiP is an AVKit system window and CallKit's call UI is a
+# system surface, neither of which exists on Android, and neither of
+# which the iOS Simulator renders (PiP needs a real device GPU path).
+# So this flow is meant to run on a REAL iPhone via a device farm
+# (BrowserStack App Automate / Firebase Test Lab iOS).
+#
+# IMPORTANT — assertion model:
+#   The iOS PiP window and any CallKit call UI render OUTSIDE the app's
+#   process, so they are NOT in Maestro's accessibility tree. You cannot
+#   `assertVisible` them. They DO show up in a full-screen screenshot.
+#   So this flow's job is to *drive the app into the states* and capture
+#   pixels at each one; the actual pass/fail (does the bubble show the
+#   counterparty's face vs. a black/splash rectangle, does the pill read
+#   "@peer · 00:NN") is decided by inspecting the screenshots off-device.
+#
+# PRE-CONDITION — harness build:
+#   The standalone call screen comes from the __DEV__ DevVideoCallHarness
+#   (App.tsx DEV_VIDEO_HARNESS flag). Build the .ipa with that flag ON so
+#   the call screen mounts on launch with the device camera as both local
+#   and "remote" feed — no real two-peer WebRTC call or TURN relay needed.
+#   Grant camera before the run (farm capability / pre-seeded TCC).
+
+appId: xyz.speakeasyapp.app
+name: iOS video-call PiP + return (Tier C, real device)
+---
+
+- launchApp
+- tapOn:
+    text: "Wait"
+    optional: true
+
+# The harness calls getUserMedia(audio+video) + InCallManager.start on mount,
+# raising TWO iOS permission dialogs (camera, then microphone). The active audio
+# session is what lets iOS auto-start PiP from inline. Grant both — wording
+# varies by iOS version, and there are two dialogs, so run the allow-taps twice.
+# All optional so the flow still runs if permission was pre-granted.
+- repeat:
+    times: 2
+    commands:
+      - tapOn:
+          text: "Allow While Using App"
+          optional: true
+      - tapOn:
+          text: "Allow"
+          optional: true
+      - tapOn:
+          text: "OK"
+          optional: true
+
+# Call screen is up once the end-call button is in the tree. The harness
+# mounts a fake "connected" video call, so this appears without a peer.
+- extendedWaitUntil:
+    visible:
+      id: "video-call-end"
+    timeout: 30000
+
+# (1) Foreground baseline — full-screen video call, chrome visible.
+- takeScreenshot: 01-foreground
+
+# Explicitly request PiP so entry is deterministic rather than relying
+# only on auto-enter-on-background (which we also exercise next).
+- tapOn:
+    id: "video-call-pip"
+    optional: true
+
+# (2) Background the app — iOS auto-enters PiP. This screenshot is the
+# bug-#4 witness: the system PiP bubble should fill with the
+# counterparty's video, NOT the brand splash / privacy cover / a narrow
+# top-left corner of the call screen.
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 02-pip-bubble
+
+# (3) Return to the call. Bug #2: on foreground the remote video should
+# repaint immediately, not stay black. Re-asserting the end button proves
+# the RN screen remounted; the screenshot proves the video actually came
+# back (a black frame with a live end button is exactly the #2 failure).
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: "video-call-end"
+    timeout: 15000
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: 03-returned
