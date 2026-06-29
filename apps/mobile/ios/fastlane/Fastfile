@@ -164,6 +164,10 @@ platform :ios do
       groups: distribute ? groups : nil,
       notify_external_testers: distribute,
       skip_waiting_for_build_processing: !distribute,
+      # Apple requires a "what's new" note for any externally-distributed
+      # build. Generic default keeps the release unblocked; override per
+      # release with TESTFLIGHT_CHANGELOG.
+      changelog: distribute ? (ENV["TESTFLIGHT_CHANGELOG"] || "Bug fixes and improvements.") : nil,
     )
   end
 
