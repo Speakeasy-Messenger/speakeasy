@@ -34,10 +34,25 @@ import type {
   IceServer,
 } from './types.js';
 import { mediaKindForCall } from './types.js';
+import { CallKeepBridge } from './callkeep-bridge.js';
 import { FilterError, setFilterBypass } from '../native/voice-filter.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
+
+/**
+ * Master switch for the CallKit / ConnectionService bridge.
+ *
+ * OFF by default and deliberately so: starting CallKit hands the iOS audio
+ * session to the system, and if it isn't perfectly coordinated with the
+ * WebRTC ADM it can break call audio (one-way / silent) — a failure that ONLY
+ * manifests in a real two-device call and so cannot be caught on the
+ * single-device BrowserStack test rig. The bridge itself is fully wired below;
+ * flip this to `true`, then verify audio in BOTH directions on a real
+ * two-device call before shipping. While `false` the bridge is never
+ * constructed, so the working in-app call UI is unchanged.
+ */
+const CALLKEEP_ENABLED: boolean = false;
 
 /**
  * How long a cancelled/ended callId is remembered so a buffered offer for
@@ -158,6 +173,8 @@ export class CallOrchestrator {
    */
   private connectingAt?: number;
   private peer?: CallPeer;
+  /** Lazily-started CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
+  private callKeep?: CallKeepBridge;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
   private connStateUnsub?: () => void;
@@ -188,6 +205,22 @@ export class CallOrchestrator {
 
   constructor(private readonly deps: CallOrchestratorDeps) {}
 
+  /**
+   * Lazily construct + start the CallKit/ConnectionService bridge before the
+   * first call, so its store subscriber is attached in time to mirror the
+   * upcoming `setActive` into the native call UI. No-op (and never constructs
+   * the bridge) while `CALLKEEP_ENABLED` is false. Idempotent: `start()` guards
+   * on its own `setupDone`, and the native module is absent-safe (no-ops if
+   * CallKit/ConnectionService isn't registered on this build). Awaited before
+   * `setActive` so the bridge's subscriber doesn't miss the call-start diff.
+   */
+  private async ensureCallKeepStarted(): Promise<void> {
+    if (!CALLKEEP_ENABLED || this.callKeep) return;
+    const bridge = new CallKeepBridge({ orchestrator: this });
+    this.callKeep = bridge;
+    await bridge.start();
+  }
+
   getActive(): ActiveCall | undefined {
     return this.active;
   }
@@ -208,6 +241,9 @@ export class CallOrchestrator {
       throw new Error('cannot call self');
     }
     const callId = newCallId();
+    // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
+    // store subscriber catches this call-start. No-op while CALLKEEP_ENABLED.
+    await this.ensureCallKeepStarted();
     this.setActive({
       callId,
       peerUserId,
@@ -665,6 +701,9 @@ export class CallOrchestrator {
       });
       this.attachPeer(peer);
       await peer.setRemoteOffer(payload);
+      // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
+      // store subscriber mirrors this incoming call into the native ring UI.
+      await this.ensureCallKeepStarted();
       this.setActive({
         callId,
         peerUserId: fromUserId,

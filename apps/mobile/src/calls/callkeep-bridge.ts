@@ -107,7 +107,12 @@ export class CallKeepBridge {
           // Spec §1: zero PII. Don't surface our calls in the
           // device's iCloud-synced Recents list.
           includesCallsInRecents: false,
-          supportsVideo: false,
+          // We DO support video calls — reporting the call as video to
+          // CallKit is what gives iOS the video-call context (and keeps
+          // the app alive in the background so the remote feed can float
+          // into a PiP bubble). The per-call `video` flag in startCall /
+          // displayIncomingCall below is what actually marks each call.
+          supportsVideo: true,
           maximumCallGroups: '1',
           maximumCallsPerCallGroup: '1',
         },
@@ -217,9 +222,13 @@ export class CallKeepBridge {
     if (!RNCallKeep) return;
     if (!prev && next) {
       const uuid = this.allocUuid(next.callId);
+      // Report the actual media kind so CallKit treats a video call as a
+      // video call — required for the iOS background video-call context
+      // that Picture-in-Picture relies on (bug #4).
+      const isVideo = next.kind === 'video';
       if (next.isCaller) {
         try {
-          RNCallKeep.startCall(uuid, next.peerUserId, `@${next.peerUserId}`, 'generic', false);
+          RNCallKeep.startCall(uuid, next.peerUserId, `@${next.peerUserId}`, 'generic', isVideo);
         } catch (err) {
           diag('callkeep', 'startCall failed', { err: String(err) });
         }
@@ -230,7 +239,7 @@ export class CallKeepBridge {
             next.peerUserId,
             `@${next.peerUserId}`,
             'generic',
-            false,
+            isVideo,
           );
         } catch (err) {
           diag('callkeep', 'displayIncomingCall failed', { err: String(err) });
