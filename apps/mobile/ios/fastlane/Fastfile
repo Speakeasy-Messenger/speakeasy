@@ -129,7 +129,15 @@ platform :ios do
     )
     upload_to_testflight(
       api_key: key,
-      skip_waiting_for_build_processing: true,
+      # WAIT for Apple's processing verdict instead of greening the instant
+      # the binary uploads. With skip=true the lane reported "success" on
+      # upload and never saw a post-upload PROCESSING rejection — so a build
+      # that Apple silently discarded looked like a successful release and
+      # never reached TestFlight (internal testers auto-get any build that
+      # finishes processing, so a missing build means processing failed).
+      # skip=false makes fastlane poll until the build is processed and FAIL
+      # the run — surfacing Apple's reason in the CI log — if it isn't.
+      skip_waiting_for_build_processing: false,
       distribute_external: false,
     )
   end
