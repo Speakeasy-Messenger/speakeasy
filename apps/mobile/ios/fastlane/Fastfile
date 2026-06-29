@@ -72,6 +72,43 @@ def set_ci_build_number
   increment_build_number(xcodeproj: "Speakeasy.xcodeproj", build_number: bn)
 end
 
+# Spaceship token from the same ASC API key env the rest of the lane uses,
+# so we can talk to App Store Connect directly (list beta groups).
+def asc_token
+  require "spaceship"
+  require "base64"
+  content = ENV.fetch("ASC_KEY_CONTENT")
+  content = Base64.decode64(content) if ENV["ASC_KEY_CONTENT_BASE64"] == "true"
+  Spaceship::ConnectAPI::Token.create(
+    key_id: ENV.fetch("ASC_KEY_ID"),
+    issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+    key: content,
+  )
+end
+
+# Which external TestFlight groups to auto-release each beta build to.
+# The lane uploaded builds but NEVER released them to external testers
+# (distribute_external was false, no groups) — so external testers only
+# ever saw builds someone released BY HAND in App Store Connect, and went
+# stale the moment nobody did that step. Fix it without hardcoding a group
+# name (which isn't in the repo and which CI can't be told out-of-band):
+# ask App Store Connect, at release time, for every EXTERNAL group on the
+# app and release to all of them. `TESTFLIGHT_EXTERNAL_GROUPS` (comma-sep)
+# overrides if ever needed. Failure is non-fatal — we fall back to the old
+# upload-only behavior so a release can never be WORSE than before.
+def external_beta_group_names
+  override = (ENV["TESTFLIGHT_EXTERNAL_GROUPS"] || "").split(",").map(&:strip).reject(&:empty?)
+  return override unless override.empty?
+  Spaceship::ConnectAPI.token = asc_token
+  app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+  names = app.get_beta_groups.reject(&:is_internal_group).map(&:name)
+  UI.message("External TestFlight groups discovered: #{names.inspect}")
+  names
+rescue => e
+  UI.important("Could not list external beta groups (#{e.message}); uploading without external distribution.")
+  []
+end
+
 platform :ios do
   desc "Install CocoaPods (USE_FRAMEWORKS=static for the LibSignalClient Swift pod)"
   lane :pods do
@@ -112,13 +149,21 @@ platform :ios do
       output_name: "Speakeasy.ipa",
       clean: true,
     )
+    groups = external_beta_group_names
+    distribute = !groups.empty?
     upload_to_testflight(
       api_key: key,
-      # Don't block CI on Apple's processing — the established, working
-      # behavior is upload-and-go (builds reach beta on their own as soon as
-      # Apple finishes processing, which is fast for internal testers).
-      skip_waiting_for_build_processing: true,
-      distribute_external: false,
+      # Auto-release to every external group (so testers actually get the
+      # build — that release step used to be manual and was the real reason
+      # builds went stale). Releasing REQUIRES a processed build, so we wait
+      # only when we're distributing; with no groups we keep the old fast
+      # upload-and-go. Builds on an already-approved version skip Apple's
+      # beta review and reach testers in minutes; the first build of a NEW
+      # version waits ~24h for review (a reason to keep the version stable).
+      distribute_external: distribute,
+      groups: distribute ? groups : nil,
+      notify_external_testers: distribute,
+      skip_waiting_for_build_processing: !distribute,
     )
   end
 
