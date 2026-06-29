@@ -72,20 +72,6 @@ def set_ci_build_number
   increment_build_number(xcodeproj: "Speakeasy.xcodeproj", build_number: bn)
 end
 
-# Marketing version (CFBundleShortVersionString). Mirrors the Android side,
-# which derives versionName from the git tag — without this, iOS shipped EVERY
-# build under the hardcoded project value (1.0), so a release tag like
-# `ios-1.0.23` produced a TestFlight build labelled "1.0 (N)" and the release
-# version was invisible to testers. The release-ios workflow strips the
-# `ios-` prefix off the tag and passes it as MARKETING_VERSION. No-op when
-# unset (a plain workflow_dispatch with no tag, or a local run) so the
-# project value stands.
-def set_ci_marketing_version
-  mv = ENV["MARKETING_VERSION"]
-  return if mv.nil? || mv.empty?
-  increment_version_number(xcodeproj: "Speakeasy.xcodeproj", version_number: mv)
-end
-
 platform :ios do
   desc "Install CocoaPods (USE_FRAMEWORKS=static for the LibSignalClient Swift pod)"
   lane :pods do
@@ -116,7 +102,6 @@ platform :ios do
     key = asc_api_key
     match(type: "appstore", readonly: is_ci, api_key: key)
     pin_signing
-    set_ci_marketing_version
     set_ci_build_number
     build_app(
       workspace: WORKSPACE,
@@ -143,7 +128,6 @@ platform :ios do
     key = asc_api_key
     match(type: "appstore", readonly: is_ci, api_key: key)
     pin_signing
-    set_ci_marketing_version
     set_ci_build_number
     build_app(
       workspace: WORKSPACE,
