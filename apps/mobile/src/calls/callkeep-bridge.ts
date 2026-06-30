@@ -1,11 +1,4 @@
 import { NativeModules, Platform } from 'react-native';
-// react-native-webrtc ships the native CallKit audio-session handshake and
-// exposes it to JS as RTCAudioSession.audioSessionDidActivate/Deactivate
-// (WebRTCModule+RTCAudioSession.m → [[RTCAudioSession sharedInstance]
-// audioSessionDidActivate:…]). We just call these from CallKit's
-// didActivate/DeactivateAudioSession events — the documented rn-callkeep +
-// rn-webrtc integration, not bespoke native code.
-import { RTCAudioSession } from 'react-native-webrtc';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from './orchestrator.js';
 import type { ActiveCall } from './types.js';
@@ -52,6 +45,30 @@ function tryLoadCallKeep(): RNCallKeepShape | undefined {
     return ('default' in mod && mod.default) ? mod.default : (mod as RNCallKeepShape);
   } catch (err) {
     diag('callkeep', 'require failed (fabric incompat?)', { err: String(err) });
+    return undefined;
+  }
+}
+
+/**
+ * Lazy-load react-native-webrtc's `RTCAudioSession`, which ships the native
+ * CallKit audio-session handshake (WebRTCModule+RTCAudioSession.m →
+ * [[RTCAudioSession sharedInstance] audioSessionDidActivate:…]) exposed as
+ * `audioSessionDidActivate` / `audioSessionDidDeactivate`. This is the
+ * documented react-native-callkeep + react-native-webrtc glue — not bespoke
+ * native code. Lazy (a runtime `require`, like tryLoadCallKeep) so importing
+ * this bridge in a non-native/test env doesn't pull react-native-webrtc's
+ * untransformable source.
+ */
+type RTCAudioSessionShape = {
+  audioSessionDidActivate: () => void;
+  audioSessionDidDeactivate: () => void;
+};
+function tryLoadRTCAudioSession(): RTCAudioSessionShape | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const mod = require('react-native-webrtc') as { RTCAudioSession?: RTCAudioSessionShape };
+    return mod.RTCAudioSession;
+  } catch {
     return undefined;
   }
 }
@@ -213,7 +230,7 @@ export class CallKeepBridge {
     this.rnCallKeep.addEventListener('didActivateAudioSession', () => {
       diag('callkeep', 'didActivateAudioSession');
       try {
-        RTCAudioSession.audioSessionDidActivate();
+        tryLoadRTCAudioSession()?.audioSessionDidActivate();
       } catch (err) {
         diag('callkeep', 'audioSessionDidActivate failed', { err: String(err) });
       }
@@ -221,7 +238,7 @@ export class CallKeepBridge {
     this.rnCallKeep.addEventListener('didDeactivateAudioSession', () => {
       diag('callkeep', 'didDeactivateAudioSession');
       try {
-        RTCAudioSession.audioSessionDidDeactivate();
+        tryLoadRTCAudioSession()?.audioSessionDidDeactivate();
       } catch (err) {
         diag('callkeep', 'audioSessionDidDeactivate failed', { err: String(err) });
       }
