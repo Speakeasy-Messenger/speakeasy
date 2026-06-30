@@ -1,0 +1,47 @@
+name: App Store — attach build & submit
+
+# One-shot helper to attach an ALREADY-UPLOADED build to the editable App
+# Store version and submit it for review, entirely via the App Store Connect
+# API (no Xcode build, no signing). This exists because App Store Connect's
+# mobile web can't change the selected build on a version (the remove/add
+# control is desktop hover-only), so a resubmission after a rejection can get
+# stuck when no desktop is available.
+#
+# Uses the same ASC API key as release-ios.yml. The metadata + binary are
+# expected to already be uploaded (e.g. by the `release` lane); this only
+# selects the build and submits.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'CFBundleVersion to attach + submit (e.g. 33)'
+        required: true
+        default: '33'
+
+permissions:
+  contents: read
+
+jobs:
+  submit:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mobile/ios
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+          bundler-cache: true
+          working-directory: apps/mobile/ios
+
+      - name: fastlane submit_build (attach + submit via ASC API)
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          ASC_KEY_CONTENT_BASE64: ${{ secrets.ASC_KEY_CONTENT_BASE64 }}
+          SUBMIT_BUILD_NUMBER: ${{ inputs.build_number }}
+        run: bundle exec fastlane ios submit_build

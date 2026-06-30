@@ -229,4 +229,32 @@ platform :ios do
       precheck_include_in_app_purchases: false,
     )
   end
+
+  desc "Attach an ALREADY-UPLOADED build to the editable App Store version " \
+       "and submit it for review — no binary build, talks to ASC only. For " \
+       "resubmitting after a rejection when the build picker can't be reached " \
+       "(e.g. App Store Connect on mobile). Build number via SUBMIT_BUILD_NUMBER."
+  lane :submit_build do
+    build = ENV.fetch("SUBMIT_BUILD_NUMBER")
+    upload_to_app_store(
+      api_key: asc_api_key,
+      build_number: build,
+      skip_binary_upload: true,
+      # Metadata was already pushed by the `release` lane; don't re-push (and
+      # don't risk clobbering the App Review contact info on ASC).
+      skip_metadata: true,
+      skip_screenshots: true,
+      submit_for_review: true,
+      automatic_release: false, # manual release after Apple approves
+      force: true, # no interactive HTML preview
+      run_precheck_before_submit: false,
+      precheck_include_in_app_purchases: false,
+      # Pre-answer the submission questionnaire so it doesn't block:
+      # export compliance is pre-declared via Info.plist
+      # ITSAppUsesNonExemptEncryption=false; the app uses no IDFA.
+      submission_information: {
+        add_id_info_uses_idfa: false,
+      },
+    )
+  end
 end
