@@ -28,18 +28,6 @@ class PipModule(reactContext: ReactApplicationContext) :
     activity.runOnUiThread { activity.applyVideoCallActive(active) }
   }
 
-  /**
-   * Set the PiP window's aspect ratio from the live video frame size, so the
-   * floating bubble matches the actual feed instead of the hardcoded 9:16
-   * (which cropped a 16:9 capture to a vertical strip — the "narrow corner").
-   */
-  @ReactMethod
-  fun setVideoAspect(width: Int, height: Int) {
-    if (width <= 0 || height <= 0) return
-    val activity = currentActivity as? MainActivity ?: return
-    activity.runOnUiThread { activity.applyVideoAspect(width, height) }
-  }
-
   // Required so JS `NativeEventEmitter(SpeakeasyPip)` doesn't warn.
   @ReactMethod fun addListener(eventName: String) {}
 

@@ -9,7 +9,6 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
  */
 interface NativePip {
   setVideoCallActive(active: boolean): void;
-  setVideoAspect(width: number, height: number): void;
 }
 
 const native = (NativeModules as { SpeakeasyPip?: NativePip }).SpeakeasyPip;
@@ -19,18 +18,6 @@ export const pip = {
   setVideoCallActive(active: boolean): void {
     if (Platform.OS !== 'android') return;
     native?.setVideoCallActive(active);
-  },
-
-  /**
-   * Report the live video frame's dimensions so the Android PiP window can
-   * adopt the matching aspect ratio (otherwise the hardcoded 9:16 window
-   * crops a 16:9 feed to a vertical strip — the "narrow corner" in the
-   * floating bubble). Driven by the fullscreen RTCView's onDimensionsChange.
-   * Safe no-op on non-Android.
-   */
-  setVideoAspect(width: number, height: number): void {
-    if (Platform.OS !== 'android' || width <= 0 || height <= 0) return;
-    native?.setVideoAspect(Math.round(width), Math.round(height));
   },
 
   /**

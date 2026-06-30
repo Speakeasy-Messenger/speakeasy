@@ -319,25 +319,22 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
-          // Render-proof instrumentation: RTCView fires onDimensionsChange
-          // only once the native view actually paints a sized frame.
-          //   - iOS: if this NEVER logs, the Metal renderer never attached
-          //     (the didMoveToWindow/window-gate bug the webrtc patch targets);
-          //     if it logs non-zero but the screen is black → a layout issue.
-          //   - Android: the {w,h} is the REAL video frame size — feed it to
-          //     the native PiP params so the floating window matches the video
-          //     aspect (was hardcoded 9:16 vs a 16:9 capture → "narrow corner"
-          //     crop). Only the fullscreen feed is what Android PiP shows.
-          onDimensionsChange={(e) => {
-            const { width: w, height: h } = e.nativeEvent;
+          // Passive render probe: RTCView fires onDimensionsChange only once
+          // the native view actually paints a sized frame. iOS — if this never
+          // logs, the Metal renderer never attached (the webrtc window-gate
+          // patch); if it logs non-zero but the screen is black, it's a layout
+          // issue. This only LOGS — it must not drive any native window state
+          // (an earlier version fed these dims into the Android PiP aspect
+          // ratio, which oscillated the bubble as the frame rotation flipped
+          // the reported w/h portrait↔landscape).
+          onDimensionsChange={(e) =>
             diag('call', 'video dimensions', {
               which: fullscreenUrl === localUrl ? 'local' : 'remote',
               slot: 'fullscreen',
-              w,
-              h,
-            });
-            if (w > 0 && h > 0) pip.setVideoAspect(w, h);
-          }}
+              w: e.nativeEvent.width,
+              h: e.nativeEvent.height,
+            })
+          }
           // Layout probe: the RTCView's ACTUAL measured size. In an Android PiP
           // window this disambiguates the "narrow corner" — if it stays the
           // full-screen size while floating, RN isn't re-measuring to the PiP
