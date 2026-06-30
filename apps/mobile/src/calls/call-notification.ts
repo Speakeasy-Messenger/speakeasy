@@ -22,7 +22,12 @@ import { diag } from '../diag/log.js';
  * bring the call screen back.
  */
 const CALL_NOTIF_ID = 'speakeasy-active-call';
-const CALL_CHANNEL_ID = 'active-call';
+// '-v2': the original 'active-call' channel was created at LOW importance, and
+// Android makes channel importance IMMUTABLE after first creation — so bumping
+// it in code was silently ignored and One UI kept filing the pill in the
+// collapsed "silent" section (invisible). A fresh channel id lets DEFAULT
+// importance actually take effect, surfacing the pill as a status-bar chip.
+const CALL_CHANNEL_ID = 'active-call-v2';
 
 export const CALL_NOTIF_ACTIONS = {
   mute: 'call-mute',
@@ -40,18 +45,22 @@ export interface OngoingCallNotif {
 
 export async function showOngoingCallNotification(c: OngoingCallNotif): Promise<void> {
   if (Platform.OS !== 'android') return;
+  diag('call', 'pill: show requested', { kind: c.kind, muted: c.micMuted });
   await notifee.createChannel({
     id: CALL_CHANNEL_ID,
     name: 'Active call',
-    // LOW so the ongoing pill doesn't buzz/peek on every update (mute toggle).
-    importance: AndroidImportance.LOW,
+    // DEFAULT (not LOW): LOW let One UI hide the pill in the collapsed silent
+    // section — the reported "pill never shows". `onlyAlertOnce` below keeps it
+    // from re-buzzing on every mute-toggle update, so DEFAULT costs only a
+    // single soft tone when the call connects (WhatsApp does the same).
+    importance: AndroidImportance.DEFAULT,
     vibration: false,
   });
   const android = {
     channelId: CALL_CHANNEL_ID,
     smallIcon: 'ic_notification',
     category: AndroidCategory.CALL,
-    importance: AndroidImportance.LOW,
+    importance: AndroidImportance.DEFAULT,
     visibility: AndroidVisibility.PUBLIC,
     // Ongoing + can't-dismiss: a live call shouldn't be swipeable away.
     ongoing: true as const,
@@ -89,14 +98,18 @@ export async function showOngoingCallNotification(c: OngoingCallNotif): Promise<
         foregroundServiceTypes: [AndroidForegroundServiceType.FOREGROUND_SERVICE_TYPE_MICROPHONE],
       },
     });
+    diag('call', 'pill: shown (fgs)', { kind: c.kind });
   } catch (err) {
     // Rare edge: a call answered from the background can't legally START a
     // microphone FGS (Android 14). Don't crash — fall back to a plain ongoing
     // pill so there's still SOMETHING controllable, and leave a breadcrumb.
     diag('call', 'pill FGS start failed; plain fallback', { err: String(err) });
-    await notifee.displayNotification({ ...base, android }).catch((err2) => {
-      diag('call', 'pill plain display failed', { err: String(err2) });
-    });
+    await notifee
+      .displayNotification({ ...base, android })
+      .then(() => diag('call', 'pill: shown (plain fallback)', { kind: c.kind }))
+      .catch((err2) => {
+        diag('call', 'pill plain display failed', { err: String(err2) });
+      });
   }
 }
 

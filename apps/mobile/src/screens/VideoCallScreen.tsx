@@ -332,6 +332,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // Android's window-size reflow.
   if (compact) {
     const pipFeed = remoteUrl ?? localUrl;
+    // Which feed is showing — part of the RTCView key below. Without this the
+    // view is keyed only on window size, so the local→remote switch at answer
+    // (same bubble size) never remounts it: react-native-webrtc's Android
+    // SurfaceView keeps painting the OLD stream (your own face) until some
+    // unrelated resize forces a remount. Device logs confirmed the feed went
+    // local→remote with no view refresh until the bubble was tapped/resized.
+    const pipFeedTag = pipFeed && pipFeed === remoteUrl ? 'r' : 'l';
     return (
       // onLayout on the ROOT measures the actual window size (ground truth,
       // unlike the often-stale Dimensions API in a PiP window). When the user
@@ -353,11 +360,11 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             // (recreates the SurfaceView at the true size on every resize),
             // falling back to the RN-measured size only until native reports in.
             key={
-              nativePipSize
+              (nativePipSize
                 ? `npip-${nativePipSize.w}x${nativePipSize.h}`
                 : pipSize
                   ? `pip-${pipSize.w}x${pipSize.h}`
-                  : 'pip'
+                  : 'pip') + `-${pipFeedTag}`
             }
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
