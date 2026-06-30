@@ -215,7 +215,19 @@ export async function routeCallFrame(
     // rings via the native incoming-call UI even from a killed state (FCM
     // can't deliver VoIP pushes). Best-effort; the regular push above is the
     // Android + fallback path. A 410/Unregistered clears the dead token.
-    if (deps.apnsVoip && deps.devices) {
+    //
+    // ⚠️ DISABLED (2026-06-29): iOS PushKit hard-requires that EVERY received
+    // VoIP push synchronously report an incoming call to CallKit, or the OS
+    // aborts the app (`_terminateAppIfThereAreUnhandledVoIPPushes`). The
+    // client's CallKit provider is NOT set up — CallKeep is gated off because
+    // its audio-session takeover broke every call (see the stock-ADM fix), so
+    // AppDelegate's reportNewIncomingCall has no CXProvider and the VoIP push
+    // crashes the app on every incoming call. The regular `kind:'call'` push
+    // above still notifies the callee. Re-enable ONLY once the client wires a
+    // real CXProvider (RNCallKeep.setup) and owns the call audio session.
+    const iosVoipCallkitEnabled =
+      process.env.IOS_VOIP_CALLKIT_ENABLED === 'true';
+    if (iosVoipCallkitEnabled && deps.apnsVoip && deps.devices) {
       const { apnsVoip, devices } = deps;
       void (async () => {
         try {
