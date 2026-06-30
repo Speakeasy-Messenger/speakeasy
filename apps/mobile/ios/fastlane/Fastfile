@@ -270,9 +270,29 @@ platform :ios do
     UI.message("Found build #{target}(#{build_num}) id=#{build.id} state=#{build.processing_state}")
 
     # Attach the build to the version (the step that can't be done in ASC
-    # mobile web). Submitting for review is then a single button on mobile.
+    # mobile web).
     version.select_build(build_id: build.id)
-    UI.success("Attached build #{target}(#{build_num}) to version #{version.id}. " \
-               "Now tap Submit for Review in App Store Connect.")
+    UI.success("Attached build #{target}(#{build_num}) to version #{version.id}.")
+
+    # Submit for review via the new ASC review-submission model: find an open
+    # submission (or create one), add this version, then submit. Reaching the
+    # 'Add for Review' button is unreliable on the ASC mobile web, so do it here.
+    submission = app.get_in_progress_review_submission(platform: "IOS")
+    if submission.nil?
+      submission = app.create_review_submission(platform: "IOS")
+      UI.message("Created review submission id=#{submission.id}")
+    else
+      UI.message("Reusing in-progress review submission id=#{submission.id} state=#{submission.state}")
+    end
+
+    begin
+      submission.add_app_store_version_to_review_items(app_store_version_id: version.id)
+      UI.message("Added version #{version.id} to the review submission")
+    rescue => e
+      UI.important("add_app_store_version_to_review_items: #{e.message} (may already be included)")
+    end
+
+    submission.submit_for_review
+    UI.success("Submitted version #{target}(#{build_num}) for App Review.")
   end
 end
