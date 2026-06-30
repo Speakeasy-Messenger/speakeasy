@@ -301,6 +301,39 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // The bubble only exists once both feeds are present (i.e. connected).
   const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
 
+  // Android PiP / floating window: render ONLY the remote video, full-bleed,
+  // and nothing else. This is the proven react-native-webrtc PiP recipe ("show
+  // only the video") — the tiny window has no room for chrome, and the simpler
+  // the view tree, the cleaner the SurfaceView fills the window. Switching into
+  // this branch unmounts the full call UI and mounts a fresh single RTCView, so
+  // the surface is (re)created at the PiP window size instead of resizing a
+  // stale full-screen one. iOS never hits this branch — its PiP is the
+  // iosPIP/AVPictureInPicture path on the full view; `compact` only flips on
+  // Android's window-size reflow.
+  if (compact) {
+    const pipFeed = remoteUrl ?? localUrl;
+    return (
+      <View style={styles.root}>
+        {pipFeed ? (
+          <RTCView
+            streamURL={pipFeed}
+            style={StyleSheet.absoluteFill}
+            objectFit="cover"
+            mirror={pipFeed === localUrl}
+            onLayout={(e) =>
+              diag('call', 'pip view layout', {
+                w: Math.round(e.nativeEvent.layout.width),
+                h: Math.round(e.nativeEvent.layout.height),
+              })
+            }
+          />
+        ) : (
+          <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       {/* Full-screen feed — local while waiting, remote once it flows

@@ -22,6 +22,10 @@
 // (the RTCAudioDevice conformance lives in a Swift extension on the
 // class); ObjC needs RTCAudioDevice in scope to compile that line.
 #import <WebRTC/WebRTC.h>
+// react-native-webrtc options singleton (static-framework import). Used to
+// enable iOS multitasking camera access so a video call keeps capturing +
+// rendering after backgrounding into Picture-in-Picture.
+#import <react_native_webrtc/WebRTCModuleOptions.h>
 // Phase 5j PR-G — VoiceFilterModule extends RCTEventEmitter (so it
 // can emit `SpeakeasyVoiceFilterFeatures` to JS at ~30 Hz). The
 // generated Speakeasy-Swift.h declares that superclass, which the
@@ -164,6 +168,15 @@ static void SpeakeasyWriteCrash(NSException *exception)
   //
   //   WebRTCModuleOptions *rtcOptions = [WebRTCModuleOptions sharedInstance];
   //   rtcOptions.audioDevice = [[SpeakeasyAudioDevice alloc] init];
+
+  // iOS Picture-in-Picture: allow the camera to keep running while the app is
+  // backgrounded into a PiP window, so a video call doesn't freeze the local
+  // feed the moment it floats. This is the documented react-native-webrtc PiP
+  // prerequisite (GetStream/rn-webrtc recipe); it gracefully no-ops on devices
+  // where the capture session reports it unsupported, so it's safe to set
+  // unconditionally. The iOS-18 path is satisfied by the `voip` UIBackgroundMode
+  // already in Info.plist (older iOS needs the multitasking-camera entitlement).
+  [WebRTCModuleOptions sharedInstance].enableMultitaskingCameraAccess = YES;
 
   // CallKit / VoIP push: register the PKPushRegistry here, ASAP at launch —
   // doing it from JS can be too late to receive a VoIP push that woke the app.
