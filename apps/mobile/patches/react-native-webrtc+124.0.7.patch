@@ -1,0 +1,25 @@
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
+index e64005d..dcf08fe 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
+@@ -290,7 +290,19 @@
+         }
+ 
+         // See "didMoveToWindow" above.
+-        if (videoTrack && self.window) {
++        //
++        // Speakeasy patch: attach the renderer as soon as the track is set,
++        // regardless of whether the view is already in a window. Under RN's
++        // New Architecture interop layer (bridgeless, RN 0.77) this legacy
++        // view is hosted in a Fabric wrapper where -didMoveToWindow is not
++        // reliably delivered to the inner view; the original `&& self.window`
++        // gate then leaves `addRenderer` never called, so the RTCMTLVideoView
++        // renders nothing (black) on iOS while Android is fine. Attaching here
++        // is safe: -didMoveToWindow still removes the renderer when the view
++        // leaves a window (breaking the track<->renderer retain cycle), and
++        // RTCMTLVideoView only acquires a drawable once it has a window, so an
++        // early attach is a harmless no-op until the view is on screen.
++        if (videoTrack) {
+             dispatch_async(_module.workerQueue, ^{
+                 [videoTrack addRenderer:self.videoView];
+             });

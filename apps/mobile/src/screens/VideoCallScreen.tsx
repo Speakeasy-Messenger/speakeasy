@@ -254,6 +254,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
+          // Render-proof instrumentation: RTCView fires onDimensionsChange
+          // only once the native Metal view actually paints a sized frame. If
+          // this NEVER logs on iOS, the renderer never attached (the
+          // didMoveToWindow/window-gate bug the react-native-webrtc patch
+          // targets); if it logs with non-zero size but the screen is still
+          // black, it's a layout/visibility issue instead.
+          onDimensionsChange={(e) =>
+            diag('call', 'video dimensions', {
+              which: fullscreenUrl === localUrl ? 'local' : 'remote',
+              slot: 'fullscreen',
+              w: e.nativeEvent.width,
+              h: e.nativeEvent.height,
+            })
+          }
           // Mirror only when this view is showing the local self-preview.
           mirror={fullscreenUrl === localUrl}
           // PiP the remote feed when it's the full-screen one (default,
@@ -302,6 +316,14 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               style={StyleSheet.absoluteFill}
               objectFit="cover"
               zOrder={1}
+              onDimensionsChange={(e) =>
+                diag('call', 'video dimensions', {
+                  which: pipUrl === localUrl ? 'local' : 'remote',
+                  slot: 'bubble',
+                  w: e.nativeEvent.width,
+                  h: e.nativeEvent.height,
+                })
+              }
               // Mirror only when the bubble is showing the local self-preview.
               mirror={pipUrl === localUrl}
               // When swapped, the remote feed lives in the bubble — keep
