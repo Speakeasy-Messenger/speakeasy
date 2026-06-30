@@ -1,1 +1,1 @@
-Pick a handle, not a phone number. End-to-end encrypted messages and voice-masked calls — the server only ever sees ciphertext, never your identity.
+Pick a handle, not a phone number. End-to-end encrypted messages and calls — the server only ever sees ciphertext.
