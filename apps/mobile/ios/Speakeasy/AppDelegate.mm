@@ -22,10 +22,6 @@
 // (the RTCAudioDevice conformance lives in a Swift extension on the
 // class); ObjC needs RTCAudioDevice in scope to compile that line.
 #import <WebRTC/WebRTC.h>
-// react-native-webrtc options singleton (static-framework import). Used to
-// enable iOS multitasking camera access so a video call keeps capturing +
-// rendering after backgrounding into Picture-in-Picture.
-#import <react_native_webrtc/WebRTCModuleOptions.h>
 // Phase 5j PR-G — VoiceFilterModule extends RCTEventEmitter (so it
 // can emit `SpeakeasyVoiceFilterFeatures` to JS at ~30 Hz). The
 // generated Speakeasy-Swift.h declares that superclass, which the
@@ -69,6 +65,10 @@
 @interface WebRTCModuleOptions : NSObject
 + (instancetype)sharedInstance;
 @property(nonatomic, strong, nullable) id audioDevice;
+// Keep the camera capturing while backgrounded into a PiP window (iOS
+// Picture-in-Picture for video calls). Matches the real property in
+// react-native-webrtc's WebRTCModuleOptions.h.
+@property(nonatomic, assign) BOOL enableMultitaskingCameraAccess;
 @end
 
 // --- Crash capture --------------------------------------------------
