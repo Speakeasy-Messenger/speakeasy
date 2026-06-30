@@ -28,7 +28,12 @@ import {
   type ReplyContext,
 } from '@speakeasy/shared';
 import { appVersion } from '../version.js';
-import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import {
+  MAX_PHOTOS_PER_PICK,
+  pickFile,
+  pickFromCamera,
+  pickPhotos,
+} from '../attachments/pick.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { UnblockConfirmSheet } from '../components/BlockSheets.js';
@@ -415,7 +420,7 @@ export function ChatScreen({
   }
 
   async function handlePickPhoto() {
-    const photos = await pickPhotos({ selectionLimit: 1 });
+    const photos = await pickPhotos({ selectionLimit: MAX_PHOTOS_PER_PICK });
     if (photos.length > 0) await sendOutbound({ attachments: photos });
   }
 

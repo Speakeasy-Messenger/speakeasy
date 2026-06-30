@@ -22,7 +22,12 @@ import {
   replyPreviewFrom,
 } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
-import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import {
+  MAX_PHOTOS_PER_PICK,
+  pickFile,
+  pickFromCamera,
+  pickPhotos,
+} from '../attachments/pick.js';
 import { AppBar } from '../components/AppBar.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import {
@@ -456,7 +461,7 @@ export function GroupChatScreen({
   }
 
   async function handlePickPhoto() {
-    const photos = await pickPhotos({ selectionLimit: 1 });
+    const photos = await pickPhotos({ selectionLimit: MAX_PHOTOS_PER_PICK });
     if (photos.length > 0) await sendOutbound({ attachments: photos });
   }
 
