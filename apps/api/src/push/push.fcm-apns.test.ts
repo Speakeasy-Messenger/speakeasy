@@ -115,4 +115,15 @@ describe('resolveBannerCopy', () => {
     const n = notice({ kind: 'call' });
     expect(resolveBannerCopy(n, 'rich')).toEqual({ title: '@alice', body: 'Calling…' });
   });
+
+  it('video call: banner distinguishes "video call" from a voice call', () => {
+    const rich = notice({ kind: 'call', callVideo: true });
+    expect(resolveBannerCopy(rich, 'rich')).toEqual({ title: '@alice', body: 'Video calling…' });
+    expect(resolveBannerCopy(rich, 'private')).toEqual({
+      title: 'speakeasy',
+      body: 'Incoming video call',
+    });
+    const missed = notice({ kind: 'call', callVideo: true, callEvent: 'missed' });
+    expect(resolveBannerCopy(missed, 'private').body).toBe('Missed video call');
+  });
 });

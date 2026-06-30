@@ -83,6 +83,11 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // compact RTCView on this so it remounts — a fresh surface at the new size —
   // whenever the window's measured size changes.
   const [pipSize, setPipSize] = useState<{ w: number; h: number } | null>(null);
+  // Authoritative PiP window size from native (dp), pushed on PiP enter + every
+  // bubble resize. Preferred over `pipSize` (RN onLayout) for keying the
+  // compact RTCView, because onLayout often reports a stale size in a PiP
+  // window → the SurfaceView kept its old buffer → "video fills only a corner".
+  const [nativePipSize, setNativePipSize] = useState<{ w: number; h: number } | null>(null);
   // Android system-PiP (the floating window after pressing Home). While in
   // it we hide the overlay chrome so only the video shows in the small frame.
   const [inPip, setInPip] = useState(false);
@@ -143,10 +148,19 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     // Closing the PiP bubble (vs expanding it back) must END the call —
     // otherwise the camera/mic/ring keep running headless.
     const unsubClosed = pip.onPipClosed(() => orchestrator.hangup());
+    // Authoritative bubble size from native (dp) — drives the compact
+    // SurfaceView remount at the true size on enter + every resize.
+    const unsubResize = pip.onPipResize((s) => {
+      setNativePipSize((prev) =>
+        prev && prev.w === s.width && prev.h === s.height ? prev : { w: s.width, h: s.height },
+      );
+      diag('call', 'pip native resize', { w: s.width, h: s.height });
+    });
     return () => {
       pip.setVideoCallActive(false);
       unsub();
       unsubClosed();
+      unsubResize();
     };
   }, [orchestrator]);
 
@@ -335,11 +349,31 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       >
         {pipFeed ? (
           <RTCView
-            key={pipSize ? `pip-${pipSize.w}x${pipSize.h}` : 'pip'}
+            // Key on the AUTHORITATIVE native bubble size when we have it
+            // (recreates the SurfaceView at the true size on every resize),
+            // falling back to the RN-measured size only until native reports in.
+            key={
+              nativePipSize
+                ? `npip-${nativePipSize.w}x${nativePipSize.h}`
+                : pipSize
+                  ? `pip-${pipSize.w}x${pipSize.h}`
+                  : 'pip'
+            }
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror={pipFeed === localUrl}
+            // Ground-truth video frame size — pairs with the 'pip native
+            // resize'/'pip view layout' logs so one device test shows whether
+            // a corner-crop is a window-size mismatch or the frame itself.
+            onDimensionsChange={(e) =>
+              diag('call', 'pip feed dimensions', {
+                w: e.nativeEvent.width,
+                h: e.nativeEvent.height,
+                nativeW: nativePipSize?.w,
+                nativeH: nativePipSize?.h,
+              })
+            }
           />
         ) : (
           <View style={[styles.remoteView, { backgroundColor: '#000' }]} />

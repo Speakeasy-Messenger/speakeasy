@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import com.facebook.react.ReactActivity
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -166,11 +167,40 @@ class MainActivity : ReactActivity() {
   ) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
     emitJsEvent("SpeakeasyPipModeChanged", isInPictureInPictureMode)
-    if (!isInPictureInPictureMode) {
+    if (isInPictureInPictureMode) {
+      // Hand JS the authoritative PiP window size so the video SurfaceView is
+      // recreated at the true bubble size (see emitPipSize).
+      emitPipSize(newConfig)
+    } else {
       // Exiting PiP — but we don't yet know if it's a dismiss or an expand.
       // onResume (expand) clears this; onStop (dismiss) acts on it.
       exitingPip = true
     }
+  }
+
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    // While floating in PiP the user can resize the bubble. Android delivers
+    // the new window size HERE — onPictureInPictureModeChanged only fires on
+    // enter/exit, not on a resize — so without this the JS side never learns
+    // the bubble grew. RN's own onLayout frequently reports a stale (pre-resize)
+    // size inside a PiP window, which left the SurfaceView holding its old
+    // buffer: the reported "video only fills a corner / lags resizing to fit".
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode) {
+      emitPipSize(newConfig)
+    }
+  }
+
+  // Emit the PiP window size in DP — which is exactly React Native's layout
+  // unit, so JS can key/size the video view directly with no px conversion.
+  // screenWidthDp/screenHeightDp track the floating window (not the display)
+  // while in PiP, and are available on every API level we ship.
+  private fun emitPipSize(config: Configuration) {
+    val map = Arguments.createMap().apply {
+      putInt("width", config.screenWidthDp)
+      putInt("height", config.screenHeightDp)
+    }
+    emitJsEvent("SpeakeasyPipResize", map)
   }
 
   override fun onResume() {
