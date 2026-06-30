@@ -126,14 +126,44 @@ class MainActivity : ReactActivity() {
     }
   }
 
+  // The PiP window's aspect ratio. Defaults to portrait-ish until the live
+  // video frame size arrives (via applyVideoAspect); then it tracks the actual
+  // feed so the floating bubble matches the video instead of cropping it.
+  private var pipAspect: Rational = Rational(9, 16)
+
   private fun buildPipParams(): PictureInPictureParams {
     val builder = PictureInPictureParams.Builder()
-      // Portrait-ish call window. Android clamps to its allowed range.
-      .setAspectRatio(Rational(9, 16))
+      .setAspectRatio(pipAspect)
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
       builder.setAutoEnterEnabled(videoCallActive)
     }
     return builder.build()
+  }
+
+  /**
+   * Adopt the live video frame's aspect ratio for the PiP window. Without this
+   * the window was a fixed 9:16, so a 16:9 feed (the default capture) rendered
+   * with the sides cropped — the reported "narrow corner" in the bubble.
+   * Android requires the ratio within [1:2.39 .. 2.39:1]; clamp to that.
+   */
+  fun applyVideoAspect(width: Int, height: Int) {
+    if (width <= 0 || height <= 0) return
+    val ratio = width.toDouble() / height.toDouble()
+    val clamped = ratio.coerceIn(1.0 / 2.39, 2.39)
+    // Keep the exact frame ratio when it's already in range; otherwise build a
+    // Rational from the clamped value (×1000 for precision).
+    val next =
+      if (clamped == ratio) Rational(width, height)
+      else Rational((clamped * 1000).toInt(), 1000)
+    if (next == pipAspect) return
+    pipAspect = next
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      try {
+        setPictureInPictureParams(buildPipParams())
+      } catch (_: IllegalStateException) {
+        // Activity not in a state that accepts PiP params — ignore.
+      }
+    }
   }
 
   // Pre-Android-12 fallback: explicitly enter PiP when the user leaves

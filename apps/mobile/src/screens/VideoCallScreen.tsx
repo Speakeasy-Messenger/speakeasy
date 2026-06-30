@@ -255,17 +255,34 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           style={styles.remoteView}
           objectFit="cover"
           // Render-proof instrumentation: RTCView fires onDimensionsChange
-          // only once the native Metal view actually paints a sized frame. If
-          // this NEVER logs on iOS, the renderer never attached (the
-          // didMoveToWindow/window-gate bug the react-native-webrtc patch
-          // targets); if it logs with non-zero size but the screen is still
-          // black, it's a layout/visibility issue instead.
-          onDimensionsChange={(e) =>
+          // only once the native view actually paints a sized frame.
+          //   - iOS: if this NEVER logs, the Metal renderer never attached
+          //     (the didMoveToWindow/window-gate bug the webrtc patch targets);
+          //     if it logs non-zero but the screen is black → a layout issue.
+          //   - Android: the {w,h} is the REAL video frame size — feed it to
+          //     the native PiP params so the floating window matches the video
+          //     aspect (was hardcoded 9:16 vs a 16:9 capture → "narrow corner"
+          //     crop). Only the fullscreen feed is what Android PiP shows.
+          onDimensionsChange={(e) => {
+            const { width: w, height: h } = e.nativeEvent;
             diag('call', 'video dimensions', {
               which: fullscreenUrl === localUrl ? 'local' : 'remote',
               slot: 'fullscreen',
-              w: e.nativeEvent.width,
-              h: e.nativeEvent.height,
+              w,
+              h,
+            });
+            if (w > 0 && h > 0) pip.setVideoAspect(w, h);
+          }}
+          // Layout probe: the RTCView's ACTUAL measured size. In an Android PiP
+          // window this disambiguates the "narrow corner" — if it stays the
+          // full-screen size while floating, RN isn't re-measuring to the PiP
+          // window (the view is oversized + clipped); if it's small but still
+          // clipped, it's the SurfaceView keeping its pre-resize buffer.
+          onLayout={(e) =>
+            diag('call', 'fullscreen view layout', {
+              compact,
+              w: Math.round(e.nativeEvent.layout.width),
+              h: Math.round(e.nativeEvent.layout.height),
             })
           }
           // Mirror only when this view is showing the local self-preview.
