@@ -235,26 +235,35 @@ platform :ios do
        "resubmitting after a rejection when the build picker can't be reached " \
        "(e.g. App Store Connect on mobile). Build number via SUBMIT_BUILD_NUMBER."
   lane :submit_build do
-    build = ENV.fetch("SUBMIT_BUILD_NUMBER")
-    upload_to_app_store(
-      api_key: asc_api_key,
-      build_number: build,
-      skip_binary_upload: true,
-      # Metadata was already pushed by the `release` lane; don't re-push (and
-      # don't risk clobbering the App Review contact info on ASC).
-      skip_metadata: true,
-      skip_screenshots: true,
-      submit_for_review: true,
-      automatic_release: false, # manual release after Apple approves
-      force: true, # no interactive HTML preview
-      run_precheck_before_submit: false,
-      precheck_include_in_app_purchases: false,
-      # Pre-answer the submission questionnaire so it doesn't block:
-      # export compliance is pre-declared via Info.plist
-      # ITSAppUsesNonExemptEncryption=false; the app uses no IDFA.
-      submission_information: {
-        add_id_info_uses_idfa: false,
-      },
+    require "spaceship"
+    Spaceship::ConnectAPI.token = asc_token
+    app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
+    UI.message("App id=#{app.id} (#{APP_IDENTIFIER})")
+
+    # Print every version + its state so we can see what's actually editable
+    # (deliver's submit couldn't find an 'editable version' — diagnose why).
+    versions = app.get_app_store_versions(includes: "appStoreVersionSubmission")
+    versions.each do |v|
+      UI.message("VERSION #{v.version_string} platform=#{v.platform} state=#{v.app_store_state} id=#{v.id}")
+    end
+
+    target = ENV.fetch("APP_VERSION", "1.0")
+    version = versions.find { |v| v.version_string == target }
+    UI.user_error!("No iOS version '#{target}' found on the app") unless version
+    UI.message("Target version #{target}: state=#{version.app_store_state} id=#{version.id}")
+
+    build_num = ENV.fetch("SUBMIT_BUILD_NUMBER")
+    builds = Spaceship::ConnectAPI::Build.all(
+      app_id: app.id, version: target, build_number: build_num,
     )
+    build = builds.first
+    UI.user_error!("Build #{target}(#{build_num}) not found in App Store Connect") unless build
+    UI.message("Found build #{target}(#{build_num}) id=#{build.id} state=#{build.processing_state}")
+
+    # Attach the build to the version (the step that can't be done in ASC
+    # mobile web). Submitting for review is then a single button on mobile.
+    version.select_build(build_id: build.id)
+    UI.success("Attached build #{target}(#{build_num}) to version #{version.id}. " \
+               "Now tap Submit for Review in App Store Connect.")
   end
 end
