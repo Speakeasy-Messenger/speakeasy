@@ -1121,7 +1121,53 @@ export async function prewarmWsForIncomingCall(): Promise<void> {
 }
 
 // ---------------------------------------------------------------------------
-// TOP-LEVEL HANDLER REGISTRATION (Android only)
+// iOS NOTIFICATION CATEGORIES — parity with Android's MessagingStyle actions.
+//
+// iOS only surfaces notification actions (Reply / Mark-as-read) when the
+// displayed notification's `categoryId` matches a category registered here.
+// The Notification Service Extension (Increment 2) tags message pushes with
+// the 'message' category so these actions appear; the local-notification dev
+// harness does the same. Registered once at startup; idempotent.
+// ---------------------------------------------------------------------------
+
+export const IOS_CATEGORY = {
+  message: 'message',
+  call: 'incoming-call',
+} as const;
+
+export async function registerIosNotificationCategories(): Promise<void> {
+  if (Platform.OS !== 'ios') return;
+  try {
+    await notifee.setNotificationCategories([
+      {
+        id: IOS_CATEGORY.message,
+        actions: [
+          {
+            id: 'reply',
+            title: 'Reply',
+            // Text-input action — the iOS equivalent of Android's RemoteInput
+            // inline reply. Routes to the same handleInlineReply path.
+            input: { buttonText: 'Send', placeholderText: 'Message' },
+          },
+          { id: 'mark-read', title: 'Mark as Read' },
+        ],
+      },
+      {
+        id: IOS_CATEGORY.call,
+        actions: [
+          { id: 'answer', title: 'Answer', foreground: true },
+          { id: 'decline', title: 'Decline', destructive: true },
+        ],
+      },
+    ]);
+    diag('push', 'iOS notification categories registered');
+  } catch (err) {
+    diag('push', 'iOS category registration failed', { err: String(err) });
+  }
+}
+
+// ---------------------------------------------------------------------------
+// TOP-LEVEL HANDLER REGISTRATION
 // CRITICAL: This MUST execute at module load, not in a function.
 // Android Headless JS expects the handlers to exist when the bundle loads.
 // ---------------------------------------------------------------------------
@@ -1170,6 +1216,33 @@ if (Platform.OS === 'android') {
   });
 
   diag('push', 'background message + notifee handlers registered');
+}
+
+if (Platform.OS === 'ios') {
+  // iOS renders the APNs alert itself (and decrypts it via the NSE once that
+  // lands). The app still owns the ACTIONS: a notification Reply / Mark-as-read
+  // / tap routes through notifee's background event in a brief background
+  // context, the same reply path as Android. Categories must also be
+  // registered (above) for the actions to appear.
+  void registerIosNotificationCategories();
+  notifee.onBackgroundEvent(async ({ type, detail }) => {
+    if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'reply') {
+      await handleInlineReply(detail.notification, detail.input);
+      return;
+    }
+    if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'mark-read') {
+      const id = detail.notification?.id;
+      if (id) await notifee.cancelNotification(id).catch(() => {});
+      return;
+    }
+    if (type !== EventType.PRESS) return;
+    const p = toPersistedPush((detail.notification?.data ?? {}) as FcmData);
+    if (p) {
+      await persistRawPush(p);
+      diag('push-bg', 'ios tap-target persisted', { conversationId: p.conversationId });
+    }
+  });
+  diag('push', 'iOS notifee background handler + categories registered');
 }
 
 // ---------------------------------------------------------------------------
