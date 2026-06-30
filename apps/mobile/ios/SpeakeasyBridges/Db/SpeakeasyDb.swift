@@ -51,7 +51,9 @@
 import Foundation
 import CryptoKit
 import Security
+#if !SPEAKEASY_EXTENSION
 import VouchflowSDK
+#endif
 // SQLCipher (the C library) ships sqlite3.h via CocoaPods but does not
 // expose a Swift module. The C symbols (sqlite3_open, sqlite3_key, …)
 // are made visible via the bridging header (#import <sqlite3.h>).
@@ -103,12 +105,25 @@ final class SpeakeasyDb {
         if let h = handle { return h }
 
         // The token gates "is the app enrolled at all" — it no longer
-        // keys the database. See file header.
+        // keys the database. See file header. The Notification Service
+        // Extension can't (and needn't) run this gate: it's a separate
+        // process with no Vouchflow session, and it only ever opens an
+        // already-enrolled store to decrypt — so skip the gate there.
+        #if !SPEAKEASY_EXTENSION
         guard let token = Vouchflow.shared.cachedDeviceToken else {
             throw SpeakeasyDbError.notEnrolled
         }
         _ = token // gates enrollment only; no longer keys the DB
+        #endif
         let dbPath = try databasePath()
+        #if SPEAKEASY_EXTENSION
+        // The extension only READS an already-migrated store; it must never
+        // CREATE one (that's the app's job, post-enrollment + migration). If the
+        // shared DB isn't there yet, bail — PushDecryptKit keeps the server banner.
+        guard FileManager.default.fileExists(atPath: dbPath) else {
+            throw SpeakeasyDbError.notEnrolled
+        }
+        #endif
         let secret = try resolveRootSecret(dbPath: dbPath)
         let passphrase = derivePassphrase(rootSecret: secret)
 
@@ -168,8 +183,19 @@ final class SpeakeasyDb {
     /// deterministic move is to wipe the orphan, seed fresh, and set the
     /// reset flag so JS can surface the loss to the user.
     private func resolveRootSecret(dbPath: String) throws -> String {
+        #if SPEAKEASY_EXTENSION
+        // The extension has no keychain access to the app's default group; it
+        // reads the secret the app mirrored into the App-Group container, and
+        // NEVER seeds. If the mirror isn't there yet (the app hasn't run since
+        // the update), bail — PushDecryptKit keeps the server banner.
+        guard let mirrored = SharedSecretFile.read() else {
+            throw SpeakeasyDbError.keyUnavailable(errSecItemNotFound)
+        }
+        return mirrored
+        #else
         switch DbKeyStore.loadResult() {
         case .found(let existing):
+            SharedSecretFile.writeIfNeeded(existing) // mirror for the NSE
             return existing
         case .unavailable(let status):
             // The secret read FAILED (device locked right after a reboot/OS
@@ -197,8 +223,10 @@ final class SpeakeasyDb {
                 NSLog("[SpeakeasyDb] could not persist new db root secret — refusing to create an un-rekeyable DB")
                 throw SpeakeasyDbError.keyUnavailable(errSecIO)
             }
+            SharedSecretFile.writeIfNeeded(seed) // mirror for the NSE
             return seed
         }
+        #endif
     }
 
     /// Open the database, recreating it empty if the file cannot be
@@ -292,7 +320,9 @@ final class SpeakeasyDb {
         }
     }
 
-    private func databasePath() throws -> String {
+    /// The legacy (pre-App-Group) location: the app's private Application
+    /// Support container. Kept as the migration source + a permanent fallback.
+    private func legacyDatabasePath() throws -> String {
         let docs = try FileManager.default.url(
             for: .applicationSupportDirectory,
             in: .userDomainMask,
@@ -300,6 +330,23 @@ final class SpeakeasyDb {
             create: true
         )
         return docs.appendingPathComponent(SpeakeasyDb.DB_FILENAME).path
+    }
+
+    /// The active DB path. Prefers the App-Group container (shared with the
+    /// Notification Service Extension) and migrates the legacy private-container
+    /// DB into it ONCE.
+    ///
+    /// Safety: the migration COPIES (never moves) at first-open, when the DB is
+    /// closed and has no concurrent writer — so the copy is a consistent
+    /// snapshot and the legacy file stays intact as a fallback. A partial copy
+    /// is rolled back and we fall through to the legacy path, so a failed
+    /// migration degrades to "the extension can't decrypt yet", never lost data.
+    /// Falls back to legacy entirely if there's no App-Group container.
+    private func databasePath() throws -> String {
+        let legacy = try legacyDatabasePath()
+        let group = AppGroup.databaseURL(filename: SpeakeasyDb.DB_FILENAME)?.path
+        // Pure, offline-tested migration logic (see DbMigration + its test).
+        return DbMigration.resolveActivePath(legacy: legacy, group: group)
     }
 
     /// A fresh 32-byte random secret, Base64-encoded.

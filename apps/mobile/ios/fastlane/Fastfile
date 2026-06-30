@@ -23,6 +23,10 @@ PROFILE = "match AppStore #{APP_IDENTIFIER}".freeze
 # Share Extension target — its own bundle id + match profile (App Group).
 EXT_IDENTIFIER = "xyz.speakeasyapp.app.ShareExtension".freeze
 EXT_PROFILE = "match AppStore #{EXT_IDENTIFIER}".freeze
+# Notification Service Extension — own bundle id + match profile (App Group,
+# for the shared SQLCipher store the rich-push decrypt reads).
+NSE_IDENTIFIER = "xyz.speakeasyapp.app.NotificationService".freeze
+NSE_PROFILE = "match AppStore #{NSE_IDENTIFIER}".freeze
 
 def asc_api_key
   app_store_connect_api_key(
@@ -57,6 +61,16 @@ def pin_signing
     code_sign_identity: "Apple Distribution",
     profile_name: EXT_PROFILE,
     targets: ["ShareExtension"],
+  )
+  # Same, for the Notification Service Extension.
+  update_code_signing_settings(
+    path: "Speakeasy.xcodeproj",
+    use_automatic_signing: false,
+    team_id: TEAM_ID,
+    bundle_identifier: NSE_IDENTIFIER,
+    code_sign_identity: "Apple Distribution",
+    profile_name: NSE_PROFILE,
+    targets: ["NotificationService"],
   )
 end
 
@@ -144,7 +158,7 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       export_method: "app-store",
-      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE } },
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE, NSE_IDENTIFIER => NSE_PROFILE } },
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,
@@ -182,7 +196,7 @@ platform :ios do
       workspace: WORKSPACE,
       scheme: SCHEME,
       export_method: "app-store",
-      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE } },
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE, NSE_IDENTIFIER => NSE_PROFILE } },
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,

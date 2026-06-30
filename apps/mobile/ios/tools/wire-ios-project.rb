@@ -309,6 +309,114 @@ if fw_idx && cur_idx && cur_idx != fw_idx + 1
   changed << 'positioned Embed App Extensions after Link Binary (cycle fix)'
 end
 
+# ---------------------------------------------------------------------------
+# Notification Service Extension ("NotificationService") — rich-push decrypt.
+# Mirrors the ShareExtension creation above, PLUS the libsignal build settings
+# (it links the prebuilt libsignal_ffi.a to decrypt in-process) and the App
+# Group entitlement. The Podfile names this target, so the build runs THIS
+# script BEFORE pod install so CocoaPods can integrate LibSignalClient into it.
+# ---------------------------------------------------------------------------
+NSE_NAME = 'NotificationService'
+nse = project.targets.find { |t| t.name == NSE_NAME }
+if nse.nil?
+  nse_deploy =
+    target.build_configurations.first.build_settings['IPHONEOS_DEPLOYMENT_TARGET'] || '15.1'
+  nse = project.new_target(:app_extension, NSE_NAME, :ios, nse_deploy, nil, :swift)
+  changed << 'created NotificationService target'
+end
+nse.product_reference.name = "#{NSE_NAME}.appex"
+nse.product_reference.path = "#{NSE_NAME}.appex"
+
+nse_group = project.main_group.groups.find { |g| g.display_name == NSE_NAME } ||
+            project.main_group.new_group(NSE_NAME, NSE_NAME)
+nse_src = nse_group.files.find { |f| f.display_name == 'NotificationService.swift' } ||
+          nse_group.new_reference(File.join(IOS_DIR, NSE_NAME, 'NotificationService.swift'))
+unless nse.source_build_phase.files_references.include?(nse_src)
+  nse.add_file_references([nse_src])
+end
+['Info.plist', 'NotificationService.entitlements', 'NotificationService-Bridging-Header.h'].each do |fname|
+  next if nse_group.files.find { |f| f.display_name == fname }
+  nse_group.new_reference(File.join(IOS_DIR, NSE_NAME, fname))
+end
+
+# PushDecryptKit lives in the NSE group; compile it into the extension.
+%w[PushDecryptKit.swift].each do |fname|
+  ref = nse_group.files.find { |f| f.display_name == fname } ||
+        nse_group.new_reference(File.join(IOS_DIR, NSE_NAME, fname))
+  nse.add_file_references([ref]) unless nse.source_build_phase.files_references.include?(ref)
+end
+
+# The shared PURE (React-free) crypto + DB sources the decrypt path needs.
+# Reuse each file's EXISTING project reference (it's already compiled into the
+# app target) and just add it to the extension's compile sources too.
+NSE_SHARED_SOURCES = [
+  'SpeakeasyBridges/Signal/DecryptCache.swift',
+  'SpeakeasyBridges/Db/CrossProcessLock.swift',
+  'SpeakeasyBridges/Signal/SpeakeasySignalStore.swift',
+  'SpeakeasyBridges/Signal/SqlCipherSignalProtocolStore.swift',
+  'SpeakeasyBridges/Db/SpeakeasyDb.swift',
+  'SpeakeasyBridges/Db/DbKeyStore.swift',
+  'SpeakeasyBridges/Db/DbMigration.swift',
+  'SpeakeasyBridges/Db/SharedSecretFile.swift',
+  'SpeakeasyBridges/Db/Schema.swift',
+  'SpeakeasyBridges/Db/AppGroup.swift',
+].freeze
+NSE_SHARED_SOURCES.each do |rel|
+  abs = File.join(IOS_DIR, rel)
+  ref = project.files.find { |f| f.real_path.to_s == abs } ||
+        nse_group.new_reference(abs)
+  nse.add_file_references([ref]) unless nse.source_build_phase.files_references.include?(ref)
+end
+
+app_bs = target.build_configurations.first.build_settings
+nse.build_configurations.each do |config|
+  bs = config.build_settings
+  bs['PRODUCT_NAME'] = '$(TARGET_NAME)'
+  bs['PRODUCT_BUNDLE_IDENTIFIER'] = 'xyz.speakeasyapp.app.NotificationService'
+  bs['INFOPLIST_FILE'] = "#{NSE_NAME}/Info.plist"
+  bs['CODE_SIGN_ENTITLEMENTS'] = "#{NSE_NAME}/NotificationService.entitlements"
+  # Shared DB sources reach the SQLCipher C API through this bridging header.
+  bs['SWIFT_OBJC_BRIDGING_HEADER'] = "#{NSE_NAME}/NotificationService-Bridging-Header.h"
+  # Compile the Vouchflow enrollment-gate (and import) OUT of the extension —
+  # it's a separate process with no Vouchflow session and only opens an
+  # already-enrolled store. Keeps VouchflowSDK out of the NSE link.
+  bs['SWIFT_ACTIVE_COMPILATION_CONDITIONS'] = ['$(inherited)', 'SPEAKEASY_EXTENSION']
+  bs['SWIFT_VERSION'] = app_bs['SWIFT_VERSION'] || '5.0'
+  bs['TARGETED_DEVICE_FAMILY'] = '1'
+  bs['SKIP_INSTALL'] = 'YES'
+  bs['GENERATE_INFOPLIST_FILE'] = 'NO'
+  bs['MARKETING_VERSION'] = '1.0'
+  bs['CURRENT_PROJECT_VERSION'] = '1'
+  bs['LD_RUNPATH_SEARCH_PATHS'] =
+    ['$(inherited)', '@executable_path/Frameworks', '@executable_path/../../Frameworks']
+  # libsignal: same settings the app target carries so the prebuilt FFI links
+  # into the extension binary too (see CLAUDE.md / Podfile).
+  bs['SWIFT_INCLUDE_PATHS'] = '$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi'
+  bs['LIBSIGNAL_FFI_BUILD_PATH'] = 'target/$(CARGO_BUILD_TARGET)/release'
+  bs['LIBSIGNAL_FFI_TEMP_DIR'] = '$(OBJROOT)/Pods.build/libsignal_ffi'
+  bs['LIBSIGNAL_FFI_LIB_TO_LINK'] =
+    '$(LIBSIGNAL_FFI_TEMP_DIR)/$(LIBSIGNAL_FFI_BUILD_PATH)/libsignal_ffi.a'
+  bs['OTHER_LDFLAGS'] = ['$(inherited)', '$(LIBSIGNAL_FFI_LIB_TO_LINK)']
+  # CARGO_BUILD_TARGET resolves the prebuilt-FFI path per SDK/arch. The app
+  # target sets these directly in pbxproj (not via the pod), so the NSE needs
+  # them too — without them $(CARGO_BUILD_TARGET) is empty and the linker looks
+  # for libsignal_ffi.a under "target//release" (the first-build failure).
+  bs['CARGO_BUILD_TARGET[sdk=iphoneos*]'] = 'aarch64-apple-ios'
+  bs['CARGO_BUILD_TARGET[sdk=iphonesimulator*][arch=*]'] = 'x86_64-apple-ios'
+  bs['CARGO_BUILD_TARGET[sdk=iphonesimulator*][arch=arm64]'] = 'aarch64-apple-ios-sim'
+end
+
+target.add_dependency(nse) unless target.dependencies.any? { |d| d.target == nse }
+# Reuse the same Embed App Extensions phase the ShareExtension uses.
+nse_embed = target.copy_files_build_phases.find { |p| p.symbol_dst_subfolder_spec == :plug_ins } ||
+            target.new_copy_files_build_phase('Embed App Extensions')
+nse_embed.symbol_dst_subfolder_spec = :plug_ins
+unless nse_embed.files.any? { |bf| bf.respond_to?(:file_ref) && bf.file_ref == nse.product_reference }
+  bf = nse_embed.add_file_reference(nse.product_reference)
+  bf.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
+  changed << 'embedded NotificationService.appex'
+end
+
 if changed.empty?
   puts 'wire-ios-project: already wired — no changes'
 else

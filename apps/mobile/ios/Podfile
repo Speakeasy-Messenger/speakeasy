@@ -107,3 +107,15 @@ target 'Speakeasy' do
     end
   end
 end
+
+# Rich-push Notification Service Extension. It decrypts the forwarded ciphertext
+# in its own process, so it needs the SAME libsignal the app uses. (SQLCipher is
+# added when PushDecryptKit needs the shared DB.) The `NotificationService`
+# Xcode target is created by tools/wire-ios-project.rb, which the build runs
+# BEFORE pod install so CocoaPods can integrate this pod into it.
+target 'NotificationService' do
+  pod 'LibSignalClient', git: 'https://github.com/signalapp/libsignal.git', tag: 'v0.59.0'
+  # The extension opens the shared encrypted store to decrypt + dedup, so it
+  # needs the same SQLCipher the app uses.
+  pod 'SQLCipher', '~> 4.6.0'
+end
