@@ -24,6 +24,7 @@ import {
   ensureCameraPermission,
   ensureMicPermission,
 } from '../permissions/runtime.js';
+import { Platform } from 'react-native';
 import { diag } from '../diag/log.js';
 import type {
   ActiveCall,
@@ -43,16 +44,20 @@ const RING_TIMEOUT_MS = 45_000;
 /**
  * Master switch for the CallKit / ConnectionService bridge.
  *
- * OFF by default and deliberately so: starting CallKit hands the iOS audio
- * session to the system, and if it isn't perfectly coordinated with the
- * WebRTC ADM it can break call audio (one-way / silent) — a failure that ONLY
- * manifests in a real two-device call and so cannot be caught on the
- * single-device BrowserStack test rig. The bridge itself is fully wired below;
- * flip this to `true`, then verify audio in BOTH directions on a real
- * two-device call before shipping. While `false` the bridge is never
- * constructed, so the working in-app call UI is unchanged.
+ * Enabled on iOS ONLY. CallKit is the standard iOS call surface: it gives the
+ * green return-to-call banner (the "pill"), lock-screen controls, the
+ * background video-call context PiP relies on, and — with
+ * enableMultitaskingCameraAccess (AppDelegate) — keeps the camera capturing
+ * when backgrounded so the peer's video doesn't freeze. The audio-session
+ * handshake is the documented react-native-callkeep + react-native-webrtc glue
+ * (CallKeepBridge listens for didActivate/DeactivateAudioSession and calls
+ * RTCAudioSession.audioSessionDidActivate/Deactivate — both library code, not
+ * bespoke native). Still verify call audio (both directions) on a real device;
+ * it can only be confirmed on-device. Kept OFF on Android, where it would pull
+ * in ConnectionService + a "calling app" permission prompt and change the
+ * working call UX — Android uses the notifee foreground-service pill instead.
  */
-const CALLKEEP_ENABLED: boolean = false;
+const CALLKEEP_ENABLED: boolean = Platform.OS === 'ios';
 
 /**
  * How long a cancelled/ended callId is remembered so a buffered offer for

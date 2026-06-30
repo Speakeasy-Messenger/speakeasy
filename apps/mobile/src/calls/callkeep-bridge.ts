@@ -1,4 +1,11 @@
 import { NativeModules, Platform } from 'react-native';
+// react-native-webrtc ships the native CallKit audio-session handshake and
+// exposes it to JS as RTCAudioSession.audioSessionDidActivate/Deactivate
+// (WebRTCModule+RTCAudioSession.m → [[RTCAudioSession sharedInstance]
+// audioSessionDidActivate:…]). We just call these from CallKit's
+// didActivate/DeactivateAudioSession events — the documented rn-callkeep +
+// rn-webrtc integration, not bespoke native code.
+import { RTCAudioSession } from 'react-native-webrtc';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from './orchestrator.js';
 import type { ActiveCall } from './types.js';
@@ -198,6 +205,26 @@ export class CallKeepBridge {
     this.rnCallKeep.addEventListener('didPerformSetMutedCallAction', ({ muted }) => {
       diag('callkeep', 'mute toggle', { muted: !!muted });
       this.deps.orchestrator.setMicMuted(!!muted);
+    });
+    // iOS CallKit audio-session handshake. CallKit owns the AVAudioSession;
+    // when it activates/deactivates it, WebRTC must be told so its ADM uses
+    // the right session — otherwise audio is silent / one-way. This is the
+    // exact glue documented by react-native-callkeep + react-native-webrtc.
+    this.rnCallKeep.addEventListener('didActivateAudioSession', () => {
+      diag('callkeep', 'didActivateAudioSession');
+      try {
+        RTCAudioSession.audioSessionDidActivate();
+      } catch (err) {
+        diag('callkeep', 'audioSessionDidActivate failed', { err: String(err) });
+      }
+    });
+    this.rnCallKeep.addEventListener('didDeactivateAudioSession', () => {
+      diag('callkeep', 'didDeactivateAudioSession');
+      try {
+        RTCAudioSession.audioSessionDidDeactivate();
+      } catch (err) {
+        diag('callkeep', 'audioSessionDidDeactivate failed', { err: String(err) });
+      }
     });
   }
 

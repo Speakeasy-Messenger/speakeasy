@@ -77,6 +77,12 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // corner bubble (default once connected); true = local full-screen /
   // remote in the bubble. Tapping the bubble toggles it.
   const [swapped, setSwapped] = useState(false);
+  // Measured size of the PiP/compact window. Tapping the floating bubble makes
+  // Android grow the window; the SurfaceViewRenderer keeps its old buffer
+  // (video stays small, black fills the rest) unless we recreate it. We key the
+  // compact RTCView on this so it remounts — a fresh surface at the new size —
+  // whenever the window's measured size changes.
+  const [pipSize, setPipSize] = useState<{ w: number; h: number } | null>(null);
   // Android system-PiP (the floating window after pressing Home). While in
   // it we hide the overlay chrome so only the video shows in the small frame.
   const [inPip, setInPip] = useState(false);
@@ -313,19 +319,27 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   if (compact) {
     const pipFeed = remoteUrl ?? localUrl;
     return (
-      <View style={styles.root}>
+      // onLayout on the ROOT measures the actual window size (ground truth,
+      // unlike the often-stale Dimensions API in a PiP window). When the user
+      // taps the bubble and Android grows it, this fires with the new size →
+      // pipSize changes → the RTCView's key changes → its SurfaceView is
+      // recreated at the new size instead of staying small.
+      <View
+        style={styles.root}
+        onLayout={(e) => {
+          const w = Math.round(e.nativeEvent.layout.width);
+          const h = Math.round(e.nativeEvent.layout.height);
+          setPipSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+          diag('call', 'pip view layout', { w, h });
+        }}
+      >
         {pipFeed ? (
           <RTCView
+            key={pipSize ? `pip-${pipSize.w}x${pipSize.h}` : 'pip'}
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror={pipFeed === localUrl}
-            onLayout={(e) =>
-              diag('call', 'pip view layout', {
-                w: Math.round(e.nativeEvent.layout.width),
-                h: Math.round(e.nativeEvent.layout.height),
-              })
-            }
           />
         ) : (
           <View style={[styles.remoteView, { backgroundColor: '#000' }]} />

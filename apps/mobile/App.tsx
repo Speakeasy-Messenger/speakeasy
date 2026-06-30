@@ -1079,9 +1079,10 @@ export default function App() {
       const callActiveForCover = !!useCalls.getState().active;
       useUiState.getState().setPrivacyCovered(next !== 'active' && !callActiveForCover);
       if (next === 'active') {
-        // Back in the app → tear down the ongoing-call pill (the in-app
-        // call UI is now front-and-center). No-op if it wasn't showing. (#5)
-        void dismissOngoingCallNotification();
+        // The ongoing-call pill is posted at call-connect and persists for the
+        // whole call (dropped on call end), so we no longer dismiss it on
+        // foreground — it just sits quietly in the shade while the in-app call
+        // UI is up, then becomes the return-to-call pill once backgrounded.
         const state = ws.getState();
         // `reconnecting` already has a timer pending — the WS client
         // turned `connect()` into a no-op for that state in the loop
@@ -1185,6 +1186,26 @@ export default function App() {
         prev?.active?.stage !== 'incoming_ringing'
       ) {
         navRef.current?.navigate('IncomingCall');
+      }
+      // #5 pill: post the ongoing-call notification the moment the call
+      // CONNECTS (while still foreground), so it's reliably created — posting
+      // it later on the way to background was unreliable (the reported "pill
+      // never shows"). A posted notification persists regardless of app/
+      // process state, so it's there as the pill once backgrounded. Dropped on
+      // call end below. Android only (iOS uses CallKit); video uses PiP.
+      if (
+        Platform.OS === 'android' &&
+        s.active &&
+        s.active.stage === 'connected' &&
+        prev?.active?.stage !== 'connected' &&
+        s.active.kind !== 'video'
+      ) {
+        void showOngoingCallNotification({
+          peerHandle: s.active.peerUserId,
+          connectedAtMs: s.active.connectedAt,
+          micMuted: s.active.micMuted,
+          kind: s.active.kind,
+        });
       }
       // #5 pill: drop it the moment the call ends (even while backgrounded).
       if (prev?.active && !s.active) {
