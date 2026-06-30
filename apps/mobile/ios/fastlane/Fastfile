@@ -236,7 +236,16 @@ platform :ios do
        "(e.g. App Store Connect on mobile). Build number via SUBMIT_BUILD_NUMBER."
   lane :submit_build do
     require "spaceship"
-    Spaceship::ConnectAPI.token = asc_token
+    require "base64"
+    # Self-contained ASC token (don't depend on other Fastfile helpers that
+    # may not exist on whatever branch the workflow runs from).
+    asc_key = ENV.fetch("ASC_KEY_CONTENT")
+    asc_key = Base64.decode64(asc_key) if ENV["ASC_KEY_CONTENT_BASE64"] == "true"
+    Spaceship::ConnectAPI.token = Spaceship::ConnectAPI::Token.create(
+      key_id: ENV.fetch("ASC_KEY_ID"),
+      issuer_id: ENV.fetch("ASC_ISSUER_ID"),
+      key: asc_key,
+    )
     app = Spaceship::ConnectAPI::App.find(APP_IDENTIFIER)
     UI.message("App id=#{app.id} (#{APP_IDENTIFIER})")
 
