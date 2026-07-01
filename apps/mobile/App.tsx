@@ -14,6 +14,7 @@ import {
   dismissOngoingCallNotification,
   CALL_NOTIF_ACTIONS,
 } from './src/calls/call-notification.js';
+import { setActiveCallControls } from './src/calls/call-controls-registry.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
@@ -1265,20 +1266,29 @@ export default function App() {
       }
     });
 
-    // #5 pill actions: Mute / End from the notification route to the call
-    // orchestrator. Tap-the-body (return-to-call) is handled by the action's
-    // launchActivity, which foregrounds the app — the call overlay then shows
-    // because useCalls.active is still set.
+    // #5 pill actions: Mute / End. These are almost always pressed while the app
+    // is BACKGROUNDED (the pill's whole purpose), so they arrive via
+    // notifee.onBackgroundEvent (push-handler), NOT this foreground handler —
+    // wiring them only here left the pill buttons dead. We publish the live
+    // call's controls to a process-global registry that BOTH handlers read (the
+    // call keeps the process alive via its FGS, so it's the same JS context).
+    // This foreground handler still covers pressing them with the app in front.
+    const callControls = {
+      toggleMute: () => {
+        const active = useCalls.getState().active;
+        if (active && callOrch) callOrch.setMicMuted(!active.micMuted);
+      },
+      hangup: () => {
+        callOrch?.hangup();
+        void dismissOngoingCallNotification();
+      },
+    };
+    setActiveCallControls(callControls);
     const callNotifUnsub = notifee.onForegroundEvent(({ type, detail }) => {
       if (type !== EventType.ACTION_PRESS) return;
       const id = detail.pressAction?.id;
-      const active = useCalls.getState().active;
-      if (id === CALL_NOTIF_ACTIONS.mute && active && callOrch) {
-        callOrch.setMicMuted(!active.micMuted);
-      } else if (id === CALL_NOTIF_ACTIONS.end && callOrch) {
-        callOrch.hangup();
-        void dismissOngoingCallNotification();
-      }
+      if (id === CALL_NOTIF_ACTIONS.mute) callControls.toggleMute();
+      else if (id === CALL_NOTIF_ACTIONS.end) callControls.hangup();
     });
 
     return () => {
@@ -1287,6 +1297,7 @@ export default function App() {
       unsubscribe();
       callsUnsub();
       callNotifUnsub();
+      setActiveCallControls(undefined);
       void dismissOngoingCallNotification();
       setCallOrchestrator(undefined);
       ws.close();

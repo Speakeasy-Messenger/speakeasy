@@ -38,6 +38,8 @@ import { decodePayload, newMessageId, ulidTimeMs } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
 import { callKeepEnabled } from '../calls/orchestrator.js';
+import { CALL_NOTIF_ACTIONS } from '../calls/call-notification.js';
+import { getActiveCallControls } from '../calls/call-controls-registry.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
@@ -1206,6 +1208,20 @@ if (Platform.OS === 'android') {
     // Inline reply submitted from a notification's RemoteInput field.
     if (type === EventType.ACTION_PRESS && detail.pressAction?.id === 'reply') {
       await handleInlineReply(detail.notification, detail.input);
+      return;
+    }
+    // Ongoing-call pill Mute / End. The pill is used while backgrounded, so its
+    // action presses land HERE (not App.tsx's onForegroundEvent). The call's
+    // foreground service keeps the process alive, so the live orchestrator is
+    // reachable through the controls registry App.tsx populated.
+    if (type === EventType.ACTION_PRESS && detail.pressAction?.id === CALL_NOTIF_ACTIONS.mute) {
+      diag('push-bg', 'pill action: mute');
+      getActiveCallControls()?.toggleMute();
+      return;
+    }
+    if (type === EventType.ACTION_PRESS && detail.pressAction?.id === CALL_NOTIF_ACTIONS.end) {
+      diag('push-bg', 'pill action: end');
+      getActiveCallControls()?.hangup();
       return;
     }
     if (type !== EventType.PRESS) return;
