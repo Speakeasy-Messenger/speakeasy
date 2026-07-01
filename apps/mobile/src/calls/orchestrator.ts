@@ -44,20 +44,31 @@ const RING_TIMEOUT_MS = 45_000;
 /**
  * Master switch for the CallKit / ConnectionService bridge.
  *
- * Enabled on iOS ONLY. CallKit is the standard iOS call surface: it gives the
- * green return-to-call banner (the "pill"), lock-screen controls, the
- * background video-call context PiP relies on, and — with
- * enableMultitaskingCameraAccess (AppDelegate) — keeps the camera capturing
- * when backgrounded so the peer's video doesn't freeze. The audio-session
- * handshake is the documented react-native-callkeep + react-native-webrtc glue
- * (CallKeepBridge listens for didActivate/DeactivateAudioSession and calls
- * RTCAudioSession.audioSessionDidActivate/Deactivate — both library code, not
- * bespoke native). Still verify call audio (both directions) on a real device;
- * it can only be confirmed on-device. Kept OFF on Android, where it would pull
- * in ConnectionService + a "calling app" permission prompt and change the
- * working call UX — Android uses the notifee foreground-service pill instead.
+ * DISABLED on all platforms (2026-06-30). Enabling it on iOS regressed calls
+ * on a real device (Giselle): (1) a DOUBLE incoming-call prompt — CallKit's
+ * native ring UI (CallKeepBridge.displayIncomingCall) plus the app's own
+ * IncomingCallScreen (App.tsx navigates on `incoming_ringing` unconditionally);
+ * and (2) BROKEN audio (one-way / silent) — CallKit owns the AVAudioSession and
+ * fights InCallManager, which also activates it via `InCallManager.start({auto:
+ * true})` in webrtc-peer.ts. That session tug-of-war is the same iOS audio
+ * fragility that broke builds 3–12 (see the stock-ADM history).
+ *
+ * Turning CallKit off restores the known-good path: the in-app IncomingCallScreen
+ * is the sole incoming UI (no double prompt) and InCallManager owns the audio
+ * session cleanly (working two-way audio, build-13 behaviour). iOS video PiP is
+ * UNAFFECTED — it depends on enableMultitaskingCameraAccess + media:'video' +
+ * the iosPIP prop, NOT CallKit. The only thing given up is CallKit's lock-screen
+ * call UI / system pill, which needed a VoIP push (still gated off) to ring from
+ * a killed state anyway. Android was already off (ConnectionService + a
+ * "calling app" prompt; it uses the notifee foreground-service pill instead).
+ *
+ * To re-attempt CallKit later, the audio fix is: on iOS don't let InCallManager
+ * activate the session (`auto:false` / skip start) and let CallKit's
+ * didActivateAudioSession drive RTCAudioSession.audioSessionDidActivate — plus
+ * gate the IncomingCallScreen navigation behind `!CALLKEEP_ENABLED`. Verify
+ * on-device; it cannot be confirmed off-device.
  */
-const CALLKEEP_ENABLED: boolean = Platform.OS === 'ios';
+const CALLKEEP_ENABLED: boolean = false;
 
 /**
  * How long a cancelled/ended callId is remembered so a buffered offer for
