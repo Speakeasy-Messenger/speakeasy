@@ -391,7 +391,19 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
                   : 'pip') + `-${pipFeedTag}`
             }
             streamURL={pipFeed}
-            style={StyleSheet.absoluteFill}
+            // Size the view EXPLICITLY to the authoritative native PiP size (dp),
+            // not absoluteFill. absoluteFill wasn't tracking the PiP resize — when
+            // the bubble expanded, the video view stayed at the original small
+            // size while the window grew (the reported "video stays the size of
+            // the original bubble"). An explicit width/height that changes with
+            // nativePipSize forces the view to the new bounds so the video fills.
+            style={
+              nativePipSize
+                ? { width: nativePipSize.w, height: nativePipSize.h }
+                : pipSize
+                  ? { width: pipSize.w, height: pipSize.h }
+                  : StyleSheet.absoluteFill
+            }
             objectFit="cover"
             mirror={pipFeed === localUrl}
             // Ground-truth video frame size — pairs with the 'pip native
