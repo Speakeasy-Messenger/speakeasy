@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  AppState,
   Pressable,
   StyleSheet,
   Text,
@@ -97,12 +98,23 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // SurfaceView re-creates at the new window size (Android SurfaceViews keep
   // their pre-resize buffer otherwise → the feed fills only part of the bubble).
   const { width: winW, height: winH } = useWindowDimensions();
-  // The authoritative "collapse to just the video" signal. True when the
-  // native PiP event told us so OR — the reliable fallback — when the window
-  // has reflowed to the tiny floating size. Either path drives BOTH the
-  // chrome-hide and the SurfaceView remount, so the bubble shows only the
-  // counterparty's face even when the native event never arrives.
-  const compact = inPip || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE;
+  // Backgrounded → the video call is floating in a PiP bubble. Track it so we
+  // can collapse to the bubble-only view IMMEDIATELY on background, without
+  // waiting for the native PiP-mode event (which lands ~1–2 s later). Without
+  // this, the full call UI — top bar and all — briefly renders inside the tiny
+  // PiP window on entry, and the bubble shows a cropped corner of it (the
+  // reported "top bar shows in the bubble").
+  const [appBackgrounded, setAppBackgrounded] = useState(false);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppBackgrounded(s !== 'active'));
+    return () => sub.remove();
+  }, []);
+  // The authoritative "collapse to just the video" signal. True when the native
+  // PiP event told us so, OR the app is backgrounded (about to be / already in
+  // PiP), OR the window has reflowed to the tiny floating size. Any path drives
+  // BOTH the chrome-hide and the SurfaceView remount.
+  const compact =
+    inPip || appBackgrounded || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE;
   useEffect(() => {
     diag('call', 'pip mode change', {
       inPip,
@@ -147,7 +159,12 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     const unsub = pip.onPipModeChanged(setInPip);
     // Closing the PiP bubble (vs expanding it back) must END the call —
     // otherwise the camera/mic/ring keep running headless.
-    const unsubClosed = pip.onPipClosed(() => orchestrator.hangup());
+    const unsubClosed = pip.onPipClosed(() => {
+      diag('call', 'pip closed → hangup');
+      orchestrator.hangup();
+    });
+    // Diagnostic breadcrumb for the X-dismiss path (see MainActivity.onStop).
+    const unsubLifecycle = pip.onPipLifecycle((info) => diag('call', 'pip lifecycle', { info }));
     // Authoritative bubble size from native (dp) — drives the compact
     // SurfaceView remount at the true size on enter + every resize.
     const unsubResize = pip.onPipResize((s) => {
@@ -161,6 +178,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       unsub();
       unsubClosed();
       unsubResize();
+      unsubLifecycle();
     };
   }, [orchestrator]);
 
@@ -356,13 +374,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       >
         {pipFeed ? (
           <RTCView
-            // Remount ONLY on the feed switch (local→remote at answer), NOT on
-            // window resize. The WebRTC hardware scaler (enabled in the
-            // WebRTCView patch) now makes the single surface scale to the bubble
-            // as it grows/shrinks, so recreating it per-resize is unnecessary and
-            // was itself the "video stuck at the old size in the corner after
-            // resize" bug — a freshly-mounted SurfaceView raced the window size.
-            key={`pip-${pipFeedTag}`}
+            // Remount on BOTH the window size (native PiP size when known, else
+            // the RN-measured size) AND the feed tag. The size part recreates
+            // the Android SurfaceView at each new bubble size (its buffer doesn't
+            // track a resize otherwise); the feed part remounts on the local→
+            // remote switch at answer. (v1.0.33 dropped the size key + added a
+            // hardware scaler — that regressed sizing to a fixed-size video that
+            // over/under-filled the bubble, so we're back to the size remount.)
+            key={
+              (nativePipSize
+                ? `npip-${nativePipSize.w}x${nativePipSize.h}`
+                : pipSize
+                  ? `pip-${pipSize.w}x${pipSize.h}`
+                  : 'pip') + `-${pipFeedTag}`
+            }
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
             objectFit="cover"

@@ -1,25 +1,3 @@
-diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
-index 5d14d0f..0092dbd 100644
---- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
-+++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
-@@ -549,6 +549,17 @@ public class WebRTCView extends ViewGroup {
- 
-             try {
-                 surfaceViewRenderer.init(sharedContext, rendererEvents);
-+                // Speakeasy patch: enable the WebRTC hardware scaler. Without it
-+                // the SurfaceView's buffer is fixed at creation and does NOT
-+                // adapt when the view/window resizes — so in an Android PiP
-+                // bubble the video renders at a fixed size (overflowing the
-+                // small bubble as an enlarged corner, or under-filling the
-+                // enlarged bubble in the top-left). With the hardware scaler the
-+                // surface uses setFixedSize + the hardware compositor scales each
-+                // frame to the current view bounds, so the video always fills the
-+                // bubble as it grows/shrinks. This is what WebRTC's own sample
-+                // apps (AppRTCMobile) do; react-native-webrtc omits it.
-+                surfaceViewRenderer.setEnableHardwareScaler(true);
-                 surfaceViewRendererInstances++;
-             } catch (Exception e) {
-                 Logging.e(
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
 index e64005d..dcf08fe 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m

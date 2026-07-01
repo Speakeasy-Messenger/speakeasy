@@ -64,4 +64,16 @@ export const pip = {
     );
     return () => sub.remove();
   },
+
+  /**
+   * Native PiP-lifecycle breadcrumbs (onStop flag values) — diagnostic only, so
+   * a device log shows why an X-dismiss did or didn't end the call. No-op off
+   * Android.
+   */
+  onPipLifecycle(cb: (info: string) => void): () => void {
+    if (Platform.OS !== 'android' || !native) return () => {};
+    const emitter = new NativeEventEmitter(native as unknown as never);
+    const sub = emitter.addListener('SpeakeasyPipLifecycle', (info: string) => cb(info));
+    return () => sub.remove();
+  },
 };

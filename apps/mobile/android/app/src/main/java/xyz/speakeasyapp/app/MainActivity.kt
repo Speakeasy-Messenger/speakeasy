@@ -160,6 +160,12 @@ class MainActivity : ReactActivity() {
   // onResume can tell a DISMISS (user closed the bubble → onStop) from an
   // EXPAND (user reopened the app → onResume).
   private var exitingPip = false
+  // True from the moment we ENTER PiP until we either expand (onResume clears it)
+  // or the activity stops (dismiss). More robust than exitingPip alone: some
+  // OEMs (Samsung) close the PiP via the X WITHOUT delivering
+  // onPictureInPictureModeChanged(false) first, so exitingPip never gets set —
+  // but wasInPip is still true at onStop, so we still detect the dismiss.
+  private var wasInPip = false
 
   override fun onPictureInPictureModeChanged(
     isInPictureInPictureMode: Boolean,
@@ -168,6 +174,7 @@ class MainActivity : ReactActivity() {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
     emitJsEvent("SpeakeasyPipModeChanged", isInPictureInPictureMode)
     if (isInPictureInPictureMode) {
+      wasInPip = true
       // Hand JS the authoritative PiP window size so the video SurfaceView is
       // recreated at the true bubble size (see emitPipSize).
       emitPipSize(newConfig)
@@ -205,23 +212,29 @@ class MainActivity : ReactActivity() {
 
   override fun onResume() {
     super.onResume()
-    // Reopened into the app — not a dismiss. Don't end the call.
+    // Reopened into the app (expanded from PiP) — not a dismiss. Don't end call.
     exitingPip = false
+    wasInPip = false
   }
 
   override fun onStop() {
     super.onStop()
     // End the call when the user CLOSES the PiP bubble (the reported "press X,
-    // call keeps going"). Two signals, because devices differ:
-    //  - exitingPip: onPictureInPictureModeChanged(false) fired first (the
-    //    clean path) and onResume didn't clear it → a dismiss, not an expand.
-    //  - isFinishing: some OEMs finish the activity straight from the PiP X
-    //    WITHOUT delivering onPictureInPictureModeChanged(false) first, so
-    //    exitingPip never gets set; a finishing activity in onStop is a dismiss.
-    // A plain background (Home during an audio call) is neither: not finishing,
-    // and exitingPip stays false — so the call is left running as intended.
-    if (exitingPip || isFinishing) {
+    // call keeps going"). The activity stops while it WAS in PiP and did NOT
+    // resume to the foreground (onResume would have cleared wasInPip on an
+    // expand). We OR three signals because OEMs vary in which they deliver on
+    // the PiP X: exitingPip (clean onPictureInPictureModeChanged(false) path),
+    // isFinishing (activity finished from the X), and wasInPip (Samsung path
+    // that skips the mode-changed callback). A plain Home-background of a
+    // non-PiP audio call is none of these, so that call keeps running.
+    val dismissed = exitingPip || isFinishing || wasInPip
+    emitJsEvent(
+      "SpeakeasyPipLifecycle",
+      "onStop exitingPip=$exitingPip isFinishing=$isFinishing wasInPip=$wasInPip dismissed=$dismissed",
+    )
+    if (dismissed) {
       exitingPip = false
+      wasInPip = false
       emitJsEvent("SpeakeasyPipClosed", true)
     }
   }
