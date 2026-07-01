@@ -1,9 +1,9 @@
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java
 new file mode 100644
-index 0000000..a1e4a5d
+index 0000000..26e4d45
 --- /dev/null
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java
-@@ -0,0 +1,202 @@
+@@ -0,0 +1,204 @@
 +package com.oney.WebRTCModule;
 +
 +import android.content.Context;
@@ -169,11 +169,13 @@ index 0000000..a1e4a5d
 +    @Override
 +    protected void onMeasure(int widthSpec, int heightSpec) {
 +        ThreadUtils.checkIsOnMainThread();
-+        Point size;
-+        synchronized (layoutLock) {
-+            size = videoLayoutMeasure.measure(widthSpec, heightSpec, rotatedFrameWidth, rotatedFrameHeight);
-+        }
-+        setMeasuredDimension(size.x, size.y);
++        // Always take the full available size. WebRTCView positions us (fill, for
++        // cover) via a direct layout() call, so letting videoLayoutMeasure impose
++        // a fit-size here just fought that and contributed to the letterboxed
++        // bubble. The EglRenderer does the cover crop via setLayoutAspectRatio.
++        setMeasuredDimension(
++                getDefaultSize(getSuggestedMinimumWidth(), widthSpec),
++                getDefaultSize(getSuggestedMinimumHeight(), heightSpec));
 +    }
 +
 +    @Override
@@ -207,10 +209,25 @@ index 0000000..a1e4a5d
 +    }
 +}
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
-index 5d14d0f..dfdbf3f 100644
+index 5d14d0f..4c6d101 100644
 --- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
-@@ -142,7 +142,7 @@ public class WebRTCView extends ViewGroup {
+@@ -47,7 +47,13 @@ public class WebRTCView extends ViewGroup {
+      * pillarboxed. Areas of the element's playback area that do not contain the
+      * video represent nothing.
+      */
+-    private static final ScalingType DEFAULT_SCALING_TYPE = ScalingType.SCALE_ASPECT_FIT;
++    // Speakeasy patch: default to FILL (cover), not FIT. Every RTCView in the app
++    // sets objectFit="cover", but that prop can arrive AFTER the view's first
++    // layout — especially for the PiP bubble, which remounts on resize. With the
++    // stock FIT default the bubble then renders letterboxed (video fit inside with
++    // a black band) until/unless a re-layout picks up the cover prop. Defaulting
++    // to FILL matches the app's intent and removes that window.
++    private static final ScalingType DEFAULT_SCALING_TYPE = ScalingType.SCALE_ASPECT_FILL;
+ 
+     private static final String TAG = WebRTCModule.TAG;
+ 
+@@ -142,7 +148,7 @@ public class WebRTCView extends ViewGroup {
       * The {@link View} and {@link VideoSink} implementation which
       * actually renders {@link #videoTrack} on behalf of this instance.
       */
@@ -219,7 +236,7 @@ index 5d14d0f..dfdbf3f 100644
  
      /**
       * The {@code VideoTrack}, if any, rendered by this {@code WebRTCView}.
-@@ -157,7 +157,7 @@ public class WebRTCView extends ViewGroup {
+@@ -157,7 +163,7 @@ public class WebRTCView extends ViewGroup {
      public WebRTCView(Context context) {
          super(context);
  
