@@ -211,10 +211,16 @@ class MainActivity : ReactActivity() {
 
   override fun onStop() {
     super.onStop()
-    if (exitingPip) {
-      // The user CLOSED the PiP bubble (didn't expand it). End the call so the
-      // camera/mic/dial tone don't keep running headless (reported: "close the
-      // bubble, the call keeps going"). JS hangs up on this event.
+    // End the call when the user CLOSES the PiP bubble (the reported "press X,
+    // call keeps going"). Two signals, because devices differ:
+    //  - exitingPip: onPictureInPictureModeChanged(false) fired first (the
+    //    clean path) and onResume didn't clear it → a dismiss, not an expand.
+    //  - isFinishing: some OEMs finish the activity straight from the PiP X
+    //    WITHOUT delivering onPictureInPictureModeChanged(false) first, so
+    //    exitingPip never gets set; a finishing activity in onStop is a dismiss.
+    // A plain background (Home during an audio call) is neither: not finishing,
+    // and exitingPip stays false — so the call is left running as intended.
+    if (exitingPip || isFinishing) {
       exitingPip = false
       emitJsEvent("SpeakeasyPipClosed", true)
     }

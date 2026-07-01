@@ -356,16 +356,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       >
         {pipFeed ? (
           <RTCView
-            // Key on the AUTHORITATIVE native bubble size when we have it
-            // (recreates the SurfaceView at the true size on every resize),
-            // falling back to the RN-measured size only until native reports in.
-            key={
-              (nativePipSize
-                ? `npip-${nativePipSize.w}x${nativePipSize.h}`
-                : pipSize
-                  ? `pip-${pipSize.w}x${pipSize.h}`
-                  : 'pip') + `-${pipFeedTag}`
-            }
+            // Remount ONLY on the feed switch (local→remote at answer), NOT on
+            // window resize. The WebRTC hardware scaler (enabled in the
+            // WebRTCView patch) now makes the single surface scale to the bubble
+            // as it grows/shrinks, so recreating it per-resize is unnecessary and
+            // was itself the "video stuck at the old size in the corner after
+            // resize" bug — a freshly-mounted SurfaceView raced the window size.
+            key={`pip-${pipFeedTag}`}
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
