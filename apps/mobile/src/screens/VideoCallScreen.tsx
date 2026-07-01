@@ -374,18 +374,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       >
         {pipFeed ? (
           <RTCView
-            // Remount on window size (native PiP size when known) + feed tag.
-            // SurfaceView's buffer doesn't track a system resize, so recreate it
-            // at each new bubble size; feed tag remounts on the local→remote
-            // switch at answer. (TextureView would avoid this but crashed on
-            // device — reverted; see the react-native-webrtc patch history.)
-            key={
-              (nativePipSize
-                ? `npip-${nativePipSize.w}x${nativePipSize.h}`
-                : pipSize
-                  ? `pip-${pipSize.w}x${pipSize.h}`
-                  : 'pip') + `-${pipFeedTag}`
-            }
+            // Remount only on the feed switch (local→remote at answer), NOT on
+            // resize: the Android renderer is a TextureViewRenderer (see the
+            // react-native-webrtc patch) which scales to the view bounds on every
+            // window resize with no surface recreation — so the bubble fills
+            // correctly as it grows/shrinks. (The v1.0.37 crash was TextureView
+            // rejecting setBackgroundColor; fixed with a no-op override.)
+            key={`pip-${pipFeedTag}`}
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
