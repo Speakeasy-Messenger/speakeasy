@@ -55,7 +55,11 @@ import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vo
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
-import { CallOrchestrator, type CallHistoryEntry } from './src/calls/orchestrator.js';
+import {
+  CallOrchestrator,
+  callKeepEnabled,
+  type CallHistoryEntry,
+} from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { setShowWhenLocked, shouldShowOverLockScreen } from './src/native/lock-screen.js';
@@ -1183,9 +1187,27 @@ export default function App() {
     const callsUnsub = useCalls.subscribe((s, prev) => {
       if (
         s.active?.stage === 'incoming_ringing' &&
-        prev?.active?.stage !== 'incoming_ringing'
+        prev?.active?.stage !== 'incoming_ringing' &&
+        // When CallKit is on (iOS) it presents the incoming-call UI itself
+        // (CallKeepBridge.displayIncomingCall). Showing the in-app screen too
+        // produced a DOUBLE incoming-call prompt on device — suppress it and let
+        // CallKit own the ring. The accept is routed to 'Call' just below.
+        !callKeepEnabled()
       ) {
         navRef.current?.navigate('IncomingCall');
+      }
+      // CallKit accept: the native UI (not the in-app IncomingCallScreen, which
+      // normally does replace('Call')) handled the ring, so when the user
+      // answers — stage leaves incoming_ringing with the call still active —
+      // route to the call screen ourselves. Decline leaves `active` null, so the
+      // `s.active` guard skips it.
+      if (
+        callKeepEnabled() &&
+        prev?.active?.stage === 'incoming_ringing' &&
+        s.active != null &&
+        s.active.stage !== 'incoming_ringing'
+      ) {
+        navRef.current?.navigate('Call');
       }
       // #5 pill: post the ongoing-call notification the moment the call
       // CONNECTS (while still foreground), so it's reliably created — posting

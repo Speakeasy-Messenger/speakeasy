@@ -177,6 +177,23 @@ export class CallKeepBridge {
         RNCallKeep.registerAndroidEvents();
         RNCallKeep.setAvailable(true);
       }
+      if (Platform.OS === 'ios') {
+        // Manual-audio mode for CallKit coexistence (see the
+        // WebRTCModule+RTCAudioSession patch). WebRTC must NOT auto-grab the
+        // AVAudioSession — CallKit owns it and drives isAudioEnabled via the
+        // didActivate/didDeactivate handlers below. Set once here, before the
+        // first call's audio unit initialises. Without this, WebRTC and CallKit
+        // fight over the session and audio is one-way / silent.
+        try {
+          const wm = NativeModules.WebRTCModule as
+            | { setManualAudio?: (manual: boolean) => void }
+            | undefined;
+          wm?.setManualAudio?.(true);
+          diag('callkeep', 'manual audio enabled');
+        } catch (err) {
+          diag('callkeep', 'setManualAudio failed', { err: String(err) });
+        }
+      }
       this.attachListeners();
       this.attachStoreSubscriber();
       this.setupDone = true;

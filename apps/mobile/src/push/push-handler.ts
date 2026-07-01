@@ -37,6 +37,7 @@ import AsyncStorage from '@react-native-async-storage/async-storage';
 import { decodePayload, newMessageId, ulidTimeMs } from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
+import { callKeepEnabled } from '../calls/orchestrator.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
 import { useConversations } from '../store/conversations.js';
@@ -1305,6 +1306,10 @@ async function routeTarget(
       // IncomingCallScreen reads from useCalls.active — it will render
       // because we verified active.stage === 'incoming_ringing'.
       void cancelCallNotification(target);
+      // With CallKit on (iOS), CallKit presents the incoming-call UI; opening
+      // the in-app screen too would double the prompt. Just surface the app —
+      // the store subscriber's displayIncomingCall shows the CallKit ring.
+      if (callKeepEnabled()) return;
       navRef.current?.navigate('IncomingCall');
       return;
     case 'call-stale':
@@ -1313,6 +1318,7 @@ async function routeTarget(
       return;
     case 'call-connecting':
       void cancelCallNotification(target);
+      if (callKeepEnabled()) return; // CallKit owns the incoming UI (see above).
       navRef.current?.navigate('IncomingCall', { connectingPeerId: target.peerId });
       return;
     case 'group':

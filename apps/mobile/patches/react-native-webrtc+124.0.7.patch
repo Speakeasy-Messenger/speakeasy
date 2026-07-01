@@ -23,3 +23,49 @@ index e64005d..dcf08fe 100644
              dispatch_async(_module.workerQueue, ^{
                  [videoTrack addRenderer:self.videoView];
              });
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
+index cd4fa13..64ab025 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
+@@ -7,13 +7,39 @@
+ 
+ @implementation WebRTCModule (RTCAudioSession)
+ 
++// Speakeasy patch: manual-audio mode for CallKit coexistence.
++//
++// Stock react-native-webrtc 124 never sets `useManualAudio`, so WebRTC's ADM
++// auto-activates the AVAudioSession the moment an audio track appears — which
++// collides with CallKit (which also owns/activates the session) and with
++// react-native-incall-manager, producing one-way / silent audio on iOS. The
++// documented CallKit+WebRTC recipe is: set useManualAudio = YES up front, then
++// let CallKit's provider:didActivate/didDeactivate drive isAudioEnabled, so
++// WebRTC touches the session ONLY when CallKit says it's active. `manual` is
++// set once at CallKeep setup; `isAudioEnabled` is toggled from the CallKit
++// didActivate/didDeactivate events (the two methods below).
++//
++// Refs: Medium "Mastering VoIP Audio with CallKit and WebRTC on iOS";
++// webrtc RTCAudioSession (useManualAudio / isAudioEnabled).
++RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(setManualAudio : (BOOL)manual) {
++    [RTCAudioSession sharedInstance].useManualAudio = manual;
++    return nil;
++}
++
+ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidActivate) {
+-    [[RTCAudioSession sharedInstance] audioSessionDidActivate:[AVAudioSession sharedInstance]];
++    RTCAudioSession *session = [RTCAudioSession sharedInstance];
++    [session audioSessionDidActivate:[AVAudioSession sharedInstance]];
++    // Grant WebRTC permission to run its VoIP audio unit now that CallKit has
++    // activated the session. No-op unless useManualAudio == YES.
++    session.isAudioEnabled = YES;
+     return nil;
+ }
+ 
+ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidDeactivate) {
+-    [[RTCAudioSession sharedInstance] audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
++    RTCAudioSession *session = [RTCAudioSession sharedInstance];
++    [session audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
++    // CallKit tore the session down — stop the VoIP audio unit.
++    session.isAudioEnabled = NO;
+     return nil;
+ }
+ 

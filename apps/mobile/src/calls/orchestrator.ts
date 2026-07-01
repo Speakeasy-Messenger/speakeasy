@@ -42,33 +42,37 @@ import { FilterError, setFilterBypass } from '../native/voice-filter.js';
 const RING_TIMEOUT_MS = 45_000;
 
 /**
- * Master switch for the CallKit / ConnectionService bridge.
+ * Master switch for the CallKit / ConnectionService bridge. Enabled on iOS ONLY.
  *
- * DISABLED on all platforms (2026-06-30). Enabling it on iOS regressed calls
- * on a real device (Giselle): (1) a DOUBLE incoming-call prompt — CallKit's
- * native ring UI (CallKeepBridge.displayIncomingCall) plus the app's own
- * IncomingCallScreen (App.tsx navigates on `incoming_ringing` unconditionally);
- * and (2) BROKEN audio (one-way / silent) — CallKit owns the AVAudioSession and
- * fights InCallManager, which also activates it via `InCallManager.start({auto:
- * true})` in webrtc-peer.ts. That session tug-of-war is the same iOS audio
- * fragility that broke builds 3–12 (see the stock-ADM history).
+ * CallKit gives the green return-to-call pill, lock-screen controls, and the
+ * system call UI. An earlier enable regressed calls on a real device (Giselle) —
+ * a DOUBLE incoming prompt and one-way/silent audio — because WebRTC, CallKit,
+ * and InCallManager all fought over the AVAudioSession. Both are now fixed per
+ * the documented CallKit+WebRTC recipe (Medium "Mastering VoIP Audio with
+ * CallKit and WebRTC on iOS"; react-native-webrtc RTCAudioSession):
  *
- * Turning CallKit off restores the known-good path: the in-app IncomingCallScreen
- * is the sole incoming UI (no double prompt) and InCallManager owns the audio
- * session cleanly (working two-way audio, build-13 behaviour). iOS video PiP is
- * UNAFFECTED — it depends on enableMultitaskingCameraAccess + media:'video' +
- * the iosPIP prop, NOT CallKit. The only thing given up is CallKit's lock-screen
- * call UI / system pill, which needed a VoIP push (still gated off) to ring from
- * a killed state anyway. Android was already off (ConnectionService + a
- * "calling app" prompt; it uses the notifee foreground-service pill instead).
+ *   - AUDIO: react-native-webrtc 124 never sets `useManualAudio`, so WebRTC
+ *     auto-grabs the session and battles CallKit. We now (patch-package) set
+ *     `RTCAudioSession.useManualAudio = YES` at bridge setup and drive
+ *     `isAudioEnabled` YES/NO from CallKit's didActivate/didDeactivate — the
+ *     canonical manual-audio pattern. WebRTC then only touches the session when
+ *     CallKit says it's active, ending the tug-of-war.
+ *   - DOUBLE PROMPT: the in-app IncomingCallScreen is suppressed while
+ *     CALLKEEP_ENABLED (CallKit is the sole incoming UI); App.tsx routes a
+ *     CallKit answer straight to the Call screen. See `callKeepEnabled()`.
  *
- * To re-attempt CallKit later, the audio fix is: on iOS don't let InCallManager
- * activate the session (`auto:false` / skip start) and let CallKit's
- * didActivateAudioSession drive RTCAudioSession.audioSessionDidActivate — plus
- * gate the IncomingCallScreen navigation behind `!CALLKEEP_ENABLED`. Verify
- * on-device; it cannot be confirmed off-device.
+ * Still on-device-only verifiable (no iOS audio/CallKit testable off-device).
+ * Kept OFF on Android (ConnectionService + a "calling app" prompt; Android uses
+ * the notifee foreground-service pill instead).
  */
-const CALLKEEP_ENABLED: boolean = false;
+const CALLKEEP_ENABLED: boolean = Platform.OS === 'ios';
+
+/** Whether the CallKit/ConnectionService bridge is active on this platform.
+ *  Exposed so the UI can suppress the in-app IncomingCallScreen when CallKit
+ *  owns the incoming-call surface (avoids the double-prompt regression). */
+export function callKeepEnabled(): boolean {
+  return CALLKEEP_ENABLED;
+}
 
 /**
  * How long a cancelled/ended callId is remembered so a buffered offer for
