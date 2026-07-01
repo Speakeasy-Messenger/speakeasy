@@ -1161,23 +1161,14 @@ export default function App() {
           }
         } else if (callActive) {
           diag('app', 'AppState background → keeping WS (call active)');
-          // Voice-call pill (#5): surface the ongoing-call notification so a
-          // backgrounded call stays visible + controllable — peer, live
-          // duration, Mute, End, tap-to-return. Android only; iOS gets the
-          // same from CallKit. Video calls also float into PiP; this is the
-          // sole affordance for audio calls (nothing else shows when bg'd).
-          const ac = useCalls.getState().active;
-          // Video calls float into the PiP bubble — showing the pill too
-          // would double up. The pill is for audio/'private' (masked audio)
-          // calls, which have no other backgrounded affordance.
-          if (ac && ac.kind !== 'video') {
-            void showOngoingCallNotification({
-              peerHandle: ac.peerUserId,
-              connectedAtMs: ac.connectedAt,
-              micMuted: ac.micMuted,
-              kind: ac.kind,
-            });
-          }
+          // NB: the voice-call pill is NOT (re)started here. Its foreground
+          // service is `microphone`-typed, and Android 14 FORBIDS starting a
+          // microphone FGS from the background — an attempt throws, the process
+          // isn't protected, One UI kills the backgrounded call, and the pill
+          // never appears (the repeatedly-reported bug). The FGS is instead
+          // started at the call's first FOREGROUND moment (caller dialing /
+          // callee accept) in the store subscriber below, so by the time we
+          // background here it is already running and simply keeps running.
         }
       }
     });
@@ -1209,12 +1200,35 @@ export default function App() {
       ) {
         navRef.current?.navigate('Call');
       }
-      // #5 pill: post the ongoing-call notification the moment the call
-      // CONNECTS (while still foreground), so it's reliably created — posting
-      // it later on the way to background was unreliable (the reported "pill
-      // never shows"). A posted notification persists regardless of app/
-      // process state, so it's there as the pill once backgrounded. Dropped on
-      // call end below. Android only (iOS uses CallKit); video uses PiP.
+      // #5 pill (Android; iOS uses CallKit; video uses PiP): START the ongoing-
+      // call foreground service at the call's first FOREGROUND moment — the
+      // caller pressing dial, or the callee accepting an incoming call. This is
+      // deliberate: the FGS is `microphone`-typed and Android 14 rejects a
+      // microphone-FGS start from the background, so starting it lazily (at
+      // connect, which can land after the user has already tabbed away while it
+      // rings, or on the AppState→background transition) silently failed — the
+      // reported "pill never shows". Started here while foreground, the service
+      // is already running before any backgrounding, keeping both the pill and
+      // the call's process alive. `connectedAt` is undefined until connect; the
+      // connect branch below re-displays to add the live duration.
+      const pillStart =
+        (s.active?.stage === 'outgoing_dialing' &&
+          prev?.active?.stage !== 'outgoing_dialing') ||
+        (prev?.active?.stage === 'incoming_ringing' &&
+          s.active != null &&
+          s.active.stage !== 'incoming_ringing');
+      if (Platform.OS === 'android' && s.active && s.active.kind !== 'video' && pillStart) {
+        diag('call', 'pill: foreground start', { stage: s.active.stage, kind: s.active.kind });
+        void showOngoingCallNotification({
+          peerHandle: s.active.peerUserId,
+          connectedAtMs: s.active.connectedAt,
+          micMuted: s.active.micMuted,
+          kind: s.active.kind,
+        });
+      }
+      // Re-display at connect to add the live duration chronometer. This UPDATES
+      // the already-running FGS (same notification id) rather than starting a
+      // new one, so it is allowed even if it lands while backgrounded.
       if (
         Platform.OS === 'android' &&
         s.active &&
