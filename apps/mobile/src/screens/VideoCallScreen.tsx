@@ -397,24 +397,35 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             // size while the window grew (the reported "video stays the size of
             // the original bubble"). An explicit width/height that changes with
             // nativePipSize forces the view to the new bounds so the video fills.
+            // Prefer the ROOT onLayout size (pipSize) — it's RN's own reliable
+            // measurement of the actual window and fires on every resize;
+            // nativePipSize (native event) is the fallback.
             style={
-              nativePipSize
-                ? { width: nativePipSize.w, height: nativePipSize.h }
-                : pipSize
-                  ? { width: pipSize.w, height: pipSize.h }
+              pipSize
+                ? { width: pipSize.w, height: pipSize.h }
+                : nativePipSize
+                  ? { width: nativePipSize.w, height: nativePipSize.h }
                   : StyleSheet.absoluteFill
             }
             objectFit="cover"
             mirror={pipFeed === localUrl}
-            // Ground-truth video frame size — pairs with the 'pip native
-            // resize'/'pip view layout' logs so one device test shows whether
-            // a corner-crop is a window-size mismatch or the frame itself.
             onDimensionsChange={(e) =>
               diag('call', 'pip feed dimensions', {
                 w: e.nativeEvent.width,
                 h: e.nativeEvent.height,
+              })
+            }
+            // DEFINITIVE diagnostic: the RTCView's ACTUAL native laid-out size vs
+            // the sizes we're feeding it. On expand, if this logs the small size
+            // while pipSize is the big size → RN isn't committing the resize to
+            // the native view in PiP (a native fix is needed); if it logs the big
+            // size but the video still looks small → it's a render-side issue.
+            onLayout={(e) =>
+              diag('call', 'pip RTCView layout', {
+                w: Math.round(e.nativeEvent.layout.width),
+                h: Math.round(e.nativeEvent.layout.height),
+                pipW: pipSize?.w,
                 nativeW: nativePipSize?.w,
-                nativeH: nativePipSize?.h,
               })
             }
           />
