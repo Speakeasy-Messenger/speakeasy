@@ -1,9 +1,9 @@
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java
 new file mode 100644
-index 0000000..4acfbb0
+index 0000000..b8d501d
 --- /dev/null
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java
-@@ -0,0 +1,199 @@
+@@ -0,0 +1,205 @@
 +package com.oney.WebRTCModule;
 +
 +import android.content.Context;
@@ -144,9 +144,15 @@ index 0000000..4acfbb0
 +
 +    @Override
 +    public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
-+        // A TextureView scales its content to its own bounds, so a size change
-+        // needs no surface recreation — unlike SurfaceView. This is the whole
-+        // point of using a TextureView for the resizable PiP bubble.
++        // RECREATE the EGL surface at the new size. A SurfaceTexture-backed EGL
++        // window surface caches its dimensions from creation time — so when the
++        // TextureView resizes (Android PiP: the bubble mounts full-screen for a
++        // frame, then shrinks to the PiP size, then grows/shrinks as controls
++        // show), the renderer would otherwise keep drawing at the OLD size and
++        // the TextureView scales that stale, wrong-aspect buffer to the new
++        // bounds — the reported "video-to-viewport size mismatch after resize".
++        // Releasing + recreating pins the render buffer to the current bounds.
++        eglRenderer.releaseEglSurface(() -> eglRenderer.createEglSurface(surfaceTexture));
 +    }
 +
 +    @Override
