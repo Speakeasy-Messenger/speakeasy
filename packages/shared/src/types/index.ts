@@ -336,7 +336,17 @@ export type CallEndReason =
    * the callee sees nothing. Audio/masked offers are never gated by it.
    * (#13 unified call entry.)
    */
-  | 'video_refused';
+  | 'video_refused'
+  /**
+   * Server-originated: the peer's WebSocket dropped mid-call (swipe-away,
+   * process-kill, or a network loss with no reconnect inside the server's
+   * grace window) and the server ended the call on the dropped party's
+   * behalf — a killed client can't send `call_end` itself. A client never
+   * sends this reason. The receiver treats it like `hangup` (see
+   * orchestrator.handleIncomingEnd). Frees the surviving party from a dead
+   * call screen instead of stranding them until they hang up manually.
+   */
+  | 'peer_disconnected';
 
 /**
  * Call modality. `'private'` is the brand-promise mode that filters the

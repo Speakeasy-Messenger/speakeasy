@@ -50,6 +50,30 @@ function tryLoadCallKeep(): RNCallKeepShape | undefined {
 }
 
 /**
+ * Lazy-load react-native-webrtc's `RTCAudioSession`, which ships the native
+ * CallKit audio-session handshake (WebRTCModule+RTCAudioSession.m →
+ * [[RTCAudioSession sharedInstance] audioSessionDidActivate:…]) exposed as
+ * `audioSessionDidActivate` / `audioSessionDidDeactivate`. This is the
+ * documented react-native-callkeep + react-native-webrtc glue — not bespoke
+ * native code. Lazy (a runtime `require`, like tryLoadCallKeep) so importing
+ * this bridge in a non-native/test env doesn't pull react-native-webrtc's
+ * untransformable source.
+ */
+type RTCAudioSessionShape = {
+  audioSessionDidActivate: () => void;
+  audioSessionDidDeactivate: () => void;
+};
+function tryLoadRTCAudioSession(): RTCAudioSessionShape | undefined {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
+    const mod = require('react-native-webrtc') as { RTCAudioSession?: RTCAudioSessionShape };
+    return mod.RTCAudioSession;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Bridges the JS `CallOrchestrator` to the platform native call UIs:
  * iOS CallKit and Android ConnectionService, both via
  * `react-native-callkeep`.
@@ -107,7 +131,12 @@ export class CallKeepBridge {
           // Spec §1: zero PII. Don't surface our calls in the
           // device's iCloud-synced Recents list.
           includesCallsInRecents: false,
-          supportsVideo: false,
+          // We DO support video calls — reporting the call as video to
+          // CallKit is what gives iOS the video-call context (and keeps
+          // the app alive in the background so the remote feed can float
+          // into a PiP bubble). The per-call `video` flag in startCall /
+          // displayIncomingCall below is what actually marks each call.
+          supportsVideo: true,
           maximumCallGroups: '1',
           maximumCallsPerCallGroup: '1',
         },
@@ -147,6 +176,23 @@ export class CallKeepBridge {
       if (Platform.OS === 'android') {
         RNCallKeep.registerAndroidEvents();
         RNCallKeep.setAvailable(true);
+      }
+      if (Platform.OS === 'ios') {
+        // Manual-audio mode for CallKit coexistence (see the
+        // WebRTCModule+RTCAudioSession patch). WebRTC must NOT auto-grab the
+        // AVAudioSession — CallKit owns it and drives isAudioEnabled via the
+        // didActivate/didDeactivate handlers below. Set once here, before the
+        // first call's audio unit initialises. Without this, WebRTC and CallKit
+        // fight over the session and audio is one-way / silent.
+        try {
+          const wm = NativeModules.WebRTCModule as
+            | { setManualAudio?: (manual: boolean) => void }
+            | undefined;
+          wm?.setManualAudio?.(true);
+          diag('callkeep', 'manual audio enabled');
+        } catch (err) {
+          diag('callkeep', 'setManualAudio failed', { err: String(err) });
+        }
       }
       this.attachListeners();
       this.attachStoreSubscriber();
@@ -194,6 +240,26 @@ export class CallKeepBridge {
       diag('callkeep', 'mute toggle', { muted: !!muted });
       this.deps.orchestrator.setMicMuted(!!muted);
     });
+    // iOS CallKit audio-session handshake. CallKit owns the AVAudioSession;
+    // when it activates/deactivates it, WebRTC must be told so its ADM uses
+    // the right session — otherwise audio is silent / one-way. This is the
+    // exact glue documented by react-native-callkeep + react-native-webrtc.
+    this.rnCallKeep.addEventListener('didActivateAudioSession', () => {
+      diag('callkeep', 'didActivateAudioSession');
+      try {
+        tryLoadRTCAudioSession()?.audioSessionDidActivate();
+      } catch (err) {
+        diag('callkeep', 'audioSessionDidActivate failed', { err: String(err) });
+      }
+    });
+    this.rnCallKeep.addEventListener('didDeactivateAudioSession', () => {
+      diag('callkeep', 'didDeactivateAudioSession');
+      try {
+        tryLoadRTCAudioSession()?.audioSessionDidDeactivate();
+      } catch (err) {
+        diag('callkeep', 'audioSessionDidDeactivate failed', { err: String(err) });
+      }
+    });
   }
 
   /**
@@ -217,9 +283,13 @@ export class CallKeepBridge {
     if (!RNCallKeep) return;
     if (!prev && next) {
       const uuid = this.allocUuid(next.callId);
+      // Report the actual media kind so CallKit treats a video call as a
+      // video call — required for the iOS background video-call context
+      // that Picture-in-Picture relies on (bug #4).
+      const isVideo = next.kind === 'video';
       if (next.isCaller) {
         try {
-          RNCallKeep.startCall(uuid, next.peerUserId, `@${next.peerUserId}`, 'generic', false);
+          RNCallKeep.startCall(uuid, next.peerUserId, `@${next.peerUserId}`, 'generic', isVideo);
         } catch (err) {
           diag('callkeep', 'startCall failed', { err: String(err) });
         }
@@ -230,7 +300,7 @@ export class CallKeepBridge {
             next.peerUserId,
             `@${next.peerUserId}`,
             'generic',
-            false,
+            isVideo,
           );
         } catch (err) {
           diag('callkeep', 'displayIncomingCall failed', { err: String(err) });

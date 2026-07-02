@@ -7,6 +7,7 @@ import {
   conversationIdForDirect,
   type Attachment,
   type ConversationKind,
+  type ReplyContext,
   type TtlOption,
 } from '@speakeasy/shared';
 import type { DisappearingStage } from '../components/disappearing-stage.js';
@@ -46,6 +47,15 @@ export interface ChatMessage {
   attachments?: Attachment[];
   /** Handles @mentioned in this message (bare, no @ prefix). */
   mentions?: string[];
+  /**
+   * Set when this message is a quote-reply. Carries the quoted
+   * message's id, author handle, and a one-line preview snapshot —
+   * decoded from the E2E payload's `replyTo`. The bubble renders it as
+   * a quoted block above the body. Snapshot (not a live lookup) so it
+   * survives the original being unloaded / deleted. See shared
+   * `ReplyContext`.
+   */
+  replyTo?: ReplyContext;
   /** Conversation membership type — affects routing on outbound. */
   kind: ConversationKind;
   /** Wall-clock send time (ms) — the sender's clock at the moment

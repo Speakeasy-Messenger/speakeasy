@@ -9,6 +9,7 @@ import type {
 } from '@speakeasy/shared';
 import { MockSignalProtocolClient } from '../native/mock-signal-protocol.js';
 import { CallOrchestrator } from './orchestrator.js';
+import { getActiveCallControls, setActiveCallControls } from './call-controls-registry.js';
 import type { CallPeer, CallPeerFactory } from './types.js';
 
 type ConnState =
@@ -821,5 +822,59 @@ describe('CallOrchestrator', () => {
       const seq2 = h.caller.sendAnimationFrame(neutralFrame);
       expect(seq2).toBe(1);
     });
+  });
+});
+
+/**
+ * Regression — the ongoing-call pill's Mute / End buttons.
+ *
+ * They were pressed while the app was BACKGROUNDED, so notifee routed them to
+ * onBackgroundEvent (push-handler), not App.tsx's onForegroundEvent where the
+ * handlers lived — so the buttons did nothing. The fix publishes the live
+ * call's controls to `call-controls-registry` for the background handler to
+ * read. This exercises that registry path against a real connected call: the
+ * pixels/notifee delivery are native (untestable here), but the CONTROL LOGIC
+ * that a pill press invokes is plain JS and must work.
+ */
+describe('reported bug — ongoing-call pill controls via background registry', () => {
+  it('registered controls toggle mute and hang up the live call', async () => {
+    const h = makeOrchHarness();
+    await h.caller.startOutgoing('bob', 'video');
+    await h.pump();
+    await h.callee.accept();
+    await h.pump();
+    h.callerPeer().emitConnState('connected');
+    h.calleePeer().emitConnState('connected');
+    expect(h.caller.getActive()?.stage).toBe('connected');
+
+    // Mirror exactly what App.tsx publishes for the background handler to read.
+    setActiveCallControls({
+      toggleMute: () => {
+        const active = h.caller.getActive();
+        if (active) h.caller.setMicMuted(!active.micMuted);
+      },
+      hangup: () => h.caller.hangup(),
+    });
+
+    // Background "Mute" press → registry → orchestrator → peer.
+    getActiveCallControls()!.toggleMute();
+    expect(h.callerPeer().micMuted).toBe(true);
+    expect(h.caller.getActive()?.micMuted).toBe(true);
+    getActiveCallControls()!.toggleMute();
+    expect(h.callerPeer().micMuted).toBe(false);
+
+    // Background "End" press → registry → call torn down + call_end to peer.
+    getActiveCallControls()!.hangup();
+    await h.pump();
+    expect(h.caller.getActive()).toBeUndefined();
+    expect(h.callee.getActive()).toBeUndefined();
+    expect(h.finishedCaller[0]?.reason).toBe('completed');
+
+    setActiveCallControls(undefined);
+  });
+
+  it('getActiveCallControls is undefined once controls are cleared (call ended)', () => {
+    setActiveCallControls(undefined);
+    expect(getActiveCallControls()).toBeUndefined();
   });
 });

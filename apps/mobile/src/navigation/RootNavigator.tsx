@@ -4,6 +4,7 @@ import {
   createNativeStackNavigator,
   type NativeStackScreenProps,
 } from '@react-navigation/native-stack';
+import { BackHandler } from 'react-native';
 import { InAppBanner } from '../components/InAppBanner.js';
 import { ScreenErrorBoundary } from '../components/ScreenErrorBoundary.js';
 import { Toast } from '../components/Toast.js';
@@ -431,6 +432,15 @@ function CallSwitcher({
   onClosed: () => void;
 }): React.ReactElement {
   const kind = useCalls((s) => s.active?.kind ?? 'audio');
+  // Consume the Android hardware back button while a call is on screen. Without
+  // this, back pops this fullScreenModal to the Chat screen and ORPHANS the call
+  // — audio keeps flowing with no way back to the call UI (reported bug). Back
+  // is intentionally inert here; the user ends a call with the End button, or
+  // presses Home to minimise it (a video call floats into the PiP bubble).
+  React.useEffect(() => {
+    const sub = BackHandler.addEventListener('hardwareBackPress', () => true);
+    return () => sub.remove();
+  }, []);
   return kind === 'video' ? (
     <VideoCallScreen orchestrator={orchestrator} onClosed={onClosed} />
   ) : (

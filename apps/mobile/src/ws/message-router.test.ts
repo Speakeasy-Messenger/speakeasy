@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   encodePayload,
   type Attachment,
+  type ReplyContext,
   type WsClientMsg,
   type WsServerMsg,
 } from '@speakeasy/shared';
@@ -32,7 +33,7 @@ const ME = 'me';
  * prepend the 0x02 SignalMessage marker to the utf-8 payload, then base64.
  * `decrypt` on the receiving side strips the marker back off.
  */
-function makeDirectCiphertext(payloadText: string, extra: Partial<{ attachments: Attachment[]; mentions: string[] }> = {}): string {
+function makeDirectCiphertext(payloadText: string, extra: Partial<{ attachments: Attachment[]; mentions: string[]; replyTo: ReplyContext }> = {}): string {
   const plain = encodePayload({ v: 1, text: payloadText, ...extra });
   const body = utf8ToBytes(plain);
   const out = new Uint8Array(body.length + 1);
@@ -46,7 +47,7 @@ function makeDirectCiphertext(payloadText: string, extra: Partial<{ attachments:
  * decodes the raw utf-8 envelope directly with no signal decrypt, so
  * there is NO 0x02 marker — just the base64 of the JSON payload.
  */
-function makePlaintextCiphertext(payloadText: string, extra: Partial<{ attachments: Attachment[]; mentions: string[] }> = {}): string {
+function makePlaintextCiphertext(payloadText: string, extra: Partial<{ attachments: Attachment[]; mentions: string[]; replyTo: ReplyContext }> = {}): string {
   const plain = encodePayload({ v: 1, text: payloadText, ...extra });
   return bytesToB64(utf8ToBytes(plain));
 }
@@ -193,6 +194,23 @@ describe('messageRouter — direct message frame', () => {
     expect(h.added[0]?.msg.attachments).toEqual(att);
     expect(h.attachmentsSeen).toHaveLength(1);
     expect(h.attachmentsSeen[0]).toEqual(att);
+  });
+
+  it('carries a quote-reply (replyTo) through to the stored message', async () => {
+    const h = makeHarness();
+    const replyTo: ReplyContext = { id: 'm-orig', from: 'alice', preview: 'the original' };
+    h.router(directFrame({ ciphertext: makeDirectCiphertext('quoting you', { replyTo }) }));
+    await flush();
+    expect(h.added).toHaveLength(1);
+    expect(h.added[0]?.msg.replyTo).toEqual(replyTo);
+    expect(h.added[0]?.msg.text).toBe('quoting you');
+  });
+
+  it('a normal direct message stores no replyTo', async () => {
+    const h = makeHarness();
+    h.router(directFrame());
+    await flush();
+    expect(h.added[0]?.msg.replyTo).toBeUndefined();
   });
 
   it('recoverable decrypt failure → buffered (no bubble/ack), then dead bubble + ack after timeout', async () => {

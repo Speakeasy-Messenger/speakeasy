@@ -18,6 +18,13 @@ const PHOTO_MAX_BYTES = 800_000; // pre-base64
 const GIF_MAX_BYTES = 1_000_000;
 const FILE_MAX_BYTES = 800_000;
 
+/**
+ * How many photos one multi-select send may carry. Each photo is resized to
+ * ≤800KB (most land far under), so this caps a batch at a few MB on the wire —
+ * generous for an album, safe for the encrypted single-message payload.
+ */
+export const MAX_PHOTOS_PER_PICK = 8;
+
 function base64Bytes(b64: string): number {
   return Math.floor((b64.length * 3) / 4);
 }

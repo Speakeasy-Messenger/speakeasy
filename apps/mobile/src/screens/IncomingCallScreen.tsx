@@ -1,6 +1,8 @@
 import React, { useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
+import InCallManager from 'react-native-incall-manager';
+import { useSettings } from '../store/settings.js';
 import { Handle } from '../components/Handle.js';
 import { defaultAnimalForUser } from '../avatars/default.js';
 import { AvatarRenderer } from '../avatars/AvatarRenderer.js';
@@ -91,6 +93,39 @@ export function IncomingCallScreen({
   useEffect(() => {
     if (peerId) void refreshProfile(peerId, true);
   }, [peerId]);
+
+  // Ring while the incoming-call UI is up. Previously NOTHING played a
+  // ringtone, so an incoming Speakeasy call was completely silent (reported:
+  // "phone does not ring"). Loop the user's system ringtone ('_DEFAULT_')
+  // and stop it the moment the call is accepted/declined/abandoned (the screen
+  // unmounts or leaves incoming_ringing). Honors the Ringtone setting; the 45s
+  // cap is a safety net matching the orchestrator's ring timeout.
+  const ringtoneEnabled = useSettings((s) => s.ringtoneEnabled);
+  const vibrateOnIncoming = useSettings((s) => s.vibrateOnIncoming);
+  const incomingPresented = !!ringing || showConnecting;
+  useEffect(() => {
+    if (!incomingPresented || !ringtoneEnabled) return undefined;
+    try {
+      // ('_DEFAULT_' = system ringtone) — vibrate pattern honors the setting,
+      // ios_category '' (iOS rings via CallKit; this is the Android path),
+      // 45s safety cap.
+      InCallManager.startRingtone(
+        '_DEFAULT_',
+        vibrateOnIncoming ? [0, 1000, 1000] : 0,
+        '',
+        45,
+      );
+    } catch {
+      /* ringtone is best-effort */
+    }
+    return () => {
+      try {
+        InCallManager.stopRingtone();
+      } catch {
+        /* best-effort */
+      }
+    };
+  }, [incomingPresented, ringtoneEnabled, vibrateOnIncoming]);
 
   if (!peerId) {
     return null;

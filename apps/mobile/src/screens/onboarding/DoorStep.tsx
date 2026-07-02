@@ -1,10 +1,17 @@
 import React, { useEffect, useRef } from 'react';
-import { Animated, StyleSheet, View } from 'react-native';
+import { Animated, Linking, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { CipherS } from '../../brand/CipherS.js';
 import { Wordmark } from '../../components/Wordmark.js';
 import { Button } from '../../components/Button.js';
 import { brand, motion } from '../../theme/tokens.js';
+
+// Terms / Privacy live on the marketing site; the same URLs are linked
+// from the About screen. Tapping "Open the door" is the agreement action
+// (App Store Guideline 1.2 requires users agree to terms with a clear
+// no-tolerance-for-objectionable-content stance before using the service).
+const TERMS_URL = 'https://speakeasyapp.xyz/terms';
+const PRIVACY_URL = 'https://speakeasyapp.xyz/privacy';
 
 /**
  * Onboarding screen 01 — Door.
@@ -60,6 +67,24 @@ export function DoorStep({ onContinue }: Props): React.ReactElement {
         ]}
       >
         <Button label="Open the door" onPress={onContinue} testID="onboarding-door-continue" />
+        <Text style={styles.legal}>
+          By opening the door, you agree to our{' '}
+          <Text
+            style={styles.legalLink}
+            onPress={() => void Linking.openURL(TERMS_URL)}
+          >
+            Terms of Use
+          </Text>{' '}
+          and{' '}
+          <Text
+            style={styles.legalLink}
+            onPress={() => void Linking.openURL(PRIVACY_URL)}
+          >
+            Privacy Policy
+          </Text>
+          . Speakeasy has zero tolerance for harassment or objectionable
+          content.
+        </Text>
       </Animated.View>
     </SafeAreaView>
   );
@@ -79,5 +104,16 @@ const styles = StyleSheet.create({
   spacer32: { height: 32 },
   bottom: {
     paddingBottom: 24,
+  },
+  legal: {
+    marginTop: 14,
+    textAlign: 'center',
+    color: 'rgba(242,233,216,0.65)',
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  legalLink: {
+    color: '#F2E9D8',
+    textDecorationLine: 'underline',
   },
 });

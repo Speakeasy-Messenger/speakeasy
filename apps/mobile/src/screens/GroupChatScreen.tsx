@@ -13,9 +13,21 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import notifee from '@notifee/react-native';
 import { clearNotifStack } from '../push/push-handler.js';
-import { type Attachment, encodePayload, newMessageId, parseMentions } from '@speakeasy/shared';
+import {
+  type Attachment,
+  type ReplyContext,
+  encodePayload,
+  newMessageId,
+  parseMentions,
+  replyPreviewFrom,
+} from '@speakeasy/shared';
 import { diag } from '../diag/log.js';
-import { pickFile, pickFromCamera, pickPhotos } from '../attachments/pick.js';
+import {
+  MAX_PHOTOS_PER_PICK,
+  pickFile,
+  pickFromCamera,
+  pickPhotos,
+} from '../attachments/pick.js';
 import { AppBar } from '../components/AppBar.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
 import {
@@ -52,7 +64,7 @@ import { ApiError } from '../api/client.js';
 import { makeGroupOrchestrator } from '../crypto/group-orchestration.js';
 import { utf8ToBytes } from '../utils/bytes.js';
 import { colors, fonts, space, text } from '../theme/index.js';
-import { font, type } from '../theme/tokens.js';
+import { accent, font, type } from '../theme/tokens.js';
 import { useColors } from '../theme/index.js';
 import Svg, { Path } from 'react-native-svg';
 
@@ -190,6 +202,20 @@ export function GroupChatScreen({
   }, [groupId]);
 
   const [input, setInput] = useState('');
+  // Quote-reply target — the message the next send will quote (set by
+  // swiping a bubble). Cleared on send or banner dismiss. Mirrors
+  // ChatScreen; the wire/store plumbing is shared.
+  const [replyTarget, setReplyTarget] = useState<ReplyContext | null>(null);
+  const startReply = useCallback(
+    (m: { id: string; from: string; text: string; attachments?: Attachment[] }) => {
+      setReplyTarget({
+        id: m.id,
+        from: m.from === 'me' ? (myUserId ?? 'me') : m.from,
+        preview: replyPreviewFrom({ text: m.text, attachments: m.attachments }),
+      });
+    },
+    [myUserId],
+  );
   // Prefill from a "Share → Speakeasy" hand-off when this group was picked
   // from the share picker (one-shot; take() clears it).
   useEffect(() => {
@@ -322,6 +348,9 @@ export function GroupChatScreen({
     let text = opts.text?.trim() || undefined;
     let attachments = opts.attachments?.length ? opts.attachments : undefined;
     if (!text && !attachments) return;
+    // Consume the active reply target — any send while a reply is pending
+    // becomes a quote-reply, then the banner clears.
+    const reply = replyTarget ?? undefined;
     if (!group) {
       add(groupId, {
         id: newMessageId(),
@@ -350,11 +379,13 @@ export function GroupChatScreen({
         from: 'me',
         text,
         attachments,
+        replyTo: reply,
         kind: 'group',
         sentAt: Date.now(),
         stage: 'sent',
         sendFailure: 'too_long',
       });
+      if (reply) setReplyTarget(null);
       return;
     }
     if (text && text.length > SEND_TEXT_MAX_CHARS) {
@@ -372,10 +403,12 @@ export function GroupChatScreen({
       from: 'me',
       text: text ?? '',
       attachments,
+      replyTo: reply,
       kind: 'group',
       sentAt: Date.now(),
       stage: 'sent',
     });
+    if (reply) setReplyTarget(null);
     try {
       const getDeviceToken = async () => {
         const cached = useIdentity.getState().deviceToken;
@@ -393,7 +426,7 @@ export function GroupChatScreen({
           useDistributionIds.getState().getOrCreate(id),
       });
       await ws.waitForAuthed();
-      const plaintext = encodePayload({ v: 1, text, attachments, mentions: opts.mentions });
+      const plaintext = encodePayload({ v: 1, text, attachments, mentions: opts.mentions, replyTo: reply });
       await orchestrator.sendGroupMessage({
         groupId,
         members: group.members,
@@ -428,7 +461,7 @@ export function GroupChatScreen({
   }
 
   async function handlePickPhoto() {
-    const photos = await pickPhotos({ selectionLimit: 1 });
+    const photos = await pickPhotos({ selectionLimit: MAX_PHOTOS_PER_PICK });
     if (photos.length > 0) await sendOutbound({ attachments: photos });
   }
 
@@ -548,6 +581,28 @@ export function GroupChatScreen({
                   stage={item.stage as DisappearingStage}
                   variant={isSelf ? 'sent' : 'received'}
                   timestamp={item.sentAt}
+                  replyTo={
+                    item.replyTo
+                      ? {
+                          from:
+                            item.replyTo.from === myUserId
+                              ? 'you'
+                              : item.replyTo.from,
+                          preview: item.replyTo.preview,
+                        }
+                      : undefined
+                  }
+                  onReply={
+                    item.sendFailure
+                      ? undefined
+                      : () =>
+                          startReply({
+                            id: item.id,
+                            from: item.from,
+                            text: item.text,
+                            attachments: item.attachments,
+                          })
+                  }
                   onTapPhoto={(a) => setViewerAttachment(a)}
                   onTapFile={(a) => void saveAndAnnounceFile(a)}
                   onSeeMore={() => onOpenFullMessage?.(item.text)}
@@ -582,6 +637,37 @@ export function GroupChatScreen({
             { backgroundColor: themed.cream, borderTopColor: themed.divider },
           ]}
         >
+          {replyTarget ? (
+            <View
+              testID="group-reply-banner"
+              style={[styles.replyBanner, { borderLeftColor: accent.base }]}
+            >
+              <View style={styles.replyBannerBody}>
+                <Text style={[styles.replyBannerTitle, { color: accent.base }]}>
+                  Replying to{' '}
+                  {replyTarget.from === myUserId ? 'you' : replyTarget.from}
+                </Text>
+                <Text
+                  numberOfLines={1}
+                  style={[styles.replyBannerPreview, { color: themed.slate }]}
+                >
+                  {replyTarget.preview || ' '}
+                </Text>
+              </View>
+              <Pressable
+                onPress={() => setReplyTarget(null)}
+                hitSlop={10}
+                accessibilityRole="button"
+                accessibilityLabel="Cancel reply"
+                testID="group-reply-cancel"
+                style={styles.replyBannerClose}
+              >
+                <Text style={[styles.replyBannerCloseGlyph, { color: themed.slate }]}>
+                  ✕
+                </Text>
+              </Pressable>
+            </View>
+          ) : null}
           <View style={styles.inputBar}>
             <Pressable
               onPress={handlePaperclip}
@@ -736,6 +822,36 @@ const styles = StyleSheet.create({
     borderTopWidth: StyleSheet.hairlineWidth,
     paddingHorizontal: 20,
     paddingVertical: space.md,
+  },
+  // Reply banner above the input bar — parity with ChatScreen.
+  replyBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    borderLeftWidth: 3,
+    paddingLeft: space.sm,
+    paddingRight: space.xs,
+    paddingVertical: space.xs,
+    marginBottom: space.sm,
+  },
+  replyBannerBody: { flex: 1 },
+  replyBannerTitle: {
+    fontFamily: font.medium,
+    fontSize: 12,
+    marginBottom: 1,
+  },
+  replyBannerPreview: {
+    fontFamily: font.regular,
+    fontSize: 13,
+  },
+  replyBannerClose: {
+    width: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  replyBannerCloseGlyph: {
+    fontFamily: font.regular,
+    fontSize: 15,
   },
   inputBar: {
     flexDirection: 'row',

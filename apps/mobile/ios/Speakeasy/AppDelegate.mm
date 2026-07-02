@@ -65,6 +65,10 @@
 @interface WebRTCModuleOptions : NSObject
 + (instancetype)sharedInstance;
 @property(nonatomic, strong, nullable) id audioDevice;
+// Keep the camera capturing while backgrounded into a PiP window (iOS
+// Picture-in-Picture for video calls). Matches the real property in
+// react-native-webrtc's WebRTCModuleOptions.h.
+@property(nonatomic, assign) BOOL enableMultitaskingCameraAccess;
 @end
 
 // --- Crash capture --------------------------------------------------
@@ -164,6 +168,15 @@ static void SpeakeasyWriteCrash(NSException *exception)
   //
   //   WebRTCModuleOptions *rtcOptions = [WebRTCModuleOptions sharedInstance];
   //   rtcOptions.audioDevice = [[SpeakeasyAudioDevice alloc] init];
+
+  // iOS Picture-in-Picture: allow the camera to keep running while the app is
+  // backgrounded into a PiP window, so a video call doesn't freeze the local
+  // feed the moment it floats. This is the documented react-native-webrtc PiP
+  // prerequisite (GetStream/rn-webrtc recipe); it gracefully no-ops on devices
+  // where the capture session reports it unsupported, so it's safe to set
+  // unconditionally. The iOS-18 path is satisfied by the `voip` UIBackgroundMode
+  // already in Info.plist (older iOS needs the multitasking-camera entitlement).
+  [WebRTCModuleOptions sharedInstance].enableMultitaskingCameraAccess = YES;
 
   // CallKit / VoIP push: register the PKPushRegistry here, ASAP at launch —
   // doing it from JS can be too late to receive a VoIP push that woke the app.

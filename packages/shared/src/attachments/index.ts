@@ -58,6 +58,40 @@ export function messagePreviewText(m: {
   return first ? attachmentNoun(first.kind) : '';
 }
 
+/**
+ * Quote-reply context. When the user swipes a message to reply, the
+ * replied-to message's id, author handle, and a short one-line preview
+ * snapshot ride along INSIDE the encrypted payload — the server stays
+ * blind. The preview is a snapshot (not a live lookup) so the quoted
+ * block renders even if the original was never delivered to / has since
+ * been deleted on the recipient, and so it survives independently of
+ * whichever messages happen to be loaded in the receiver's window.
+ */
+export interface ReplyContext {
+  /** message_id of the quoted message. */
+  id: string;
+  /** Handle of the quoted message's author (bare, no `@`). */
+  from: string;
+  /** One-line preview snapshot of the quoted message (text or media noun). */
+  preview: string;
+}
+
+/** Longest reply preview we keep — quoting a wall of text shouldn't bloat
+ *  every reply's ciphertext. Matches the single-line quoted-block render. */
+export const REPLY_PREVIEW_MAX = 120;
+
+/** Build the snapshot preview stored on a reply. Trims + clamps the
+ *  quoted message's one-line preview to {@link REPLY_PREVIEW_MAX}. */
+export function replyPreviewFrom(m: {
+  text?: string;
+  attachments?: Attachment[];
+}): string {
+  const preview = messagePreviewText(m);
+  return preview.length > REPLY_PREVIEW_MAX
+    ? `${preview.slice(0, REPLY_PREVIEW_MAX - 1)}…`
+    : preview;
+}
+
 export interface MessagePayload {
   /** Schema version. Bump on breaking changes. */
   v: 1;
@@ -71,6 +105,12 @@ export interface MessagePayload {
    * highlights them; the server may use them for selective push.
    */
   mentions?: string[];
+  /**
+   * Set when this message is a quote-reply to an earlier one. E2E —
+   * carried inside the ciphertext, never visible to the server. Absent
+   * on normal messages (back-compat: older clients simply ignore it).
+   */
+  replyTo?: ReplyContext;
 }
 
 /** Pack a payload into the utf-8 plaintext that gets handed to the
@@ -105,6 +145,7 @@ export function decodePayload(plain: string): MessagePayload {
         mentions: Array.isArray(parsed.mentions)
           ? parsed.mentions.filter((m): m is string => typeof m === 'string')
           : undefined,
+        replyTo: isReplyContext(parsed.replyTo) ? parsed.replyTo : undefined,
       };
     }
     // Unknown / future version → fall back to raw text.
@@ -112,6 +153,18 @@ export function decodePayload(plain: string): MessagePayload {
   } catch {
     return { v: 1, text: plain };
   }
+}
+
+/** Runtime guard for a decoded `replyTo` — defends the renderer against a
+ *  malformed / hostile payload (the field crosses the trust boundary). */
+function isReplyContext(r: unknown): r is ReplyContext {
+  return (
+    !!r &&
+    typeof r === 'object' &&
+    typeof (r as ReplyContext).id === 'string' &&
+    typeof (r as ReplyContext).from === 'string' &&
+    typeof (r as ReplyContext).preview === 'string'
+  );
 }
 
 /**

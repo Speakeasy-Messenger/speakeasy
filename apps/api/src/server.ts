@@ -104,6 +104,10 @@ export interface BuildServerOptions {
   /** Override the ack buffer (test injection). Defaults to Redis-backed
    *  when REDIS_URL is set, else in-memory. */
   ackBuffer?: AckBuffer;
+  /** Grace window (ms) before a mid-call WS drop ends the call for the
+   *  peer. Defaults to DEFAULT_CALL_DROP_GRACE_MS. Tests pass a small
+   *  value. */
+  callDropGraceMs?: number;
   /** Override the persistent event log (test injection). Defaults to
    *  Drizzle when DATABASE_URL is set, else in-memory. */
   eventLog?: EventLogRepo;
@@ -349,6 +353,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       callBuffer,
       ackBuffer,
       userNotifier,
+      callDropGraceMs: opts.callDropGraceMs,
       eventLog,
       apnsVoip,
     });

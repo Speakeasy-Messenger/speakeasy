@@ -10,6 +10,7 @@ import android.os.Build
 import android.os.Bundle
 import android.util.Rational
 import com.facebook.react.ReactActivity
+import com.facebook.react.bridge.Arguments
 import com.facebook.react.modules.core.DeviceEventManagerModule
 import com.facebook.react.ReactActivityDelegate
 import com.facebook.react.defaults.DefaultNewArchitectureEntryPoint.fabricEnabled
@@ -159,6 +160,12 @@ class MainActivity : ReactActivity() {
   // onResume can tell a DISMISS (user closed the bubble → onStop) from an
   // EXPAND (user reopened the app → onResume).
   private var exitingPip = false
+  // True from the moment we ENTER PiP until we either expand (onResume clears it)
+  // or the activity stops (dismiss). More robust than exitingPip alone: some
+  // OEMs (Samsung) close the PiP via the X WITHOUT delivering
+  // onPictureInPictureModeChanged(false) first, so exitingPip never gets set —
+  // but wasInPip is still true at onStop, so we still detect the dismiss.
+  private var wasInPip = false
 
   override fun onPictureInPictureModeChanged(
     isInPictureInPictureMode: Boolean,
@@ -166,36 +173,83 @@ class MainActivity : ReactActivity() {
   ) {
     super.onPictureInPictureModeChanged(isInPictureInPictureMode, newConfig)
     emitJsEvent("SpeakeasyPipModeChanged", isInPictureInPictureMode)
-    if (!isInPictureInPictureMode) {
+    if (isInPictureInPictureMode) {
+      wasInPip = true
+      // Hand JS the authoritative PiP window size so the video SurfaceView is
+      // recreated at the true bubble size (see emitPipSize).
+      emitPipSize(newConfig)
+    } else {
       // Exiting PiP — but we don't yet know if it's a dismiss or an expand.
       // onResume (expand) clears this; onStop (dismiss) acts on it.
       exitingPip = true
     }
   }
 
+  override fun onConfigurationChanged(newConfig: Configuration) {
+    super.onConfigurationChanged(newConfig)
+    // While floating in PiP the user can resize the bubble. Android delivers
+    // the new window size HERE — onPictureInPictureModeChanged only fires on
+    // enter/exit, not on a resize — so without this the JS side never learns
+    // the bubble grew. RN's own onLayout frequently reports a stale (pre-resize)
+    // size inside a PiP window, which left the SurfaceView holding its old
+    // buffer: the reported "video only fills a corner / lags resizing to fit".
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N && isInPictureInPictureMode) {
+      emitPipSize(newConfig)
+    }
+  }
+
+  // Emit the PiP window size in DP — which is exactly React Native's layout
+  // unit, so JS can key/size the video view directly with no px conversion.
+  // screenWidthDp/screenHeightDp track the floating window (not the display)
+  // while in PiP, and are available on every API level we ship.
+  private fun emitPipSize(config: Configuration) {
+    val map = Arguments.createMap().apply {
+      putInt("width", config.screenWidthDp)
+      putInt("height", config.screenHeightDp)
+    }
+    emitJsEvent("SpeakeasyPipResize", map)
+  }
+
   override fun onResume() {
     super.onResume()
-    // Reopened into the app — not a dismiss. Don't end the call.
+    // Reopened into the app (expanded from PiP) — not a dismiss. Don't end call.
     exitingPip = false
+    wasInPip = false
   }
 
   override fun onStop() {
     super.onStop()
-    if (exitingPip) {
-      // The user CLOSED the PiP bubble (didn't expand it). End the call so the
-      // camera/mic/dial tone don't keep running headless (reported: "close the
-      // bubble, the call keeps going"). JS hangs up on this event.
+    // End the call when the user CLOSES the PiP bubble (the reported "press X,
+    // call keeps going"). The activity stops while it WAS in PiP and did NOT
+    // resume to the foreground (onResume would have cleared wasInPip on an
+    // expand). We OR three signals because OEMs vary in which they deliver on
+    // the PiP X: exitingPip (clean onPictureInPictureModeChanged(false) path),
+    // isFinishing (activity finished from the X), and wasInPip (Samsung path
+    // that skips the mode-changed callback). A plain Home-background of a
+    // non-PiP audio call is none of these, so that call keeps running.
+    val dismissed = exitingPip || isFinishing || wasInPip
+    emitJsEvent(
+      "SpeakeasyPipLifecycle",
+      "onStop exitingPip=$exitingPip isFinishing=$isFinishing wasInPip=$wasInPip dismissed=$dismissed",
+    )
+    if (dismissed) {
       exitingPip = false
+      wasInPip = false
       emitJsEvent("SpeakeasyPipClosed", true)
     }
   }
 
   private fun emitJsEvent(name: String, value: Any) {
     try {
-      (application as? MainApplication)
-        ?.reactNativeHost
-        ?.reactInstanceManager
-        ?.currentReactContext
+      // Bridgeless (new arch): the live JS context is on `reactHost`, NOT
+      // `reactNativeHost.reactInstanceManager` — that's the legacy bridge path
+      // and is null under bridgeless, so the old chain silently no-op'd EVERY
+      // emit. That's why SpeakeasyPipModeChanged never reached JS (inPip never
+      // flipped → the call overlay stayed drawn inside the small PiP window =
+      // the "bubble dimension error") and SpeakeasyPipClosed never fired
+      // (dismissing the bubble didn't end the call).
+      val ctx = (application as? MainApplication)?.reactHost?.currentReactContext
+      ctx
         ?.getJSModule(DeviceEventManagerModule.RCTDeviceEventEmitter::class.java)
         ?.emit(name, value)
     } catch (_: Throwable) {

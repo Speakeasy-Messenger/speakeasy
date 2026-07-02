@@ -1,0 +1,339 @@
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java
+new file mode 100644
+index 0000000..26e4d45
+--- /dev/null
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/TextureViewRenderer.java
+@@ -0,0 +1,204 @@
++package com.oney.WebRTCModule;
++
++import android.content.Context;
++import android.graphics.Point;
++import android.graphics.SurfaceTexture;
++import android.graphics.drawable.Drawable;
++import android.util.AttributeSet;
++import android.view.TextureView;
++
++import org.webrtc.EglBase;
++import org.webrtc.EglRenderer;
++import org.webrtc.GlRectDrawer;
++import org.webrtc.RendererCommon;
++import org.webrtc.RendererCommon.RendererEvents;
++import org.webrtc.ThreadUtils;
++import org.webrtc.VideoFrame;
++import org.webrtc.VideoSink;
++
++import java.util.concurrent.CountDownLatch;
++
++/**
++ * Speakeasy addition: a TextureView-backed WebRTC video renderer, a drop-in for
++ * org.webrtc.SurfaceViewRenderer inside {@link WebRTCView}.
++ *
++ * WHY: react-native-webrtc renders into a SurfaceViewRenderer. A SurfaceView's
++ * underlying buffer does NOT reliably track the view size when the SYSTEM
++ * resizes the window — which is exactly what Android Picture-in-Picture does as
++ * the bubble grows/shrinks. The result was a video call bubble that showed the
++ * frame at a fixed size (overflowing the small bubble as a cropped corner, or
++ * under-filling the enlarged bubble with a black band). A TextureView renders
++ * into the view's own hardware layer, so its content always matches the view
++ * bounds — it resizes cleanly in PiP. Same approach LiveKit/GetStream default to.
++ *
++ * Mirrors org.webrtc's SurfaceViewRenderer + SurfaceEglRenderer against the same
++ * EglRenderer API (every call here is present in org.jitsi:webrtc 124): an
++ * EglRenderer does the GL drawing; we feed it the TextureView's SurfaceTexture
++ * on availability and release it on destroy, and forward frames via VideoSink.
++ * Only the public methods WebRTCView calls are implemented; SurfaceView-only
++ * z-order controls are inert no-ops, and setBackground* are swallowed (a
++ * TextureView THROWS UnsupportedOperationException on any background drawable —
++ * WebRTCView sets a black/transparent idle background, and the video fills the
++ * opaque view anyway, so the background is moot).
++ */
++public class TextureViewRenderer extends TextureView
++        implements VideoSink, TextureView.SurfaceTextureListener {
++
++    private final EglRenderer eglRenderer;
++    private final RendererCommon.VideoLayoutMeasure videoLayoutMeasure =
++            new RendererCommon.VideoLayoutMeasure();
++    private final Object layoutLock = new Object();
++
++    private RendererEvents rendererEvents;
++    private boolean isFirstFrameRendered;
++    private int rotatedFrameWidth;
++    private int rotatedFrameHeight;
++    private int frameRotation;
++
++    public TextureViewRenderer(Context context) {
++        super(context);
++        this.eglRenderer = new EglRenderer("TextureViewRenderer");
++        setSurfaceTextureListener(this);
++    }
++
++    public TextureViewRenderer(Context context, AttributeSet attrs) {
++        super(context, attrs);
++        this.eglRenderer = new EglRenderer("TextureViewRenderer");
++        setSurfaceTextureListener(this);
++    }
++
++    /** Matches SurfaceViewRenderer#init(EglBase.Context, RendererEvents). */
++    public void init(EglBase.Context sharedContext, RendererEvents events) {
++        ThreadUtils.checkIsOnMainThread();
++        this.rendererEvents = events;
++        synchronized (layoutLock) {
++            isFirstFrameRendered = false;
++            rotatedFrameWidth = 0;
++            rotatedFrameHeight = 0;
++            frameRotation = 0;
++        }
++        eglRenderer.init(sharedContext, EglBase.CONFIG_PLAIN, new GlRectDrawer());
++    }
++
++    public void release() {
++        eglRenderer.release();
++    }
++
++    public void setScalingType(RendererCommon.ScalingType scalingType) {
++        ThreadUtils.checkIsOnMainThread();
++        synchronized (layoutLock) {
++            videoLayoutMeasure.setScalingType(scalingType);
++        }
++        requestLayout();
++    }
++
++    public void setMirror(boolean mirror) {
++        eglRenderer.setMirror(mirror);
++    }
++
++    public void clearImage() {
++        eglRenderer.clearImage();
++    }
++
++    // A TextureView THROWS UnsupportedOperationException on any background
++    // drawable (setBackgroundColor -> setBackground -> setBackgroundDrawable).
++    // WebRTCView calls setBackgroundColor(BLACK/TRANSPARENT) for its idle
++    // "clean" state — swallow both so it doesn't crash. The view is opaque and
++    // the video fills it, so a background would never be visible anyway.
++    @Override
++    public void setBackgroundColor(int color) {
++        // no-op
++    }
++
++    @Override
++    public void setBackground(Drawable background) {
++        // no-op
++    }
++
++    // SurfaceView-only z-order controls WebRTCView calls — inert on a TextureView.
++    public void setZOrderMediaOverlay(boolean isMediaOverlay) {}
++
++    public void setZOrderOnTop(boolean onTop) {}
++
++    // ---- VideoSink ----------------------------------------------------------
++
++    @Override
++    public void onFrame(VideoFrame frame) {
++        updateFrameDimensionsAndReportEvents(frame);
++        eglRenderer.onFrame(frame);
++    }
++
++    // ---- TextureView.SurfaceTextureListener ---------------------------------
++
++    @Override
++    public void onSurfaceTextureAvailable(SurfaceTexture surfaceTexture, int width, int height) {
++        ThreadUtils.checkIsOnMainThread();
++        eglRenderer.createEglSurface(surfaceTexture);
++    }
++
++    @Override
++    public void onSurfaceTextureSizeChanged(SurfaceTexture surfaceTexture, int width, int height) {
++        // Intentionally a no-op. TextureView already calls
++        // SurfaceTexture#setDefaultBufferSize(w,h) on resize, so new buffers come
++        // out at the new size and the EGL surface tracks it. (An earlier attempt
++        // to release+recreate the EGL surface here CRASHED: createEglSurface
++        // races the SurfaceTexture teardown during call-close/reopen —
++        // "GLException: Failed to create window surface" on EglThread.)
++    }
++
++    @Override
++    public boolean onSurfaceTextureDestroyed(SurfaceTexture surfaceTexture) {
++        ThreadUtils.checkIsOnMainThread();
++        final CountDownLatch completionLatch = new CountDownLatch(1);
++        eglRenderer.releaseEglSurface(completionLatch::countDown);
++        ThreadUtils.awaitUninterruptibly(completionLatch);
++        return true;
++    }
++
++    @Override
++    public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {}
++
++    // ---- View layout --------------------------------------------------------
++
++    @Override
++    protected void onMeasure(int widthSpec, int heightSpec) {
++        ThreadUtils.checkIsOnMainThread();
++        // Always take the full available size. WebRTCView positions us (fill, for
++        // cover) via a direct layout() call, so letting videoLayoutMeasure impose
++        // a fit-size here just fought that and contributed to the letterboxed
++        // bubble. The EglRenderer does the cover crop via setLayoutAspectRatio.
++        setMeasuredDimension(
++                getDefaultSize(getSuggestedMinimumWidth(), widthSpec),
++                getDefaultSize(getSuggestedMinimumHeight(), heightSpec));
++    }
++
++    @Override
++    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
++        ThreadUtils.checkIsOnMainThread();
++        eglRenderer.setLayoutAspectRatio((right - left) / (float) (bottom - top));
++    }
++
++    private void updateFrameDimensionsAndReportEvents(VideoFrame frame) {
++        synchronized (layoutLock) {
++            if (!isFirstFrameRendered) {
++                isFirstFrameRendered = true;
++                if (rendererEvents != null) {
++                    rendererEvents.onFirstFrameRendered();
++                }
++            }
++            if (rotatedFrameWidth != frame.getRotatedWidth()
++                    || rotatedFrameHeight != frame.getRotatedHeight()
++                    || frameRotation != frame.getRotation()) {
++                rotatedFrameWidth = frame.getRotatedWidth();
++                rotatedFrameHeight = frame.getRotatedHeight();
++                frameRotation = frame.getRotation();
++                if (rendererEvents != null) {
++                    rendererEvents.onFrameResolutionChanged(
++                            frame.getBuffer().getWidth(), frame.getBuffer().getHeight(), frameRotation);
++                }
++                // Re-measure/-layout on the UI thread when the frame geometry changes.
++                post(this::requestLayout);
++            }
++        }
++    }
++}
+diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
+index 5d14d0f..a985ce1 100644
+--- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
++++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
+@@ -47,7 +47,13 @@ public class WebRTCView extends ViewGroup {
+      * pillarboxed. Areas of the element's playback area that do not contain the
+      * video represent nothing.
+      */
+-    private static final ScalingType DEFAULT_SCALING_TYPE = ScalingType.SCALE_ASPECT_FIT;
++    // Speakeasy patch: default to FILL (cover), not FIT. Every RTCView in the app
++    // sets objectFit="cover", but that prop can arrive AFTER the view's first
++    // layout — especially for the PiP bubble, which remounts on resize. With the
++    // stock FIT default the bubble then renders letterboxed (video fit inside with
++    // a black band) until/unless a re-layout picks up the cover prop. Defaulting
++    // to FILL matches the app's intent and removes that window.
++    private static final ScalingType DEFAULT_SCALING_TYPE = ScalingType.SCALE_ASPECT_FILL;
+ 
+     private static final String TAG = WebRTCModule.TAG;
+ 
+@@ -142,7 +148,7 @@ public class WebRTCView extends ViewGroup {
+      * The {@link View} and {@link VideoSink} implementation which
+      * actually renders {@link #videoTrack} on behalf of this instance.
+      */
+-    private final SurfaceViewRenderer surfaceViewRenderer;
++    private final TextureViewRenderer surfaceViewRenderer;
+ 
+     /**
+      * The {@code VideoTrack}, if any, rendered by this {@code WebRTCView}.
+@@ -157,7 +163,7 @@ public class WebRTCView extends ViewGroup {
+     public WebRTCView(Context context) {
+         super(context);
+ 
+-        surfaceViewRenderer = new SurfaceViewRenderer(context);
++        surfaceViewRenderer = new TextureViewRenderer(context);
+         addView(surfaceViewRenderer);
+ 
+         setMirror(false);
+@@ -344,6 +350,20 @@ public class WebRTCView extends ViewGroup {
+         surfaceViewRenderer.layout(l, t, r, b);
+     }
+ 
++    // Speakeasy patch: re-lay-out the child renderer whenever this view's size
++    // changes. Under RN's New Architecture (Fabric) interop, this legacy view's
++    // frame is updated directly on an Android PiP resize WITHOUT our onLayout
++    // re-running — so the child surfaceViewRenderer kept its pre-resize bounds
++    // and the video stayed at the old (small) size inside the grown bubble
++    // (device logs: outer RTCView resized to the new size, video did not).
++    // onSizeChanged fires on the frame update; posting requestSurfaceViewRenderer
++    // Layout re-runs onLayout against the NEW bounds after this pass.
++    @Override
++    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
++        super.onSizeChanged(w, h, oldw, oldh);
++        post(requestSurfaceViewRendererLayoutRunnable);
++    }
++
+     /**
+      * Stops rendering {@link #videoTrack} and releases the associated acquired
+      * resources (if rendering is in progress).
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
+index e64005d..dcf08fe 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
+@@ -290,7 +290,19 @@
+         }
+ 
+         // See "didMoveToWindow" above.
+-        if (videoTrack && self.window) {
++        //
++        // Speakeasy patch: attach the renderer as soon as the track is set,
++        // regardless of whether the view is already in a window. Under RN's
++        // New Architecture interop layer (bridgeless, RN 0.77) this legacy
++        // view is hosted in a Fabric wrapper where -didMoveToWindow is not
++        // reliably delivered to the inner view; the original `&& self.window`
++        // gate then leaves `addRenderer` never called, so the RTCMTLVideoView
++        // renders nothing (black) on iOS while Android is fine. Attaching here
++        // is safe: -didMoveToWindow still removes the renderer when the view
++        // leaves a window (breaking the track<->renderer retain cycle), and
++        // RTCMTLVideoView only acquires a drawable once it has a window, so an
++        // early attach is a harmless no-op until the view is on screen.
++        if (videoTrack) {
+             dispatch_async(_module.workerQueue, ^{
+                 [videoTrack addRenderer:self.videoView];
+             });
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
+index cd4fa13..64ab025 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
+@@ -7,13 +7,39 @@
+ 
+ @implementation WebRTCModule (RTCAudioSession)
+ 
++// Speakeasy patch: manual-audio mode for CallKit coexistence.
++//
++// Stock react-native-webrtc 124 never sets `useManualAudio`, so WebRTC's ADM
++// auto-activates the AVAudioSession the moment an audio track appears — which
++// collides with CallKit (which also owns/activates the session) and with
++// react-native-incall-manager, producing one-way / silent audio on iOS. The
++// documented CallKit+WebRTC recipe is: set useManualAudio = YES up front, then
++// let CallKit's provider:didActivate/didDeactivate drive isAudioEnabled, so
++// WebRTC touches the session ONLY when CallKit says it's active. `manual` is
++// set once at CallKeep setup; `isAudioEnabled` is toggled from the CallKit
++// didActivate/didDeactivate events (the two methods below).
++//
++// Refs: Medium "Mastering VoIP Audio with CallKit and WebRTC on iOS";
++// webrtc RTCAudioSession (useManualAudio / isAudioEnabled).
++RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(setManualAudio : (BOOL)manual) {
++    [RTCAudioSession sharedInstance].useManualAudio = manual;
++    return nil;
++}
++
+ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidActivate) {
+-    [[RTCAudioSession sharedInstance] audioSessionDidActivate:[AVAudioSession sharedInstance]];
++    RTCAudioSession *session = [RTCAudioSession sharedInstance];
++    [session audioSessionDidActivate:[AVAudioSession sharedInstance]];
++    // Grant WebRTC permission to run its VoIP audio unit now that CallKit has
++    // activated the session. No-op unless useManualAudio == YES.
++    session.isAudioEnabled = YES;
+     return nil;
+ }
+ 
+ RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidDeactivate) {
+-    [[RTCAudioSession sharedInstance] audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
++    RTCAudioSession *session = [RTCAudioSession sharedInstance];
++    [session audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
++    // CallKit tore the session down — stop the VoIP audio unit.
++    session.isAudioEnabled = NO;
+     return nil;
+ }
+ 

@@ -24,6 +24,7 @@ import {
   ensureCameraPermission,
   ensureMicPermission,
 } from '../permissions/runtime.js';
+import { Platform } from 'react-native';
 import { diag } from '../diag/log.js';
 import type {
   ActiveCall,
@@ -34,10 +35,44 @@ import type {
   IceServer,
 } from './types.js';
 import { mediaKindForCall } from './types.js';
+import { CallKeepBridge } from './callkeep-bridge.js';
 import { FilterError, setFilterBypass } from '../native/voice-filter.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
+
+/**
+ * Master switch for the CallKit / ConnectionService bridge. Enabled on iOS ONLY.
+ *
+ * CallKit gives the green return-to-call pill, lock-screen controls, and the
+ * system call UI. An earlier enable regressed calls on a real device (Giselle) —
+ * a DOUBLE incoming prompt and one-way/silent audio — because WebRTC, CallKit,
+ * and InCallManager all fought over the AVAudioSession. Both are now fixed per
+ * the documented CallKit+WebRTC recipe (Medium "Mastering VoIP Audio with
+ * CallKit and WebRTC on iOS"; react-native-webrtc RTCAudioSession):
+ *
+ *   - AUDIO: react-native-webrtc 124 never sets `useManualAudio`, so WebRTC
+ *     auto-grabs the session and battles CallKit. We now (patch-package) set
+ *     `RTCAudioSession.useManualAudio = YES` at bridge setup and drive
+ *     `isAudioEnabled` YES/NO from CallKit's didActivate/didDeactivate — the
+ *     canonical manual-audio pattern. WebRTC then only touches the session when
+ *     CallKit says it's active, ending the tug-of-war.
+ *   - DOUBLE PROMPT: the in-app IncomingCallScreen is suppressed while
+ *     CALLKEEP_ENABLED (CallKit is the sole incoming UI); App.tsx routes a
+ *     CallKit answer straight to the Call screen. See `callKeepEnabled()`.
+ *
+ * Still on-device-only verifiable (no iOS audio/CallKit testable off-device).
+ * Kept OFF on Android (ConnectionService + a "calling app" prompt; Android uses
+ * the notifee foreground-service pill instead).
+ */
+const CALLKEEP_ENABLED: boolean = Platform.OS === 'ios';
+
+/** Whether the CallKit/ConnectionService bridge is active on this platform.
+ *  Exposed so the UI can suppress the in-app IncomingCallScreen when CallKit
+ *  owns the incoming-call surface (avoids the double-prompt regression). */
+export function callKeepEnabled(): boolean {
+  return CALLKEEP_ENABLED;
+}
 
 /**
  * How long a cancelled/ended callId is remembered so a buffered offer for
@@ -158,6 +193,8 @@ export class CallOrchestrator {
    */
   private connectingAt?: number;
   private peer?: CallPeer;
+  /** Lazily-started CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
+  private callKeep?: CallKeepBridge;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
   private connStateUnsub?: () => void;
@@ -188,6 +225,22 @@ export class CallOrchestrator {
 
   constructor(private readonly deps: CallOrchestratorDeps) {}
 
+  /**
+   * Lazily construct + start the CallKit/ConnectionService bridge before the
+   * first call, so its store subscriber is attached in time to mirror the
+   * upcoming `setActive` into the native call UI. No-op (and never constructs
+   * the bridge) while `CALLKEEP_ENABLED` is false. Idempotent: `start()` guards
+   * on its own `setupDone`, and the native module is absent-safe (no-ops if
+   * CallKit/ConnectionService isn't registered on this build). Awaited before
+   * `setActive` so the bridge's subscriber doesn't miss the call-start diff.
+   */
+  private async ensureCallKeepStarted(): Promise<void> {
+    if (!CALLKEEP_ENABLED || this.callKeep) return;
+    const bridge = new CallKeepBridge({ orchestrator: this });
+    this.callKeep = bridge;
+    await bridge.start();
+  }
+
   getActive(): ActiveCall | undefined {
     return this.active;
   }
@@ -208,6 +261,9 @@ export class CallOrchestrator {
       throw new Error('cannot call self');
     }
     const callId = newCallId();
+    // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
+    // store subscriber catches this call-start. No-op while CALLKEEP_ENABLED.
+    await this.ensureCallKeepStarted();
     this.setActive({
       callId,
       peerUserId,
@@ -665,6 +721,9 @@ export class CallOrchestrator {
       });
       this.attachPeer(peer);
       await peer.setRemoteOffer(payload);
+      // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
+      // store subscriber mirrors this incoming call into the native ring UI.
+      await this.ensureCallKeepStarted();
       this.setActive({
         callId,
         peerUserId: fromUserId,
@@ -786,6 +845,15 @@ export class CallOrchestrator {
         // Malformed: a peer shouldn't claim this. Fall through to
         // generic hangup so the UI doesn't get stuck.
         local = 'hangup';
+        break;
+      case 'peer_disconnected':
+        // Server-originated: the peer's WS dropped mid-call (swipe-away /
+        // kill / lost network with no reconnect in the grace window) and
+        // the server ended the call on their behalf. Treat exactly like a
+        // hangup — a connected call shows its duration, an unanswered one
+        // shows missed. Same outcome as `default`, spelled out so the
+        // wire-reason → local-reason mapping stays complete.
+        local = this.active.stage === 'connected' ? 'completed' : 'hangup';
         break;
       default:
         local = this.active.stage === 'connected' ? 'completed' : 'hangup';

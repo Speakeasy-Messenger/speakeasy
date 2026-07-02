@@ -656,8 +656,45 @@ class WebRtcCallPeer implements CallPeer {
     }
     if (this.mediaKind === 'video') {
       for (const track of stream.getVideoTracks()) {
-        this.pc.addTrack(track as MediaStreamTrack, stream);
+        const sender = this.pc.addTrack(track as MediaStreamTrack, stream);
+        await this.tuneVideoSender(sender);
       }
+    }
+  }
+
+  /**
+   * Hold the picture SHARP for the whole call. Reported (#6): video starts
+   * pixel-perfect then gets pixelated/choppy over time. Cause: we set no
+   * sender params, so WebRTC's default degradation drops RESOLUTION as
+   * CPU/thermal/bandwidth tighten over a long call — exactly that decay.
+   *
+   * Fix: prefer dropping framerate over resolution (`maintain-resolution`),
+   * pin scaleResolutionDownBy=1 so it never downscales, and give the encoder
+   * a real bitrate ceiling (~2.5 Mbps for 720p) so it doesn't over-compress
+   * into blockiness. Tradeoff: on a genuinely weak link it goes choppy rather
+   * than blurry — the deliberate choice for a face-to-face call. Best-effort:
+   * setParameters support varies across react-native-webrtc, so failure is
+   * non-fatal (the call just keeps WebRTC's defaults).
+   */
+  private async tuneVideoSender(sender: unknown): Promise<void> {
+    try {
+      const s = sender as {
+        getParameters?: () => Record<string, unknown>;
+        setParameters?: (p: Record<string, unknown>) => Promise<void>;
+      };
+      if (!s.getParameters || !s.setParameters) return;
+      const params = s.getParameters();
+      params.degradationPreference = 'maintain-resolution';
+      const encodings = (params.encodings as Array<Record<string, unknown>>) ?? [{}];
+      for (const enc of encodings) {
+        enc.maxBitrate = 2_500_000;
+        enc.scaleResolutionDownBy = 1;
+      }
+      params.encodings = encodings;
+      await s.setParameters(params);
+      diag('webrtc', 'video sender tuned: maintain-resolution + 2.5Mbps cap');
+    } catch (err) {
+      diag('webrtc', 'tuneVideoSender failed (non-fatal)', { err: String(err) });
     }
   }
 
@@ -701,7 +738,15 @@ class WebRtcCallPeer implements CallPeer {
     // would broadcast on speaker the moment they connected. The
     // user's mute / speaker controls in CallScreen still flip
     // `setForceSpeakerphoneOn(true|false)` on demand.
-    InCallManager.start({ media: 'audio', auto: true });
+    //
+    // `media` MUST match the call kind on iOS: a video call needs the
+    // AVAudioSession in `.videoChat` mode, not `.voiceChat`. With the wrong
+    // (audio) mode the session reports `allowsPictureInPicturePlayback: NO`,
+    // so iOS marks Picture-in-Picture *prohibited* and the call never floats
+    // into a PiP bubble when backgrounded (bug #4 — verified on a real iPhone
+    // via the device log: audio-mode = prohibited, video-mode = possible).
+    const media = this.mediaKind === 'video' ? 'video' : 'audio';
+    InCallManager.start({ media, auto: true });
     this.startedManager = true;
     InCallManager.setKeepScreenOn(true);
     // Listen for headset plug/unplug and seed the current state BEFORE

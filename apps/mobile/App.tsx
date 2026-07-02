@@ -8,7 +8,13 @@ import {
   newMessageId,
 } from '@speakeasy/shared';
 import type { NavigationContainerRef } from '@react-navigation/native';
-import notifee from '@notifee/react-native';
+import notifee, { EventType } from '@notifee/react-native';
+import {
+  showOngoingCallNotification,
+  dismissOngoingCallNotification,
+  CALL_NOTIF_ACTIONS,
+} from './src/calls/call-notification.js';
+import { setActiveCallControls } from './src/calls/call-controls-registry.js';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { RootNavigator } from './src/navigation/RootNavigator.js';
 import type { RootStack } from './src/navigation/RootNavigator.js';
@@ -50,7 +56,11 @@ import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vo
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
-import { CallOrchestrator, type CallHistoryEntry } from './src/calls/orchestrator.js';
+import {
+  CallOrchestrator,
+  callKeepEnabled,
+  type CallHistoryEntry,
+} from './src/calls/orchestrator.js';
 import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { setShowWhenLocked, shouldShowOverLockScreen } from './src/native/lock-screen.js';
@@ -207,7 +217,17 @@ let _apfLastApply = 0;
 // overlay's animation length; keeps a stale event from pinning the eyes.
 const EVENT_HOLD_MS = 1600;
 
+// __DEV__-only: flip true (Metro reloads) to boot straight into the
+// standalone video-call test harness — see DevVideoCallHarness. Lets PiP /
+// resize / return be tested with the camera and no real call. Always false
+// in committed source; never reached in release (__DEV__ is false there).
+const DEV_VIDEO_HARNESS = false;
+
 export default function App() {
+  if (__DEV__ && DEV_VIDEO_HARNESS) {
+    const Harness = require('./src/screens/DevVideoCallHarness.js').DevVideoCallHarness;
+    return <Harness onClosed={() => {}} />;
+  }
   const userId = useIdentity((s) => s.userId);
   const deviceToken = useIdentity((s) => s.deviceToken);
   const hydrated = useIdentity((s) => s.hydrated);
@@ -1064,6 +1084,10 @@ export default function App() {
       const callActiveForCover = !!useCalls.getState().active;
       useUiState.getState().setPrivacyCovered(next !== 'active' && !callActiveForCover);
       if (next === 'active') {
+        // The ongoing-call pill is posted at call-connect and persists for the
+        // whole call (dropped on call end), so we no longer dismiss it on
+        // foreground — it just sits quietly in the shade while the in-app call
+        // UI is up, then becomes the return-to-call pill once backgrounded.
         const state = ws.getState();
         // `reconnecting` already has a timer pending — the WS client
         // turned `connect()` into a no-op for that state in the loop
@@ -1138,6 +1162,14 @@ export default function App() {
           }
         } else if (callActive) {
           diag('app', 'AppState background → keeping WS (call active)');
+          // NB: the voice-call pill is NOT (re)started here. Its foreground
+          // service is `microphone`-typed, and Android 14 FORBIDS starting a
+          // microphone FGS from the background — an attempt throws, the process
+          // isn't protected, One UI kills the backgrounded call, and the pill
+          // never appears (the repeatedly-reported bug). The FGS is instead
+          // started at the call's first FOREGROUND moment (caller dialing /
+          // callee accept) in the store subscriber below, so by the time we
+          // background here it is already running and simply keeps running.
         }
       }
     });
@@ -1147,10 +1179,116 @@ export default function App() {
     const callsUnsub = useCalls.subscribe((s, prev) => {
       if (
         s.active?.stage === 'incoming_ringing' &&
-        prev?.active?.stage !== 'incoming_ringing'
+        prev?.active?.stage !== 'incoming_ringing' &&
+        // When CallKit is on (iOS) it presents the incoming-call UI itself
+        // (CallKeepBridge.displayIncomingCall). Showing the in-app screen too
+        // produced a DOUBLE incoming-call prompt on device — suppress it and let
+        // CallKit own the ring. The accept is routed to 'Call' just below.
+        !callKeepEnabled()
       ) {
         navRef.current?.navigate('IncomingCall');
       }
+      // CallKit accept: the native UI (not the in-app IncomingCallScreen, which
+      // normally does replace('Call')) handled the ring, so when the user
+      // answers — stage leaves incoming_ringing with the call still active —
+      // route to the call screen ourselves. Decline leaves `active` null, so the
+      // `s.active` guard skips it.
+      if (
+        callKeepEnabled() &&
+        prev?.active?.stage === 'incoming_ringing' &&
+        s.active != null &&
+        s.active.stage !== 'incoming_ringing'
+      ) {
+        navRef.current?.navigate('Call');
+      }
+      // #5 pill (Android; iOS uses CallKit; video uses PiP): START the ongoing-
+      // call foreground service at the call's first FOREGROUND moment — the
+      // caller pressing dial, or the callee accepting an incoming call. This is
+      // deliberate: the FGS is `microphone`-typed and Android 14 rejects a
+      // microphone-FGS start from the background, so starting it lazily (at
+      // connect, which can land after the user has already tabbed away while it
+      // rings, or on the AppState→background transition) silently failed — the
+      // reported "pill never shows". Started here while foreground, the service
+      // is already running before any backgrounding, keeping both the pill and
+      // the call's process alive. `connectedAt` is undefined until connect; the
+      // connect branch below re-displays to add the live duration.
+      const pillStart =
+        (s.active?.stage === 'outgoing_dialing' &&
+          prev?.active?.stage !== 'outgoing_dialing') ||
+        (prev?.active?.stage === 'incoming_ringing' &&
+          s.active != null &&
+          s.active.stage !== 'incoming_ringing');
+      if (Platform.OS === 'android' && s.active && s.active.kind !== 'video' && pillStart) {
+        diag('call', 'pill: foreground start', { stage: s.active.stage, kind: s.active.kind });
+        void showOngoingCallNotification({
+          peerHandle: s.active.peerUserId,
+          connectedAtMs: s.active.connectedAt,
+          micMuted: s.active.micMuted,
+          kind: s.active.kind,
+        });
+      }
+      // Re-display at connect to add the live duration chronometer. This UPDATES
+      // the already-running FGS (same notification id) rather than starting a
+      // new one, so it is allowed even if it lands while backgrounded.
+      if (
+        Platform.OS === 'android' &&
+        s.active &&
+        s.active.stage === 'connected' &&
+        prev?.active?.stage !== 'connected' &&
+        s.active.kind !== 'video'
+      ) {
+        void showOngoingCallNotification({
+          peerHandle: s.active.peerUserId,
+          connectedAtMs: s.active.connectedAt,
+          micMuted: s.active.micMuted,
+          kind: s.active.kind,
+        });
+      }
+      // #5 pill: drop it the moment the call ends (even while backgrounded).
+      if (prev?.active && !s.active) {
+        void dismissOngoingCallNotification();
+      }
+      // Keep the Mute/Unmute label current while backgrounded (re-display is
+      // idempotent on the same id). Only when backgrounded — never spawn the
+      // pill while the in-app call UI is foreground.
+      if (
+        s.active &&
+        prev?.active &&
+        s.active.micMuted !== prev.active.micMuted &&
+        AppState.currentState !== 'active'
+      ) {
+        void showOngoingCallNotification({
+          peerHandle: s.active.peerUserId,
+          connectedAtMs: s.active.connectedAt,
+          micMuted: s.active.micMuted,
+          kind: s.active.kind,
+        });
+      }
+    });
+
+    // #5 pill actions: Mute / End. These are almost always pressed while the app
+    // is BACKGROUNDED (the pill's whole purpose), so they arrive via
+    // notifee.onBackgroundEvent (push-handler), NOT this foreground handler —
+    // wiring them only here left the pill buttons dead. We publish the live
+    // call's controls to a process-global registry that BOTH handlers read (the
+    // call keeps the process alive via its FGS, so it's the same JS context).
+    // This foreground handler still covers pressing them with the app in front.
+    const callControls = {
+      toggleMute: () => {
+        const active = useCalls.getState().active;
+        if (active && callOrch) callOrch.setMicMuted(!active.micMuted);
+      },
+      hangup: () => {
+        callOrch?.hangup();
+        void dismissOngoingCallNotification();
+      },
+    };
+    setActiveCallControls(callControls);
+    const callNotifUnsub = notifee.onForegroundEvent(({ type, detail }) => {
+      if (type !== EventType.ACTION_PRESS) return;
+      const id = detail.pressAction?.id;
+      if (id === CALL_NOTIF_ACTIONS.mute) callControls.toggleMute();
+      else if (id === CALL_NOTIF_ACTIONS.end) callControls.hangup();
     });
 
     return () => {
@@ -1158,6 +1296,9 @@ export default function App() {
       lifecycleSub.remove();
       unsubscribe();
       callsUnsub();
+      callNotifUnsub();
+      setActiveCallControls(undefined);
+      void dismissOngoingCallNotification();
       setCallOrchestrator(undefined);
       ws.close();
     };
