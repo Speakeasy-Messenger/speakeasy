@@ -135,7 +135,11 @@ platform :ios do
   lane :certs do
     # Unlocked keychain for non-interactive cert install (CI / SSH).
     setup_ci(force: true)
-    match(type: "appstore", readonly: false, api_key: asc_api_key)
+    # force: true regenerates the profiles even if a valid one already exists —
+    # required to pick up a NEWLY-enabled App-ID capability (match reuses an
+    # existing valid profile otherwise, so a new entitlement like
+    # multitasking-camera-access would never make it into the profile).
+    match(type: "appstore", readonly: false, force: true, api_key: asc_api_key)
   end
 
   desc "Sync signing (read-only — for CI, after `certs` has populated the repo)"
