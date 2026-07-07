@@ -70,6 +70,12 @@ import {
 import { createRedisCallOfferBuffer } from './ws/call-offer-buffer.redis.js';
 import { createAckBuffer, type AckBuffer } from './ws/ack-buffer.js';
 import { createRedisAckBuffer } from './ws/ack-buffer.redis.js';
+import {
+  createPushFallbackQueue,
+  type PushFallbackQueue,
+} from './push/push-fallback-queue.js';
+import { createRedisPushFallbackQueue } from './push/push-fallback-queue.redis.js';
+import { startPushFallbackWorker } from './push/push-fallback-worker.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
 import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { apnsVoipFromEnv } from './push/apns-voip.js';
@@ -104,6 +110,9 @@ export interface BuildServerOptions {
   /** Override the ack buffer (test injection). Defaults to Redis-backed
    *  when REDIS_URL is set, else in-memory. */
   ackBuffer?: AckBuffer;
+  /** Override the push-fallback re-check queue (test injection). Defaults to
+   *  Redis-backed when a Redis client is available, else in-memory. */
+  pushFallbackQueue?: PushFallbackQueue;
   /** Grace window (ms) before a mid-call WS drop ends the call for the
    *  peer. Defaults to DEFAULT_CALL_DROP_GRACE_MS. Tests pass a small
    *  value. */
@@ -336,6 +345,11 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
     const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
     const ackBuffer = opts.ackBuffer ?? defaultAckBuffer();
+    // Redis-backed when we have a shared client (so a fallback enqueued on one
+    // fly machine is claimed exactly once across the fleet), else in-memory.
+    const pushFallbackQueue =
+      opts.pushFallbackQueue ??
+      (redis ? createRedisPushFallbackQueue(redis) : createPushFallbackQueue());
 
     attachWebsocket(app, {
       validator,
@@ -353,9 +367,22 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       callBuffer,
       ackBuffer,
       userNotifier,
+      pushFallbackQueue,
       callDropGraceMs: opts.callDropGraceMs,
       eventLog,
       apnsVoip,
+    });
+    // Delayed re-check worker: fires generic OS banners for messages whose rich
+    // data-only push never landed (killed/Doze'd Android app). Idempotent across
+    // instances (claimDue removes atomically); unref'd so it never blocks exit.
+    const stopPushFallbackWorker = startPushFallbackWorker({
+      queue: pushFallbackQueue,
+      messages,
+      push,
+      log: app.log,
+    });
+    app.addHook('onClose', async () => {
+      stopPushFallbackWorker();
     });
     if (redis) {
       app.addHook('onClose', async () => {

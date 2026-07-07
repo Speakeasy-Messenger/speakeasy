@@ -36,6 +36,10 @@ export class InMemoryMessagesRepo implements MessagesRepo {
     return out;
   }
 
+  async getById(messageId: string): Promise<BufferedMessage | null> {
+    return this.buffer.get(messageId) ?? null;
+  }
+
   async markDeliveredByDevice(
     messageId: string,
     deviceToken: string,

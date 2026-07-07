@@ -82,6 +82,23 @@ describe('buildAndroidPushMessage', () => {
     // Data still rides along for tap-routing + the foreground path.
     expect(msg.data?.conversation_id).toBe('direct:alice:bob');
   });
+
+  it('forceBanner: rich device gets a notification block too, tagged by conversation', () => {
+    // The delayed fallback: a rich device whose data-only push never landed
+    // now gets an OS-rendered banner, deduped per conversation.
+    const msg = buildAndroidPushMessage(
+      notice({ forceBanner: true, ciphertext: undefined }),
+      { ...opts('rich'), tokens: ['tok-1'] },
+    );
+    expect(msg.android?.notification).toEqual({
+      title: '@alice',
+      body: 'New message',
+      channelId: 'speakeasy_default',
+      tag: 'direct:alice:bob',
+    });
+    // No ciphertext — the app is presumed dead; it can't decrypt anyway.
+    expect(msg.data).not.toHaveProperty('ciphertext');
+  });
 });
 
 describe('resolveBannerCopy', () => {

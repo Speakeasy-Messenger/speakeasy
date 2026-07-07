@@ -34,6 +34,10 @@ import type { AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
 import { routeCallFrame } from './call-router.js';
 import type { CallDropMonitor } from './call-drop-monitor.js';
+import {
+  FALLBACK_DELAY_MS,
+  type PushFallbackQueue,
+} from '../push/push-fallback-queue.js';
 
 const AUTH_TIMEOUT_MS = 10_000;
 const RELAY_TTL_MS = 7 * 24 * 60 * 60 * 1000; // spec §5: 7-day relay buffer
@@ -88,6 +92,14 @@ interface Deps {
    * answers in a 2-machine deploy.
    */
   userNotifier: UserNotifier;
+  /**
+   * Delayed re-check queue for the rich-push fallback. After buffering +
+   * push-notifying a message, the id is enqueued to fire ~45s later; if the
+   * row is still undelivered then (the rich data-only push never landed on a
+   * killed/Doze'd Android app), the worker sends a generic OS banner. Optional
+   * so test harnesses without it wired keep working (no fallback fires).
+   */
+  pushFallbackQueue?: PushFallbackQueue;
   /**
    * Ends a call for the surviving party when the peer's WS drops mid-call
    * without a `call_end` (swipe-away / process-kill). Armed from this
@@ -633,6 +645,12 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 ciphertext: msg.ciphertext,
               })
               .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
+            // Schedule the delayed fallback re-check: if this row is still
+            // undelivered ~45s from now, the rich data-only push didn't land
+            // (killed/Doze'd Android app) and the worker sends a generic OS
+            // banner. A delivered (acked) row is gone by then → no fallback,
+            // preview preserved. See push-fallback-worker.ts.
+            deps.pushFallbackQueue?.enqueue(rowId, Date.now() + FALLBACK_DELAY_MS);
           }),
         );
 
