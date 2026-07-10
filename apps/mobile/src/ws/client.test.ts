@@ -115,6 +115,51 @@ describe('SpeakeasyWsClient', () => {
     expect(JSON.parse(second.sent[0]!)).toEqual({ type: 'auth', token: 'tok-1' });
   });
 
+  it('a transient auth-infra close (network_error) reconnects WITHOUT forcing re-attestation', async () => {
+    // The 525-outage regression: a `network_error` auth close means the server
+    // couldn't reach Vouchflow — the token is fine. The reconnect must reuse the
+    // cached token (getToken with NO forceRefresh), never force a re-attest
+    // (which prompts + loops the passkey sheet).
+    const getToken = vi.fn(async (_opts?: { forceRefresh?: boolean }) => 'tok-1');
+    const { client } = makeClient(getToken);
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    // Server rejects mid-auth (never sent 'authed') with a transient infra code.
+    first.fire('close', { code: 4004, reason: 'network_error' });
+    expect(client.getState()).toBe('reconnecting');
+
+    vi.advanceTimersByTime(100);
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getToken).toHaveBeenCalledTimes(2);
+    expect(getToken.mock.calls[1]![0]).toBeUndefined(); // no forceRefresh
+  });
+
+  it('a genuine auth rejection (low_confidence) DOES force re-attestation on reconnect', async () => {
+    const getToken = vi.fn(async (_opts?: { forceRefresh?: boolean }) => 'tok-1');
+    const { client } = makeClient(getToken);
+    client.connect();
+    const first = FakeSocket.instances[0]!;
+    first.open();
+    await Promise.resolve();
+    await Promise.resolve();
+    first.fire('close', { code: 4004, reason: 'low_confidence' });
+
+    vi.advanceTimersByTime(100);
+    const second = FakeSocket.instances[1]!;
+    second.open();
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(getToken.mock.calls[1]![0]).toEqual({ forceRefresh: true });
+  });
+
   it('connect() during reconnecting is a no-op (lets the pending timer fire)', async () => {
     // alpha-0.4.7 reproducer: server's `connections.add` kicked an
     // existing socket whenever the client opened a fresh one mid-

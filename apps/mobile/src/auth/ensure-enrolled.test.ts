@@ -88,6 +88,21 @@ describe('ensureServerBinding', () => {
     expect(apiMock.enroll).toHaveBeenCalledOnce();
   });
 
+  it('does NOT re-attest (no verify sheet) on a transient network_error 401', async () => {
+    // The 525-outage regression: enroll 401s with `network_error` because the
+    // server couldn't reach Vouchflow — NOT because the token is bad. We must
+    // not prompt a re-attestation (it can't fix an upstream outage and loops the
+    // verify sheet). Expect a quiet 'noop' and zero verify prompts.
+    apiMock.enroll.mockRejectedValueOnce(new ApiError(401, 'network_error'));
+    const result = await ensureServerBinding({
+      signalProtocol,
+      vouchflow,
+      forceReenroll: true,
+    });
+    expect(result).toBe('noop');
+    expect(verifyMock).not.toHaveBeenCalled();
+  });
+
   it('on 409 "taken", tries rebind and reports "reenrolled" on success', async () => {
     apiMock.enroll.mockRejectedValueOnce(new ApiError(409, 'taken'));
     apiMock.rebindDevice.mockResolvedValueOnce({ user_id: 'silent-golden-hawk' });
