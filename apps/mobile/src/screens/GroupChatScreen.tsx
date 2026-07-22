@@ -10,7 +10,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import notifee from '@notifee/react-native';
 import { clearNotifStack } from '../push/push-handler.js';
 import {
@@ -30,6 +29,7 @@ import {
 } from '../attachments/pick.js';
 import { AppBar } from '../components/AppBar.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
+import { KeyboardSafeAreaView } from '../components/KeyboardSafeAreaView.js';
 import {
   SEND_TEXT_ATTACHMENT_MAX_CHARS,
   SEND_TEXT_MAX_CHARS,
@@ -486,7 +486,7 @@ export function GroupChatScreen({
   const ttlLabel = formatTtl(ttl);
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
+    <KeyboardSafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
       {/* CONVERSATIONS.md §3.2 + §4.1 group variant. Two-line AppBar:
           room mark + `# group-name` + status square (line 1), then a
           meta sub-line `<N> IN THE ROOM · LEAVES IN <TTL>` (line 2).
@@ -738,7 +738,7 @@ export function GroupChatScreen({
         onPickCamera={() => void handleCamera()}
         onPickFile={() => void handlePickFile()}
       />
-    </SafeAreaView>
+    </KeyboardSafeAreaView>
   );
 }
 

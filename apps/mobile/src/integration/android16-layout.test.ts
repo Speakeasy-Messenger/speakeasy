@@ -62,6 +62,23 @@ describe('Android 16 edge-to-edge layout contracts', () => {
     );
   });
 
+  it('drops the redundant navigation inset while the Android IME is visible', () => {
+    const keyboardSafeArea = source('src/components/KeyboardSafeAreaView.tsx');
+    const directChat = source('src/screens/ChatScreen.tsx');
+    const groupChat = source('src/screens/GroupChatScreen.tsx');
+
+    expect(keyboardSafeArea).toContain(
+      "const EDGES_WITHOUT_BOTTOM: readonly Edge[] = ['top', 'right', 'left'];",
+    );
+    expect(keyboardSafeArea).toContain("Keyboard.addListener('keyboardDidShow'");
+    expect(keyboardSafeArea).toContain("Keyboard.addListener('keyboardDidHide'");
+    expect(keyboardSafeArea).toContain(
+      'edges={androidKeyboardVisible ? EDGES_WITHOUT_BOTTOM : props.edges}',
+    );
+    expect(directChat).toContain('<KeyboardSafeAreaView');
+    expect(groupChat).toContain('<KeyboardSafeAreaView');
+  });
+
   it('uses light system-bar icons whenever the dark brand canvas is visible', () => {
     const app = source('App.tsx');
 
