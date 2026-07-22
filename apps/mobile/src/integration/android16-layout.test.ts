@@ -9,6 +9,22 @@ function source(relativePath: string): string {
 }
 
 describe('Android 16 edge-to-edge layout contracts', () => {
+  it('keeps the Android build on API 36 with a compatible Gradle plugin', () => {
+    const gradle = source('android/build.gradle');
+
+    expect(gradle).toContain('compileSdkVersion = 36');
+    expect(gradle).toContain('targetSdkVersion = 36');
+    expect(gradle).toContain('com.android.tools.build:gradle:8.9.1');
+  });
+
+  it('runs release and emulator CI against API 36', () => {
+    const releaseWorkflow = source('../../.github/workflows/release-play.yml');
+    const emulatorWorkflow = source('../../.github/workflows/tier-b-emulator.yml');
+
+    expect(releaseWorkflow).toContain('platforms;android-36 build-tools;36.0.0');
+    expect(emulatorWorkflow).toContain('api-level: 36');
+  });
+
   it('resizes the whole navigator above the Android IME', () => {
     const app = source('App.tsx');
 
