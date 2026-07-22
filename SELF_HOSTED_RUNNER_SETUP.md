@@ -94,8 +94,8 @@ echo "Installing Android SDK packages..."
 sudo $ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager \
   "platform-tools" \
   "platforms;android-30" \
-  "platforms;android-35" \
-  "build-tools;35.0.0" \
+  "platforms;android-36" \
+  "build-tools;36.0.0" \
   "system-images;android-30;google_apis;x86_64" \
   "emulator" \
   "ndk;26.1.10909125" \

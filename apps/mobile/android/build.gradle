@@ -1,14 +1,13 @@
 buildscript {
     ext {
-        buildToolsVersion = "35.0.0"
+        buildToolsVersion = "36.0.0"
         // Phase 5b: dev.vouchflow:android-sdk requires API 28+ (Android 9.0).
         // Bumped from RN-template default 24 — see Vouchflow Android README.
         minSdkVersion = 28
-        compileSdkVersion = 35
-        // Play Store requires API 35 minimum since Aug 2025 (per the
-        // Play Console error shown on rc.26 upload). compileSdk is
-        // already 35 so this is just lifting the runtime target.
-        targetSdkVersion = 35
+        compileSdkVersion = 36
+        // Google Play requires new apps and app updates to target Android 16
+        // (API 36) starting Aug 31, 2026.
+        targetSdkVersion = 36
         // NDK r27 is the first NDK that emits 16 KB-page-aligned (p_align
         // 0x4000) prebuilt .so files — required for Play `completed`
         // production validation since Aug 2025. Matches React Native
@@ -23,7 +22,9 @@ buildscript {
         mavenCentral()
     }
     dependencies {
-        classpath("com.android.tools.build:gradle")
+        // API 36 requires Android Gradle Plugin 8.9.1 or newer. Keep this
+        // explicit because React Native 0.77's bundled catalog pins 8.7.2.
+        classpath("com.android.tools.build:gradle:8.9.1")
         classpath("com.facebook.react:react-native-gradle-plugin")
         classpath("org.jetbrains.kotlin:kotlin-gradle-plugin")
         // FCM (push notifications). Reads google-services.json at compile

@@ -1,5 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Linking, Platform, StatusBar, View } from 'react-native';
+import {
+  AppState,
+  KeyboardAvoidingView,
+  Linking,
+  Platform,
+  StatusBar,
+  View,
+} from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   conversationIdForCommunity,
@@ -1307,21 +1314,26 @@ export default function App() {
   return (
     <SafeAreaProvider>
       <ThemeProvider>
-        <ThemedStatusBar />
+        <ThemedStatusBar brandCanvas={!userId || showSplash} />
         {!showSplash ? (
           <>
-            <RootNavigator
-              navRef={navRef}
-              onReady={() => setNavReady(true)}
-              callOrchestrator={callOrchestrator}
-              onBannerTap={(target) => {
-                if (target.kind === 'direct') {
-                  navRef.current?.navigate('Chat', { peerId: target.peerId });
-                } else {
-                  navRef.current?.navigate('GroupChat', { groupId: target.groupId });
-                }
-              }}
-            />
+            <KeyboardAvoidingView
+              behavior={Platform.OS === 'android' ? 'height' : undefined}
+              style={{ flex: 1 }}
+            >
+              <RootNavigator
+                navRef={navRef}
+                onReady={() => setNavReady(true)}
+                callOrchestrator={callOrchestrator}
+                onBannerTap={(target) => {
+                  if (target.kind === 'direct') {
+                    navRef.current?.navigate('Chat', { peerId: target.peerId });
+                  } else {
+                    navRef.current?.navigate('GroupChat', { groupId: target.groupId });
+                  }
+                }}
+              />
+            </KeyboardAvoidingView>
             {/* Off-screen — rasterizes peer avatars for notifications. */}
             <AvatarCacheWarmer />
             {/* Off-screen — rasterizes group room-marks for notifications. */}
@@ -1347,16 +1359,15 @@ export default function App() {
  * canvas — Onboarding / IdReveal handle their own status-bar color
  * via their SafeAreaView).
  *
- * (v1.0.1-hotfix.2 restored `backgroundColor` after the hotfix.1
- * edge-to-edge attempt was reverted — with the edge-to-edge opt-out back
- * on, the legacy tinted status bar is the correct, supported behavior.)
+ * Android 16 enforces edge-to-edge for apps targeting API 36, so icon color
+ * must follow the canvas currently visible beneath the transparent system bar.
  */
-function ThemedStatusBar(): React.JSX.Element {
+function ThemedStatusBar({ brandCanvas }: { brandCanvas: boolean }): React.JSX.Element {
   const t = useTheme();
   return (
     <StatusBar
-      barStyle={t.mode === 'dark' ? 'light-content' : 'dark-content'}
-      backgroundColor={t.canvas}
+      barStyle={brandCanvas || t.mode === 'dark' ? 'light-content' : 'dark-content'}
+      backgroundColor={brandCanvas ? t.brand.canvas : t.canvas}
     />
   );
 }
