@@ -13,7 +13,6 @@ import {
   TextInput,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
 import notifee from '@notifee/react-native';
 import { clearNotifStack } from '../push/push-handler.js';
 import {
@@ -35,6 +34,7 @@ import {
   pickPhotos,
 } from '../attachments/pick.js';
 import { AttachmentSheet } from '../components/AttachmentSheet.js';
+import { KeyboardSafeAreaView } from '../components/KeyboardSafeAreaView.js';
 import { saveAndAnnounceFile } from '../attachments/save-and-open.js';
 import { UnblockConfirmSheet } from '../components/BlockSheets.js';
 import { CallTypeSheet } from '../components/CallTypeSheet.js';
@@ -712,7 +712,10 @@ export function ChatScreen({
   const ttlLabel = formatTtl(ttl);
 
   return (
-    <SafeAreaView testID="chat-screen" style={[styles.root, { backgroundColor: themed.cream }]}>
+    <KeyboardSafeAreaView
+      testID="chat-screen"
+      style={[styles.root, { backgroundColor: themed.cream }]}
+    >
       {/* CONVERSATIONS.md §3.2 — two-line AppBar: peer portrait +
           handle + brass status square (line 1) + meta-style sub-line
           `E2E · LEAVES IN <TTL>` (line 2). Tap the title block opens
@@ -1118,7 +1121,7 @@ export function ChatScreen({
         onPickCamera={() => void handleCamera()}
         onPickFile={() => void handlePickFile()}
       />
-    </SafeAreaView>
+    </KeyboardSafeAreaView>
   );
 }
 
