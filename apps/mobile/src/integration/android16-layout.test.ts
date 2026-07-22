@@ -25,6 +25,15 @@ describe('Android 16 edge-to-edge layout contracts', () => {
     expect(emulatorWorkflow).toContain('api-level: 36');
   });
 
+  it('generates native library code before a clean app build configures CMake', () => {
+    const appGradle = source('android/app/build.gradle');
+
+    expect(appGradle).toContain('tasks.named("preBuild").configure');
+    expect(appGradle).toContain(
+      'rootProject.getTasksByName("generateCodegenArtifactsFromSchema", true)',
+    );
+  });
+
   it('resizes the whole navigator above the Android IME', () => {
     const app = source('App.tsx');
 
