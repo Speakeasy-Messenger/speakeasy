@@ -1,5 +1,5 @@
 appId: xyz.speakeasyapp.app
-name: Self-DM round-trip (Tier B)
+name: Peer DM round-trip and Android IME layout (Tier B)
 ---
 
 - clearState
@@ -19,16 +19,16 @@ name: Self-DM round-trip (Tier B)
 # `find-sheet-result` — tapping it opens the chat (no separate
 # "Start chat" button anymore).
 #
-# Type our own handle directly for the self-DM. We enrolled it just
-# above, so it is known — no need to copyTextFrom the header. (The
-# header's `conversations-userid` is a View wrapping the Handle, and
-# its rendered text is `@tester02` — the `@` is rejected by the
-# find-sheet's handle validator anyway.)
+# Flow 01 enrolled tester01 into the same in-memory API server. Looking
+# up that peer while the keyboard stays open is the API 36 regression
+# guard: the result card must remain visible above the IME.
 - tapOn:
     id: "conversations-fab"
 - tapOn:
     id: "find-sheet-input"
-- inputText: "tester02"
+- inputText: "tester01"
+- assertVisible:
+    id: "find-sheet-result"
 - tapOn:
     id: "find-sheet-result"
 
@@ -38,14 +38,16 @@ name: Self-DM round-trip (Tier B)
 # text label any more).
 - tapOn:
     id: "chat-input"
-- inputText: "Hello self!"
+- inputText: "Hello peer!"
+- assertVisible:
+    id: "chat-send"
 - tapOn:
     id: "chat-send"
 
 - assertVisible:
-    text: "Hello self!"
+    text: "Hello peer!"
 
 - back
 
 - assertVisible:
-    text: "Hello self!"
+    text: "Hello peer!"
