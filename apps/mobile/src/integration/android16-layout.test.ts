@@ -36,13 +36,29 @@ describe('Android 16 edge-to-edge layout contracts', () => {
 
   it('resizes the whole navigator above the Android IME', () => {
     const app = source('App.tsx');
+    const manifest = source('android/app/src/main/AndroidManifest.xml');
 
     expect(app).toContain('<KeyboardAvoidingView');
     expect(app).toContain(
       "behavior={Platform.OS === 'android' ? 'height' : undefined}",
     );
+    expect(app).toContain(
+      "enabled={Platform.OS !== 'android' || androidKeyboardVisible}",
+    );
+    expect(app).toContain("Keyboard.addListener('keyboardDidHide'");
     expect(app.indexOf('<KeyboardAvoidingView')).toBeLessThan(
       app.indexOf('<RootNavigator'),
+    );
+    expect(manifest).toContain('android:windowSoftInputMode="adjustResize"');
+  });
+
+  it('positions the conversations FAB above the explicit bottom inset', () => {
+    const conversations = source('src/screens/ConversationsScreen.tsx');
+
+    expect(conversations).toContain('const insets = useSafeAreaInsets();');
+    expect(conversations).toContain('{ bottom: insets.bottom + space.lg }');
+    expect(conversations).toContain(
+      '{ bottom: (dockHeight || 220) + insets.bottom + space.md }',
     );
   });
 
