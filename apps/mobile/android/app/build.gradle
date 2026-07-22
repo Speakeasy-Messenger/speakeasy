@@ -194,6 +194,16 @@ react {
     autolinkLibrariesWithApp()
 }
 
+// AGP 8.9 can configure the app's native CMake graph before React Native's
+// library codegen tasks have created their generated JNI directories on a
+// clean runner. Make app preBuild wait for every autolinked library's codegen
+// output so clean release builds do not depend on stale local/Gradle caches.
+gradle.projectsEvaluated {
+    tasks.named("preBuild").configure {
+        dependsOn(rootProject.getTasksByName("generateCodegenArtifactsFromSchema", true))
+    }
+}
+
 /**
  * Run R8 (code shrinking + obfuscation) on release builds. Keep rules
  * live in `proguard-rules.pro`. Resource shrinking is deliberately left
