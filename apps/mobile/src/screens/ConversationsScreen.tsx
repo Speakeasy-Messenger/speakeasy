@@ -8,7 +8,10 @@ import {
   Text,
   View,
 } from 'react-native';
-import { SafeAreaView } from 'react-native-safe-area-context';
+import {
+  SafeAreaView,
+  useSafeAreaInsets,
+} from 'react-native-safe-area-context';
 import { messagePreviewText } from '@speakeasy/shared';
 import { AppBar } from '../components/AppBar.js';
 import { FindSomeoneSheet } from '../components/FindSomeoneSheet.js';
@@ -107,6 +110,7 @@ export function ConversationsScreen({
     userId ? s.byUserId[userId]?.selectedAvatarId : undefined,
   );
   const themed = useColors();
+  const insets = useSafeAreaInsets();
   const pendingShare = useShare((s) => s.pendingText);
   const setPendingShare = useShare((s) => s.setPendingText);
 
@@ -463,8 +467,8 @@ export function ConversationsScreen({
           // Lift the FAB clear of the dock. `dockHeight || 220` covers
           // the first frame before onLayout measures the real height.
           showGetStarted
-            ? { bottom: (dockHeight || 220) + space.md }
-            : null,
+            ? { bottom: (dockHeight || 220) + insets.bottom + space.md }
+            : { bottom: insets.bottom + space.lg },
         ]}
       >
         <Pressable

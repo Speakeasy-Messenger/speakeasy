@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import {
   AppState,
+  Keyboard,
   KeyboardAvoidingView,
   Linking,
   Platform,
@@ -257,6 +258,27 @@ export default function App() {
   // has run. Declared up here (not next to its useEffect below)
   // because `showSplash` needs it.
   const [recoveryDone, setRecoveryDone] = useState(false);
+  // Android 16 can deliver keyboardDidHide with a non-zero end frame. RN's
+  // KeyboardAvoidingView treats that frame as a remaining overlap and keeps a
+  // stale bottom offset after Back dismisses the IME. Track visibility
+  // separately so a hidden keyboard always disables avoidance immediately.
+  const [androidKeyboardVisible, setAndroidKeyboardVisible] = useState(
+    () => Platform.OS === 'android' && Keyboard.isVisible(),
+  );
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const shown = Keyboard.addListener('keyboardDidShow', () => {
+      setAndroidKeyboardVisible(true);
+    });
+    const hidden = Keyboard.addListener('keyboardDidHide', () => {
+      setAndroidKeyboardVisible(false);
+    });
+    return () => {
+      shown.remove();
+      hidden.remove();
+    };
+  }, []);
 
   // Self-identify the binary at the top of every diag session so a forwarded
   // log says exactly which build produced it — no more guessing "are they on
@@ -1319,6 +1341,7 @@ export default function App() {
           <>
             <KeyboardAvoidingView
               behavior={Platform.OS === 'android' ? 'height' : undefined}
+              enabled={Platform.OS !== 'android' || androidKeyboardVisible}
               style={{ flex: 1 }}
             >
               <RootNavigator
