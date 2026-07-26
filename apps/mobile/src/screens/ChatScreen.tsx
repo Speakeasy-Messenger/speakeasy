@@ -565,17 +565,28 @@ export function ChatScreen({
       // Re-confirm the state right before send — `ensureSessionWithPeer`
       // above can take ~10s, plenty of time for a WS flap.
       if (ws.getState() !== 'authed') await ws.waitForAuthed();
-      ws.send({
-        type: 'message',
-        to: peerId,
-        ciphertext: bytesToB64(ciphertext),
-        msg_type: 'direct',
-        // Stamp the wire frame with the same id as the optimistic
-        // bubble so the server's `delivered`/`read` frames come back
-        // with an id this bubble actually has — otherwise receipts
-        // never attach and the bubble is stuck on a single ✓.
-        message_id: id,
-      });
+      // Tracked send: the client retains this exact frame until the
+      // `delivered` receipt arrives and replays it on reconnect —
+      // `socket.send` succeeding on a half-dead socket (network drop)
+      // otherwise loses the message with no retry (rc.89 diag,
+      // 2026-07-26: send OK at 19:37:22, socket aborted seconds
+      // later, message never delivered). Safe because the server
+      // inserts onConflictDoNothing on message_id and receivers
+      // dedupe by message_id.
+      ws.sendTracked(
+        {
+          type: 'message',
+          to: peerId,
+          ciphertext: bytesToB64(ciphertext),
+          msg_type: 'direct',
+          // Stamp the wire frame with the same id as the optimistic
+          // bubble so the server's `delivered`/`read` frames come back
+          // with an id this bubble actually has — otherwise receipts
+          // never attach and the bubble is stuck on a single ✓.
+          message_id: id,
+        },
+        id,
+      );
       diag('chat', 'send: ws.send OK', { peerFp: diagFingerprint(peerId) });
     } catch (err: unknown) {
       const e = err as {

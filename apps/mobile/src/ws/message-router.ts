@@ -678,6 +678,7 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
 
       case 'delivered':
         diag('router', 'delivered', { msgId: frame.message_id });
+        deps.ws.confirmDelivery(frame.message_id);
         deps.markDelivered(frame.message_id);
         return;
 

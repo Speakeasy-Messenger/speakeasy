@@ -235,6 +235,68 @@ export class SpeakeasyWsClient {
     this.socket.send(JSON.stringify(msg));
   }
 
+  // Outbound chat frames awaiting the server's `delivered` receipt,
+  // keyed by client-supplied message_id. `socket.send()` succeeding
+  // only proves the frame reached a kernel buffer — on a half-dead
+  // socket (network drop mid-session) the frame is silently lost and
+  // nothing retries it. Server inserts are onConflictDoNothing on the
+  // message id and receivers dedupe by message_id, so replaying the
+  // SAME serialized frame is a no-op when the original did arrive.
+  //
+  // `delivered` fires only when the recipient acks (not when the
+  // server stores), so a frame for an offline peer stays unconfirmed
+  // for a long time even though the server has it — the TTL bounds
+  // how long we keep replaying on reconnect. The loss window this
+  // exists to close is seconds wide; 10 minutes is generous.
+  private readonly trackedSends = new Map<string, { raw: string; sentAt: number }>();
+  private static readonly TRACKED_SEND_TTL_MS = 10 * 60 * 1000;
+  private static readonly TRACKED_SEND_MAX = 64;
+
+  /**
+   * `send()` plus loss protection: retains the serialized frame until
+   * `confirmDelivery(messageId)` (wired to the `delivered` WS frame)
+   * or TTL expiry, replaying it on every subsequent `authed`
+   * transition in between. Throws like `send()` when not authed.
+   */
+  sendTracked(msg: WsClientMsg, messageId: string): void {
+    const raw = JSON.stringify(msg);
+    if (this.state !== 'authed' || !this.socket) {
+      throw new Error(`cannot send in state=${this.state}`);
+    }
+    // Insert before sending so a send that throws mid-frame is still
+    // covered by the next authed replay. Bound the map so a long
+    // offline stretch can't grow it without limit (oldest first).
+    if (this.trackedSends.size >= SpeakeasyWsClient.TRACKED_SEND_MAX) {
+      const oldest = this.trackedSends.keys().next().value;
+      if (oldest !== undefined) this.trackedSends.delete(oldest);
+    }
+    this.trackedSends.set(messageId, { raw, sentAt: Date.now() });
+    this.socket.send(raw);
+  }
+
+  /** Drop a tracked frame — its `delivered` receipt arrived. */
+  confirmDelivery(messageId: string): void {
+    this.trackedSends.delete(messageId);
+  }
+
+  private flushTrackedSends(): void {
+    if (this.state !== 'authed' || !this.socket) return;
+    const now = Date.now();
+    for (const [id, entry] of [...this.trackedSends]) {
+      if (now - entry.sentAt > SpeakeasyWsClient.TRACKED_SEND_TTL_MS) {
+        this.trackedSends.delete(id);
+        continue;
+      }
+      try {
+        this.socket.send(entry.raw);
+      } catch {
+        // Mid-flush close — entries stay tracked; the next 'authed'
+        // transition tries again.
+        return;
+      }
+    }
+  }
+
   /**
    * Send an `ack` for `messageId`, queueing if the WS isn't authed yet.
    * Idempotent — duplicate calls for the same id collapse, and the id
@@ -394,6 +456,7 @@ export class SpeakeasyWsClient {
       this.startPingLoop();
       this.flushAcks();
       this.flushSends();
+      this.flushTrackedSends();
     }
     this.opts.onMessage?.(msg);
     for (const sub of this.subscribers) {

@@ -517,4 +517,70 @@ describe('SpeakeasyWsClient', () => {
     expect(called).toBe(0);
     expect(client.getState()).toBe('reconnecting');
   });
+
+  describe('tracked sends (delivered-gated replay)', () => {
+    async function authedClient() {
+      const { client } = makeClient();
+      client.connect();
+      const sock = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+      sock.open();
+      await Promise.resolve();
+      await Promise.resolve();
+      sock.message({ type: 'authed', user_id: 'a-b-c' });
+      return { client, sock };
+    }
+
+    async function reconnect(client: SpeakeasyWsClient) {
+      FakeSocket.instances[FakeSocket.instances.length - 1]!.close();
+      vi.advanceTimersByTime(100);
+      const next = FakeSocket.instances[FakeSocket.instances.length - 1]!;
+      next.open();
+      await Promise.resolve();
+      await Promise.resolve();
+      next.message({ type: 'authed', user_id: 'a-b-c' });
+      return next;
+    }
+
+    const frame = { type: 'message', to: 'peer', ciphertext: 'YWJj', msg_type: 'direct', message_id: 'm1' };
+
+    it('replays an unconfirmed frame on the next authed transition', async () => {
+      const { client, sock } = await authedClient();
+      client.sendTracked(frame as any, 'm1');
+      expect(sock.sent.map((s) => JSON.parse(s))).toContainEqual(frame);
+
+      const second = await reconnect(client);
+      // auth frame + replayed message frame, byte-identical.
+      expect(second.sent.map((s) => JSON.parse(s))).toContainEqual(frame);
+    });
+
+    it('does NOT replay after confirmDelivery (delivered receipt)', async () => {
+      const { client } = await authedClient();
+      client.sendTracked(frame as any, 'm1');
+      client.confirmDelivery('m1');
+
+      const second = await reconnect(client);
+      expect(second.sent.map((s) => JSON.parse(s))).not.toContainEqual(frame);
+    });
+
+    it('drops tracked frames past the TTL instead of replaying', async () => {
+      const { client } = await authedClient();
+      client.sendTracked(frame as any, 'm1');
+
+      vi.advanceTimersByTime(10 * 60 * 1000 + 1);
+      const second = await reconnect(client);
+      expect(second.sent.map((s) => JSON.parse(s))).not.toContainEqual(frame);
+    });
+
+    it('replays across multiple reconnects until confirmed', async () => {
+      const { client } = await authedClient();
+      client.sendTracked(frame as any, 'm1');
+
+      const second = await reconnect(client);
+      expect(second.sent.map((s) => JSON.parse(s))).toContainEqual(frame);
+
+      client.confirmDelivery('m1');
+      const third = await reconnect(client);
+      expect(third.sent.map((s) => JSON.parse(s))).not.toContainEqual(frame);
+    });
+  });
 });
