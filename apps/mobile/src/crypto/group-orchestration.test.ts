@@ -13,11 +13,23 @@ interface CapturedFrame {
   frame: WsClientMsg;
 }
 
-function makeFakeWs(): { ws: SpeakeasyWsClient; sent: CapturedFrame[] } {
+function makeFakeWs(): {
+  ws: SpeakeasyWsClient;
+  sent: CapturedFrame[];
+  tracked: Array<{ frame: WsClientMsg; messageId: string }>;
+} {
   const sent: CapturedFrame[] = [];
+  const tracked: Array<{ frame: WsClientMsg; messageId: string }> = [];
   const ws = {
     send: (frame: WsClientMsg) => {
       sent.push({ frame });
+    },
+    // Group message frames go out tracked (retained until the server's
+    // `accepted` receipt). Record them in `sent` too so ordering
+    // assertions see the full outbound sequence.
+    sendTracked: (frame: WsClientMsg, messageId: string) => {
+      sent.push({ frame });
+      tracked.push({ frame, messageId });
     },
     // The orchestrator now re-confirms `authed` immediately before each
     // ws.send (alpha-0.4.7 reconnect-loop fix). Stub these out so the
@@ -28,7 +40,7 @@ function makeFakeWs(): { ws: SpeakeasyWsClient; sent: CapturedFrame[] } {
       sent.push({ frame: { type: 'ack', message_id: id } as WsClientMsg });
     },
   } as unknown as SpeakeasyWsClient;
-  return { ws, sent };
+  return { ws, sent, tracked };
 }
 
 function makeFakeApi(bundle: PreKeyBundleResponse): ApiClient {
@@ -163,6 +175,61 @@ describe('makeGroupOrchestrator', () => {
     expect(sent.length).toBe(4);
     expect((sent[2]!.frame as Extract<WsClientMsg, { type: 'skdm' }>).to).toBe('carol');
     expect(sent[3]!.frame.type).toBe('message');
+  });
+
+  it('sends the group message via sendTracked (accepted-gated retransmit); SKDMs stay untracked', async () => {
+    clearSessionCache();
+    const { ws, sent, tracked } = makeFakeWs();
+    const orch = makeGroupOrchestrator({
+      api: makeFakeApi(bundleFor('any')),
+      signalProtocol: new MockSignalProtocolClient(),
+      groupMessaging: new MockGroupMessagingClient(),
+      ws,
+      getDeviceToken: async () => 'dvt_test',
+      getOrCreateDistributionId: () => DIST_ID,
+    });
+
+    await orch.sendGroupMessage({
+      groupId: 'grp-1',
+      members: ['alice', 'bob'],
+      selfUserId: 'alice',
+      plaintext: utf8('tracked'),
+      messageId: 'm-tracked-1',
+    });
+
+    // Only the group message frame is tracked — replaying an SKDM the
+    // recipient already processed fails their 1:1 decrypt (ratchet
+    // advanced), so those stay on the plain send path.
+    expect(sent.map((s) => s.frame.type)).toEqual(['skdm', 'message']);
+    expect(tracked).toHaveLength(1);
+    expect(tracked[0]!.messageId).toBe('m-tracked-1');
+    const frame = tracked[0]!.frame as Extract<WsClientMsg, { type: 'message' }>;
+    expect(frame.msg_type).toBe('group');
+    expect(frame.message_id).toBe('m-tracked-1');
+  });
+
+  it('mints a message id for tracked sends when the caller passes none (push-reply path)', async () => {
+    clearSessionCache();
+    const { ws, tracked } = makeFakeWs();
+    const orch = makeGroupOrchestrator({
+      api: makeFakeApi(bundleFor('any')),
+      signalProtocol: new MockSignalProtocolClient(),
+      groupMessaging: new MockGroupMessagingClient(),
+      ws,
+      getDeviceToken: async () => 'dvt_test',
+      getOrCreateDistributionId: () => DIST_ID,
+    });
+    await orch.sendGroupMessage({
+      groupId: 'grp-1',
+      members: ['alice', 'bob'],
+      selfUserId: 'alice',
+      plaintext: utf8('no id supplied'),
+    });
+    expect(tracked).toHaveLength(1);
+    const frame = tracked[0]!.frame as Extract<WsClientMsg, { type: 'message' }>;
+    // A fresh ULID, stamped on the frame and used as the tracking key.
+    expect(tracked[0]!.messageId).toMatch(/^[0-9A-HJKMNP-TV-Z]{26}$/);
+    expect(frame.message_id).toBe(tracked[0]!.messageId);
   });
 
   it('redistributeSenderKey re-sends an SKDM to a single peer (answers skdm_request)', async () => {

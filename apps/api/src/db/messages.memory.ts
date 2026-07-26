@@ -6,6 +6,12 @@ export class InMemoryMessagesRepo implements MessagesRepo {
   async insert(
     msg: Omit<BufferedMessage, 'createdAt'> & { createdAt?: Date },
   ): Promise<void> {
+    // Match the drizzle impl's onConflictDoNothing({ target: messages.id }):
+    // ids are client-supplied (direct) or derived from a client-supplied id
+    // (group/community fan-out), and a retransmitted frame must be a no-op —
+    // NOT an overwrite, which would reset a partially-acked row's
+    // deliveredToDevices.
+    if (this.buffer.has(msg.id)) return;
     const row: BufferedMessage = {
       ...msg,
       createdAt: msg.createdAt ?? new Date(),

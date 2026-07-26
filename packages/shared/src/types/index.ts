@@ -102,8 +102,12 @@ export type WsClientMsg =
        * back to the sender carry an id the sender's bubble actually
        * has — without it, receipts can never attach. Optional: if a
        * client omits it the server generates one (older clients still
-       * work, just without working receipts). Ignored for
-       * group/community (server assigns per-recipient ids).
+       * work, just without working receipts). For group/community the
+       * server still assigns per-recipient row ids, but derives them
+       * deterministically from this id so a client retransmit maps
+       * onto the same rows (idempotent fan-out), and answers with an
+       * `accepted` frame carrying this id so the sender can stop
+       * retransmitting.
        */
       message_id?: MessageId;
     }
@@ -208,6 +212,18 @@ export type WsServerMsg =
       sent_at?: number;
     }
   | { type: 'delivered'; message_id: MessageId }
+  /**
+   * Server-side receipt to the SENDER: the message frame carrying this
+   * (client-supplied) `message_id` has been durably persisted + fanned
+   * out, so the sender may stop retransmitting it. This is the group
+   * counterpart of the `delivered`-gated retransmit for direct
+   * messages — groups have no recipient-ack receipt flowing back to
+   * the sender, so without this a group frame sent into a half-dead
+   * socket is silently lost with no retry. Only emitted for
+   * group/community frames that carried a `message_id` (old clients
+   * never send one on those, so they never see this frame).
+   */
+  | { type: 'accepted'; message_id: MessageId }
   /**
    * Counterpart to the `read` client frame. The recipient (`from`)
    * has opened the chat and `message_id` is now visibly read. Only

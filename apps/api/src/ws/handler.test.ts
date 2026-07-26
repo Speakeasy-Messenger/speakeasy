@@ -1,7 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { WebSocket, AddressInfo } from 'ws';
 import { MockValidator } from '@speakeasy/vouchflow';
-import { conversationIdForDirect, newCommunityId, newGroupId } from '@speakeasy/shared';
+import {
+  conversationIdForDirect,
+  newCommunityId,
+  newGroupId,
+  newMessageId,
+} from '@speakeasy/shared';
 import { buildServer } from '../server.js';
 import { InMemoryUserRepo } from '../db/users.memory.js';
 import { InMemoryDeletedHandlesRepo } from '../db/deleted-handles.js';
@@ -710,6 +715,162 @@ describe('ws messaging — Phase 3', () => {
     await new Promise((r) => setTimeout(r, 30));
     const stored = [...messagesRepo.buffer.values()][0]!;
     expect(stored.conversation).toMatch(/^dm-[0-9a-f]{16}$/);
+  });
+});
+
+describe('ws group send — accepted receipt + idempotent retransmit', () => {
+  async function authedSocket(
+    userId: string,
+  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+    const ws = await open();
+    const q = new MsgQueue(ws);
+    ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
+    const authed = (await q.next()) as { type: string };
+    expect(authed.type).toBe('authed');
+    return { ws, q };
+  }
+
+  async function makeGroup(): Promise<string> {
+    const groupId = newGroupId();
+    await groupRepo.create({ groupId, createdBy: 'alice-blue-fox' });
+    await groupRepo.addMember({
+      groupId,
+      userId: 'bob-red-bear',
+      addedBy: 'alice-blue-fox',
+    });
+    await groupRepo.addMember({
+      groupId,
+      userId: 'carol-pink-owl',
+      addedBy: 'alice-blue-fox',
+    });
+    return groupId;
+  }
+
+  it('group message with a client message_id → accepted fires to the sender, derived per-recipient row ids', async () => {
+    const groupId = await makeGroup();
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    const c = await authedSocket('carol-pink-owl');
+
+    const messageId = newMessageId();
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: groupId,
+        ciphertext: 'Z3JvdXA=',
+        msg_type: 'group',
+        message_id: messageId,
+      }),
+    );
+    const accepted = (await a.q.next()) as { type: string; message_id: string };
+    expect(accepted.type).toBe('accepted');
+    expect(accepted.message_id).toBe(messageId);
+
+    const bMsg = (await b.q.next()) as { message_id: string };
+    const cMsg = (await c.q.next()) as { message_id: string };
+    // Per-recipient row ids: distinct from the sender's id and from
+    // each other, but keeping its ULID time head (push-handler stamps
+    // bubble timestamps via ulidTimeMs(message_id)).
+    expect(bMsg.message_id).not.toBe(messageId);
+    expect(cMsg.message_id).not.toBe(messageId);
+    expect(bMsg.message_id).not.toBe(cMsg.message_id);
+    expect(bMsg.message_id.slice(0, 10)).toBe(messageId.slice(0, 10));
+    expect(messagesRepo.buffer.size).toBe(2);
+  });
+
+  it('retransmitted group frame is idempotent — no second fan-out, accepted re-fires', async () => {
+    const groupId = await makeGroup();
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    const frame = JSON.stringify({
+      type: 'message',
+      to: groupId,
+      ciphertext: 'Z3JvdXA=',
+      msg_type: 'group',
+      message_id: newMessageId(),
+    });
+    a.ws.send(frame);
+    expect(((await a.q.next()) as { type: string }).type).toBe('accepted');
+    const first = (await b.q.next()) as { message_id: string };
+    expect(messagesRepo.buffer.size).toBe(2); // bob + carol rows
+
+    // Byte-identical replay — what the client's tracked-send flush does
+    // when the original `accepted` was eaten by a dead socket.
+    a.ws.send(frame);
+    expect(((await a.q.next()) as { type: string }).type).toBe('accepted');
+    // Live duplicate reaches bob with the SAME derived id (his store
+    // dedupes on it) and no extra rows were inserted.
+    const dup = (await b.q.next()) as { message_id: string };
+    expect(dup.message_id).toBe(first.message_id);
+    expect(messagesRepo.buffer.size).toBe(2);
+  });
+
+  it('group message without message_id (old client) → no accepted', async () => {
+    const groupId = await makeGroup();
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: groupId,
+        ciphertext: 'Z3JvdXA=',
+        msg_type: 'group',
+      }),
+    );
+    // Fan-out completed once bob has the frame; give the handler a
+    // moment to emit anything else it (wrongly) would, then prove the
+    // sender's next frame is the pong sentinel, not an accepted.
+    await b.q.next();
+    await new Promise((r) => setTimeout(r, 30));
+    a.ws.send(JSON.stringify({ type: 'ping' }));
+    expect(((await a.q.next()) as { type: string }).type).toBe('pong');
+  });
+
+  it('community message with a client message_id → accepted fires too', async () => {
+    const communityId = newCommunityId();
+    await communityRepo.create({ communityId, createdBy: 'alice-blue-fox' });
+    await communityRepo.addMember({
+      communityId,
+      userId: 'bob-red-bear',
+      addedBy: 'alice-blue-fox',
+    });
+    const a = await authedSocket('alice-blue-fox');
+    const messageId = newMessageId();
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: communityId,
+        ciphertext: 'Y29tbXVuaXR5',
+        msg_type: 'community',
+        message_id: messageId,
+      }),
+    );
+    const accepted = (await a.q.next()) as { type: string; message_id: string };
+    expect(accepted.type).toBe('accepted');
+    expect(accepted.message_id).toBe(messageId);
+  });
+
+  it('direct sends never get accepted — delivered stays the only sender receipt', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    a.ws.send(
+      JSON.stringify({
+        type: 'message',
+        to: 'bob-red-bear',
+        ciphertext: 'AAA=',
+        msg_type: 'direct',
+        message_id: newMessageId(),
+      }),
+    );
+    const incoming = (await b.q.next()) as { message_id: string };
+    b.ws.send(JSON.stringify({ type: 'ack', message_id: incoming.message_id }));
+    // An accepted (emitted during the send handler) would land well
+    // before the recipient's ack round-trip — so the sender's FIRST
+    // frame being `delivered` proves none was sent.
+    const receipt = (await a.q.next()) as { type: string };
+    expect(receipt.type).toBe('delivered');
   });
 });
 

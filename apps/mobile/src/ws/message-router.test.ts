@@ -61,6 +61,8 @@ interface Harness {
   acks: string[];
   /** Frames handed to ws.enqueueSend (e.g. skdm_request). */
   sends: WsClientMsg[];
+  /** Message ids handed to ws.confirmDelivery (delivered / accepted). */
+  confirmed: string[];
   notified: Array<Parameters<NonNullable<MessageRouterDeps['notifyInbound']>>[0]>;
   attachmentsSeen: Attachment[][];
 }
@@ -71,6 +73,7 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
   const added: Harness['added'] = [];
   const acks: string[] = [];
   const sends: WsClientMsg[] = [];
+  const confirmed: string[] = [];
   const notified: Harness['notified'] = [];
   const attachmentsSeen: Attachment[][] = [];
 
@@ -86,8 +89,9 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
       enqueueSend: (m: WsClientMsg) => {
         sends.push(m);
       },
-      confirmDelivery: (_id: string) => {
-        /* delivered receipts drop tracked outbound frames */
+      confirmDelivery: (id: string) => {
+        // delivered / accepted receipts drop tracked outbound frames
+        confirmed.push(id);
       },
     } as unknown as MessageRouterDeps['ws'],
     orchestrator: {} as MessageRouterDeps['orchestrator'],
@@ -112,6 +116,7 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
     added,
     acks,
     sends,
+    confirmed,
     notified,
     attachmentsSeen,
   };
@@ -636,6 +641,15 @@ describe('messageRouter — control & lifecycle frames', () => {
     const h = makeHarness();
     h.router({ type: 'delivered', message_id: 'd-1' } as WsServerMsg);
     expect(h.deps.markDelivered).toHaveBeenCalledWith('d-1');
+  });
+
+  it('accepted drops the tracked outbound frame via ws.confirmDelivery', () => {
+    const h = makeHarness();
+    h.router({ type: 'accepted', message_id: 'g-1' } as WsServerMsg);
+    expect(h.confirmed).toEqual(['g-1']);
+    // Server-persistence receipt only — no bubble state changes (groups
+    // have no delivered glyph).
+    expect(h.deps.markDelivered).not.toHaveBeenCalled();
   });
 
   it('read forwards the message id (with a read timestamp) to markMessageRead', () => {
