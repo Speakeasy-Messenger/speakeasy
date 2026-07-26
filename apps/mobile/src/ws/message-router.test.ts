@@ -86,6 +86,9 @@ function makeHarness(over: Partial<MessageRouterDeps> = {}): Harness {
       enqueueSend: (m: WsClientMsg) => {
         sends.push(m);
       },
+      confirmDelivery: (_id: string) => {
+        /* delivered receipts drop tracked outbound frames */
+      },
     } as unknown as MessageRouterDeps['ws'],
     orchestrator: {} as MessageRouterDeps['orchestrator'],
     onPrekeysLow: vi.fn(),
