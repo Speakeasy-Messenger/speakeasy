@@ -399,6 +399,13 @@ export function GroupChatScreen({
         members: group.members,
         selfUserId: myUserId!,
         plaintext: utf8ToBytes(plaintext),
+        // Stamp the wire frame with the optimistic bubble's id. The
+        // orchestrator sends it tracked: retained until the server's
+        // `accepted` receipt for this id, replayed on reconnect — so a
+        // half-dead socket (network drop mid-session) can't silently
+        // eat the group message the way it could a direct one before
+        // the `delivered`-gated retransmit landed.
+        messageId: localId,
       });
     } catch (err: unknown) {
       const e = err as { name?: string; message?: string };

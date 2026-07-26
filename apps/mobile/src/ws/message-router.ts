@@ -682,6 +682,15 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
         deps.markDelivered(frame.message_id);
         return;
 
+      case 'accepted':
+        // Server has durably persisted + fanned out a tracked group
+        // send — drop the retained frame so it stops replaying on
+        // reconnect. Groups have no `delivered` receipt (direct
+        // messages keep that gate); no bubble state changes here.
+        diag('router', 'accepted', { msgId: frame.message_id });
+        deps.ws.confirmDelivery(frame.message_id);
+        return;
+
       case 'read':
         diag('router', 'read', {
           msgId: frame.message_id,

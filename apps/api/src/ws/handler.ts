@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import type { WebSocket } from 'ws';
 import type { FastifyBaseLogger } from 'fastify';
 import {
@@ -126,6 +127,33 @@ function conversationFor(
     case 'community':
       return conversationIdForCommunity(to);
   }
+}
+
+/** Crockford base32 — the ULID alphabet `MESSAGE_ID_REGEX` accepts. */
+const ULID_ALPHABET = '0123456789ABCDEFGHJKMNPQRSTVWXYZ';
+
+/**
+ * Derive the per-recipient row id for a group/community fan-out from
+ * the sender's client-supplied message id. Deterministic, so a client
+ * retransmit of the same frame (the `accepted`-gated replay) maps onto
+ * the SAME row ids — the insert's onConflictDoNothing then makes the
+ * replay a no-op instead of a second fan-out, and receivers see a
+ * stable id to dedupe the duplicate live frame by.
+ *
+ * Shape: keep the base id's 10-char ULID time head (push-handler
+ * stamps bubble timestamps via `ulidTimeMs(message_id)`) and replace
+ * the 16-char randomness tail with sha256(baseId, recipientId) mapped
+ * into the ULID alphabet — still matches `MESSAGE_ID_REGEX`.
+ */
+function deriveRecipientMessageId(baseId: string, recipientId: string): string {
+  const digest = createHash('sha256')
+    .update(`${baseId}\0${recipientId}`)
+    .digest();
+  let tail = '';
+  for (let i = 0; i < 16; i++) {
+    tail += ULID_ALPHABET[digest[i]! % 32];
+  }
+  return baseId.slice(0, 10) + tail;
 }
 
 /**
@@ -515,6 +543,20 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               : newMessageId()
             : undefined;
 
+        // Group/community senders have no `delivered` receipt to gate a
+        // retransmit on, so the client replays these frames until the
+        // server confirms persistence with an `accepted` frame. That
+        // replay is only safe if the fan-out is idempotent: derive the
+        // per-recipient row ids from the client-supplied id (see
+        // deriveRecipientMessageId) so a replayed frame collides on the
+        // primary key instead of inserting a second row per member.
+        // Old clients omit `message_id` on group frames — they keep the
+        // legacy fresh-id fan-out and never receive `accepted`.
+        const groupBaseMessageId =
+          msg.msg_type !== 'direct' && isMessageId(msg.message_id)
+            ? msg.message_id
+            : undefined;
+
         // For group pushes, surface the room's name (plaintext
         // server-side per spec §schema groups.name) so the notification
         // reads "<Group> · New message" instead of "@sender · New
@@ -526,7 +568,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
 
         await Promise.all(
           recipients.map(async (recipientId) => {
-            const rowId = directMessageId ?? newMessageId();
+            const rowId =
+              directMessageId ??
+              (groupBaseMessageId
+                ? deriveRecipientMessageId(groupBaseMessageId, recipientId)
+                : newMessageId());
             // Phase 5f: snapshot recipient's known devices at insert time.
             // The row deletes only when *every* listed device acks. If no
             // devices are known yet (recipient never connected), empty
@@ -612,6 +658,19 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
           }),
         );
+
+        // Group/community: tell the sender the frame is durably
+        // persisted + fanned out so it stops retransmitting. Emitted
+        // on the replay path too (the inserts were conflict-no-ops but
+        // the goal is to stop the replay — the original `accepted` may
+        // be the very frame the dead socket ate). Direct messages are
+        // deliberately excluded: their retransmit is gated on the
+        // recipient-ack `delivered` receipt, and old clients DO send
+        // `message_id` on direct frames — no reason to spray a frame
+        // type they don't know at every 1:1 send.
+        if (groupBaseMessageId) {
+          send(socket, { type: 'accepted', message_id: groupBaseMessageId });
+        }
 
         if (sealed) {
           deps.log.info(

@@ -1,3 +1,4 @@
+import { newMessageId } from '@speakeasy/shared';
 import type { ApiClient } from '../api/client.js';
 import type { GroupMessagingModule, SignalProtocolModule } from '@speakeasy/crypto';
 import type { SpeakeasyWsClient } from '../ws/client.js';
@@ -55,6 +56,15 @@ export interface SendGroupMessageOpts {
   selfUserId: string;
   /** UTF-8 bytes of the message body. */
   plaintext: Uint8Array;
+  /**
+   * Client-generated id stamped on the group message wire frame and
+   * used as the retransmit-tracking key: the frame is retained until
+   * the server's `accepted` receipt echoes this id back (see
+   * `ws.sendTracked`). Callers with an optimistic bubble should pass
+   * its id so wire frame and bubble correlate in diagnostics; when
+   * omitted (headless push-reply path) a fresh id is minted.
+   */
+  messageId?: string;
 }
 
 export interface GroupOrchestrator {
@@ -110,6 +120,27 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
     deps.ws.send(msg);
   }
 
+  // sendOrWait plus loss protection for the group message frame: the WS
+  // client retains the frame until the server's `accepted` receipt for
+  // `messageId` arrives, replaying it on reconnect — a group frame sent
+  // into a half-dead socket is otherwise silently lost, and unlike
+  // direct messages there is no `delivered` receipt to notice it by.
+  // Safe because the server derives per-recipient row ids from
+  // `messageId`, so a replay collides on the primary key instead of
+  // fanning out twice. SKDMs stay on plain sendOrWait: replaying an
+  // already-processed SKDM fails the recipient's 1:1 decrypt (ratchet
+  // advanced) and strands an unackable relay row, while a genuinely
+  // lost SKDM already self-heals via the skdm_request re-bootstrap.
+  async function sendTrackedOrWait(
+    msg: Parameters<typeof deps.ws.sendTracked>[0],
+    messageId: string,
+  ): Promise<void> {
+    if (deps.ws.getState() !== 'authed') {
+      await deps.ws.waitForAuthed();
+    }
+    deps.ws.sendTracked(msg, messageId);
+  }
+
   return {
     async sendGroupMessage(opts: SendGroupMessageOpts): Promise<void> {
       const distributionId = deps.getOrCreateDistributionId(opts.groupId);
@@ -143,14 +174,19 @@ export function makeGroupOrchestrator(deps: GroupOrchestratorDeps): GroupOrchest
         }
       }
 
-      // Now the actual group message.
+      // Now the actual group message — tracked until `accepted`.
+      const messageId = opts.messageId ?? newMessageId();
       const ciphertext = await deps.groupMessaging.encryptForGroup(distributionId, opts.plaintext);
-      await sendOrWait({
-        type: 'message',
-        to: opts.groupId,
-        ciphertext: bytesToB64(ciphertext),
-        msg_type: 'group',
-      });
+      await sendTrackedOrWait(
+        {
+          type: 'message',
+          to: opts.groupId,
+          ciphertext: bytesToB64(ciphertext),
+          msg_type: 'group',
+          message_id: messageId,
+        },
+        messageId,
+      );
     },
 
     async redistributeSenderKey(groupId: string, peer: string): Promise<void> {
