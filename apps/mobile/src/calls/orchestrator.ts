@@ -40,6 +40,17 @@ import { FilterError, setFilterBypass } from '../native/voice-filter.js';
 const RING_TIMEOUT_MS = 45_000;
 
 /**
+ * Wall-clock ms a call may sit in `connecting` (SDP exchanged, ICE/DTLS in
+ * progress) before we give up and end it as `failed`. The ring timeout does
+ * NOT cover this stage — it's cleared the moment we enter `connecting` — so
+ * without this bound a call whose ICE never nominates a pair (e.g. one peer
+ * has no usable relay candidate) hangs on "connecting" forever. A healthy
+ * connect is a few seconds; 45s is generous headroom for slow TURN allocation
+ * on a bad network while still failing fast enough to show "couldn't connect."
+ */
+const CONNECTING_TIMEOUT_MS = 45_000;
+
+/**
  * How long a cancelled/ended callId is remembered so a buffered offer for
  * the SAME call — drained late after the caller already hung up — is dropped
  * instead of ringing an abandoned call. Comfortably covers the server's
@@ -113,6 +124,8 @@ export interface CallOrchestratorDeps {
   now?: () => number;
   /** Setter so tests can inject a deterministic timeout. */
   ringTimeoutMs?: number;
+  /** Setter so tests can inject a deterministic connecting-stage timeout. */
+  connectingTimeoutMs?: number;
 }
 
 export interface CallHistoryEntry {
@@ -159,6 +172,7 @@ export class CallOrchestrator {
   private connectingAt?: number;
   private peer?: CallPeer;
   private ringTimer?: ReturnType<typeof setTimeout>;
+  private connectingTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
   private connStateUnsub?: () => void;
   private animationFrameUnsub?: () => void;
@@ -840,6 +854,18 @@ export class CallOrchestrator {
           this.setActive({ ...this.active, reconnecting: true });
         }
       } else if (state === 'failed') {
+        // FOLLOW-UP (mid-call path-death resilience): the robust fix for a
+        // nominated pair dying mid-call is an ICE restart — re-offer with
+        // `iceRestart: true` so ICE re-gathers and re-nominates (picking up a
+        // relay pair when the direct path dies). That is the safety net
+        // bc76ebf lacked (it banned direct paths instead, causing the
+        // relay-only never-connects regression this commit reverts). It needs
+        // mid-call renegotiation, which the signaling layer does NOT support
+        // today: handleIncomingOffer drops a re-delivered offer for the active
+        // call as a "duplicate offer for active call ignored", so an
+        // ICE-restart re-offer would never be applied by the peer. Wiring that
+        // (a renegotiation offer path + bounded 1-2 restart attempts before
+        // giving up to `failed`) is deferred rather than half-implemented.
         this.endLocally('failed');
       } else if (state === 'closed') {
         // Closed without a wire-side end — treat as completed if we
@@ -981,14 +1007,23 @@ export class CallOrchestrator {
     // WebRTC levers move — it excludes the callee's human answer time
     // (which lives in the ringing→connecting gap). Logged on every call
     // so testers' builds produce a baseline before we tune any lever.
-    if (stage === 'connecting') this.connectingAt = at;
-    if (stage === 'connected' && this.connectingAt != null) {
-      diag('call', 'setup latency: connecting→connected', {
-        iceMs: at - this.connectingAt,
-        kind: this.active.kind,
-        isCaller: this.active.isCaller,
-        callId: this.active.callId,
-      });
+    if (stage === 'connecting') {
+      this.connectingAt = at;
+      // Bound the connecting stage: the ring timeout was just cleared, so
+      // without this an ICE failure (no nominated pair) would spin forever.
+      this.armConnectingTimeout();
+    }
+    if (stage === 'connected') {
+      // ICE/DTLS is up — stop the connecting watchdog.
+      this.clearConnectingTimeout();
+      if (this.connectingAt != null) {
+        diag('call', 'setup latency: connecting→connected', {
+          iceMs: at - this.connectingAt,
+          kind: this.active.kind,
+          isCaller: this.active.isCaller,
+          callId: this.active.callId,
+        });
+      }
     }
     this.setActive({
       ...this.active,
@@ -1071,6 +1106,7 @@ export class CallOrchestrator {
 
   private cleanup(): void {
     this.clearRingTimeout();
+    this.clearConnectingTimeout();
     this.connectingAt = undefined;
     this.localIceUnsub?.();
     this.connStateUnsub?.();
@@ -1120,6 +1156,36 @@ export class CallOrchestrator {
   private clearRingTimeout(): void {
     if (this.ringTimer) clearTimeout(this.ringTimer);
     this.ringTimer = undefined;
+  }
+
+  /**
+   * Arm the connecting-stage watchdog. If the call is still in `connecting`
+   * when it fires — ICE/DTLS never reached `connected` — end it as `failed`
+   * so the user sees "couldn't connect" instead of an indefinite spinner.
+   *
+   * We don't send a wire `call_end`: both peers run this identical watchdog
+   * from their own `connecting` transition, so each surfaces the failure
+   * locally. (There is no `failed` wire reason anyway.) This also covers the
+   * callee-accepted-but-caller-vanished case, where no peer is left to notify.
+   */
+  private armConnectingTimeout(): void {
+    this.clearConnectingTimeout();
+    const ms = this.deps.connectingTimeoutMs ?? CONNECTING_TIMEOUT_MS;
+    this.connectingTimer = setTimeout(() => {
+      if (this.active && this.active.stage === 'connecting') {
+        diag('call', 'connecting timeout: ICE/DTLS never connected', {
+          callId: this.active.callId,
+          kind: this.active.kind,
+          isCaller: this.active.isCaller,
+        });
+        this.endLocally('failed');
+      }
+    }, ms);
+  }
+
+  private clearConnectingTimeout(): void {
+    if (this.connectingTimer) clearTimeout(this.connectingTimer);
+    this.connectingTimer = undefined;
   }
 
   private now(): number {
