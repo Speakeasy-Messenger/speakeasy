@@ -15,6 +15,7 @@
  */
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { formatDiag, getDiagSnapshot } from './log.js';
+import { uploadDiag } from './upload.js';
 
 export const LAST_JS_CRASH_KEY = '@speakeasy/lastJsCrash';
 
@@ -60,6 +61,12 @@ export function installErrorHandler(): void {
       // Best-effort: AsyncStorage is async, but the native bridge is
       // very fast and almost always completes before the process dies.
       void AsyncStorage.setItem(LAST_JS_CRASH_KEY, JSON.stringify(captured));
+      // Beta-only diag streaming (trigger 2): fire the redacted buffer to
+      // the server so a crash that kills the process before the tester
+      // reopens Diagnostics is still recoverable. No-op off beta / toggle-
+      // off (see diag/upload.ts). Best-effort like the write above — a
+      // fatal crash may race the network flush, which is acceptable.
+      void uploadDiag({ reason: 'crash' });
     } catch {
       // Never let our reporter swallow the original crash.
     }

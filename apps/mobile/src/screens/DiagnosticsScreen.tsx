@@ -22,6 +22,7 @@ import {
   readLastJsCrash,
   type CapturedCrash,
 } from '../diag/install-error-handler.js';
+import { isDiagStreamingEnabled, uploadDiag } from '../diag/upload.js';
 import { useColors } from '../theme/index.js';
 import { font, space, type as typeScale } from '../theme/tokens.js';
 import { useOwnership } from '../store/ownership.js';
@@ -70,6 +71,10 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
   const [entries, setEntries] = useState<DiagEntry[]>(() => getDiagSnapshot());
   const [lastCrash, setLastCrash] = useState<CapturedCrash | null>(null);
   const [copied, setCopied] = useState<'none' | 'log' | 'crash'>('none');
+  // Beta-only: the "Send diagnostics now" row is hidden on GA builds and
+  // when the streaming toggle is off (the uploader would no-op anyway).
+  const [sent, setSent] = useState(false);
+  const canStream = isDiagStreamingEnabled();
 
   useEffect(() => {
     const off = subscribeDiag((e) => setEntries(e.slice()));
@@ -101,6 +106,15 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
   function handleClearLog() {
     clearDiag();
     setEntries([]);
+  }
+
+  function handleSendDiagnostics() {
+    // Fire-and-forget by contract — uploadDiag swallows its own errors.
+    // The brief "Sent" flip is optimistic acknowledgement, not delivery
+    // confirmation (a diag upload never blocks the UI).
+    void uploadDiag({ reason: 'manual' });
+    setSent(true);
+    setTimeout(() => setSent(false), 1500);
   }
 
   function handleClearCrash() {
@@ -216,6 +230,31 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
           replaces this in Phase C.
         </Text>
       </Pressable>
+
+      {/* Beta-only manual upload. Hidden on GA + when streaming is off,
+          so it only appears where it actually does something. Streams the
+          same redacted buffer shown below — metadata only, no plaintext. */}
+      {canStream ? (
+        <Pressable
+          onPress={handleSendDiagnostics}
+          style={({ pressed }) => [
+            styles.bigAction,
+            {
+              borderColor: themed.divider,
+              backgroundColor: pressed ? themed.soft : 'transparent',
+            },
+          ]}
+          testID="diag-send-now"
+        >
+          <Text style={[styles.bigActionTitle, { color: themed.ink }]}>
+            {sent ? 'Sent' : 'Send diagnostics now'}
+          </Text>
+          <Text style={[styles.bigActionSub, { color: themed.slate }]}>
+            Beta only. Uploads this redacted log to the server so we don't
+            have to ask you to copy-paste it.
+          </Text>
+        </Pressable>
+      ) : null}
 
       <FlatList
         data={entries}

@@ -53,6 +53,13 @@ interface SettingsState {
    *  pre-upgrade users hear the same voice they had. */
   voiceFilterProfile: VoiceFilterProfileId;
 
+  /** Beta-only: auto-stream the (already-redacted) diag ring buffer to
+   *  the server on abnormal call ends / crashes so we stop asking
+   *  testers to copy-paste logs. No effect on GA builds — the uploader
+   *  is hard-gated on a "-rc." version regardless of this flag. Default
+   *  on for beta; surfaced only on the Diagnostics screen. */
+  diagStreaming: boolean;
+
   hydrated: boolean;
 
   setAllowIncomingCalls: (v: boolean) => void;
@@ -65,6 +72,7 @@ interface SettingsState {
   setRingtoneEnabled: (v: boolean) => void;
   setVibrateOnIncoming: (v: boolean) => void;
   setVoiceFilterProfile: (id: VoiceFilterProfileId) => void;
+  setDiagStreaming: (v: boolean) => void;
   hydrate: () => Promise<void>;
   reset: () => Promise<void>;
 }
@@ -83,6 +91,7 @@ type PersistedShape = Partial<
     | 'setRingtoneEnabled'
     | 'setVibrateOnIncoming'
     | 'setVoiceFilterProfile'
+    | 'setDiagStreaming'
     | 'hydrate'
     | 'reset'
   >
@@ -99,6 +108,7 @@ const DEFAULTS = {
   ringtoneEnabled: true,
   vibrateOnIncoming: true,
   voiceFilterProfile: DEFAULT_VOICE_FILTER_PROFILE,
+  diagStreaming: true,
 } as const;
 
 async function persist(s: PersistedShape): Promise<void> {
@@ -121,6 +131,7 @@ function snapshot(s: SettingsState): PersistedShape {
     ringtoneEnabled: s.ringtoneEnabled,
     vibrateOnIncoming: s.vibrateOnIncoming,
     voiceFilterProfile: s.voiceFilterProfile,
+    diagStreaming: s.diagStreaming,
   };
 }
 
@@ -169,6 +180,10 @@ export const useSettings = create<SettingsState>((set, get) => ({
   },
   setVoiceFilterProfile: (id) => {
     set({ voiceFilterProfile: id });
+    void persist(snapshot(get()));
+  },
+  setDiagStreaming: (v) => {
+    set({ diagStreaming: v });
     void persist(snapshot(get()));
   },
 

@@ -25,6 +25,7 @@ import {
   ensureMicPermission,
 } from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
+import { uploadDiag } from '../diag/upload.js';
 import type {
   ActiveCall,
   CallEndedReason,
@@ -1023,6 +1024,22 @@ export class CallOrchestrator {
     const startedAt = this.active.stageEnteredAt; // first stage's timestamp
     const connectedAt = this.active.connectedAt;
     const endedAt = this.now();
+    // Beta-only diag streaming (trigger 1): upload the redacted buffer on
+    // an ABNORMAL end so both sides of a broken call auto-correlate on the
+    // server by callId. Abnormal = a technical failure ('failed', local or
+    // peer filter death) OR a 'hangup' on a call that never connected — the
+    // silent-teardown class we could previously only debug by asking the
+    // tester to paste logs. Normal social ends ('completed', 'decline',
+    // 'cancel', 'busy', 'no_answer', 'video_refused', …) never upload.
+    // No-op off beta / toggle-off / pre-enroll — see diag/upload.ts.
+    const abnormalEnd =
+      reason === 'failed' ||
+      reason === 'filter_failure' ||
+      reason === 'peer_filter_failure' ||
+      (reason === 'hangup' && !connectedAt);
+    if (abnormalEnd) {
+      void uploadDiag({ reason: `call_${reason}`, callId: this.active.callId });
+    }
     const ended: ActiveCall = {
       ...this.active,
       stage: 'ended',

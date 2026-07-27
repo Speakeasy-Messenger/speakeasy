@@ -1,5 +1,19 @@
 import type { AbuseReportReason } from '@speakeasy/shared';
 import type { PreKey, PreKeyBundleInput } from '../crypto/types.js';
+import type { DiagEntry } from '../diag/log.js';
+
+/**
+ * Body of `POST /v1/diag`. Beta-only diagnostic upload — `entries` is the
+ * already-redacted diag ring buffer (handles/previews are fingerprinted at
+ * write time in `diag/log.ts`; no message plaintext is ever present).
+ * `callId` correlates both sides of the same call when set.
+ */
+export interface DiagUploadPayload {
+  entries: DiagEntry[];
+  appVersion: string;
+  reason: string;
+  callId?: string;
+}
 
 /**
  * Parse a fetch response body as JSON, swallowing errors (some
@@ -770,6 +784,38 @@ export class ApiClient {
       };
       return j.ice_servers;
     }
+    let code: string | undefined;
+    try {
+      const j = (await res.json()) as { error?: string };
+      code = j?.error;
+    } catch {
+      /* ignore */
+    }
+    throw new ApiError(res.status, code);
+  }
+
+  /**
+   * Beta-only diagnostic upload. POSTs the (already-redacted) diag ring
+   * buffer so we stop asking testers to copy-paste logs out of the
+   * Diagnostics screen. Metadata-only by construction — see
+   * `DiagUploadPayload`. The server rejects non-beta (`appVersion` without
+   * "-rc.") with 403, so this is a no-op contract for GA even if called.
+   * Best-effort: throws `ApiError` on non-200 like the other methods; the
+   * `uploadDiag` wrapper in `diag/upload.ts` swallows it (fire-and-forget).
+   */
+  async uploadDiag(
+    deviceToken: string,
+    payload: DiagUploadPayload,
+  ): Promise<void> {
+    const res = await this.doFetch(`${this.baseUrl}/v1/diag`, {
+      method: 'POST',
+      headers: {
+        'content-type': 'application/json',
+        authorization: `Bearer ${deviceToken}`,
+      },
+      body: JSON.stringify(payload),
+    });
+    if (res.status === 200) return;
     let code: string | undefined;
     try {
       const j = (await res.json()) as { error?: string };
