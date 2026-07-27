@@ -98,20 +98,34 @@ class WebRtcCallPeer implements CallPeer {
     // UI toggle and the actual audio route agree the instant the call
     // connects — no double-tap to reconcile.
     this.speakerOn = mediaKind === 'video';
-    // Force the TURN relay when we actually have a TURN server. Real-device
-    // testing (bananaman 2026-06-26, Android↔iOS on 5G) showed ICE nominating
-    // a fragile `host↔host` UDP pair — it held ~6s, the cellular path rebound,
-    // and with no ICE-restart wired the call went straight to `failed` instead
-    // of falling back to the 10 relay candidates it had gathered. On cellular
-    // / symmetric-NAT the only reliable path is the relay anyway, and the media
-    // is DTLS-SRTP with Signal-authenticated SDP (orchestrator.ts) so a hostile
-    // relay can't MITM. We still allow `all` when only STUN was issued (TURN
-    // fetch failed) so a same-LAN call can connect at all rather than gather
-    // zero candidates.
-    const hasTurn = iceServers.some((s) => {
-      const urls = Array.isArray(s.urls) ? s.urls : [s.urls];
-      return urls.some((u) => typeof u === 'string' && u.toLowerCase().startsWith('turn'));
-    });
+    // ICE transport policy is deliberately left at the WebRTC default
+    // (`'all'`): try direct (host/srflx) first and fall back to the TURN
+    // relay. Do NOT force `'relay'`.
+    //
+    // History (bc76ebf, reverted here): a real-device Android↔iOS 5G call
+    // nominated a fragile `host↔host` UDP pair that held ~6s then died when
+    // the cellular path rebound; because no ICE-restart was wired, it went
+    // straight to `failed` instead of re-nominating a relay pair it had
+    // already gathered. The "fix" set `iceTransportPolicy='relay'` whenever a
+    // TURN server was issued — which is the normal case (Cloudflare Calls) —
+    // making EVERY call relay-only. That traded a rare mid-call drop for a
+    // common never-connects: if the relay path doesn't work end-to-end for
+    // BOTH peers (one peer's TURN-cred fetch failed → STUN-only, no relay
+    // candidate to pair with; a peer's network blocks the relay; a relay
+    // hiccup), ICE finds no candidate pair and the call hangs on "connecting"
+    // forever with no direct fallback. The repo's own field data had `'all'`
+    // connecting ~70-80% of mobile calls directly.
+    //
+    // The correct safety net for mid-call path death is an ICE restart (re-
+    // offer with `iceRestart: true`), NOT banning direct paths. That needs
+    // mid-call renegotiation support in the signaling layer, which the
+    // orchestrator does not have today (a re-delivered offer for the active
+    // call is dropped as a duplicate) — tracked as a follow-up. Until then,
+    // the orchestrator bounds the `connecting` stage with a timeout so a
+    // stuck call surfaces as "couldn't connect" instead of an endless spinner.
+    //
+    // Media stays safe under `'all'`: it's DTLS-SRTP with Signal-authenticated
+    // SDP (orchestrator.ts), so neither a direct nor a relayed path can MITM.
     this.pc = new RTCPeerConnection({
       iceServers: iceServers.map((s) => ({
         urls: s.urls,
@@ -121,7 +135,7 @@ class WebRtcCallPeer implements CallPeer {
       // `bundle-policy: max-bundle` keeps audio on a single
       // ICE/DTLS pair — one less moving part to NAT-traverse.
       bundlePolicy: 'max-bundle',
-      iceTransportPolicy: hasTurn ? 'relay' : 'all',
+      iceTransportPolicy: 'all',
     });
 
     // RN-WebRTC's EventTarget shim doesn't expose addEventListener via

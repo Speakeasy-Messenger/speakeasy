@@ -99,6 +99,7 @@ interface OrchHarness {
 function makeOrchHarness(
   opts: {
     ringTimeoutMs?: number;
+    connectingTimeoutMs?: number;
     /** Phase 5j Private Call — wired into both orchestrators when
      *  set, so tests of the animation-frame round-trip can see
      *  decoded inbound frames. */
@@ -146,6 +147,7 @@ function makeOrchHarness(
     onPeerAnimationFrame: opts.onPeerAnimationFrame,
     voiceFilter: opts.voiceFilter,
     ringTimeoutMs: opts.ringTimeoutMs,
+    connectingTimeoutMs: opts.connectingTimeoutMs,
   });
   const callee = new CallOrchestrator({
     myUserId: 'bob',
@@ -160,6 +162,7 @@ function makeOrchHarness(
     onPeerAnimationFrame: opts.onPeerAnimationFrame,
     voiceFilter: opts.voiceFilter,
     ringTimeoutMs: opts.ringTimeoutMs,
+    connectingTimeoutMs: opts.connectingTimeoutMs,
   });
 
   async function pump(): Promise<void> {
@@ -361,6 +364,46 @@ describe('CallOrchestrator', () => {
     expect(h.callee.getActive()).toBeUndefined();
     expect(h.finishedCaller[0]?.reason).toBe('no_answer');
     expect(h.finishedCallee[0]?.reason).toBe('no_answer');
+    vi.useRealTimers();
+  });
+
+  it('connecting timeout: a call stuck in connecting ends as failed (not an endless spinner)', async () => {
+    // Regression guard for the relay-only hang (bc76ebf): once SDP is
+    // exchanged both sides enter `connecting`; if ICE never nominates a pair
+    // the call must fail on a bounded deadline instead of spinning forever.
+    vi.useFakeTimers();
+    const h = makeOrchHarness({ ringTimeoutMs: 100_000, connectingTimeoutMs: 1000 });
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    await h.callee.accept();
+    await h.pump();
+    // Both are in `connecting` and no peer ever emits `connected`.
+    expect(h.caller.getActive()?.stage).toBe('connecting');
+    expect(h.callee.getActive()?.stage).toBe('connecting');
+
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.caller.getActive()).toBeUndefined();
+    expect(h.callee.getActive()).toBeUndefined();
+    expect(h.finishedCaller[0]?.reason).toBe('failed');
+    expect(h.finishedCallee[0]?.reason).toBe('failed');
+    vi.useRealTimers();
+  });
+
+  it('connecting timeout is cleared once connected (no spurious failure)', async () => {
+    vi.useFakeTimers();
+    const h = makeOrchHarness({ ringTimeoutMs: 100_000, connectingTimeoutMs: 1000 });
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    await h.callee.accept();
+    await h.pump();
+    h.callerPeer().emitConnState('connected');
+    h.calleePeer().emitConnState('connected');
+    expect(h.caller.getActive()?.stage).toBe('connected');
+
+    // Past the connecting deadline — the connected call must survive.
+    await vi.advanceTimersByTimeAsync(1500);
+    expect(h.caller.getActive()?.stage).toBe('connected');
+    expect(h.callee.getActive()?.stage).toBe('connected');
     vi.useRealTimers();
   });
 
