@@ -20,6 +20,9 @@ import { DrizzleDevicesRepo } from './db/devices.drizzle.js';
 import { DrizzleEventLogRepo } from './db/event-log.drizzle.js';
 import { InMemoryEventLogRepo } from './db/event-log.memory.js';
 import type { EventLogRepo } from './db/event-log.js';
+import { DrizzleDiagUploadsRepo } from './db/diag.drizzle.js';
+import { InMemoryDiagUploadsRepo } from './db/diag.memory.js';
+import type { DiagUploadsRepo } from './db/diag.js';
 import { registerEnrollRoutes } from './routes/enroll.js';
 import { registerAvailabilityRoute } from './routes/availability.js';
 import { registerUserRoutes } from './routes/users.js';
@@ -77,6 +80,7 @@ import { InMemoryDevicesRepo } from './db/devices.memory.js';
 import type { DevicesRepo } from './db/devices.js';
 import { registerDeviceRoutes } from './routes/devices.js';
 import { registerFeedbackRoute } from './routes/feedback.js';
+import { registerDiagRoute } from './routes/diag.js';
 import { registerBroadcastRoute } from './routes/broadcast.js';
 import { registerAdminRoutes } from './routes/admin.js';
 import {
@@ -107,6 +111,9 @@ export interface BuildServerOptions {
   /** Override the persistent event log (test injection). Defaults to
    *  Drizzle when DATABASE_URL is set, else in-memory. */
   eventLog?: EventLogRepo;
+  /** Override the beta diag-uploads repo (test injection). Defaults to
+   *  Drizzle when DATABASE_URL is set, else in-memory. */
+  diagUploads?: DiagUploadsRepo;
   /** TURN/STUN credentials provider for `/v1/turn/credentials`. Defaults
    *  to env-driven (Cloudflare if env set; STUN-only fallback). */
   turnProvider?: TurnProvider;
@@ -279,6 +286,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     db: hasDb ? getDb() : undefined,
   });
   await registerFeedbackRoute(app);
+  const diagUploads =
+    opts.diagUploads ?? (hasDb ? new DrizzleDiagUploadsRepo() : new InMemoryDiagUploadsRepo());
+  await registerDiagRoute(app, { repo: diagUploads });
   await registerAdminRoutes(app, { eventLog, devices, users: repo });
   await registerBroadcastRoute(app, { devices, messages, push, userNotifier });
   const turnProvider = opts.turnProvider ?? turnProviderFromEnv();

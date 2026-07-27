@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type {
   CallAnswerPayload,
   CallIceCandidate,
@@ -10,6 +10,13 @@ import type {
 import { MockSignalProtocolClient } from '../native/mock-signal-protocol.js';
 import { CallOrchestrator } from './orchestrator.js';
 import type { CallPeer, CallPeerFactory } from './types.js';
+
+// Beta diag streaming — mock the uploader so we can assert WHICH call
+// ends trigger a stream (abnormal only) without hitting the network or
+// the version/toggle gate. A no-op mock is harmless to every other test.
+vi.mock('../diag/upload.js', () => ({ uploadDiag: vi.fn(async () => undefined) }));
+import { uploadDiag } from '../diag/upload.js';
+const mockUploadDiag = vi.mocked(uploadDiag);
 
 type ConnState =
   | 'connecting'
@@ -821,5 +828,48 @@ describe('CallOrchestrator', () => {
       const seq2 = h.caller.sendAnimationFrame(neutralFrame);
       expect(seq2).toBe(1);
     });
+  });
+});
+
+describe('CallOrchestrator — beta diag streaming triggers', () => {
+  beforeEach(() => {
+    mockUploadDiag.mockClear();
+  });
+
+  it('streams the diag buffer on an abnormal end (connection failed)', async () => {
+    const h = makeOrchHarness();
+    const callId = await h.caller.startOutgoing('bob');
+    // WebRTC gives up before the call ever connected → endLocally('failed').
+    h.callerPeer().emitConnState('failed');
+    expect(h.caller.getActive()).toBeUndefined();
+    expect(mockUploadDiag).toHaveBeenCalledTimes(1);
+    expect(mockUploadDiag).toHaveBeenCalledWith({
+      reason: 'call_failed',
+      callId,
+    });
+  });
+
+  it('does NOT stream on a normal completed call (connected → hangup)', async () => {
+    const h = makeOrchHarness();
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    await h.callee.accept();
+    await h.pump();
+    h.callerPeer().emitConnState('connected');
+    h.calleePeer().emitConnState('connected');
+    h.callee.hangup();
+    await h.pump();
+    expect(h.finishedCaller[0]?.reason).toBe('completed');
+    expect(h.finishedCallee[0]?.reason).toBe('completed');
+    expect(mockUploadDiag).not.toHaveBeenCalled();
+  });
+
+  it('does NOT stream when the callee declines (normal social end)', async () => {
+    const h = makeOrchHarness();
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    h.callee.decline();
+    await h.pump();
+    expect(mockUploadDiag).not.toHaveBeenCalled();
   });
 });

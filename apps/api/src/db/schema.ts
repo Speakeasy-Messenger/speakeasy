@@ -358,3 +358,33 @@ export const serverEventLog = pgTable(
     typeTsIdx: index('server_event_log_type_ts').on(t.eventType, t.ts),
   }),
 );
+
+/**
+ * Beta-only diagnostic log uploads. One row per `POST /v1/diag`. The
+ * `entries` payload is the client's already-redacted diag ring buffer
+ * (handles/previews fingerprinted, no plaintext — see mobile
+ * `diag/log.ts`); the route strips it to the known DiagEntry keys as
+ * defense-in-depth and 403s non-beta (`app_version` without "-rc.").
+ *
+ * `call_id` is nullable (crash/manual uploads aren't call-scoped) and
+ * indexed so both sides of a failed call correlate. Retention: purge
+ * >14d via `DiagUploadsRepo.purgeOlderThan`. See migrations/0023.
+ */
+export const diagUploads = pgTable(
+  'diag_uploads',
+  {
+    id: bigserial('id', { mode: 'number' }).primaryKey(),
+    userId: text('user_id').notNull(),
+    callId: text('call_id'),
+    appVersion: text('app_version').notNull(),
+    reason: text('reason').notNull(),
+    entries: jsonb('entries').notNull().default([]),
+    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => ({
+    callIdIdx: index('diag_uploads_call_id_idx')
+      .on(t.callId)
+      .where(sql`${t.callId} IS NOT NULL`),
+    userCreatedIdx: index('diag_uploads_user_created_idx').on(t.userId, t.createdAt),
+  }),
+);
