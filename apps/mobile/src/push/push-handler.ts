@@ -61,7 +61,10 @@ import RNFS from 'react-native-fs';
 import { NotifMessaging } from '../native/notif-messaging.js';
 import { getCachedDeviceToken } from '../native/cached-device-token.js';
 import { shouldSuppressPushForMute } from './push-mute-policy.js';
-import { enqueuePendingInboundMessage } from './pending-inbound.js';
+import {
+  enqueuePendingInboundMessage,
+  pendingInboundFromDecryptedPush,
+} from './pending-inbound.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -83,6 +86,8 @@ export type FcmData = {
   body?: string;
   /** Buffered message id (for decrypt + de-dup). */
   message_id?: string;
+  /** Server-assigned relay time in milliseconds, encoded by FCM as a string. */
+  sent_at?: string;
   /** Sender handle — the address the decrypt is keyed on. */
   sender_id?: string;
   /** Message ciphertext (base64). Present only for 'rich' devices on a
@@ -384,11 +389,7 @@ function toPersistedPush(data: FcmData): PersistedPush | null {
  */
 async function decryptForNotification(data: FcmData): Promise<{
   notificationText: string | null;
-  message: {
-    text: string;
-    attachments: ReturnType<typeof decodePayload>['attachments'];
-    mentions: ReturnType<typeof decodePayload>['mentions'];
-  };
+  payload: ReturnType<typeof decodePayload>;
 } | null> {
   if (!data.ciphertext || !data.sender_id) return null;
   const ciphertext = b64ToBytes(data.ciphertext);
@@ -402,20 +403,12 @@ async function decryptForNotification(data: FcmData): Promise<{
   if (payload.attachments && payload.attachments.length > 0) {
     return {
       notificationText: 'sent an attachment',
-      message: {
-        text: payload.text ?? '',
-        attachments: payload.attachments,
-        mentions: payload.mentions,
-      },
+      payload,
     };
   }
   return {
     notificationText: payload.text ?? null,
-    message: {
-      text: payload.text ?? '',
-      attachments: payload.attachments,
-      mentions: payload.mentions,
-    },
+    payload,
   };
 }
 
@@ -815,6 +808,7 @@ async function displayCallNotification(data: FcmData): Promise<void> {
  */
 async function displayPushNotification(data: FcmData): Promise<void> {
   const conversationId = data.conversation_id;
+  const receivedAt = Date.now();
   const muted = await shouldSuppressPushForMute(conversationId);
   if (
     conversationId &&
@@ -826,19 +820,15 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       const decrypted = await decryptForNotification(data);
       if (decrypted && data.message_id) {
         try {
-          await enqueuePendingInboundMessage({
+          await enqueuePendingInboundMessage(pendingInboundFromDecryptedPush({
             conversationId,
-            message: {
-              id: data.message_id,
-              from: data.sender_id,
-              text: decrypted.message.text,
-              attachments: decrypted.message.attachments,
-              mentions: decrypted.message.mentions,
-              kind: data.msg_type === 'group' ? 'group' : 'direct',
-              sentAt: ulidTimeMs(data.message_id) ?? Date.now(),
-              stage: 'sent',
-            },
-          });
+            messageId: data.message_id,
+            senderId: data.sender_id,
+            msgType: data.msg_type,
+            payload: decrypted.payload,
+            receivedAt,
+            sentAt: Number(data.sent_at),
+          }));
           diag('push-bg', 'decrypted message persisted for fast foreground load', {
             conversationId,
             msgId: data.message_id,
@@ -885,7 +875,10 @@ async function displayPushNotification(data: FcmData): Promise<void> {
             ...prior,
             {
               text,
-              timestamp: ulidTimeMs(data.message_id ?? '') ?? Date.now(),
+              timestamp:
+                Number(data.sent_at) ||
+                ulidTimeMs(data.message_id ?? '') ||
+                Date.now(),
               person: { id: peer, name: '@' + peer },
             },
           ],
@@ -937,7 +930,10 @@ async function displayPushNotification(data: FcmData): Promise<void> {
           ...prior,
           {
             text: '📎 New attachment',
-            timestamp: ulidTimeMs(data.message_id ?? '') ?? Date.now(),
+            timestamp:
+              Number(data.sent_at) ||
+              ulidTimeMs(data.message_id ?? '') ||
+              Date.now(),
             person: { id: peer, name: '@' + peer },
           },
         ],

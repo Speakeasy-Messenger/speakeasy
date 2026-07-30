@@ -736,10 +736,11 @@ describe('ws messaging — Phase 3', () => {
         msg_type: 'direct',
       }),
     );
-    await b.q.next(); // message delivered live via WS
+    const live = (await b.q.next()) as { sent_at: number };
     await new Promise((r) => setTimeout(r, 30));
     expect(pushProvider.calls).toHaveLength(1);
     expect(pushProvider.calls[0]!.userId).toBe('bob-red-bear');
+    expect(pushProvider.calls[0]!.sentAt).toBe(live.sent_at);
 
     // Offline: Carol isn't connected → push still fires.
     a.ws.send(

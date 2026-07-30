@@ -63,6 +63,12 @@ export interface PushDeliveryNotice {
    */
   messageId?: string;
   /**
+   * Server-assigned relay time in milliseconds. Forwarded as a string in
+   * FCM/APNs data so a headless recipient can order the bubble without
+   * trusting the sender-generated message id's clock.
+   */
+  sentAt?: number;
+  /**
    * The message ciphertext, base64. The server can't read it (E2E), but
    * it forwards it in the FCM data block so the headless push handler
    * can decrypt it on-device and show the real text in the notification.

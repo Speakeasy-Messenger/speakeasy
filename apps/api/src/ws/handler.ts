@@ -618,6 +618,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
             // survive when the recipient is offline; the mobile client
             // dedupes by `message_id` so the live frame + a later
             // drain replay of the same row is harmless.
+            const serverSentAt = Date.now();
             const frame = {
               type: 'message' as const,
               // Sealed-sender direct messages omit `from` — the
@@ -632,7 +633,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               // receive time, but stamping it server-side keeps the bubble
               // timestamp consistent with the buffered-drain path and
               // immune to client clock skew.
-              sent_at: Date.now(),
+              sent_at: serverSentAt,
             };
             // Always fan out live AND fire a notify-only push. The
             // previous `onlineSomewhere ? notify : push` gate relied
@@ -668,6 +669,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 // The server can't read it (E2E); push.fcm-apns gates
                 // inclusion (rich device, not sealed, size cap).
                 messageId: rowId,
+                sentAt: serverSentAt,
                 ciphertext: msg.ciphertext,
               })
               .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));

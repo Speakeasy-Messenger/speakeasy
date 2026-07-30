@@ -1,5 +1,6 @@
 import { secureKv } from '../native/secure-kv.js';
 import type { ChatMessage } from '../store/conversations.js';
+import { ulidTimeMs, type MessagePayload } from '@speakeasy/shared';
 
 /**
  * Small encrypted inbox for messages already decrypted by the Android
@@ -16,6 +17,37 @@ const MAX_PENDING_INBOUND = 200;
 export interface PendingInboundMessage {
   conversationId: string;
   message: ChatMessage;
+}
+
+/** Convert a successfully decrypted FCM payload into the durable inbox shape. */
+export function pendingInboundFromDecryptedPush(args: {
+  conversationId: string;
+  messageId: string;
+  senderId: string;
+  msgType: 'direct' | 'group' | undefined;
+  payload: MessagePayload;
+  receivedAt?: number;
+  sentAt?: number;
+}): PendingInboundMessage {
+  const receivedAt = args.receivedAt ?? Date.now();
+  const sentAt =
+    args.sentAt !== undefined && Number.isFinite(args.sentAt) && args.sentAt > 0
+      ? args.sentAt
+      : ulidTimeMs(args.messageId) ?? receivedAt;
+  return {
+    conversationId: args.conversationId,
+    message: {
+      id: args.messageId,
+      from: args.senderId,
+      text: args.payload.text ?? '',
+      attachments: args.payload.attachments,
+      mentions: args.payload.mentions,
+      kind: args.msgType === 'group' ? 'group' : 'direct',
+      sentAt,
+      receivedAt,
+      stage: 'sent',
+    },
+  };
 }
 
 let mutationChain: Promise<void> = Promise.resolve();
