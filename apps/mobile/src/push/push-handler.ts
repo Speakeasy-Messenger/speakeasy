@@ -61,6 +61,10 @@ import RNFS from 'react-native-fs';
 import { NotifMessaging } from '../native/notif-messaging.js';
 import { getCachedDeviceToken } from '../native/cached-device-token.js';
 import { shouldSuppressPushForMute } from './push-mute-policy.js';
+import {
+  enqueuePendingInboundMessage,
+  pendingInboundFromDecryptedPush,
+} from './pending-inbound.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -82,6 +86,8 @@ export type FcmData = {
   body?: string;
   /** Buffered message id (for decrypt + de-dup). */
   message_id?: string;
+  /** Server-assigned relay time in milliseconds, encoded by FCM as a string. */
+  sent_at?: string;
   /** Sender handle — the address the decrypt is keyed on. */
   sender_id?: string;
   /** Message ciphertext (base64). Present only for 'rich' devices on a
@@ -381,7 +387,10 @@ function toPersistedPush(data: FcmData): PersistedPush | null {
  * running it here does not break the in-app decrypt when the same
  * message later drains over the WebSocket.
  */
-async function decryptForNotification(data: FcmData): Promise<string | null> {
+async function decryptForNotification(data: FcmData): Promise<{
+  notificationText: string | null;
+  payload: ReturnType<typeof decodePayload>;
+} | null> {
   if (!data.ciphertext || !data.sender_id) return null;
   const ciphertext = b64ToBytes(data.ciphertext);
   const plaintext =
@@ -392,9 +401,15 @@ async function decryptForNotification(data: FcmData): Promise<string | null> {
   // Attachments: don't surface metadata — just "@sender sent an
   // attachment" (title already carries the handle).
   if (payload.attachments && payload.attachments.length > 0) {
-    return 'sent an attachment';
+    return {
+      notificationText: 'sent an attachment',
+      payload,
+    };
   }
-  return payload.text ?? null;
+  return {
+    notificationText: payload.text ?? null,
+    payload,
+  };
 }
 
 /** One line in an Android MessagingStyle notification. */
@@ -793,20 +808,8 @@ async function displayCallNotification(data: FcmData): Promise<void> {
  */
 async function displayPushNotification(data: FcmData): Promise<void> {
   const conversationId = data.conversation_id;
-  if (!useConversations.getState().hydrated) {
-    await useConversations.getState().hydrate();
-  }
-  // Group banner falls back to the locally-known room name when the push
-  // omits it — needs the groups store hydrated in this headless context.
-  if (!useGroups.getState().hydrated) {
-    await useGroups.getState().hydrate();
-  }
-  if (shouldSuppressPushForMute(conversationId, useConversations.getState())) {
-    diag('push-bg', 'notification suppressed for muted conversation', {
-      conversationId,
-    });
-    return;
-  }
+  const receivedAt = Date.now();
+  const muted = await shouldSuppressPushForMute(conversationId);
   if (
     conversationId &&
     data.notify_kind === 'message' &&
@@ -814,9 +817,47 @@ async function displayPushNotification(data: FcmData): Promise<void> {
     data.sender_id
   ) {
     try {
-      const text = await decryptForNotification(data);
+      const decrypted = await decryptForNotification(data);
+      if (decrypted && data.message_id) {
+        try {
+          await enqueuePendingInboundMessage(pendingInboundFromDecryptedPush({
+            conversationId,
+            messageId: data.message_id,
+            senderId: data.sender_id,
+            msgType: data.msg_type,
+            payload: decrypted.payload,
+            receivedAt,
+            sentAt: Number(data.sent_at),
+          }));
+          diag('push-bg', 'decrypted message persisted for fast foreground load', {
+            conversationId,
+            msgId: data.message_id,
+          });
+        } catch (err) {
+          // Notification rendering must remain available if the encrypted
+          // inbox is temporarily unavailable. WS replay is still the
+          // fallback that writes this message into chat.
+          diag('push-bg', 'fast-load inbox write failed — continuing notification', {
+            conversationId,
+            msgId: data.message_id,
+            err: String(err),
+          });
+        }
+      }
+      if (muted) {
+        diag('push-bg', 'notification suppressed for muted conversation', {
+          conversationId,
+        });
+        return;
+      }
+      const text = decrypted?.notificationText ?? null;
       if (text) {
         const peer = data.sender_id;
+        // Group banner falls back to the locally-known room name when the
+        // push omits it. Direct pushes no longer pay this hydration cost.
+        if (data.msg_type === 'group' && !useGroups.getState().hydrated) {
+          await useGroups.getState().hydrate();
+        }
         // The durable AsyncStorage stack — NOT notifee's
         // getDisplayedNotifications, which can't see notifications posted
         // by the native NotifMessaging module, so in the background it
@@ -834,7 +875,10 @@ async function displayPushNotification(data: FcmData): Promise<void> {
             ...prior,
             {
               text,
-              timestamp: ulidTimeMs(data.message_id ?? '') ?? Date.now(),
+              timestamp:
+                Number(data.sent_at) ||
+                ulidTimeMs(data.message_id ?? '') ||
+                Date.now(),
               person: { id: peer, name: '@' + peer },
             },
           ],
@@ -867,6 +911,12 @@ async function displayPushNotification(data: FcmData): Promise<void> {
     data.sender_id &&
     !data.ciphertext
   ) {
+    if (muted) {
+      diag('push-bg', 'notification suppressed for muted conversation', {
+        conversationId,
+      });
+      return;
+    }
     if (!useSettings.getState().hydrated) await useSettings.getState().hydrate();
     if (useSettings.getState().notificationPrivacy === 'rich') {
       const peer = data.sender_id;
@@ -880,7 +930,10 @@ async function displayPushNotification(data: FcmData): Promise<void> {
           ...prior,
           {
             text: '📎 New attachment',
-            timestamp: ulidTimeMs(data.message_id ?? '') ?? Date.now(),
+            timestamp:
+              Number(data.sent_at) ||
+              ulidTimeMs(data.message_id ?? '') ||
+              Date.now(),
             person: { id: peer, name: '@' + peer },
           },
         ],
@@ -891,6 +944,12 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       });
       return;
     }
+  }
+  if (muted) {
+    diag('push-bg', 'notification suppressed for muted conversation', {
+      conversationId,
+    });
+    return;
   }
   // Calls get the full-screen ringing notification; everything else the
   // plain banner. (Message ciphertext already handled above and returned.)

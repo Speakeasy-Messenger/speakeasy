@@ -14,6 +14,7 @@ function notice(overrides: Partial<PushDeliveryNotice> = {}): PushDeliveryNotice
     kind: 'message',
     senderId: 'alice',
     messageId: 'msg-1',
+    sentAt: 1_753_800_000_123,
     ciphertext: 'abc123',
     ...overrides,
   };
@@ -26,6 +27,7 @@ describe('buildIosPushData', () => {
       msg_type: 'direct',
       notify_kind: 'message',
       message_id: 'msg-1',
+      sent_at: '1753800000123',
       sender_id: 'alice',
       ciphertext: 'abc123',
     });
@@ -61,6 +63,7 @@ describe('buildAndroidPushMessage', () => {
       conversation_id: 'direct:alice:bob',
       msg_type: 'direct',
       sender_id: 'alice',
+      sent_at: '1753800000123',
       title: '@alice',
       body: 'New message',
     });

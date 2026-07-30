@@ -12,6 +12,11 @@ import {
 import type { DisappearingStage } from '../components/disappearing-stage.js';
 import { ttlAnchorMs } from '../feed/ttl-timing.js';
 import { diag } from '../diag/log.js';
+import { persistPushMuteSnapshot } from '../push/push-mute-policy.js';
+import {
+  clearPendingInboundMessages,
+  drainPendingInboundMessages,
+} from '../push/pending-inbound.js';
 
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
@@ -337,7 +342,7 @@ function scheduleHydrateRetry(): void {
   }, delay);
 }
 
-async function persistNow(byId: Record<string, ConversationState>): Promise<void> {
+async function persistNow(byId: Record<string, ConversationState>): Promise<boolean> {
   const convCount = Object.keys(byId).length;
   let msgCount = 0;
   for (const c of Object.values(byId)) msgCount += c.messages.length;
@@ -348,11 +353,12 @@ async function persistNow(byId: Record<string, ConversationState>): Promise<void
       convCount,
       msgCount,
     });
-    return;
+    return false;
   }
   try {
     await secureKv.set(STORAGE_KEY, JSON.stringify(byId));
     diag('persist', 'wrote', { convCount, msgCount });
+    return true;
   } catch (err) {
     // In-memory state remains the source of truth for the session; surface
     // the failure (previously swallowed) so a persistent write problem is
@@ -362,6 +368,7 @@ async function persistNow(byId: Record<string, ConversationState>): Promise<void
       msgCount,
       err: String(err),
     });
+    return false;
   }
 }
 
@@ -386,11 +393,16 @@ function schedulePersist(byId: Record<string, ConversationState>): void {
 }
 /** Force an immediate write of the latest pending snapshot. Call before the
  * app can be killed (AppState -> background) so a debounced write isn't lost. */
-export async function flushConversationsPersist(): Promise<void> {
+export async function flushConversationsPersist(opts?: {
+  throwOnFailure?: boolean;
+}): Promise<void> {
   if (persistTimer) { clearTimeout(persistTimer); persistTimer = null; }
   const snap = persistSnapshot ?? useConversations.getState().byId;
   persistSnapshot = null;
-  await persistNow(snap);
+  const persisted = await persistNow(snap);
+  if (!persisted && opts?.throwOnFailure) {
+    throw new Error('conversation_persist_failed');
+  }
 }
 
 export const useConversations = create<ConversationsState>((set, get) => ({
@@ -690,6 +702,11 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       return { byId: rest };
     });
     schedulePersist(get().byId);
+    void persistPushMuteSnapshot(get().byId).catch((err) => {
+      diag('push-bg', 'mute snapshot write failed after conversation removal', {
+        err: String(err),
+      });
+    });
   },
 
   setTtl: (conversationId, ttl) => {
@@ -718,6 +735,9 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       };
     });
     schedulePersist(get().byId);
+    void persistPushMuteSnapshot(get().byId).catch((err) => {
+      diag('push-bg', 'mute snapshot write failed', { err: String(err) });
+    });
   },
 
   setFrozen: (conversationId, frozen) => {
@@ -849,6 +869,22 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       }
       set({ hydrated: true });
     }
+    try {
+      const count = await drainPendingInboundMessages({
+        add: (conversationId, message) => get().add(conversationId, message),
+        persist: () => flushConversationsPersist({ throwOnFailure: true }),
+      });
+      if (count > 0) {
+        diag('persist', 'drained background message inbox', { count });
+      }
+      await persistPushMuteSnapshot(get().byId);
+    } catch (err) {
+      // Keep the inbox intact for the next launch. The WS replay remains a
+      // fallback for this session, so a transient DB error is non-fatal.
+      diag('persist', 'background message inbox drain failed', {
+        err: String(err),
+      });
+    }
   },
 
   reset: async () => {
@@ -863,6 +899,14 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch {
       /* ignore */
+    }
+    try {
+      await Promise.all([
+        clearPendingInboundMessages(),
+        persistPushMuteSnapshot({}),
+      ]);
+    } catch {
+      /* ignore — pre-enrollment the encrypted DB may not be open */
     }
   },
 }));

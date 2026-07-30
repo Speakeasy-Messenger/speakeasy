@@ -81,6 +81,7 @@ export function buildIosPushData(
 ): Record<string, string> {
   const data = buildBasePushData(notice);
   if (notice.messageId) data.message_id = notice.messageId;
+  if (notice.sentAt !== undefined) data.sent_at = String(notice.sentAt);
   if (notice.senderId) data.sender_id = notice.senderId;
   if (ciphertextEligible(notice) && privacy === 'rich') {
     data.ciphertext = notice.ciphertext!;
@@ -113,6 +114,7 @@ export function buildAndroidPushMessage(
   const { title, body, privacy, tokens } = opts;
   const data: Record<string, string> = { ...buildBasePushData(notice), title, body };
   if (notice.messageId) data.message_id = notice.messageId;
+  if (notice.sentAt !== undefined) data.sent_at = String(notice.sentAt);
   if (notice.senderId) data.sender_id = notice.senderId;
   // Ciphertext only for 'rich' devices — 'private' devices opt out of the
   // content preview, so they never receive it.
