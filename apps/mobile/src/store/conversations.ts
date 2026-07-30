@@ -12,6 +12,11 @@ import {
 import type { DisappearingStage } from '../components/disappearing-stage.js';
 import { ttlAnchorMs } from '../feed/ttl-timing.js';
 import { diag } from '../diag/log.js';
+import { persistPushMuteSnapshot } from '../push/push-mute-policy.js';
+import {
+  clearPendingInboundMessages,
+  drainPendingInboundMessages,
+} from '../push/pending-inbound.js';
 
 /**
  * Per-conversation message list + TTL config + persistence opt-in.
@@ -718,6 +723,9 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       };
     });
     schedulePersist(get().byId);
+    void persistPushMuteSnapshot(get().byId).catch((err) => {
+      diag('push-bg', 'mute snapshot write failed', { err: String(err) });
+    });
   },
 
   setFrozen: (conversationId, frozen) => {
@@ -849,6 +857,22 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       }
       set({ hydrated: true });
     }
+    try {
+      const count = await drainPendingInboundMessages({
+        add: (conversationId, message) => get().add(conversationId, message),
+        persist: flushConversationsPersist,
+      });
+      if (count > 0) {
+        diag('persist', 'drained background message inbox', { count });
+      }
+      await persistPushMuteSnapshot(get().byId);
+    } catch (err) {
+      // Keep the inbox intact for the next launch. The WS replay remains a
+      // fallback for this session, so a transient DB error is non-fatal.
+      diag('persist', 'background message inbox drain failed', {
+        err: String(err),
+      });
+    }
   },
 
   reset: async () => {
@@ -863,6 +887,14 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       await AsyncStorage.removeItem(STORAGE_KEY);
     } catch {
       /* ignore */
+    }
+    try {
+      await Promise.all([
+        clearPendingInboundMessages(),
+        persistPushMuteSnapshot({}),
+      ]);
+    } catch {
+      /* ignore — pre-enrollment the encrypted DB may not be open */
     }
   },
 }));
