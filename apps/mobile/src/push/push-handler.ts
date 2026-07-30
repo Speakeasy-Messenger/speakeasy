@@ -825,23 +825,34 @@ async function displayPushNotification(data: FcmData): Promise<void> {
     try {
       const decrypted = await decryptForNotification(data);
       if (decrypted && data.message_id) {
-        await enqueuePendingInboundMessage({
-          conversationId,
-          message: {
-            id: data.message_id,
-            from: data.sender_id,
-            text: decrypted.message.text,
-            attachments: decrypted.message.attachments,
-            mentions: decrypted.message.mentions,
-            kind: data.msg_type === 'group' ? 'group' : 'direct',
-            sentAt: ulidTimeMs(data.message_id) ?? Date.now(),
-            stage: 'sent',
-          },
-        });
-        diag('push-bg', 'decrypted message persisted for fast foreground load', {
-          conversationId,
-          msgId: data.message_id,
-        });
+        try {
+          await enqueuePendingInboundMessage({
+            conversationId,
+            message: {
+              id: data.message_id,
+              from: data.sender_id,
+              text: decrypted.message.text,
+              attachments: decrypted.message.attachments,
+              mentions: decrypted.message.mentions,
+              kind: data.msg_type === 'group' ? 'group' : 'direct',
+              sentAt: ulidTimeMs(data.message_id) ?? Date.now(),
+              stage: 'sent',
+            },
+          });
+          diag('push-bg', 'decrypted message persisted for fast foreground load', {
+            conversationId,
+            msgId: data.message_id,
+          });
+        } catch (err) {
+          // Notification rendering must remain available if the encrypted
+          // inbox is temporarily unavailable. WS replay is still the
+          // fallback that writes this message into chat.
+          diag('push-bg', 'fast-load inbox write failed — continuing notification', {
+            conversationId,
+            msgId: data.message_id,
+            err: String(err),
+          });
+        }
       }
       if (muted) {
         diag('push-bg', 'notification suppressed for muted conversation', {
