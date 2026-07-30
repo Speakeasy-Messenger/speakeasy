@@ -68,9 +68,20 @@ export type AckResult =
   | { kind: 'pending' }
   | { kind: 'fully_delivered'; senderId: string; recipientId: string };
 
+export type MessageInsertResult =
+  | 'inserted'
+  | 'duplicate_pending'
+  | 'duplicate_delivered';
+
 export interface MessagesRepo {
-  /** Persist before forwarding. Returns the row's id. */
-  insert(msg: Omit<BufferedMessage, 'createdAt'> & { createdAt?: Date }): Promise<void>;
+  /**
+   * Reserve the message id and persist its relay payload atomically.
+   * Duplicate results come from a minimal id tombstone that outlives the
+   * payload; callers must emit delivery side effects only for `inserted`.
+   */
+  insert(
+    msg: Omit<BufferedMessage, 'createdAt'> & { createdAt?: Date },
+  ): Promise<MessageInsertResult>;
 
   /**
    * Pull all undelivered messages drainable by `(recipientId,

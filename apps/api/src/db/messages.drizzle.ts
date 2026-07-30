@@ -1,34 +1,81 @@
-import { eq, sql } from 'drizzle-orm';
+import { eq, lte, sql } from 'drizzle-orm';
 import { getDb } from './client.js';
-import { messages } from './schema.js';
-import type { BufferedMessage, AckResult, MessagesRepo } from './messages.js';
+import { messageDeliveryTombstones, messages } from './schema.js';
+import type {
+  AckResult,
+  BufferedMessage,
+  MessageInsertResult,
+  MessagesRepo,
+} from './messages.js';
 import type { ConversationKind } from '@speakeasy/shared';
 
 export class DrizzleMessagesRepo implements MessagesRepo {
   async insert(
     msg: Omit<BufferedMessage, 'createdAt'> & { createdAt?: Date },
-  ): Promise<void> {
+  ): Promise<MessageInsertResult> {
     const db = getDb();
-    await db.insert(messages).values({
-      id: msg.id,
-      conversation: msg.conversation,
-      senderId: msg.senderId,
-      recipientId: msg.recipientId,
-      ciphertext: msg.ciphertext,
-      msgType: msg.msgType,
-      skdmGroupId: msg.skdmGroupId ?? null,
-      targetDevices: sql`${JSON.stringify(msg.targetDevices)}::jsonb`,
-      deliveredToDevices: sql`${JSON.stringify(msg.deliveredToDevices)}::jsonb`,
-      sealed: msg.sealed,
-      delivered: false,
-      createdAt: msg.createdAt ?? new Date(),
-      expiresAt: msg.expiresAt,
-    })
-      // Message ids are now client-supplied (so receipts can attach).
-      // A reconnect that re-flushes the same queued frame would
-      // otherwise collide on the primary key; ignore the duplicate so
-      // the resend is a harmless no-op instead of erroring the send.
-      .onConflictDoNothing({ target: messages.id });
+    return db.transaction(async (tx) => {
+      // The dedupe marker contains no message metadata or ciphertext. Purge
+      // it after the relay TTL before reserving the next client id.
+      const now = new Date();
+      // Payload first: the migration's DELETE trigger marks its tombstone
+      // delivered, then the second delete removes that expired marker too.
+      await tx.delete(messages).where(lte(messages.expiresAt, now));
+      await tx
+        .delete(messageDeliveryTombstones)
+        .where(lte(messageDeliveryTombstones.expiresAt, now));
+
+      const reserved = await tx
+        .insert(messageDeliveryTombstones)
+        .values({
+          messageId: msg.id,
+          expiresAt: msg.expiresAt,
+          delivered: false,
+        })
+        .onConflictDoNothing({ target: messageDeliveryTombstones.messageId })
+        .returning({ messageId: messageDeliveryTombstones.messageId });
+
+      if (reserved.length === 0) {
+        const existing = await tx
+          .select({ delivered: messageDeliveryTombstones.delivered })
+          .from(messageDeliveryTombstones)
+          .where(eq(messageDeliveryTombstones.messageId, msg.id))
+          .limit(1);
+        return existing[0]?.delivered
+          ? 'duplicate_delivered'
+          : 'duplicate_pending';
+      }
+
+      // Phase-one rolling compatibility mirrors old writers at the database
+      // boundary. Phase two may reject legacy duplicate inserts, so mark this
+      // transaction as the owner of the reservation before inserting its
+      // payload. The setting is transaction-local and parameterized.
+      await tx.execute(
+        sql`SELECT set_config('speakeasy.message_reservation_id', ${msg.id}, true)`,
+      );
+
+      const payloadInserted = await tx
+        .insert(messages)
+        .values({
+          id: msg.id,
+          conversation: msg.conversation,
+          senderId: msg.senderId,
+          recipientId: msg.recipientId,
+          ciphertext: msg.ciphertext,
+          msgType: msg.msgType,
+          skdmGroupId: msg.skdmGroupId ?? null,
+          targetDevices: sql`${JSON.stringify(msg.targetDevices)}::jsonb`,
+          deliveredToDevices: sql`${JSON.stringify(msg.deliveredToDevices)}::jsonb`,
+          sealed: msg.sealed,
+          delivered: false,
+          createdAt: msg.createdAt ?? new Date(),
+          expiresAt: msg.expiresAt,
+        })
+        // Defensive fallback for any pre-trigger legacy payload anomaly.
+        .onConflictDoNothing({ target: messages.id })
+        .returning({ id: messages.id });
+      return payloadInserted.length > 0 ? 'inserted' : 'duplicate_pending';
+    });
   }
 
   async listUndeliveredFor(
@@ -63,7 +110,8 @@ export class DrizzleMessagesRepo implements MessagesRepo {
         // The repo's vitest tests use the in-memory impl, so neither
         // bug surfaced in CI. Mirror the in-memory behavior here as
         // the contract.
-        sql`${messages.recipientId} = ${recipientId} AND (
+        sql`${messages.expiresAt} > NOW()
+          AND ${messages.recipientId} = ${recipientId} AND (
           jsonb_array_length(${messages.targetDevices}) = 0
           OR (
             ${messages.targetDevices}::jsonb ? ${deviceToken}
@@ -107,9 +155,21 @@ export class DrizzleMessagesRepo implements MessagesRepo {
       const targetDevices = (row.targetDevices as string[]) ?? [];
       const deliveredToDevices = (row.deliveredToDevices as string[]) ?? [];
 
-      // Legacy shortcut: no target devices known at insert time — any ack deletes
+      // Legacy shortcut: no target devices known at insert time — any ack
+      // deletes the payload row and marks its metadata-free id reservation.
       if (targetDevices.length === 0) {
         await tx.delete(messages).where(eq(messages.id, messageId));
+        await tx
+          .insert(messageDeliveryTombstones)
+          .values({
+            messageId,
+            expiresAt: row.expiresAt,
+            delivered: true,
+          })
+          .onConflictDoUpdate({
+            target: messageDeliveryTombstones.messageId,
+            set: { delivered: true, expiresAt: row.expiresAt },
+          });
         return {
           kind: 'fully_delivered',
           senderId: row.senderId,
@@ -127,6 +187,17 @@ export class DrizzleMessagesRepo implements MessagesRepo {
 
       if (allDelivered) {
         await tx.delete(messages).where(eq(messages.id, messageId));
+        await tx
+          .insert(messageDeliveryTombstones)
+          .values({
+            messageId,
+            expiresAt: row.expiresAt,
+            delivered: true,
+          })
+          .onConflictDoUpdate({
+            target: messageDeliveryTombstones.messageId,
+            set: { delivered: true, expiresAt: row.expiresAt },
+          });
         return {
           kind: 'fully_delivered',
           senderId: row.senderId,
