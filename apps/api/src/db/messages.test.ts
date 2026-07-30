@@ -164,4 +164,20 @@ describe('InMemoryMessagesRepo', () => {
     expect(migration).toContain('ON CONFLICT (message_id) DO NOTHING');
     expect(migration).not.toContain("USING ERRCODE = '23505'");
   });
+
+  it('hard-gates legacy writers only after the tombstone-aware rollout', () => {
+    const migration = readFileSync(
+      resolve(
+        __dirname,
+        '../../../../infra/migrations/0025_message_delivery_hard_gate.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain(
+      "current_setting('speakeasy.message_reservation_id', TRUE)",
+    );
+    expect(migration).toContain('IF reservation_owner = NEW.id');
+    expect(migration).toContain("USING ERRCODE = '23505'");
+    expect(migration).toContain("Restore phase one's non-rejecting mirror");
+  });
 });
