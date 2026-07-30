@@ -580,7 +580,7 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
             const targetDevices = (await deps.devices.listForUser(recipientId)).map(
               (d) => d.deviceToken,
             );
-            await deps.messages.insert({
+            const insertResult = await deps.messages.insert({
               id: rowId,
               conversation,
               senderId: senderUserId,
@@ -592,6 +592,21 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
               deliveredToDevices: [],
               sealed,
             });
+            // A reconnect may replay the exact client frame before its
+            // delivery receipt reaches the sender. The message-id conflict
+            // is the atomic idempotency gate: if the row already exists,
+            // its original attempt already performed live fan-out + push.
+            // Repeating those side effects is what produced duplicate
+            // recipient deliveries despite there being only one DB row.
+            if (insertResult !== 'inserted') {
+              if (
+                msg.msg_type === 'direct' &&
+                insertResult === 'duplicate_delivered'
+              ) {
+                send(socket, { type: 'delivered', message_id: rowId });
+              }
+              return;
+            }
             // Live fan-out via UserNotifier — local delivery + Redis
             // pub/sub so the recipient receives the message regardless
             // of which fly instance their WS is authed on. Pre-rc.58

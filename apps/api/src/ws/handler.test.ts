@@ -320,6 +320,62 @@ describe('ws messaging — Phase 3', () => {
     expect(messagesRepo.buffer.size).toBe(0);
   });
 
+  it('does not fan out or push a replayed direct message_id twice', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    const messageId = newMessageId();
+    const frame = JSON.stringify({
+      type: 'message',
+      to: 'bob-red-bear',
+      ciphertext: 'AAA=',
+      msg_type: 'direct',
+      message_id: messageId,
+    });
+
+    a.ws.send(frame);
+    const first = (await b.q.next()) as { type: string; message_id: string };
+    expect(first).toMatchObject({ type: 'message', message_id: messageId });
+
+    // Simulate a sender reconnect replay before Bob's delivery ack reaches
+    // the server. The row already exists, so every delivery side effect must
+    // be suppressed along with the duplicate insert.
+    a.ws.send(frame);
+    await expect(b.q.next(150)).rejects.toThrow();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(messagesRepo.buffer.size).toBe(1);
+  });
+
+  it('does not redeliver a replay after the recipient ack removed the relay payload', async () => {
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+    const messageId = newMessageId();
+    const frame = JSON.stringify({
+      type: 'message',
+      to: 'bob-red-bear',
+      ciphertext: 'AAA=',
+      msg_type: 'direct',
+      message_id: messageId,
+    });
+
+    a.ws.send(frame);
+    const first = (await b.q.next()) as { type: string; message_id: string };
+    expect(first).toMatchObject({ type: 'message', message_id: messageId });
+    b.ws.send(JSON.stringify({ type: 'ack', message_id: messageId }));
+    expect(((await a.q.next()) as { type: string }).type).toBe('delivered');
+    expect(messagesRepo.buffer.size).toBe(0);
+
+    // The sender can miss `delivered` on a dead socket and replay after Bob's
+    // ack removed the relay payload. A durable id tombstone must still make
+    // that replay a no-op.
+    a.ws.send(frame);
+    expect(((await a.q.next()) as { type: string }).type).toBe('delivered');
+    await expect(b.q.next(150)).rejects.toThrow();
+    await new Promise((r) => setTimeout(r, 30));
+    expect(pushProvider.calls).toHaveLength(1);
+    expect(messagesRepo.buffer.size).toBe(0);
+  });
+
   it('delivers buffered messages on reconnect; delivered fires after offline recipient acks', async () => {
     const a = await authedSocket('alice-blue-fox');
     a.ws.send(
@@ -792,17 +848,19 @@ describe('ws group send — accepted receipt + idempotent retransmit', () => {
     });
     a.ws.send(frame);
     expect(((await a.q.next()) as { type: string }).type).toBe('accepted');
-    const first = (await b.q.next()) as { message_id: string };
+    await b.q.next();
     expect(messagesRepo.buffer.size).toBe(2); // bob + carol rows
 
     // Byte-identical replay — what the client's tracked-send flush does
     // when the original `accepted` was eaten by a dead socket.
     a.ws.send(frame);
     expect(((await a.q.next()) as { type: string }).type).toBe('accepted');
-    // Live duplicate reaches bob with the SAME derived id (his store
-    // dedupes on it) and no extra rows were inserted.
-    const dup = (await b.q.next()) as { message_id: string };
-    expect(dup.message_id).toBe(first.message_id);
+    // The accepted receipt re-fires, but the duplicate must not repeat
+    // recipient fan-out. A pong sentinel proves bob's next queued frame
+    // is not another copy of the message.
+    await new Promise((r) => setTimeout(r, 30));
+    b.ws.send(JSON.stringify({ type: 'ping' }));
+    expect(((await b.q.next()) as { type: string }).type).toBe('pong');
     expect(messagesRepo.buffer.size).toBe(2);
   });
 

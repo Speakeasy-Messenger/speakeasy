@@ -259,6 +259,18 @@ export const messages = pgTable(
   }),
 );
 
+export const messageDeliveryTombstones = pgTable(
+  'message_delivery_tombstones',
+  {
+    messageId: text('message_id').primaryKey(),
+    expiresAt: timestamp('expires_at', { withTimezone: true }).notNull(),
+    delivered: boolean('delivered').notNull().default(false),
+  },
+  (t) => ({
+    expiresIdx: index('message_delivery_tombstones_expires_idx').on(t.expiresAt),
+  }),
+);
+
 /**
  * User-submitted feedback for the dev team. The `@feedback` handle is
  * special-cased in the availability route (always taken) and on the

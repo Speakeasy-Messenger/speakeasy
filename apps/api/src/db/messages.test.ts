@@ -1,3 +1,5 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { InMemoryMessagesRepo } from './messages.memory.js';
 
@@ -48,14 +50,16 @@ describe('InMemoryMessagesRepo', () => {
     expect(await r.listUndeliveredFor('dave', 'any')).toHaveLength(0);
   });
 
-  it('legacy single-device path: any single ack deletes the row', async () => {
+  it('legacy single-device path: ack removes the payload but keeps the id reserved', async () => {
     const r = new InMemoryMessagesRepo();
-    await r.insert(newRowDefaults({ id: 'm1', senderId: 'a', recipientId: 'b' }));
+    const row = newRowDefaults({ id: 'm1', senderId: 'a', recipientId: 'b' });
+    await r.insert(row);
 
     const result = await r.markDeliveredByDevice('m1', 'first-device');
     expect(result).toEqual({ kind: 'fully_delivered', senderId: 'a', recipientId: 'b' });
     expect((await r.markDeliveredByDevice('m1', 'second-device'))).toEqual({ kind: 'not_found' });
     expect(await r.listUndeliveredFor('b', 'any')).toHaveLength(0);
+    expect(await r.insert(row)).toBe('duplicate_delivered');
   });
 
   it('multi-device: pending until every targetDevice has acked', async () => {
@@ -109,5 +113,55 @@ describe('InMemoryMessagesRepo', () => {
     expect(await r.markDeliveredByDevice('does-not-exist', 'anything')).toEqual({
       kind: 'not_found',
     });
+  });
+
+  it('allows an id again after its delivered tombstone expires', async () => {
+    const r = new InMemoryMessagesRepo();
+    const row = {
+      ...newRowDefaults({ id: 'm1' }),
+      expiresAt: new Date(Date.now() - 1),
+    };
+    expect(await r.insert(row)).toBe('inserted');
+    expect((await r.markDeliveredByDevice('m1', 'device')).kind).toBe('fully_delivered');
+    expect(await r.insert(row)).toBe('inserted');
+  });
+
+  it('does not drain expired payloads and replaces them when the id is reused', async () => {
+    const r = new InMemoryMessagesRepo();
+    const expired = {
+      ...newRowDefaults({ id: 'm1', body: 'expired' }),
+      expiresAt: new Date(Date.now() - 1),
+    };
+    expect(await r.insert(expired)).toBe('inserted');
+    expect(await r.listUndeliveredFor('bob', 'device')).toHaveLength(0);
+
+    const fresh = {
+      ...newRowDefaults({ id: 'm1', body: 'fresh' }),
+      expiresAt: sevenDays(),
+    };
+    expect(await r.insert(fresh)).toBe('inserted');
+    expect((await r.listUndeliveredFor('bob', 'device'))[0]?.ciphertext).toEqual(
+      buf('fresh'),
+    );
+  });
+
+  it('backfills existing relay ids when the tombstone table is introduced', () => {
+    const migration = readFileSync(
+      resolve(
+        __dirname,
+        '../../../../infra/migrations/0024_message_delivery_tombstones.sql',
+      ),
+      'utf8',
+    );
+    expect(migration).toContain(
+      'INSERT INTO message_delivery_tombstones (message_id, expires_at, delivered)',
+    );
+    expect(migration).toContain('SELECT id, expires_at, delivered');
+    expect(migration).toContain('FROM messages');
+    expect(migration).toContain('CREATE TRIGGER messages_tombstone_insert');
+    expect(migration).toContain('CREATE TRIGGER messages_tombstone_delete');
+    expect(migration).toContain('BEFORE INSERT ON messages');
+    expect(migration).toContain('ON CONFLICT (message_id) DO NOTHING');
+    expect(migration).not.toContain("USING ERRCODE = '23505'");
   });
 });
