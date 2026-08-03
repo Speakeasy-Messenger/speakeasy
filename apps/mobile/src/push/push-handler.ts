@@ -65,6 +65,13 @@ import {
   enqueuePendingInboundMessage,
   pendingInboundFromDecryptedPush,
 } from './pending-inbound.js';
+import {
+  directPeerForPush,
+  notificationTapData,
+  parsePersistedPush,
+  toPersistedPush,
+  type PersistedPush,
+} from './push-tap-target.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -101,14 +108,6 @@ export type FcmData = {
  * happens at consume time, not here, because the background Headless
  * JS context can't read the (un-hydrated) conversations store.
  */
-type PersistedPush = {
-  conversationId: string;
-  kind: 'message' | 'call';
-  msgType: 'direct' | 'group' | undefined;
-  /** ms since epoch — used for staleness check on call taps. */
-  persistedAt: number;
-};
-
 /**
  * Resolved navigation target produced by `resolveTargetAtConsumeTime`.
  * Different from `PersistedPush` because by this point the conversations
@@ -180,14 +179,7 @@ async function consumeRawPush(): Promise<PersistedPush | null> {
     const val = await AsyncStorage.getItem(TAP_TARGET_KEY);
     if (!val) return null;
     await AsyncStorage.removeItem(TAP_TARGET_KEY);
-    const parsed = JSON.parse(val) as Partial<PersistedPush>;
-    if (!parsed?.conversationId || !parsed?.kind) return null;
-    return {
-      conversationId: parsed.conversationId,
-      kind: parsed.kind,
-      msgType: parsed.msgType,
-      persistedAt: typeof parsed.persistedAt === 'number' ? parsed.persistedAt : Date.now(),
-    };
+    return parsePersistedPush(JSON.parse(val));
   } catch {
     return null;
   }
@@ -300,18 +292,17 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
       const groupId = conversationId.replace(/^group-/, '');
       return { kind: 'group', groupId };
     }
-    // Direct message — look up peerUserId from hydrated store.
+    // Existing conversations use their hydrated peer identity. A first-ever
+    // message has no row yet, so fall back to the sender carried by the push
+    // while WebSocket replay loads the bubble into the newly opened chat.
     const conv = useConversations.getState().byId[conversationId];
-    if (conv?.peerUserId) {
-      return { kind: 'direct', peerId: conv.peerUserId };
+    const peerId = directPeerForPush(p, conv?.peerUserId);
+    if (peerId) {
+      return { kind: 'direct', peerId };
     }
-    // Store hydrated but no record — likely first-ever message from
-    // this peer and the conversation wasn't `openDirect`-created yet.
-    // We can't navigate without a real userId (ChatScreen computes
-    // conversationIdForDirect(myUserId, peerId)). Bail and let the
-    // user open the chat from the conversation list once the WS
-    // message arrives and creates the entry.
-    diag('push-nav', 'no peerUserId for direct conversation — skipping nav', {
+    // Sealed/legacy push with neither source available. There is no safe way
+    // to derive a handle from the opaque conversation id.
+    diag('push-nav', 'direct push has no sender identity — skipping nav', {
       conversationId,
     });
     return null;
@@ -319,7 +310,7 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
 
   if (kind === 'call') {
     const conv = useConversations.getState().byId[conversationId];
-    const peerId = conv?.peerUserId;
+    const peerId = directPeerForPush(p, conv?.peerUserId);
     const ageMs = Date.now() - persistedAt;
     const live = useCalls.getState().active;
     const isLive =
@@ -360,17 +351,6 @@ export function resolveTargetAtConsumeTime(p: PersistedPush): NavTarget | null {
   }
 
   return null;
-}
-
-/** Wrap a raw FCM/notifee data payload into a `PersistedPush`. */
-function toPersistedPush(data: FcmData): PersistedPush | null {
-  if (!data.conversation_id || !data.notify_kind) return null;
-  return {
-    conversationId: data.conversation_id,
-    kind: data.notify_kind,
-    msgType: data.msg_type,
-    persistedAt: Date.now(),
-  };
 }
 
 // ---------------------------------------------------------------------------
@@ -733,11 +713,7 @@ async function displayGenericNotification(data: FcmData): Promise<void> {
     id: data.conversation_id,
     title: data.title ?? 'speakeasy',
     body: data.body ?? 'New message',
-    data: {
-      conversation_id: data.conversation_id ?? '',
-      notify_kind: data.notify_kind ?? 'message',
-      ...(data.msg_type ? { msg_type: data.msg_type } : {}),
-    },
+    data: notificationTapData(data),
     android: {
       channelId: channel,
       smallIcon: 'ic_notification',
@@ -777,10 +753,7 @@ async function displayCallNotification(data: FcmData): Promise<void> {
     id: data.conversation_id,
     title: data.title ?? 'speakeasy',
     body: data.body ?? 'Incoming call',
-    data: {
-      conversation_id: data.conversation_id ?? '',
-      notify_kind: 'call',
-    },
+    data: notificationTapData(data),
     android: {
       channelId: channel,
       smallIcon: 'ic_notification',
