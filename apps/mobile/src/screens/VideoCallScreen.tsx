@@ -1,5 +1,6 @@
-import React, { useEffect, useState } from 'react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
+  Animated,
   Pressable,
   StyleSheet,
   Text,
@@ -37,6 +38,18 @@ const VIDEO_PIP_OPTS = {
   startAutomatically: true,
   stopAutomatically: true,
 } as const;
+
+// Auto-hide the call chrome (top status bar + bottom controls) after this
+// long with no interaction, video-player style. A tap toggles it back.
+const CHROME_IDLE_MS = 3000;
+// Fade duration for the chrome show/hide transition.
+const CHROME_FADE_MS = 200;
+// How far the corner bubble rises while the chrome is hidden — enough to
+// clear the (now invisible) top bar and occupy the top-right corner.
+const PIP_CHROME_HIDDEN_RAISE = 72;
+
+// Pressable driven by the chrome Animated value (the corner bubble's raise).
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
 
 /**
  * Live video call surface — full-bleed remote stream, picture-in-picture
@@ -172,6 +185,72 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     return undefined;
   }, [isOutgoingPreConnect]);
 
+  // ── Chrome auto-hide state machine ───────────────────────────────────
+  // The top status bar + bottom control bar behave like a video player's
+  // chrome: they fade away so the call fills the screen, and a tap brings
+  // them back. Two visible states — SHOWN / HIDDEN — driven by:
+  //   • tap on the video backdrop:  SHOWN → HIDDEN, HIDDEN → SHOWN
+  //   • 3s with no interaction while SHOWN → auto-hide
+  //   • touching a control resets the 3s timer (so muting / flipping the
+  //     camera doesn't make the bar vanish from under your finger)
+  // ACTIVE only once the call is connected and we're NOT in the Android PiP
+  // window: before connect chrome is forced on (you need "Calling…" + End),
+  // and in the floating window the `inPip` gate hides it entirely. `active`
+  // is non-null past the early return below, but hooks must run every render,
+  // so guard on it here.
+  const autoHideActive =
+    !!active && active.stage === 'connected' && !inPip;
+  const [chromeShown, setChromeShown] = useState(true);
+  // Bumped on every control interaction to restart the idle countdown.
+  const [activityNonce, setActivityNonce] = useState(0);
+  const chromeOpacity = useRef(new Animated.Value(1)).current;
+
+  // Reveal chrome whenever the auto-hide layout (re)activates — on connect,
+  // and on expanding back out of the PiP window — then the idle timer below
+  // fades it again.
+  useEffect(() => {
+    if (autoHideActive) setChromeShown(true);
+  }, [autoHideActive]);
+
+  // Idle auto-hide: while SHOWN + active, hide after CHROME_IDLE_MS with no
+  // interaction. Re-arms on a show or an activity bump; no timer when hidden
+  // or inactive (so it can't fire over the dialing/PiP UI).
+  useEffect(() => {
+    if (!autoHideActive || !chromeShown) return undefined;
+    const t = setTimeout(() => setChromeShown(false), CHROME_IDLE_MS);
+    return () => clearTimeout(t);
+  }, [autoHideActive, chromeShown, activityNonce]);
+
+  // Effective visibility: forced ON until connected, then the machine decides.
+  const chromeVisible = autoHideActive ? chromeShown : true;
+
+  // Fade the chrome whenever effective visibility flips.
+  useEffect(() => {
+    Animated.timing(chromeOpacity, {
+      toValue: chromeVisible ? 1 : 0,
+      duration: CHROME_FADE_MS,
+      useNativeDriver: true,
+    }).start();
+  }, [chromeVisible, chromeOpacity]);
+
+  // While the chrome is hidden the top bar's slot is free — slide the corner
+  // bubble up into the top-right corner, and back down when chrome returns.
+  // Driven off the same animated value so the two motions stay in lockstep.
+  const pipRaise = chromeOpacity.interpolate({
+    inputRange: [0, 1],
+    outputRange: [-PIP_CHROME_HIDDEN_RAISE, 0],
+  });
+
+  // Tap on the video backdrop toggles chrome (no-op until the call is the
+  // full active layout). Touching a control instead keeps chrome up and
+  // restarts the countdown.
+  const onBackdropTap = useCallback(() => {
+    if (autoHideActive) setChromeShown((s) => !s);
+  }, [autoHideActive]);
+  const bumpActivity = useCallback(() => {
+    if (autoHideActive) setActivityNonce((n) => n + 1);
+  }, [autoHideActive]);
+
   if (!active) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
@@ -242,6 +321,17 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
         <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
       )}
 
+      {/* Backdrop tap target — toggles the chrome. Sits ABOVE the video but
+          BELOW the overlay so the control buttons still win their own taps,
+          and a tap on the bare video (or where hidden controls were) falls
+          through the box-none overlay to here. No-op until connected. */}
+      {!inPip ? (
+        <Pressable
+          style={StyleSheet.absoluteFill}
+          onPress={onBackdropTap}
+        />
+      ) : null}
+
       {/* Overlay chrome — hidden while floating in the Android PiP window
           (the small frame only has room for the video itself). */}
       {!inPip ? (
@@ -249,7 +339,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
         {/* Top bar: peer handle + stage label. Translucent over the
             video stream so the user can read it without it taking
             real-estate from the picture. */}
-        <View style={styles.topBar}>
+        {/* Top bar is display-only (no buttons), so it never captures
+            touches — pointerEvents none lets taps over it reach the backdrop
+            and toggle. Fades with the rest of the chrome. */}
+        <Animated.View
+          style={[styles.topBar, { opacity: chromeOpacity }]}
+          pointerEvents="none"
+        >
           {/* Force a light handle color: the top bar is always over
               the video stream + a dark scrim, so themed.ink (dark in
               light mode) renders the handle invisible. Matches the
@@ -260,16 +356,21 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             color={callPalette.fg}
           />
           <Text style={styles.topStage}>{stageLabel[active.stage]}</Text>
-        </View>
+        </Animated.View>
 
         {/* Corner bubble — the non-full-screen feed. Tap to swap which
             feed is full-screen. Only shown once the peer's video is
             flowing (before that, the local feed owns the full screen). */}
         {pipUrl ? (
-          <Pressable
+          <AnimatedPressable
             testID="video-call-pip"
-            style={styles.pip}
-            onPress={() => setSwapped((s) => !s)}
+            // Rises into the top-right corner while the chrome is hidden
+            // (the top bar's slot is free), returns when it fades back in.
+            style={[styles.pip, { transform: [{ translateY: pipRaise }] }]}
+            onPress={() => {
+              bumpActivity();
+              setSwapped((s) => !s);
+            }}
           >
             <RTCView
               streamURL={pipUrl}
@@ -283,11 +384,18 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               // floats the caller (not the suspended local camera).
               iosPIP={swapped ? VIDEO_PIP_OPTS : undefined}
             />
-          </Pressable>
+          </AnimatedPressable>
         ) : null}
 
-        {/* Bottom controls. Mute / hang up / flip camera. */}
-        <View style={styles.controls}>
+        {/* Bottom controls. Mute / hang up / flip camera. Fades with the
+            chrome; while hidden, pointerEvents none lets taps fall to the
+            backdrop (which re-shows it). Any touch here restarts the idle
+            countdown so adjusting controls doesn't hide the bar mid-tap. */}
+        <Animated.View
+          style={[styles.controls, { opacity: chromeOpacity }]}
+          pointerEvents={chromeVisible ? 'auto' : 'none'}
+          onTouchStart={bumpActivity}
+        >
           <Pressable
             testID="video-call-mute"
             onPress={() => orchestrator.setMicMuted(!active.micMuted)}
@@ -330,7 +438,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           >
             <Text style={styles.flipGlyph}>↺</Text>
           </Pressable>
-        </View>
+        </Animated.View>
       </SafeAreaView>
       ) : null}
     </View>
