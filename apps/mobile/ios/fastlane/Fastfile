@@ -186,6 +186,8 @@ platform :ios do
       # build. Generic default keeps the release unblocked; override per
       # release with TESTFLIGHT_CHANGELOG.
       changelog: distribute ? (ENV["TESTFLIGHT_CHANGELOG"] || "Bug fixes and improvements.") : nil,
+    )
+  end
 
   desc "Add an ALREADY-UPLOADED, processed TestFlight build to the external " \
        "tester group. No build, no signing — pure ASC API. Recovery path for " \

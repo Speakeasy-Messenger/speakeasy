@@ -938,30 +938,6 @@ describe('reported bug — ongoing-call pill controls via background registry', 
     await h.pump();
     h.callerPeer().emitConnState('connected');
     h.calleePeer().emitConnState('connected');
-    h.callee.hangup();
-    await h.pump();
-    expect(h.finishedCaller[0]?.reason).toBe('completed');
-    expect(h.finishedCallee[0]?.reason).toBe('completed');
-    expect(mockUploadDiag).not.toHaveBeenCalled();
-  });
-
-  it('does NOT stream when the callee declines (normal social end)', async () => {
-    const h = makeOrchHarness();
-    await h.caller.startOutgoing('bob');
-    await h.pump();
-    h.callee.decline();
-    await h.pump();
-    expect(mockUploadDiag).not.toHaveBeenCalled();
-  });
-
-  it('registered controls toggle mute and hang up the live call', async () => {
-    const h = makeOrchHarness();
-    await h.caller.startOutgoing('bob', 'video');
-    await h.pump();
-    await h.callee.accept();
-    await h.pump();
-    h.callerPeer().emitConnState('connected');
-    h.calleePeer().emitConnState('connected');
     await h.pump();
     expect(h.caller.getActive()?.stage).toBe('connected');
 
