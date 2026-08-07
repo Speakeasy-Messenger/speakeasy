@@ -71,22 +71,41 @@ public final class FreshInstallGuard: NSObject {
         kSecClassIdentity,
     ]
 
+    /// What `evaluate` decided — surfaced for tests and log forensics.
+    @objc public enum Decision: Int {
+        /// Sentinel already present: this install has launched before.
+        case alreadyInitialized
+        /// No sentinel but a DB exists: pre-guard install, adopted as-is.
+        case adoptedExistingInstall
+        /// No sentinel, no DB: genuine fresh install — Keychain purged.
+        case purgedFreshInstall
+    }
+
     /// Run BEFORE any Keychain/DB consumer touches state (AppDelegate
     /// didFinishLaunching, ahead of the RN bridge).
-    @objc public static func runAtLaunch() {
-        let defaults = UserDefaults.standard
+    @objc @discardableResult
+    public static func runAtLaunch() -> Decision {
+        evaluate(defaults: UserDefaults.standard, databaseExists: databaseExists())
+    }
+
+    /// Decision core, with the two environment inputs injected so tests
+    /// can drive every branch against a REAL Keychain without touching
+    /// the app's own defaults or database.
+    @discardableResult
+    static func evaluate(defaults: UserDefaults, databaseExists: Bool) -> Decision {
         if defaults.bool(forKey: sentinelKey) {
-            return
+            return .alreadyInitialized
         }
-        if databaseExists() {
+        if databaseExists {
             // Existing install predating this guard — adopt, don't purge.
             NSLog("[FreshInstallGuard] existing install adopted (db present); no purge")
             defaults.set(true, forKey: sentinelKey)
-            return
+            return .adoptedExistingInstall
         }
         let purged = purgeKeychain()
-        NSLog("[FreshInstallGuard] fresh install — purged \(purged) keychain item(s)")
+        NSLog("[FreshInstallGuard] fresh install — purged \(purged) keychain class(es)")
         defaults.set(true, forKey: sentinelKey)
+        return .purgedFreshInstall
     }
 
     /// True when the SQLCipher store exists in the (container-scoped)

@@ -309,6 +309,31 @@ if fw_idx && cur_idx && cur_idx != fw_idx + 1
   changed << 'positioned Embed App Extensions after Link Binary (cycle fix)'
 end
 
+# ---------------------------------------------------------------------------
+# Swift unit tests. SpeakeasyTests/ was ObjC-only, so the generic loop above
+# (app target, SpeakeasyBridges/ only) never reaches it. Wire every
+# SpeakeasyTests/*.swift into the TEST target's Sources, anchored on the
+# existing SpeakeasyTests.m group. Added for FreshInstallGuardTests.swift,
+# which exercises the reinstall Keychain purge against a real Keychain.
+test_target = project.targets.find { |t| t.name == "#{TARGET_NAME}Tests" }
+if test_target
+  test_built = test_target.source_build_phase.files_references.map { |f| f.real_path.to_s }
+  test_group = project.files.find { |f| f.display_name == "#{TARGET_NAME}Tests.m" }&.parent
+  Dir.glob(File.join(IOS_DIR, "#{TARGET_NAME}Tests", '*.swift')).sort.each do |swift_path|
+    next if test_built.include?(swift_path)
+    unless test_group
+      puts "wire-ios-project: WARN no #{TARGET_NAME}Tests group — skipping #{File.basename(swift_path)}"
+      next
+    end
+    fname = File.basename(swift_path)
+    ref = test_group.files.find { |f| f.display_name == fname } || test_group.new_reference(fname)
+    unless test_target.source_build_phase.files_references.include?(ref)
+      test_target.add_file_references([ref])
+      changed << "added #{fname} to #{TARGET_NAME}Tests Sources"
+    end
+  end
+end
+
 if changed.empty?
   puts 'wire-ios-project: already wired — no changes'
 else
