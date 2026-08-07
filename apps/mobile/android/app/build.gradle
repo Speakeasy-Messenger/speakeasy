@@ -237,6 +237,7 @@ android {
     namespace "xyz.speakeasyapp.app"
     defaultConfig {
         applicationId "xyz.speakeasyapp.app"
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         // alpha-0.5.0-rc.27 — second pass at the FAB freeze:
@@ -673,4 +674,13 @@ dependencies {
     // plugin and adding the platform launcher; not worth it for one
     // module.
     testImplementation("junit:junit:4.13.2")
+
+    // Instrumented tests (run on a device/emulator). Used to prove libsignal
+    // prekey behaviour on real hardware — the store's INSERT OR REPLACE means
+    // regenerating a prekey at a fixed id overwrites the private key that
+    // in-flight PreKey messages were sealed to (the "invalid PreKey message"
+    // decrypt-failure). libsignal-android's native crypto only loads on-device,
+    // so this can't be a JVM unit test.
+    androidTestImplementation("androidx.test.ext:junit:1.1.5")
+    androidTestImplementation("androidx.test:runner:1.5.2")
 }

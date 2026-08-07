@@ -102,6 +102,17 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
       val store = SpeakeasySignalStore.requireInitialized()
       val identityKeyPair = store.identityKeyPair
 
+      // FRESH ids, never the fixed 1 / 1..N. Re-generating a bundle (e.g. on a
+      // re-bind) at reused ids did INSERT OR REPLACE over the private keys an
+      // in-flight PreKey message was sealed to → that message could never
+      // decrypt ("invalid PreKey message", the [couldn't decrypt] bubbles after
+      // a re-enroll). Using MAX(id)+1 ADDS keys and leaves the old ones in place
+      // so in-flight messages still decrypt. Falls back to the caller's id for a
+      // non-SQLCipher store (tests / the in-memory bring-up path).
+      val sqlStore = store as? SqlCipherSignalProtocolStore
+      val actualSignedPreKeyId = sqlStore?.nextSignedPreKeyId() ?: signedPreKeyId
+      val oneTimeBase = sqlStore?.nextPreKeyId() ?: 1
+
       // Signed prekey — long-lived, server-stored, signed by identity.
       val signedPreKeyPair = Curve.generateKeyPair()
       val signedPreKeySig =
@@ -109,17 +120,17 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
               identityKeyPair.privateKey, signedPreKeyPair.publicKey.serialize())
       val signedRecord =
           SignedPreKeyRecord(
-              signedPreKeyId,
+              actualSignedPreKeyId,
               System.currentTimeMillis(),
               signedPreKeyPair,
               signedPreKeySig)
-      store.storeSignedPreKey(signedPreKeyId, signedRecord)
+      store.storeSignedPreKey(actualSignedPreKeyId, signedRecord)
 
       // One-time prekeys — bucket the server hands out to peers establishing
       // new sessions. Each gets consumed once (server side).
       val preKeysArr = Arguments.createArray()
       for (i in 0 until oneTimePreKeyCount) {
-        val pkId = i + 1
+        val pkId = oneTimeBase + i
         val pkPair = Curve.generateKeyPair()
         store.storePreKey(pkId, PreKeyRecord(pkId, pkPair))
         preKeysArr.pushMap(
@@ -132,7 +143,7 @@ class SignalProtocolModule(private val reactContext: ReactApplicationContext) :
       promise.resolve(
           Arguments.createMap().apply {
             putInt("registrationId", registrationId)
-            putInt("signedPreKeyId", signedPreKeyId)
+            putInt("signedPreKeyId", actualSignedPreKeyId)
             putString("signedPreKey", b64(signedPreKeyPair.publicKey.serialize()))
             putString("signedPreKeySig", b64(signedPreKeySig))
             putArray("preKeys", preKeysArr)

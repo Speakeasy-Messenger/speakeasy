@@ -117,6 +117,19 @@ class SqlCipherSignalProtocolStore(
     db.execSQL("DELETE FROM prekeys WHERE id = ?", arrayOf<Any?>(preKeyId))
   }
 
+  /**
+   * Speakeasy addition: the next unused one-time-prekey id (MAX(id)+1, or 1 when
+   * empty). A re-generated bundle stores its prekeys here instead of reusing the
+   * fixed ids 1..N. Reuse + INSERT OR REPLACE overwrote the private key an
+   * in-flight PreKey message was sealed to — the "invalid PreKey message" decrypt
+   * loss after a re-enroll. Fresh ids keep the old keys alive so those messages
+   * still decrypt.
+   */
+  fun nextPreKeyId(): Int =
+      db.rawQuery("SELECT COALESCE(MAX(id), 0) + 1 FROM prekeys", null as Array<String>?).use { cur ->
+        if (cur.moveToFirst()) cur.getInt(0) else 1
+      }
+
   // ---------------- SignedPreKeyStore ----------------
 
   override fun loadSignedPreKey(signedPreKeyId: Int): SignedPreKeyRecord {
@@ -158,6 +171,14 @@ class SqlCipherSignalProtocolStore(
   override fun removeSignedPreKey(signedPreKeyId: Int) {
     db.execSQL("DELETE FROM signed_prekeys WHERE id = ?", arrayOf<Any?>(signedPreKeyId))
   }
+
+  /** Next unused signed-prekey id (MAX(id)+1, or 1 when empty). Same rationale
+   *  as [nextPreKeyId] — regeneration must not clobber the previous signed
+   *  prekey while an in-flight message still needs it. */
+  fun nextSignedPreKeyId(): Int =
+      db.rawQuery("SELECT COALESCE(MAX(id), 0) + 1 FROM signed_prekeys", null as Array<String>?).use { cur ->
+        if (cur.moveToFirst()) cur.getInt(0) else 1
+      }
 
   // ---------------- SessionStore ----------------
 
