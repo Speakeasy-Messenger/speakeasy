@@ -1,0 +1,51 @@
+name: TestFlight distribute (existing build)
+
+# Adds an ALREADY-UPLOADED, processed TestFlight build to the external
+# tester group — the recovery path for builds that reached App Store
+# Connect without a group assignment (every beta before the lane's
+# distribute_external flip on 2026-08-07, e.g. build 40).
+#
+# No Mac, no signing, no archive: the `distribute` fastlane lane is a
+# pure App Store Connect API call, so this runs on ubuntu in ~2 min.
+
+on:
+  workflow_dispatch:
+    inputs:
+      build_number:
+        description: 'CFBundleVersion of the uploaded build (e.g. 40)'
+        required: true
+      app_version:
+        description: 'Marketing version the build belongs to'
+        default: '1.0'
+      group:
+        description: 'External tester group name'
+        default: 'Friends'
+
+permissions:
+  contents: read
+
+jobs:
+  distribute:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: ruby/setup-ruby@v1
+        with:
+          ruby-version: '3.2'
+
+      - name: bundle install (fastlane)
+        working-directory: apps/mobile/ios
+        run: bundle install
+
+      - name: fastlane distribute
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          DIST_BUILD_NUMBER: ${{ github.event.inputs.build_number }}
+          DIST_APP_VERSION: ${{ github.event.inputs.app_version }}
+          TESTFLIGHT_GROUP: ${{ github.event.inputs.group }}
+        run: bundle exec fastlane ios distribute

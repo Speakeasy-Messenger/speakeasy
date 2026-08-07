@@ -112,10 +112,34 @@ platform :ios do
       output_name: "Speakeasy.ipa",
       clean: true,
     )
+    # Wait for ASC processing and add the build to the external tester
+    # group in the same run. `distribute_external: false` + skip-waiting
+    # (the previous config) uploaded the build but left it assigned to no
+    # group — every beta needed a manual "add build" click in the ASC UI
+    # (bitten by build 40, 2026-08-07). Same-version builds skip Beta App
+    # Review, so the wait here is processing time (~10-30 min), not review.
     upload_to_testflight(
       api_key: key,
-      skip_waiting_for_build_processing: true,
-      distribute_external: false,
+      distribute_external: true,
+      groups: [ENV["TESTFLIGHT_GROUP"] || "Friends"],
+      changelog: ENV["TESTFLIGHT_CHANGELOG"] || "Bug fixes and improvements.",
+    )
+  end
+
+  desc "Add an ALREADY-UPLOADED, processed TestFlight build to the external " \
+       "tester group. No build, no signing — pure ASC API. Recovery path for " \
+       "builds uploaded before the beta lane distributed automatically. " \
+       "Env: DIST_BUILD_NUMBER (required), DIST_APP_VERSION (default 1.0), " \
+       "TESTFLIGHT_GROUP (default Friends)."
+  lane :distribute do
+    upload_to_testflight(
+      api_key: asc_api_key,
+      distribute_only: true,
+      app_version: ENV["DIST_APP_VERSION"] || "1.0",
+      build_number: ENV.fetch("DIST_BUILD_NUMBER"),
+      distribute_external: true,
+      groups: [ENV["TESTFLIGHT_GROUP"] || "Friends"],
+      changelog: ENV["TESTFLIGHT_CHANGELOG"] || "Bug fixes and improvements.",
     )
   end
 
