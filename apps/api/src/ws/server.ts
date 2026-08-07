@@ -55,6 +55,12 @@ export interface AttachWsOptions {
    * routes layer that already uses it (e.g. prekey_low notifications).
    */
   userNotifier: UserNotifier;
+  /**
+   * Delayed re-check queue for the rich-push fallback. Forwarded to the
+   * message handler so each buffered message schedules a fallback banner if it
+   * stays undelivered. Optional — omitted in unit tests that don't exercise it.
+   */
+  pushFallbackQueue?: import('../push/push-fallback-queue.js').PushFallbackQueue;
   /** Optional persistent event log — recipient of call-route diagnostics. */
   eventLog?: EventLogRepo;
   /** Optional iOS VoIP (CallKit) push sender — fires on call_offer. */
@@ -104,6 +110,7 @@ export function attachWebsocket(
         callBuffer,
         ackBuffer,
         userNotifier: opts.userNotifier,
+        pushFallbackQueue: opts.pushFallbackQueue,
         eventLog: opts.eventLog,
         apnsVoip: opts.apnsVoip,
         log: app.log,

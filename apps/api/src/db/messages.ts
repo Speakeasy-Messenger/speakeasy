@@ -106,4 +106,13 @@ export interface MessagesRepo {
    * recipients (no previous connection on file) working.
    */
   markDeliveredByDevice(messageId: string, deviceToken: string): Promise<AckResult>;
+
+  /**
+   * Fetch a single buffered message by id, or null if it no longer exists
+   * (i.e. it was fully delivered — the row is deleted on the final ack). Used
+   * by the push-fallback worker to decide whether a delayed generic banner is
+   * still needed: a present row means the recipient never acked, so the
+   * original rich data-only push never landed.
+   */
+  getById(messageId: string): Promise<BufferedMessage | null>;
 }

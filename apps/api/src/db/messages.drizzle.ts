@@ -137,6 +137,27 @@ export class DrizzleMessagesRepo implements MessagesRepo {
     }));
   }
 
+  async getById(messageId: string): Promise<BufferedMessage | null> {
+    const db = getDb();
+    const rows = await db.select().from(messages).where(eq(messages.id, messageId));
+    const row = rows[0];
+    if (!row) return null;
+    return {
+      id: row.id,
+      conversation: row.conversation,
+      senderId: row.senderId,
+      recipientId: row.recipientId,
+      ciphertext: row.ciphertext,
+      msgType: row.msgType as ConversationKind,
+      createdAt: row.createdAt,
+      expiresAt: row.expiresAt,
+      skdmGroupId: row.skdmGroupId ?? undefined,
+      targetDevices: (row.targetDevices as string[]) ?? [],
+      deliveredToDevices: (row.deliveredToDevices as string[]) ?? [],
+      sealed: row.sealed ?? false,
+    };
+  }
+
   async markDeliveredByDevice(
     messageId: string,
     deviceToken: string,
