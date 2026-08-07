@@ -415,6 +415,7 @@ unless nse_embed.files.any? { |bf| bf.respond_to?(:file_ref) && bf.file_ref == n
   bf = nse_embed.add_file_reference(nse.product_reference)
   bf.settings = { 'ATTRIBUTES' => ['RemoveHeadersOnCopy'] }
   changed << 'embedded NotificationService.appex'
+end
 
 # Swift unit tests. SpeakeasyTests/ was ObjC-only, so the generic loop above
 # (app target, SpeakeasyBridges/ only) never reaches it. Wire every
