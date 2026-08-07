@@ -42,8 +42,11 @@ class SignalProtocolModule: NSObject {
                              rejecter reject: @escaping RCTPromiseRejectBlock) {
         do {
             // Don't clobber a persisted identity — restore + return its
-            // public key instead of minting a fresh one.
-            if SpeakeasySignalStore.initializeFromDb() {
+            // public key instead of minting a fresh one. A restore FAILURE
+            // (vs. genuine absence) throws into the catch below and rejects:
+            // minting a new identity over an unreadable-but-present store is
+            // how peers end up with "[identity changed]" out of nowhere.
+            if try SpeakeasySignalStore.initializeFromDb() {
                 let store = try SpeakeasySignalStore.require()
                 let ikp = try store.identityKeyPair(context: context)
                 resolve(Data(ikp.publicKey.serialize()).base64EncodedString())
@@ -337,10 +340,15 @@ class SignalProtocolModule: NSObject {
 
     // MARK: - Helpers
 
-    /// Lazy on-disk restore, mirrors Android's ensureRestored().
+    /// Lazy on-disk restore, mirrors Android's ensureRestored(). A restore
+    /// failure intentionally leaves the store uninitialized — the next
+    /// `require()` throws and the calling promise rejects visibly, which
+    /// is strictly better than the old silent-false (that path let
+    /// generateIdentityKey mint a REPLACEMENT identity; see
+    /// SpeakeasySignalStore.initializeFromDb).
     private func ensureRestored() {
         if !SpeakeasySignalStore.isInitialized {
-            _ = SpeakeasySignalStore.initializeFromDb()
+            _ = try? SpeakeasySignalStore.initializeFromDb()
         }
     }
 

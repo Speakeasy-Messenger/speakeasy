@@ -18,10 +18,21 @@ enum SpeakeasySignalStore {
     private static let lock = NSLock()
     private static var instance: SqlCipherSignalProtocolStore?
 
-    /// Restore from disk if a previous identity exists. Returns false if
-    /// no identity row exists yet (fresh install) OR if the DB couldn't
-    /// open because Vouchflow.cachedDeviceToken is nil (not enrolled).
-    static func initializeFromDb() -> Bool {
+    /// Restore from disk if a previous identity exists. Returns false ONLY
+    /// when the store is genuinely absent — no identity row yet (fresh
+    /// install), or the DB can't open because Vouchflow.cachedDeviceToken
+    /// is nil (not enrolled). Any OTHER failure THROWS.
+    ///
+    /// The distinction is load-bearing: `generateIdentityKey` mints a
+    /// fresh identity on `false`. The previous version returned false for
+    /// unexpected DB failures too (transient keychain unavailability,
+    /// SQLCipher open errors during an update relaunch), which silently
+    /// REPLACED the user's identity while they kept their handle — every
+    /// peer then saw "[identity changed — verify with peer]" and calls
+    /// died on UntrustedIdentityException, with no reinstall having
+    /// happened. Android's initializeFromDb has always propagated
+    /// unexpected errors; this brings iOS to parity.
+    static func initializeFromDb() throws -> Bool {
         lock.lock()
         defer { lock.unlock() }
         do {
@@ -33,10 +44,9 @@ enum SpeakeasySignalStore {
             return true
         } catch SpeakeasyDbError.notEnrolled {
             return false
-        } catch {
-            // Unexpected DB failure — surface upstream by leaving instance nil.
-            return false
         }
+        // Unexpected DB failure propagates — callers must NOT treat it
+        // as "no identity yet".
     }
 
     /// Initialise from a freshly generated identity. Persists to the DB.
