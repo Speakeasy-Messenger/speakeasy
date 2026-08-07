@@ -1,4 +1,5 @@
 import type { CallKind, WsServerMsg, WsClientMsg } from '@speakeasy/shared';
+import { isTransientAuthFailure } from '../auth/auth-error-codes.js';
 
 export type WsState =
   | 'idle'
@@ -481,7 +482,14 @@ export class SpeakeasyWsClient {
     // the getToken fetch failed). Flag it so the next attempt forces a
     // fresh re-attestation rather than retrying the same bad token.
     const wasAuthenticating = this.state === 'authenticating';
-    if (wasAuthenticating) {
+    // A close mid-auth normally means the token was rejected, so flag it and
+    // force a fresh re-attestation on the next attempt. EXCEPTION: a transient
+    // auth-infra failure (`network_error` / `rate_limited` — the server couldn't
+    // reach Vouchflow, e.g. the 525 outage) is NOT a bad token. Re-attesting
+    // there can't help and loops the passkey sheet; leave `lastAuthFailed` false
+    // so the next connect reuses the cached token and just backs off + retries
+    // until the dependency recovers.
+    if (wasAuthenticating && !isTransientAuthFailure(reason)) {
       this.lastAuthFailed = true;
     }
     if (this.intentionalClose) {

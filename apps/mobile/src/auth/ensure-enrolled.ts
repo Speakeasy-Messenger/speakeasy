@@ -4,6 +4,7 @@ import { useIdentity } from '../store/identity.js';
 import { diag } from '../diag/log.js';
 import { verifyDeviceWithExplanation } from './verify-device.js';
 import { DeviceVerificationCancelledError } from './verify-device-types.js';
+import { isTransientAuthFailure } from './auth-error-codes.js';
 import { useToast } from '../store/toast.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { VouchflowClient } from '../native/vouchflow.js';
@@ -147,6 +148,15 @@ export async function ensureServerBinding(
             return 'fail';
           }
           if (rebindErr instanceof ApiError && rebindErr.status === 401) {
+            // Same transient-vs-genuine split as the enroll path: a
+            // network_error/rate_limited rebind 401 is an upstream outage, not a
+            // refused token — don't re-attest (it loops the verify sheet).
+            if (isTransientAuthFailure(rebindErr.code)) {
+              diag('auth', 'device rebind: transient auth-infra failure (not re-attesting)', {
+                code: rebindErr.code,
+              });
+              return 'fail';
+            }
             // 401 with a different reason = the TOKEN was refused, not the
             // identity. Re-attest for a fresh one.
             diag('auth', 'device rebind: token refused', { code: rebindErr.code });
@@ -160,9 +170,19 @@ export async function ensureServerBinding(
           return 'fail';
         }
       }
-      // The enroll route only 401s from vouchflow.validate(), so any enroll
-      // 401 means the device token was refused → re-attest.
+      // The enroll route 401s from vouchflow.validate(). Usually that means the
+      // device token was refused → re-attest. BUT a `network_error` /
+      // `rate_limited` 401 means the server couldn't reach Vouchflow at all (the
+      // 525 outage) — the token is fine. Re-attesting can't fix an upstream
+      // outage and loops the verify sheet, so treat it as a transient 'fail'
+      // (keep identity, no prompt) and let the reconnect retry.
       if (err instanceof ApiError && err.status === 401) {
+        if (isTransientAuthFailure(err.code)) {
+          diag('auth', 'silent re-enroll: transient auth-infra failure (not re-attesting)', {
+            code: err.code,
+          });
+          return 'fail';
+        }
         diag('auth', 'silent re-enroll: token refused', { code: err.code });
         return 'token_rejected';
       }
