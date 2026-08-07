@@ -114,6 +114,17 @@ final class SqlCipherSignalProtocolStore:
         try exec("DELETE FROM prekeys WHERE id = ?", bind: [.int(Int(id))])
     }
 
+    /// Speakeasy addition: the next unused one-time-prekey id (MAX(id)+1, or 1
+    /// when empty). Mirrors Android's SqlCipherSignalProtocolStore.nextPreKeyId
+    /// — a re-generated bundle stores its prekeys here instead of reusing the
+    /// fixed ids 1..N. Reuse + INSERT OR REPLACE overwrote the private key an
+    /// in-flight PreKey message was sealed to — the "invalid PreKey message"
+    /// decrypt loss after a re-enroll. Fresh ids keep the old keys alive so
+    /// those messages still decrypt.
+    func nextPreKeyId() throws -> UInt32 {
+        try maxIdPlusOne("SELECT COALESCE(MAX(id), 0) + 1 FROM prekeys")
+    }
+
     // MARK: - SignedPreKeyStore
 
     func loadSignedPreKey(id: UInt32, context: StoreContext) throws -> SignedPreKeyRecord {
@@ -134,6 +145,13 @@ final class SqlCipherSignalProtocolStore:
             "INSERT OR REPLACE INTO signed_prekeys(id, record) VALUES(?, ?)",
             bind: [.int(Int(id)), .blob(Data(record.serialize()))]
         )
+    }
+
+    /// Next unused signed-prekey id (MAX(id)+1, or 1 when empty). Same
+    /// rationale as `nextPreKeyId()` — regeneration must not clobber the
+    /// previous signed prekey while an in-flight message still needs it.
+    func nextSignedPreKeyId() throws -> UInt32 {
+        try maxIdPlusOne("SELECT COALESCE(MAX(id), 0) + 1 FROM signed_prekeys")
     }
 
     // MARK: - SessionStore
@@ -302,6 +320,18 @@ final class SqlCipherSignalProtocolStore:
         if sqlite3_step(stmt) != SQLITE_DONE {
             throw SpeakeasyDbError.migration("step failed: \(String(cString: sqlite3_errmsg(db)))")
         }
+    }
+
+    /// Scalar helper for the next-id queries above. Returns the single INT
+    /// the query yields (1 if the statement somehow returns no row).
+    private func maxIdPlusOne(_ sql: String) throws -> UInt32 {
+        var stmt: OpaquePointer?
+        defer { sqlite3_finalize(stmt) }
+        if sqlite3_prepare_v2(db, sql, -1, &stmt, nil) != SQLITE_OK {
+            throw SpeakeasyDbError.migration("prepare failed: \(String(cString: sqlite3_errmsg(db)))")
+        }
+        guard sqlite3_step(stmt) == SQLITE_ROW else { return 1 }
+        return UInt32(sqlite3_column_int64(stmt, 0))
     }
 
     private func queryOne(_ sql: String, bind bindings: [Bound]) throws -> [Cell]? {

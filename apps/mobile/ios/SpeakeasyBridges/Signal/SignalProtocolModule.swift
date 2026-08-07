@@ -72,8 +72,18 @@ class SignalProtocolModule: NSObject {
             let store = try SpeakeasySignalStore.require()
             let ikp = try store.identityKeyPair(context: context)
 
+            // FRESH ids, never the fixed 1 / 1..N. Re-generating a bundle
+            // (e.g. on a re-bind) at reused ids did INSERT OR REPLACE over the
+            // private keys an in-flight PreKey message was sealed to → that
+            // message could never decrypt ("invalid PreKey message", the
+            // [couldn't decrypt] bubbles after a re-enroll). Using MAX(id)+1
+            // ADDS keys and leaves the old ones in place so in-flight messages
+            // still decrypt. Mirrors Android's fix in SignalProtocolModule.kt.
+            // The JS-supplied signedPreKeyId is superseded by the fresh id.
+            let signedKeyId = try store.nextSignedPreKeyId()
+            let oneTimeBase = try store.nextPreKeyId()
+
             // Signed prekey — long-lived, server-stored, signed by identity.
-            let signedKeyId = UInt32(truncating: signedPreKeyId)
             let signedPreKeyPair = PrivateKey.generate()
             let signedPreKeyPub = signedPreKeyPair.publicKey
             let signedPreKeySig = ikp.privateKey.generateSignature(
@@ -91,7 +101,7 @@ class SignalProtocolModule: NSObject {
             var preKeysOut: [[String: Any]] = []
             let count = Int(truncating: oneTimePreKeyCount)
             for i in 0..<count {
-                let pkId = UInt32(i + 1)
+                let pkId = oneTimeBase + UInt32(i)
                 let pkPair = PrivateKey.generate()
                 let pkRec = try PreKeyRecord(id: pkId, privateKey: pkPair)
                 try store.storePreKey(pkRec, id: pkId, context: context)
