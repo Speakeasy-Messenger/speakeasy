@@ -135,6 +135,7 @@ platform :ios do
     upload_to_testflight(
       api_key: asc_api_key,
       distribute_only: true,
+      app_platform: "ios", # distribute_only can't infer it from an ipa — prompts without this
       app_version: ENV["DIST_APP_VERSION"] || "1.0",
       build_number: ENV.fetch("DIST_BUILD_NUMBER"),
       distribute_external: true,
