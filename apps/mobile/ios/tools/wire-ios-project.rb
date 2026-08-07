@@ -328,6 +328,19 @@ if test_target
     changed << "set SWIFT_VERSION=#{app_swift_version} on #{TARGET_NAME}Tests (#{config.name})"
   end
 
+  # `@testable import Speakeasy` re-exports the app module's dependencies, so
+  # the test target must resolve SignalFfi too ("unable to resolve module
+  # dependency: 'SignalFfi'"). Mirror the app target's search paths.
+  %w[SWIFT_INCLUDE_PATHS HEADER_SEARCH_PATHS].each do |setting|
+    app_value = target.build_configurations.map { |c| c.build_settings[setting] }.compact.first
+    next unless app_value
+    test_target.build_configurations.each do |config|
+      next if config.build_settings[setting] == app_value
+      config.build_settings[setting] = app_value
+      changed << "mirrored #{setting} onto #{TARGET_NAME}Tests (#{config.name})"
+    end
+  end
+
   test_built = test_target.source_build_phase.files_references.map { |f| f.real_path.to_s }
   test_group = project.files.find { |f| f.display_name == "#{TARGET_NAME}Tests.m" }&.parent
   Dir.glob(File.join(IOS_DIR, "#{TARGET_NAME}Tests", '*.swift')).sort.each do |swift_path|
