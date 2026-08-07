@@ -178,7 +178,9 @@ describe('pickPhotos', () => {
     mockLaunchImageLibrary.mockResolvedValue({
       assets: [
         {
-          base64: 'a'.repeat(1_066_672),
+          // base64 length 4_000_004 → ~3_000_003 decoded bytes, just over the
+          // 3 MB PHOTO_MAX_BYTES cap.
+          base64: 'a'.repeat(4_000_004),
           type: 'image/jpeg',
         },
       ],
@@ -187,7 +189,7 @@ describe('pickPhotos', () => {
     await expect(pickPhotos({ selectionLimit: 1 })).resolves.toEqual([]);
     expect(mockAlert).toHaveBeenCalledWith(
       'Photo is too large',
-      expect.stringContaining('800 KB'),
+      expect.stringContaining('3 MB'),
     );
   });
 });

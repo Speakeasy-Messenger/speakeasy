@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
+  AppState,
   Pressable,
   StyleSheet,
   Text,
@@ -39,6 +40,17 @@ const VIDEO_PIP_OPTS = {
   stopAutomatically: true,
 } as const;
 
+// A PiP/floating call window is physically tiny — its smaller dimension is
+// ~108–160dp (Android clamps our 9:16 request into that range), whereas the
+// smallest real phone screen is ≥ 320dp in its short axis, and split-screen
+// halves only ONE axis (so its short axis stays full-width). So "short side
+// below this" reliably means "we're in the small floating window", with a
+// wide safety margin. We collapse to just-the-video on this signal rather
+// than depending solely on the native PiP-mode event reaching JS — that
+// event round-trip (DeviceEventEmitter under bridgeless new-arch) has been
+// unreliable, but RN's window-resize reflow on the PiP config change is not.
+const PIP_COMPACT_MAX_SHORT_SIDE = 280;
+
 // Auto-hide the call chrome (top status bar + bottom controls) after this
 // long with no interaction, video-player style. A tap toggles it back.
 const CHROME_IDLE_MS = 3000;
@@ -72,6 +84,17 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // corner bubble (default once connected); true = local full-screen /
   // remote in the bubble. Tapping the bubble toggles it.
   const [swapped, setSwapped] = useState(false);
+  // Measured size of the PiP/compact window. Tapping the floating bubble makes
+  // Android grow the window; the SurfaceViewRenderer keeps its old buffer
+  // (video stays small, black fills the rest) unless we recreate it. We key the
+  // compact RTCView on this so it remounts — a fresh surface at the new size —
+  // whenever the window's measured size changes.
+  const [pipSize, setPipSize] = useState<{ w: number; h: number } | null>(null);
+  // Authoritative PiP window size from native (dp), pushed on PiP enter + every
+  // bubble resize. Preferred over `pipSize` (RN onLayout) for keying the
+  // compact RTCView, because onLayout often reports a stale size in a PiP
+  // window → the SurfaceView kept its old buffer → "video fills only a corner".
+  const [nativePipSize, setNativePipSize] = useState<{ w: number; h: number } | null>(null);
   // Android system-PiP (the floating window after pressing Home). While in
   // it we hide the overlay chrome so only the video shows in the small frame.
   const [inPip, setInPip] = useState(false);
@@ -81,13 +104,31 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // SurfaceView re-creates at the new window size (Android SurfaceViews keep
   // their pre-resize buffer otherwise → the feed fills only part of the bubble).
   const { width: winW, height: winH } = useWindowDimensions();
+  // Backgrounded → the video call is floating in a PiP bubble. Track it so we
+  // can collapse to the bubble-only view IMMEDIATELY on background, without
+  // waiting for the native PiP-mode event (which lands ~1–2 s later). Without
+  // this, the full call UI — top bar and all — briefly renders inside the tiny
+  // PiP window on entry, and the bubble shows a cropped corner of it (the
+  // reported "top bar shows in the bubble").
+  const [appBackgrounded, setAppBackgrounded] = useState(false);
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (s) => setAppBackgrounded(s !== 'active'));
+    return () => sub.remove();
+  }, []);
+  // The authoritative "collapse to just the video" signal. True when the native
+  // PiP event told us so, OR the app is backgrounded (about to be / already in
+  // PiP), OR the window has reflowed to the tiny floating size. Any path drives
+  // BOTH the chrome-hide and the SurfaceView remount.
+  const compact =
+    inPip || appBackgrounded || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE;
   useEffect(() => {
     diag('call', 'pip mode change', {
       inPip,
+      compact,
       winW: Math.round(winW),
       winH: Math.round(winH),
     });
-  }, [inPip, winW, winH]);
+  }, [inPip, compact, winW, winH]);
 
   // Chat-history bubble for call end is emitted from the orchestrator's
   // onCallFinished deps callback in App.tsx (rc.55). Was previously a
@@ -124,11 +165,26 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     const unsub = pip.onPipModeChanged(setInPip);
     // Closing the PiP bubble (vs expanding it back) must END the call —
     // otherwise the camera/mic/ring keep running headless.
-    const unsubClosed = pip.onPipClosed(() => orchestrator.hangup());
+    const unsubClosed = pip.onPipClosed(() => {
+      diag('call', 'pip closed → hangup');
+      orchestrator.hangup();
+    });
+    // Diagnostic breadcrumb for the X-dismiss path (see MainActivity.onStop).
+    const unsubLifecycle = pip.onPipLifecycle((info) => diag('call', 'pip lifecycle', { info }));
+    // Authoritative bubble size from native (dp) — drives the compact
+    // SurfaceView remount at the true size on enter + every resize.
+    const unsubResize = pip.onPipResize((s) => {
+      setNativePipSize((prev) =>
+        prev && prev.w === s.width && prev.h === s.height ? prev : { w: s.width, h: s.height },
+      );
+      diag('call', 'pip native resize', { w: s.width, h: s.height });
+    });
     return () => {
       pip.setVideoCallActive(false);
       unsub();
       unsubClosed();
+      unsubResize();
+      unsubLifecycle();
     };
   }, [orchestrator]);
 
@@ -193,20 +249,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   //   • 3s with no interaction while SHOWN → auto-hide
   //   • touching a control resets the 3s timer (so muting / flipping the
   //     camera doesn't make the bar vanish from under your finger)
-  // ACTIVE only once the call is connected and we're NOT in the Android PiP
-  // window: before connect chrome is forced on (you need "Calling…" + End),
-  // and in the floating window the `inPip` gate hides it entirely. `active`
+  // ACTIVE only once the call is connected and we're NOT in the compact PiP
+  // bubble: before connect chrome is forced on (you need "Calling…" + End),
+  // and in the floating window the `compact` gate hides it entirely. `active`
   // is non-null past the early return below, but hooks must run every render,
   // so guard on it here.
   const autoHideActive =
-    !!active && active.stage === 'connected' && !inPip;
+    !!active && active.stage === 'connected' && !compact;
   const [chromeShown, setChromeShown] = useState(true);
   // Bumped on every control interaction to restart the idle countdown.
   const [activityNonce, setActivityNonce] = useState(0);
   const chromeOpacity = useRef(new Animated.Value(1)).current;
 
   // Reveal chrome whenever the auto-hide layout (re)activates — on connect,
-  // and on expanding back out of the PiP window — then the idle timer below
+  // and on expanding back out of the PiP bubble — then the idle timer below
   // fades it again.
   useEffect(() => {
     if (autoHideActive) setChromeShown(true);
@@ -297,6 +353,103 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // The bubble only exists once both feeds are present (i.e. connected).
   const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
 
+  // Android PiP / floating window: render ONLY the remote video, full-bleed,
+  // and nothing else. This is the proven react-native-webrtc PiP recipe ("show
+  // only the video") — the tiny window has no room for chrome, and the simpler
+  // the view tree, the cleaner the SurfaceView fills the window. Switching into
+  // this branch unmounts the full call UI and mounts a fresh single RTCView, so
+  // the surface is (re)created at the PiP window size instead of resizing a
+  // stale full-screen one. iOS never hits this branch — its PiP is the
+  // iosPIP/AVPictureInPicture path on the full view; `compact` only flips on
+  // Android's window-size reflow.
+  if (compact) {
+    const pipFeed = remoteUrl ?? localUrl;
+    // Which feed is showing — part of the RTCView key below. Without this the
+    // view is keyed only on window size, so the local→remote switch at answer
+    // (same bubble size) never remounts it: react-native-webrtc's Android
+    // SurfaceView keeps painting the OLD stream (your own face) until some
+    // unrelated resize forces a remount. Device logs confirmed the feed went
+    // local→remote with no view refresh until the bubble was tapped/resized.
+    const pipFeedTag = pipFeed && pipFeed === remoteUrl ? 'r' : 'l';
+    return (
+      // onLayout on the ROOT measures the actual window size (ground truth,
+      // unlike the often-stale Dimensions API in a PiP window). When the user
+      // taps the bubble and Android grows it, this fires with the new size →
+      // pipSize changes → the RTCView's key changes → its SurfaceView is
+      // recreated at the new size instead of staying small.
+      <View
+        style={styles.root}
+        onLayout={(e) => {
+          const w = Math.round(e.nativeEvent.layout.width);
+          const h = Math.round(e.nativeEvent.layout.height);
+          setPipSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
+          diag('call', 'pip view layout', { w, h });
+        }}
+      >
+        {pipFeed ? (
+          <RTCView
+            // Remount on window SIZE (native PiP size when known) + feed tag.
+            // The TextureView's EGL surface caches its size from creation and
+            // does NOT resize with the view — so at any size other than the one
+            // it was created at, the frame is stretched (the "mismatch when the
+            // bubble expands with controls"). Recreating the EGL surface in-place
+            // crashed (races SurfaceTexture teardown, v1.0.40). Keying on size
+            // instead lets React cleanly remount the view — a fresh TextureView +
+            // EGL surface at the correct size — with no manual EGL calls to race.
+            // Feed tag remounts on the local→remote switch at answer.
+            key={
+              (nativePipSize
+                ? `npip-${nativePipSize.w}x${nativePipSize.h}`
+                : pipSize
+                  ? `pip-${pipSize.w}x${pipSize.h}`
+                  : 'pip') + `-${pipFeedTag}`
+            }
+            streamURL={pipFeed}
+            // Size the view EXPLICITLY to the authoritative native PiP size (dp),
+            // not absoluteFill. absoluteFill wasn't tracking the PiP resize — when
+            // the bubble expanded, the video view stayed at the original small
+            // size while the window grew (the reported "video stays the size of
+            // the original bubble"). An explicit width/height that changes with
+            // nativePipSize forces the view to the new bounds so the video fills.
+            // Prefer the ROOT onLayout size (pipSize) — it's RN's own reliable
+            // measurement of the actual window and fires on every resize;
+            // nativePipSize (native event) is the fallback.
+            style={
+              pipSize
+                ? { width: pipSize.w, height: pipSize.h }
+                : nativePipSize
+                  ? { width: nativePipSize.w, height: nativePipSize.h }
+                  : StyleSheet.absoluteFill
+            }
+            objectFit="cover"
+            mirror={pipFeed === localUrl}
+            onDimensionsChange={(e) =>
+              diag('call', 'pip feed dimensions', {
+                w: e.nativeEvent.width,
+                h: e.nativeEvent.height,
+              })
+            }
+            // DEFINITIVE diagnostic: the RTCView's ACTUAL native laid-out size vs
+            // the sizes we're feeding it. On expand, if this logs the small size
+            // while pipSize is the big size → RN isn't committing the resize to
+            // the native view in PiP (a native fix is needed); if it logs the big
+            // size but the video still looks small → it's a render-side issue.
+            onLayout={(e) =>
+              diag('call', 'pip RTCView layout', {
+                w: Math.round(e.nativeEvent.layout.width),
+                h: Math.round(e.nativeEvent.layout.height),
+                pipW: pipSize?.w,
+                nativeW: nativePipSize?.w,
+              })
+            }
+          />
+        ) : (
+          <View style={[styles.remoteView, { backgroundColor: '#000' }]} />
+        )}
+      </View>
+    );
+  }
+
   return (
     <View style={styles.root}>
       {/* Full-screen feed — local while waiting, remote once it flows
@@ -306,11 +459,43 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           // Remount on the PiP transition so the Android SurfaceView
           // re-creates at the new (PiP vs full) window size instead of
           // keeping its pre-resize buffer (which left the feed filling only
-          // part of the bubble).
-          key={`fs-${inPip}`}
+          // part of the bubble — the reported "narrow corner"). Keyed on
+          // `compact` (window-size derived) so it remounts even when the
+          // native PiP event doesn't arrive. (The ~250ms placeholder on PiP
+          // entry is Android's own surface-reestablish behavior, not this
+          // remount — verified identical with a stable key.)
+          key={`fs-${compact}`}
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
+          // Passive render probe: RTCView fires onDimensionsChange only once
+          // the native view actually paints a sized frame. iOS — if this never
+          // logs, the Metal renderer never attached (the webrtc window-gate
+          // patch); if it logs non-zero but the screen is black, it's a layout
+          // issue. This only LOGS — it must not drive any native window state
+          // (an earlier version fed these dims into the Android PiP aspect
+          // ratio, which oscillated the bubble as the frame rotation flipped
+          // the reported w/h portrait↔landscape).
+          onDimensionsChange={(e) =>
+            diag('call', 'video dimensions', {
+              which: fullscreenUrl === localUrl ? 'local' : 'remote',
+              slot: 'fullscreen',
+              w: e.nativeEvent.width,
+              h: e.nativeEvent.height,
+            })
+          }
+          // Layout probe: the RTCView's ACTUAL measured size. In an Android PiP
+          // window this disambiguates the "narrow corner" — if it stays the
+          // full-screen size while floating, RN isn't re-measuring to the PiP
+          // window (the view is oversized + clipped); if it's small but still
+          // clipped, it's the SurfaceView keeping its pre-resize buffer.
+          onLayout={(e) =>
+            diag('call', 'fullscreen view layout', {
+              compact,
+              w: Math.round(e.nativeEvent.layout.width),
+              h: Math.round(e.nativeEvent.layout.height),
+            })
+          }
           // Mirror only when this view is showing the local self-preview.
           mirror={fullscreenUrl === localUrl}
           // PiP the remote feed when it's the full-screen one (default,
@@ -325,16 +510,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           BELOW the overlay so the control buttons still win their own taps,
           and a tap on the bare video (or where hidden controls were) falls
           through the box-none overlay to here. No-op until connected. */}
-      {!inPip ? (
+      {!compact ? (
         <Pressable
           style={StyleSheet.absoluteFill}
           onPress={onBackdropTap}
         />
       ) : null}
 
-      {/* Overlay chrome — hidden while floating in the Android PiP window
-          (the small frame only has room for the video itself). */}
-      {!inPip ? (
+      {/* Overlay chrome (top bar + controls) — hidden whenever we're in the
+          small floating window: it only has room for the video itself, and
+          keeping the top-bar @handle drawn inside the bubble was the reported
+          "top bar shouldn't be there" defect. Gated on `compact` so it
+          collapses on the window resize even if the native PiP event is
+          dropped. */}
+      {!compact ? (
       <SafeAreaView style={styles.overlay} pointerEvents="box-none">
         {/* Top bar: peer handle + stage label. Translucent over the
             video stream so the user can read it without it taking
@@ -377,6 +566,14 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               style={StyleSheet.absoluteFill}
               objectFit="cover"
               zOrder={1}
+              onDimensionsChange={(e) =>
+                diag('call', 'video dimensions', {
+                  which: pipUrl === localUrl ? 'local' : 'remote',
+                  slot: 'bubble',
+                  w: e.nativeEvent.width,
+                  h: e.nativeEvent.height,
+                })
+              }
               // Mirror only when the bubble is showing the local self-preview.
               mirror={pipUrl === localUrl}
               // When swapped, the remote feed lives in the bubble — keep

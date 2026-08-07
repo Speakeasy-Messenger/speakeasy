@@ -103,18 +103,15 @@ appId: xyz.speakeasyapp.app
 
 # ─── Step 05: Notifications permission ───
 # Onboarding screen 05 (PermissionsStep). Its "Continue" button fires
-# the notifications request AND calls identity.setUserId — so the app
-# does not flip to Conversations until this is tapped. On the API-30
-# Tier B emulator POST_NOTIFICATIONS is not a runtime permission, so no
-# system dialog appears.
+# the notifications request. On the API-36 Tier B emulator this can show
+# the POST_NOTIFICATIONS runtime dialog.
 - extendedWaitUntil:
     visible:
       id: "onboarding-permissions-continue"
     timeout: 15000
 - tapOn:
     id: "onboarding-permissions-continue"
-# A POST_NOTIFICATIONS system dialog only appears on API 33+; dismiss it
-# optionally so a future emulator bump doesn't break this flow.
+# Dismiss the API 36 POST_NOTIFICATIONS system dialog when it appears.
 - tapOn:
     text: "Allow"
     optional: true

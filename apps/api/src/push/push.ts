@@ -48,6 +48,12 @@ export interface PushDeliveryNotice {
    */
   callEvent?: 'missed';
   /**
+   * For `kind: 'call'` only. `true` when the offer is a video call, so the
+   * banner reads "Incoming video call" / "Missed video call" instead of the
+   * audio copy. Threaded from the call_offer's declared kind (call-router).
+   */
+  callVideo?: boolean;
+  /**
    * Explicit notification body. Normally omitted — payloads are
    * notify-only ("New message") because message content is E2E and the
    * server can't read it. The @speaker broadcast bot is the exception:

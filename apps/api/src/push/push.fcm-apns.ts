@@ -52,14 +52,21 @@ export function resolveBannerCopy(
 ): { title: string; body: string } {
   const showSender = privacy === 'rich' && !!notice.senderId;
   if ((notice.kind ?? 'message') === 'call') {
+    const video = notice.callVideo === true;
     return {
       title: showSender ? `@${notice.senderId}` : 'speakeasy',
       body:
         notice.callEvent === 'missed'
-          ? 'Missed call'
+          ? video
+            ? 'Missed video call'
+            : 'Missed call'
           : showSender
-            ? 'Calling…'
-            : 'Incoming call',
+            ? video
+              ? 'Video calling…'
+              : 'Calling…'
+            : video
+              ? 'Incoming video call'
+              : 'Incoming call',
     };
   }
   const fallbackBody = privacy === 'rich' && notice.body ? notice.body : 'New message';

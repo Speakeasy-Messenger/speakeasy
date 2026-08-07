@@ -34,6 +34,7 @@ import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
 import { routeCallFrame } from './call-router.js';
+import type { CallDropMonitor } from './call-drop-monitor.js';
 import {
   FALLBACK_DELAY_MS,
   type PushFallbackQueue,
@@ -100,6 +101,13 @@ interface Deps {
    * so test harnesses without it wired keep working (no fallback fires).
    */
   pushFallbackQueue?: PushFallbackQueue;
+  /**
+   * Ends a call for the surviving party when the peer's WS drops mid-call
+   * without a `call_end` (swipe-away / process-kill). Armed from this
+   * connection's `close` handler when it was carrying an active call, and
+   * cancelled on a same-device reconnect. See call-drop-monitor.ts.
+   */
+  callDropMonitor: CallDropMonitor;
   /** Optional persistent event log — recipient of call-route diagnostics. */
   eventLog?: import('../db/event-log.js').EventLogRepo;
   /** Optional iOS VoIP (CallKit) push sender — fires on call_offer. */
@@ -243,6 +251,13 @@ async function deliverBuffered(
 
 export function handleConnection(socket: WebSocket, deps: Deps): void {
   let session: AuthedSession | undefined;
+  // The call this socket is currently a party to, if any. Set when this
+  // socket sends the offer (caller) or answer (callee) that puts it in a
+  // call, cleared when it sends `call_end`. Read on `close`: a close
+  // while this is set means the client was killed mid-call without a
+  // chance to hang up, so the peer is ended on its behalf (see the close
+  // handler + call-drop-monitor.ts).
+  let activeCall: { callId: string; peerUserId: string } | undefined;
 
   const authTimer = setTimeout(() => {
     if (!session) {
@@ -314,6 +329,14 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
           kinds: capabilities,
         });
         await deps.presence.recordOnline(session.userId, deps.instanceId);
+        // If this device dropped mid-call moments ago, a pending
+        // "end the call for the peer" timer is counting down on the
+        // instance that held the old socket. This is the reconnect that
+        // proves the drop was transient (foreground return, handoff,
+        // deploy) and the call should ride through — cancel it. Same-
+        // instance reconnects (the common case) land here; a reconnect
+        // onto a different instance is the documented residual gap.
+        deps.callDropMonitor.cancel(session.deviceToken);
         send(socket, { type: 'authed', user_id: session.userId });
         deps.log.info(
           { userId: session.userId, deviceToken: redactToken(session.deviceToken) },
@@ -842,6 +865,20 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         const result = await routeCallFrame(deps, session.userId, msg);
         if (!result.ok) {
           sendError(socket, result.code, result.message);
+          return;
+        }
+        // Track this socket's active-call membership so a swipe-away /
+        // process-kill (which severs the WS with no `call_end`) can be
+        // turned into a `call_end` to the peer on close. The caller
+        // registers on the offer it sends; the callee on the answer it
+        // sends. `to`/`call_id` are validated strings once routeCallFrame
+        // returns ok. A `call_end` for the tracked call clears it (a clean
+        // hangup needs no drop-monitor follow-up). A `call_end` for a
+        // different call_id leaves the tracked one intact.
+        if (msg.type === 'call_offer' || msg.type === 'call_answer') {
+          activeCall = { callId: msg.call_id, peerUserId: msg.to };
+        } else if (msg.type === 'call_end' && activeCall?.callId === msg.call_id) {
+          activeCall = undefined;
         }
         return;
       }
@@ -857,6 +894,24 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
     clearTimeout(authTimer);
     if (session) {
       const closingSession = session;
+      // Snapshot + detach the active-call state before the async work so a
+      // late frame can't race it. A close while this is set means the
+      // client was killed mid-call without sending `call_end` — the client
+      // keeps its WS open for the whole call (App.tsx skips the background
+      // close while a call is active), so this is never a normal
+      // background. Hand it to the drop monitor, which ends the call for
+      // the peer after a grace window UNLESS this device reconnects first
+      // (a transient blip / deploy the call should ride through).
+      const droppedCall = activeCall;
+      activeCall = undefined;
+      if (droppedCall) {
+        deps.callDropMonitor.arm({
+          userId: closingSession.userId,
+          deviceToken: closingSession.deviceToken,
+          callId: droppedCall.callId,
+          peerUserId: droppedCall.peerUserId,
+        });
+      }
       void (async () => {
         await deps.connections.remove(
           closingSession.userId,

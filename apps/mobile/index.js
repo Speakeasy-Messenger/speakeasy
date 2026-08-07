@@ -14,6 +14,7 @@ import 'react-native-reanimated';
 // background messages are queued by Android until foreground.
 import '@react-native-firebase/messaging';
 
+import notifee from '@notifee/react-native';
 import { AppRegistry } from 'react-native';
 import App from './App';
 import { name as appName } from './app.json';
@@ -23,6 +24,15 @@ import { installErrorHandler } from './src/diag/install-error-handler';
 // the next launch can surface them on the DiagnosticsScreen. Must run
 // before any app code so it sees errors during initial render.
 installErrorHandler();
+
+// Notifee foreground service backing the ongoing voice-call pill (Android).
+// Must be registered once at startup, before any `asForegroundService`
+// notification is displayed. The task promise intentionally never resolves —
+// the service lives until the pill notification is cancelled at call end
+// (dismissOngoingCallNotification). Keeping the backgrounded audio-call
+// process alive is the whole point: without it One UI kills the call within
+// seconds of backgrounding, which is why the plain pill never appeared.
+notifee.registerForegroundService(() => new Promise(() => {}));
 
 AppRegistry.registerComponent(appName, () => App);
 

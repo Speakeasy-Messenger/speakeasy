@@ -6,17 +6,28 @@ import type { Attachment } from '@speakeasy/shared';
 import { ensureCameraPermission } from '../permissions/runtime.js';
 
 /**
- * Per-attachment caps. Multi-select photo grids stack on top of each
- * other so even a 3-photo album can hit ~600KB on the wire after
- * base64 — keep individual photos slim.
+ * Per-attachment caps. Raised from 1024px/0.7/800KB for visibly sharper photos
+ * (the old caps looked soft on modern screens). 2048px + quality 0.85 is the
+ * "high quality" envelope most messengers use; a typical photo lands ~1–2MB, so
+ * the 3MB ceiling rarely rejects. The server is not the limit here — the WS
+ * accepts up to 100MB frames and ciphertext is stored as BYTEA — this is purely
+ * a send-speed / batch-size guard (a full 8-photo multi-select can still stack
+ * to ~15–24MB on the wire, which is fine but not instant on a weak connection).
  */
-const PHOTO_MAX_W = 1024;
-const PHOTO_MAX_H = 1024;
-const PHOTO_QUALITY = 0.7;
-const PHOTO_MAX_BYTES = 800_000; // pre-base64
+const PHOTO_MAX_W = 2048;
+const PHOTO_MAX_H = 2048;
+const PHOTO_QUALITY = 0.8;
+const PHOTO_MAX_BYTES = 3_000_000; // pre-base64
 
 const GIF_MAX_BYTES = 1_000_000;
 const FILE_MAX_BYTES = 800_000;
+
+/**
+ * How many photos one multi-select send may carry. Each photo is resized to
+ * ≤800KB (most land far under), so this caps a batch at a few MB on the wire —
+ * generous for an album, safe for the encrypted single-message payload.
+ */
+export const MAX_PHOTOS_PER_PICK = 8;
 
 function base64Bytes(b64: string): number {
   return Math.floor((b64.length * 3) / 4);
@@ -45,7 +56,7 @@ function showFileTooLargeAlert(): void {
 function showPhotoTooLargeAlert(): void {
   Alert.alert(
     'Photo is too large',
-    'Speakeasy can send photos up to 800 KB in this build.',
+    'Speakeasy can send photos up to 3 MB in this build.',
   );
 }
 
