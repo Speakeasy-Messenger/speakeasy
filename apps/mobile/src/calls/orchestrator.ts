@@ -53,6 +53,8 @@ const RING_TIMEOUT_MS = 45_000;
  * on a bad network while still failing fast enough to show "couldn't connect."
  */
 const CONNECTING_TIMEOUT_MS = 45_000;
+
+/**
  * Master switch for the CallKit / ConnectionService bridge. Enabled on iOS ONLY.
  *
  * CallKit gives the green return-to-call pill, lock-screen controls, and the
