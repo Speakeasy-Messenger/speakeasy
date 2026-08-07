@@ -57,7 +57,15 @@ enum PushDecryptKit {
             if let existing = try? SpeakeasySignalStore.require() {
                 store = existing
             } else {
-                guard SpeakeasySignalStore.initializeFromDb() else {
+                // `initializeFromDb` now THROWS on an unexpected open failure
+                // and returns false only when the store is genuinely absent
+                // (see SpeakeasySignalStore — conflating the two is what let
+                // the app mint a replacement identity). Both outcomes are
+                // handled the same way HERE — keep the server's fallback
+                // banner — but they must stay distinguishable in the log: a
+                // throw means the store exists and we couldn't read it, which
+                // is a bug to chase, not a pre-migration install.
+                guard try SpeakeasySignalStore.initializeFromDb() else {
                     NSLog("[PushDecryptKit] store unavailable to extension (pre-App-Group-migration?)")
                     return false
                 }
