@@ -35,5 +35,15 @@
   <array>
     <string>group.xyz.speakeasyapp.app</string>
   </array>
+  <!-- Keeps the camera capturing while the app is backgrounded during a video
+       call (iOS suspends it otherwise → the peer sees a frozen frame). Gate for
+       AVCaptureSession.multitaskingCameraAccessEnabled: react-native-webrtc only
+       flips that on when isMultitaskingCameraAccessSupported is true, and this
+       entitlement is the guaranteed way to make it true. Requires the
+       "Multitasking Camera Access" capability enabled on the App ID + a profile
+       regenerated to include it (fastlane certs). App Store review notes must
+       explain the background-camera use (video calling). -->
+  <key>com.apple.developer.avfoundation.multitasking-camera-access</key>
+  <true/>
 </dict>
 </plist>

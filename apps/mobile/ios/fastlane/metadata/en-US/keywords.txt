@@ -1,1 +1,1 @@
-private,encrypted,messenger,anonymous,secure chat,signal,voice mask,no phone,e2e,calls,privacy
+private,encrypted,messenger,secure chat,signal,e2e,calls,privacy,handle,no phone

@@ -170,6 +170,18 @@
             <action android:name="android.telecom.ConnectionService" />
         </intent-filter>
       </service>
+      <!-- notifee's foreground service, backing the ongoing voice-call pill.
+           WITHOUT an FGS, Samsung/One UI freezes & kills a backgrounded audio
+           call within seconds — taking the pill AND the call's WS down with it
+           (the reported "pill never shows on Android"). `microphone` is the
+           correct type: the live call holds RECORD_AUDIO, and the service is
+           started while the app is foreground at call-connect (so Android 14's
+           background-FGS-start restriction doesn't apply). tools:replace forces
+           our type onto notifee-core's service declaration. -->
+      <service
+        android:name="app.notifee.core.ForegroundService"
+        android:foregroundServiceType="microphone"
+        tools:replace="android:foregroundServiceType" />
       <!-- Disable FCM notification delegation (v24+ feature that breaks JS handlers) -->
       <meta-data
         android:name="com.google.firebase.messaging.notification_delegation_enabled"

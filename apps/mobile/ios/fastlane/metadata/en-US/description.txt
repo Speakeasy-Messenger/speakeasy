@@ -1,24 +1,26 @@
-Speakeasy is a private messenger built on the premise that you shouldn't have to hand over your phone number, your email, or your real name to talk to someone you trust.
+Speakeasy is a private messenger built on a simple idea: you shouldn't have to hand over your phone number, your email, or your real name to talk to the people you trust.
 
-When you sign up, you pick a handle — anything you want, like @alice or @midnight_traveler — and the app generates a fresh cryptographic identity on your device. No personal information ever leaves your phone. Nothing about who you are gets sent anywhere.
+When you sign up, you pick a handle — like @alice or @midnight_traveler — and the app generates a cryptographic identity on your device. Your handle is how friends find and add you. You only ever talk to people you've added by their handle — there's no random matching and no strangers.
 
 WHAT YOU GET
 
 • End-to-end encryption on every message and call, using the Signal Protocol. The server only ever sees ciphertext — even the team that runs Speakeasy cannot read your messages.
 
-• Anonymous identity. Your handle is yours. There is no phone number to look up, no email to compromise, no real name to leak in a breach.
-
-• Private Calls with voice masking. When you call a friend, your voice goes through one of three customizable filters (Smoke, Velvet, or Glass) before it reaches them — even your peer hears a different voice from your actual one. Pick the voice that fits.
+• A handle instead of a phone number. No number to look up, no email to compromise, no real name to leak in a breach. Your handle is a stable identity your contacts recognize.
 
 • Group rooms with the same end-to-end guarantees as 1:1 chats. Up to 50 members per room.
 
-• No ads. No analytics tied to a real-world identity. No data-broker pipelines. The business model is paid subscriptions for advanced features, not selling your data.
+• No ads. No analytics tied to a real-world identity. No data-broker pipelines. The business model is paid subscriptions, not selling your data.
+
+SAFETY
+
+Speakeasy has zero tolerance for abuse and objectionable content. Every chat has built-in tools to block and report. Reported accounts are reviewed and removed, and abusive users are ejected. By using Speakeasy you agree to our Terms of Use, which prohibit harassment and objectionable content.
 
 YOUR DATA STAYS YOURS
 
-Speakeasy does not collect personal information. Read the full privacy policy at https://speakeasyapp.xyz/privacy/ for the technical details of what is and isn't kept on our servers.
+Speakeasy does not collect personal information. Read the full privacy policy at https://speakeasyapp.xyz/privacy/.
 
-If you delete your account, we delete your handle (releasing it back to the pool), your prekey bundle, and your encrypted message-relay buffer. Messages already delivered to your peers stay on their devices — we cannot reach into someone else's phone to delete them.
+If you delete your account, we delete your handle, your prekey bundle, and your encrypted message-relay buffer. Messages already delivered to your peers stay on their devices.
 
 QUESTIONS
 

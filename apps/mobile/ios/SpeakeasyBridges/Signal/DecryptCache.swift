@@ -50,6 +50,14 @@ enum DecryptCache {
                               ratchetDecrypt: () throws -> [UInt8]) throws -> [UInt8] {
         lock.lock()
         defer { lock.unlock() }
+        // Cross-process serialization with the Notification Service Extension:
+        // the in-process NSLock above only covers THIS process, so without this
+        // the app and the NSE could both miss the cache and both advance the
+        // ratchet for the same ciphertext. No-op when there's no App-Group
+        // container (single-process build → NSLock alone, unchanged behavior).
+        let xlock = CrossProcessLock(url: AppGroup.decryptLockURL())
+        xlock.lock()
+        defer { xlock.unlock() }
         let db = try SpeakeasyDb.shared.open()
         let hash = sha256Hex(ciphertext)
         if let cached = lookup(db: db, hash: hash) { return cached }

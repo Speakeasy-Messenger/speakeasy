@@ -1,5 +1,6 @@
 import React from 'react';
 import {
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
@@ -65,13 +66,19 @@ export function AccountScreen({
           testID="account-share-handle"
         />
 
-        <SettingsListItem
-          kind="drilldown"
-          title="Voice filter"
-          description="Anonymizes your voice on Private Calls."
-          onPress={onChangeVoiceFilter}
-          testID="account-voice-filter"
-        />
+        {/* Voice filter is Android-only: the iOS call path uses the stock
+            WebRTC audio device (the custom masking engine broke iOS call
+            audio), so the filter has no effect on iOS. Hide the control
+            there rather than expose a setting that does nothing. */}
+        {Platform.OS === 'android' ? (
+          <SettingsListItem
+            kind="drilldown"
+            title="Voice filter"
+            description="Apply a filter to your voice on Private Calls."
+            onPress={onChangeVoiceFilter}
+            testID="account-voice-filter"
+          />
+        ) : null}
 
         <Text style={[styles.sectionLabel, { color: themed.slate }]}>
           DANGER

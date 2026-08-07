@@ -163,4 +163,9 @@ jobs:
           # Monotonic CFBundleVersion — TestFlight rejects duplicate build
           # numbers. github.run_number increases per run of THIS workflow.
           BUILD_NUMBER: ${{ github.run_number }}
+          # External TestFlight group(s) to auto-release each beta build to,
+          # so testers actually receive it instead of it sitting "available
+          # to test" but unassigned. Comma-separated. On an already-approved
+          # version (1.0) this needs no re-review and lands immediately.
+          TESTFLIGHT_EXTERNAL_GROUPS: Friends
         run: bundle exec fastlane ios "$LANE"

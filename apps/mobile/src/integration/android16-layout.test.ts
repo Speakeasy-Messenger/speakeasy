@@ -1,0 +1,92 @@
+import { readFileSync } from 'node:fs';
+import { resolve } from 'node:path';
+import { describe, expect, it } from 'vitest';
+
+const mobileRoot = resolve(__dirname, '../..');
+
+function source(relativePath: string): string {
+  return readFileSync(resolve(mobileRoot, relativePath), 'utf8');
+}
+
+describe('Android 16 edge-to-edge layout contracts', () => {
+  it('keeps the Android build on API 36 with a compatible Gradle plugin', () => {
+    const gradle = source('android/build.gradle');
+
+    expect(gradle).toContain('compileSdkVersion = 36');
+    expect(gradle).toContain('targetSdkVersion = 36');
+    expect(gradle).toContain('com.android.tools.build:gradle:8.9.1');
+  });
+
+  it('runs release and emulator CI against API 36', () => {
+    const releaseWorkflow = source('../../.github/workflows/release-play.yml');
+    const emulatorWorkflow = source('../../.github/workflows/tier-b-emulator.yml');
+
+    expect(releaseWorkflow).toContain('platforms;android-36 build-tools;36.0.0');
+    expect(emulatorWorkflow).toContain('api-level: 36');
+  });
+
+  it('generates native library code before a clean app build configures CMake', () => {
+    const appGradle = source('android/app/build.gradle');
+
+    expect(appGradle).toContain('tasks.named("preBuild").configure');
+    expect(appGradle).toContain(
+      'rootProject.getTasksByName("generateCodegenArtifactsFromSchema", true)',
+    );
+  });
+
+  it('resizes the whole navigator above the Android IME', () => {
+    const app = source('App.tsx');
+    const manifest = source('android/app/src/main/AndroidManifest.xml');
+
+    expect(app).toContain('<KeyboardAvoidingView');
+    expect(app).toContain(
+      "behavior={Platform.OS === 'android' ? 'height' : undefined}",
+    );
+    expect(app).toContain(
+      "enabled={Platform.OS !== 'android' || androidKeyboardVisible}",
+    );
+    expect(app).toContain("Keyboard.addListener('keyboardDidHide'");
+    expect(app.indexOf('<KeyboardAvoidingView')).toBeLessThan(
+      app.indexOf('<RootNavigator'),
+    );
+    expect(manifest).toContain('android:windowSoftInputMode="adjustResize"');
+  });
+
+  it('positions the conversations FAB above the explicit bottom inset', () => {
+    const conversations = source('src/screens/ConversationsScreen.tsx');
+
+    expect(conversations).toContain('const insets = useSafeAreaInsets();');
+    expect(conversations).toContain('{ bottom: insets.bottom + space.lg }');
+    expect(conversations).toContain(
+      '{ bottom: (dockHeight || 220) + insets.bottom + space.md }',
+    );
+  });
+
+  it('drops the redundant navigation inset while the Android IME is visible', () => {
+    const keyboardSafeArea = source('src/components/KeyboardSafeAreaView.tsx');
+    const directChat = source('src/screens/ChatScreen.tsx');
+    const groupChat = source('src/screens/GroupChatScreen.tsx');
+
+    expect(keyboardSafeArea).toContain(
+      "const EDGES_WITHOUT_BOTTOM: readonly Edge[] = ['top', 'right', 'left'];",
+    );
+    expect(keyboardSafeArea).toContain("Keyboard.addListener('keyboardDidShow'");
+    expect(keyboardSafeArea).toContain("Keyboard.addListener('keyboardDidHide'");
+    expect(keyboardSafeArea).toContain(
+      'edges={androidKeyboardVisible ? EDGES_WITHOUT_BOTTOM : props.edges}',
+    );
+    expect(directChat).toContain('<KeyboardSafeAreaView');
+    expect(groupChat).toContain('<KeyboardSafeAreaView');
+  });
+
+  it('uses light system-bar icons whenever the dark brand canvas is visible', () => {
+    const app = source('App.tsx');
+
+    expect(app).toContain(
+      '<ThemedStatusBar brandCanvas={!userId || showSplash} />',
+    );
+    expect(app).toContain(
+      "barStyle={brandCanvas || t.mode === 'dark' ? 'light-content' : 'dark-content'}",
+    );
+  });
+});

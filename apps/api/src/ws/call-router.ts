@@ -203,6 +203,8 @@ export async function routeCallFrame(
         // "@sender: New message" + lets the mobile FCM handler route
         // to the full-screen ringer.
         kind: 'call',
+        // Banner copy: "Incoming video call" vs "Incoming call".
+        callVideo: offerKind === 'video',
       })
       .catch((err) =>
         deps.log.warn(
