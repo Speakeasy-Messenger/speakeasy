@@ -317,6 +317,17 @@ end
 # which exercises the reinstall Keychain purge against a real Keychain.
 test_target = project.targets.find { |t| t.name == "#{TARGET_NAME}Tests" }
 if test_target
+  # The target was ObjC-only, so it carries no SWIFT_VERSION and any Swift
+  # test fails the build with "SWIFT_VERSION '' is unsupported". Match the
+  # app target's version rather than hardcoding one.
+  app_swift_version =
+    target.build_configurations.map { |c| c.build_settings['SWIFT_VERSION'] }.compact.first || '5.0'
+  test_target.build_configurations.each do |config|
+    next if config.build_settings['SWIFT_VERSION'].to_s != ''
+    config.build_settings['SWIFT_VERSION'] = app_swift_version
+    changed << "set SWIFT_VERSION=#{app_swift_version} on #{TARGET_NAME}Tests (#{config.name})"
+  end
+
   test_built = test_target.source_build_phase.files_references.map { |f| f.real_path.to_s }
   test_group = project.files.find { |f| f.display_name == "#{TARGET_NAME}Tests.m" }&.parent
   Dir.glob(File.join(IOS_DIR, "#{TARGET_NAME}Tests", '*.swift')).sort.each do |swift_path|
