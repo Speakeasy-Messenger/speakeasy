@@ -112,6 +112,16 @@ static void SpeakeasyWriteCrash(NSException *exception)
   // crash during init (e.g. Vouchflow.configure) is still captured.
   NSSetUncaughtExceptionHandler(&SpeakeasyWriteCrash);
 
+  // iOS Keychain items outlive app deletion, so a reinstall used to
+  // inherit the Vouchflow device token (and DB root secret) while the
+  // app container — including the Signal store — was gone: the account
+  // resumed with a BRAND-NEW identity, bypassing enroll/rebind, and
+  // every peer saw "[identity changed]". Purge surviving credentials on
+  // a genuine fresh install so reinstall means re-onboard (the policy
+  // Android's backup_rules.xml already documents). Must run before
+  // Vouchflow.configure or any DB open touches the Keychain.
+  [FreshInstallGuard runAtLaunch];
+
   // Configure Firebase before the RN bridge starts (the JS bundle imports
   // firebase messaging at load). Reads the bundled GoogleService-Info.plist.
   if ([FIRApp defaultApp] == nil) {

@@ -259,6 +259,10 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     limiter,
     notifier: userNotifier,
     deletedHandles,
+    // Replenish verifies the uploaded signed prekey against this
+    // account's on-file identity key — a device token alone must not
+    // be able to rotate the effective identity.
+    users: repo,
   });
   const groups = opts.groupRepo ?? (hasDb ? new DrizzleGroupRepo() : new InMemoryGroupRepo());
   const communities = opts.communityRepo ?? (hasDb ? new DrizzleCommunityRepo() : new InMemoryCommunityRepo());

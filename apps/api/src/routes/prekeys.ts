@@ -1,8 +1,9 @@
 import { FastifyInstance } from 'fastify';
 import { isUserId } from '@speakeasy/shared';
 import { requireAuth } from '../auth/vouchflow.js';
-import type { PreKey } from '../db/users.js';
+import type { PreKey, UserRepo } from '../db/users.js';
 import type { PreKeyRepo } from '../db/prekeys.js';
+import { xeddsaVerify } from '../crypto/xeddsa.js';
 import type { DeletedHandlesRepo } from '../db/deleted-handles.js';
 import { rateLimit } from '../ratelimit/middleware.js';
 import type { RateLimiter } from '../ratelimit/ratelimit.js';
@@ -47,6 +48,18 @@ export async function registerPreKeyRoutes(
      * identity. Optional so older test harnesses keep returning 404.
      */
     deletedHandles?: DeletedHandlesRepo;
+    /**
+     * When provided, `/v1/prekeys/replenish` verifies the uploaded
+     * signed-prekey signature against the user's ON-FILE identity key
+     * (XEdDSA) and rejects mismatches with 403 `identity_mismatch`.
+     * Without it, any holder of a valid device token could silently
+     * swap the account's effective identity (observed 2026-08-07: an
+     * iOS keychain-surviving token after reinstall re-bound a fresh
+     * identity to the old handle, bypassing rebind's dual proof).
+     * Optional only for legacy test harnesses — server.ts always
+     * passes it.
+     */
+    users?: UserRepo;
   },
 ): Promise<void> {
   const notifier = opts.notifier ?? new NoopUserNotifier();
@@ -158,6 +171,28 @@ export async function registerPreKeyRoutes(
       const userId = request.auth?.userId;
       if (!userId) {
         return reply.code(403).send({ error: 'not_enrolled' });
+      }
+      // Identity continuity: the uploaded signed prekey must be signed
+      // by the identity key this account enrolled with. A valid device
+      // token alone must NOT be able to rotate the effective identity —
+      // that's rebind's job, which demands proof of key ownership.
+      if (opts.users) {
+        const user = await opts.users.findById(userId);
+        if (!user) {
+          return reply.code(403).send({ error: 'not_enrolled' });
+        }
+        const ok = xeddsaVerify(
+          user.publicKey,
+          Buffer.from(request.body.signedPreKey, 'base64'),
+          Buffer.from(request.body.signedPreKeySig, 'base64'),
+        );
+        if (!ok) {
+          request.log.warn(
+            { userId },
+            'replenish rejected: signed prekey not signed by on-file identity',
+          );
+          return reply.code(403).send({ error: 'identity_mismatch' });
+        }
       }
       try {
         await opts.repo.replenish({

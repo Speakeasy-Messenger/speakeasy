@@ -5,6 +5,21 @@ import { InMemoryUserRepo } from '../db/users.memory.js';
 import { InMemoryPreKeyRepo } from '../db/prekeys.memory.js';
 import { InMemoryDeletedHandlesRepo } from '../db/deleted-handles.js';
 import type { UserNotifier } from '../ws/user-notifier.js';
+import { testIdentity } from '../crypto/xeddsa-testkit.js';
+
+// The seeded account's identity. `/v1/prekeys/replenish` verifies that
+// an uploaded signed prekey is signed by THIS key — a valid device
+// token must not be able to swap the account's identity.
+const HAWK = testIdentity('silent-golden-hawk');
+
+/** A signed-prekey + matching XEdDSA signature from HAWK. */
+function signedSpk(label: string) {
+  const spk = Buffer.from(label);
+  return {
+    signedPreKey: spk.toString('base64'),
+    signedPreKeySig: HAWK.sign(spk),
+  };
+}
 
 function bundle(prekeyCount = 3) {
   return {
@@ -29,7 +44,12 @@ class CapturingNotifier implements UserNotifier {
 
 async function makeApp(initialPreKeys = 3, notifier?: UserNotifier) {
   const userRepo = new InMemoryUserRepo();
-  await userRepo.tryCreate({ userId: 'silent-golden-hawk', deviceToken: 'dvt_silent-golden-hawk', publicKey: Buffer.from('pk'),
+  await userRepo.tryCreate({
+    userId: 'silent-golden-hawk',
+    deviceToken: 'dvt_silent-golden-hawk',
+    // Real identity: replenish verifies the uploaded signed prekey
+    // against this key, so the seeded account needs a genuine one.
+    publicKey: Buffer.from(HAWK.publicKeyB64, 'base64'),
     bundle: bundle(initialPreKeys),
   });
   const preKeyRepo = new InMemoryPreKeyRepo(userRepo);
@@ -65,7 +85,7 @@ describe('POST /v1/prekeys/bundle', () => {
     expect(res.statusCode).toBe(200);
     const body = res.json();
     expect(body.user_id).toBe('silent-golden-hawk');
-    expect(body.identity_public_key).toBe(Buffer.from('pk').toString('base64'));
+    expect(body.identity_public_key).toBe(HAWK.publicKeyB64);
     expect(body.one_time_prekey?.id).toBe(1);
     expect(body.remaining_prekeys).toBe(before - 1);
     await app.close();
@@ -183,8 +203,7 @@ describe('POST /v1/prekeys/replenish', () => {
       headers: { authorization: 'Bearer dvt_caller_hawk' },
       payload: {
         signedPreKeyId: 200,
-        signedPreKey: Buffer.from('newspk').toString('base64'),
-        signedPreKeySig: Buffer.from('newsig').toString('base64'),
+        ...signedSpk('newspk'),
         preKeys: [
           { id: 99, key: Buffer.from('a').toString('base64') },
           { id: 100, key: Buffer.from('b').toString('base64') },
@@ -211,6 +230,62 @@ describe('POST /v1/prekeys/replenish', () => {
       },
     });
     expect(res.statusCode).toBe(403);
+    await app.close();
+  });
+
+  // Identity continuity. Regression guard for the 2026-08-07 hole: a
+  // device token that outlived its Signal store (iOS keychain surviving
+  // an app reinstall, or a stolen token) could upload a bundle signed by
+  // a DIFFERENT identity and silently take over the account's effective
+  // identity — bypassing /v1/devices/rebind, which exists precisely to
+  // demand proof of identity-key ownership before rebinding a handle.
+  it('rejects a bundle signed by a different identity (403 identity_mismatch)', async () => {
+    const { app, preKeyRepo } = await makeApp();
+    const attacker = testIdentity('attacker');
+    const spk = Buffer.from('attacker-spk');
+    const before = await preKeyRepo.countRemaining('silent-golden-hawk');
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prekeys/replenish',
+      // A perfectly valid device token for this account…
+      headers: { authorization: 'Bearer dvt_caller_hawk' },
+      payload: {
+        signedPreKeyId: 200,
+        // …but a bundle signed by an identity the account never enrolled.
+        signedPreKey: spk.toString('base64'),
+        signedPreKeySig: attacker.sign(spk),
+        preKeys: [{ id: 99, key: Buffer.from('a').toString('base64') }],
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('identity_mismatch');
+    // Inventory untouched — the rejected upload must not partially apply.
+    expect(await preKeyRepo.countRemaining('silent-golden-hawk')).toBe(before);
+    await app.close();
+  });
+
+  it('rejects a well-formed bundle whose signature does not verify', async () => {
+    const { app } = await makeApp();
+    const spk = Buffer.from('newspk');
+    const sig = Buffer.from(HAWK.sign(spk), 'base64');
+    sig[5]! ^= 0x01; // corrupt one byte of an otherwise-valid signature
+
+    const res = await app.inject({
+      method: 'POST',
+      url: '/v1/prekeys/replenish',
+      headers: { authorization: 'Bearer dvt_caller_hawk' },
+      payload: {
+        signedPreKeyId: 201,
+        signedPreKey: spk.toString('base64'),
+        signedPreKeySig: sig.toString('base64'),
+        preKeys: [{ id: 99, key: Buffer.from('a').toString('base64') }],
+      },
+    });
+
+    expect(res.statusCode).toBe(403);
+    expect(res.json().error).toBe('identity_mismatch');
     await app.close();
   });
 });

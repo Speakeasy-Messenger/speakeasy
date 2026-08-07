@@ -2,6 +2,7 @@ import { FastifyInstance, preHandlerHookHandler } from 'fastify';
 import { validateHandle } from '@speakeasy/shared';
 import { VouchflowValidationError } from '@speakeasy/vouchflow';
 import type { PreKeyBundleInput, UserRepo } from '../db/users.js';
+import { xeddsaVerify } from '../crypto/xeddsa.js';
 
 interface EnrollBody {
   token: string;
@@ -110,6 +111,20 @@ export async function registerEnrollRoutes(
       }
 
       const publicKeyBuf = Buffer.from(publicKey, 'base64');
+
+      // The uploaded bundle must be signed by the identity it claims —
+      // reject torn enrollments up front so the identity-continuity
+      // check on /v1/prekeys/replenish has a sound anchor.
+      if (
+        !xeddsaVerify(
+          publicKeyBuf,
+          Buffer.from(preKeyBundle.signedPreKey, 'base64'),
+          Buffer.from(preKeyBundle.signedPreKeySig, 'base64'),
+        )
+      ) {
+        request.log.warn({ userId }, 'enroll rejected: bundle not signed by submitted identity');
+        return reply.code(400).send({ error: 'invalid_signature' });
+      }
 
       const created = await repo.tryCreate({
         userId,
@@ -231,6 +246,19 @@ export async function registerEnrollRoutes(
       }
 
       const expectedPublicKey = Buffer.from(publicKey, 'base64');
+      // Rebind's publicKey must not just MATCH the on-file identity —
+      // the uploaded bundle must actually be SIGNED by it. A public
+      // key is not a secret; the signature is the ownership proof.
+      if (
+        !xeddsaVerify(
+          expectedPublicKey,
+          Buffer.from(preKeyBundle.signedPreKey, 'base64'),
+          Buffer.from(preKeyBundle.signedPreKeySig, 'base64'),
+        )
+      ) {
+        request.log.warn({ userId }, 'rebind rejected: bundle not signed by presented identity');
+        return reply.code(401).send({ error: 'identity_mismatch' });
+      }
       const outcome = await repo.rebindDevice({
         userId,
         newDeviceToken: token,

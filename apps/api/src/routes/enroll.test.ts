@@ -4,18 +4,16 @@ import { isHandle } from '@speakeasy/shared';
 import { buildServer } from '../server.js';
 import { InMemoryUserRepo } from '../db/users.memory.js';
 import { InMemoryRateLimiter } from '../ratelimit/ratelimit.js';
+import { testBundle } from '../crypto/xeddsa-testkit.js';
+
+// Enroll / rebind verify that the uploaded bundle is actually SIGNED by
+// the identity it claims, so fixtures must carry real XEdDSA signatures
+// (a device token alone must not be able to bind a new identity).
+const ALICE = testBundle('alice');
+const ATTACKER = testBundle('attacker');
 
 function bundle() {
-  return {
-    registrationId: 1,
-    signedPreKeyId: 100,
-    signedPreKey: Buffer.from('signed-prekey').toString('base64'),
-    signedPreKeySig: Buffer.from('signed-prekey-sig').toString('base64'),
-    preKeys: [
-      { id: 1, key: Buffer.from('k1').toString('base64') },
-      { id: 2, key: Buffer.from('k2').toString('base64') },
-    ],
-  };
+  return ALICE.bundle;
 }
 
 async function makeApp(overrides: Partial<Parameters<typeof buildServer>[0]> = {}) {
@@ -32,7 +30,7 @@ function basePayload(overrides: Record<string, unknown> = {}) {
   return {
     token: 'dvt_demo_001',
     user_id: validHandle,
-    publicKey: Buffer.from('pk').toString('base64'),
+    publicKey: ALICE.publicKey,
     preKeyBundle: bundle(),
     ...overrides,
   };
@@ -105,7 +103,7 @@ describe('POST /v1/enroll', () => {
   it('returns 409 taken when the chosen handle already exists', async () => {
     const repo = new InMemoryUserRepo();
     repo.users.set('alice', {
-      publicKey: Buffer.from('existing'),
+      publicKey: Buffer.from(ALICE.publicKey, 'base64'),
       bundle: bundle(),
       createdAt: new Date(),
       deviceToken: 'dvt_other',
@@ -186,10 +184,14 @@ describe('POST /v1/devices/rebind', () => {
   // Helper: seed a user via the enroll endpoint, then return both the
   // repo (so the test can verify post-rebind state) and the original
   // payload so the test can compare publicKeys.
-  async function seedEnrolled(repo: InMemoryUserRepo, opts: { publicKeyB64?: string } = {}) {
+  async function seedEnrolled(
+    repo: InMemoryUserRepo,
+    opts: { publicKeyB64?: string; bundle?: ReturnType<typeof bundle> } = {},
+  ) {
     const app = await makeApp({ userRepo: repo });
     const payload = basePayload({
-      publicKey: opts.publicKeyB64 ?? Buffer.from('pk').toString('base64'),
+      publicKey: opts.publicKeyB64 ?? ALICE.publicKey,
+      ...(opts.publicKeyB64 ? { preKeyBundle: opts.bundle ?? bundle() } : {}),
     });
     const enrollRes = await app.inject({
       method: 'POST',
@@ -224,7 +226,7 @@ describe('POST /v1/devices/rebind', () => {
 
   it('rejects rebind with 401 identity_mismatch when publicKey differs', async () => {
     const repo = new InMemoryUserRepo();
-    await seedEnrolled(repo, { publicKeyB64: Buffer.from('original-pk').toString('base64') });
+    await seedEnrolled(repo, { publicKeyB64: ALICE.publicKey });
 
     const app = await makeApp({ userRepo: repo });
     const res = await app.inject({
@@ -235,8 +237,10 @@ describe('POST /v1/devices/rebind', () => {
         user_id: validHandle,
         // Wrong publicKey — the presenter doesn't actually own the
         // Signal identity for this handle. Refuse.
-        publicKey: Buffer.from('attacker-pk').toString('base64'),
-        preKeyBundle: bundle(),
+        // Signed by the attacker's OWN identity — a well-formed bundle
+        // that simply isn't this handle's identity.
+        publicKey: ATTACKER.publicKey,
+        preKeyBundle: ATTACKER.bundle,
       },
     });
     expect(res.statusCode).toBe(401);
@@ -299,11 +303,14 @@ describe('POST /v1/devices/rebind', () => {
     const repo = new InMemoryUserRepo();
     const original = await seedEnrolled(repo);
 
+    // Same identity, freshly rotated prekeys — the legitimate rebind
+    // case (reinstall that preserved the Signal store).
     const freshBundle = {
-      registrationId: 999,
-      signedPreKeyId: 999,
-      signedPreKey: Buffer.from('fresh-spk').toString('base64'),
-      signedPreKeySig: Buffer.from('fresh-spk-sig').toString('base64'),
+      ...testBundle('alice', {
+        registrationId: 999,
+        signedPreKeyId: 999,
+        spkLabel: 'fresh-spk',
+      }).bundle,
       preKeys: [{ id: 999, key: Buffer.from('fresh-otk').toString('base64') }],
     };
     const app = await makeApp({ userRepo: repo });

@@ -17,6 +17,7 @@
     "test:load": "tsx src/ws/load-test.ts"
   },
   "dependencies": {
+    "@noble/curves": "^2.3.0",
     "@speakeasy/crypto": "*",
     "@speakeasy/shared": "*",
     "@speakeasy/vouchflow": "*",
