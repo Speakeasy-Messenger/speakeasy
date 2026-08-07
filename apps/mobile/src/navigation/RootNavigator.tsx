@@ -1,4 +1,5 @@
 import React from 'react';
+import { Alert } from 'react-native';
 import { NavigationContainer, type NavigationContainerRef } from '@react-navigation/native';
 import {
   createNativeStackNavigator,
@@ -13,6 +14,8 @@ import { OnboardingFlow } from '../screens/onboarding/OnboardingFlow.js';
 import { IdRevealScreen } from '../screens/IdRevealScreen.js';
 import { ConversationsScreen } from '../screens/ConversationsScreen.js';
 import { ChatScreen } from '../screens/ChatScreen.js';
+import { signalProtocol } from '../services.js';
+import { usePeerTrust, trustNewIdentity } from '../store/peer-trust.js';
 import { VerifyGateScreen } from '../screens/VerifyGateScreen.js';
 import { FullMessageScreen } from '../screens/FullMessageScreen.js';
 import { ConversationSettingsScreen } from '../screens/ConversationSettingsScreen.js';
@@ -304,22 +307,47 @@ export function RootNavigator({ navRef, onReady, onBannerTap, callOrchestrator }
                   onStartCall={
                     callOrchestrator
                       ? async (peerId, kind) => {
-                          try {
-                            await callOrchestrator.startOutgoing(peerId, kind);
-                            navigation.navigate('Call');
-                          } catch (err) {
-                            // A denied mic/camera permission must not fail
-                            // silently — the call screen never opens, so
-                            // without feedback the user thinks the app is
-                            // broken and re-dials. Surface the settings
-                            // alert on a plain 'denied' (never_ask_again is
-                            // already alerted inside ensure()). busy /
-                            // self-call still go to diag() only.
-                            const perr = permissionErrorKind(err);
-                            if (perr && perr.result === 'denied') {
-                              showOpenSettingsAlert(perr.kind);
+                          const dial = async () => {
+                            try {
+                              await callOrchestrator.startOutgoing(peerId, kind);
+                              navigation.navigate('Call');
+                            } catch (err) {
+                              // A denied mic/camera permission must not fail
+                              // silently — the call screen never opens, so
+                              // without feedback the user thinks the app is
+                              // broken and re-dials. Surface the settings
+                              // alert on a plain 'denied' (never_ask_again is
+                              // already alerted inside ensure()). busy /
+                              // self-call still go to diag() only.
+                              const perr = permissionErrorKind(err);
+                              if (perr && perr.result === 'denied') {
+                                showOpenSettingsAlert(perr.kind);
+                              }
                             }
+                          };
+                          // Identity-change gate: the peer reinstalled, so
+                          // an offer encrypted over the old session would
+                          // "send" fine and die undecryptable on their end
+                          // ("no answer" with no explanation). Prompt for
+                          // the trust-reset first; the fresh session then
+                          // pins their new identity and the call works.
+                          if (usePeerTrust.getState().isChanged(peerId)) {
+                            Alert.alert(
+                              `@${peerId}'s identity has changed`,
+                              `This usually means they reinstalled the app. It could also indicate a security issue. Trust the new identity and call?`,
+                              [
+                                { text: 'Cancel', style: 'cancel' },
+                                {
+                                  text: 'Trust + call',
+                                  style: 'destructive',
+                                  onPress: () =>
+                                    void trustNewIdentity(signalProtocol, peerId).then(dial),
+                                },
+                              ],
+                            );
+                            return;
                           }
+                          await dial();
                         }
                       : undefined
                   }

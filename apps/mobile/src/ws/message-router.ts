@@ -102,6 +102,14 @@ export interface MessageRouterDeps {
       | { kind: 'group'; groupId: string };
   }) => void;
   /**
+   * Called when an inbound direct message fails to decrypt with
+   * `untrusted_identity` — the peer's identity key changed (reinstall /
+   * new device). App-level wiring flags the peer in the peer-trust
+   * store so the send + call paths surface the trust-reset prompt
+   * instead of encrypting into the dead old session.
+   */
+  onPeerIdentityChanged?: (peerUserId: string) => void;
+  /**
    * Called once per successfully-decrypted inbound message that
    * carries `image` / `gif` / `file` attachments. App-level wiring
    * uses this to auto-save photos to the device gallery
@@ -342,6 +350,13 @@ export function makeMessageRouter(deps: MessageRouterDeps): (frame: WsServerMsg)
             isReplay,
             bubble,
           });
+          // Identity change is the one decrypt failure the user can
+          // recover from — flag the peer so the send/call paths gate on
+          // it (outbound encrypt over the old session "succeeds" and
+          // would otherwise vanish silently — see store/peer-trust.ts).
+          if ((err as SignalClientError).reason === 'untrusted_identity') {
+            deps.onPeerIdentityChanged?.(senderId);
+          }
         }
       }
       let conversationId: string;

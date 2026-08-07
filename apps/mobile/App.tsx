@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Linking, Platform, StatusBar, View } from 'react-native';
+import { Alert, AppState, Linking, Platform, StatusBar, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import {
   conversationIdForCommunity,
@@ -55,6 +55,7 @@ import { ensureSessionWithPeer } from './src/crypto/session.js';
 import { useCalls } from './src/store/calls.js';
 import { setShowWhenLocked, shouldShowOverLockScreen } from './src/native/lock-screen.js';
 import { usePeerAnimation } from './src/store/peer-animation.js';
+import { usePeerTrust, trustNewIdentity } from './src/store/peer-trust.js';
 import { reactNativeWebRtcPeerFactory } from './src/calls/webrtc-peer.js';
 // CallKeepBridge intentionally not imported here — see the deferred-
 // init comment in the post-enrollment effect. The bridge module still
@@ -195,6 +196,45 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
   }
 }
 
+/**
+ * A call payload from `peerUserId` failed on `untrusted_identity` —
+ * their identity key changed (reinstall / new device) and the call is
+ * already dead. Without this the callee sees NOTHING and the caller
+ * hears "no answer" (diag 2026-08-07, @sweetgarlicpie x2). Record a
+ * chat bubble for every dead call, flag the peer so the send/dial
+ * gates prompt, and offer the trust-reset right here.
+ */
+function handleCallPeerIdentityChanged(myUserId: string, peerUserId: string): void {
+  usePeerTrust.getState().markChanged(peerUserId);
+  const cid = useConversations.getState().openDirect(myUserId, peerUserId);
+  useConversations.getState().add(cid, {
+    id: newMessageId(),
+    from: 'system',
+    text: `call failed — @${peerUserId}'s identity changed. verify with peer.`,
+    kind: 'direct',
+    sentAt: Date.now(),
+    stage: 'sent',
+  });
+  Alert.alert(
+    `Call with @${peerUserId} failed`,
+    `Their identity has changed — this usually means they reinstalled the app. It could also indicate a security issue. Trust the new identity so calls and messages work again?`,
+    [
+      { text: 'Not now', style: 'cancel' },
+      {
+        text: 'Trust new identity',
+        style: 'destructive',
+        onPress: () =>
+          void trustNewIdentity(signalProtocol, peerUserId).catch((err) =>
+            diag('app', 'trustNewIdentity failed', {
+              peerUserId,
+              err: String(err),
+            }),
+          ),
+      },
+    ],
+  );
+}
+
 // rc.* diag: throttled peer-animation-frame-rate counter. "Face moved
 // for a bit then stopped" → did the data-channel frames STOP arriving
 // (bug), or did the peer just go quiet (frames keep coming, values
@@ -296,6 +336,7 @@ export default function App() {
       void useDistributionIds.getState().hydrate();
       void useSettings.getState().hydrate();
       void useProfiles.getState().hydrate();
+      void usePeerTrust.getState().hydrate();
       void useOnboardingCards.getState().hydrate();
       void useCalls.getState().hydrate();
       void useBlocks.getState().hydrate();
@@ -722,6 +763,8 @@ export default function App() {
           // previous call before the new channel delivers anything.
           usePeerAnimation.getState().clear(entry.peerUserId);
         },
+        onPeerIdentityChanged: (peerUserId) =>
+          handleCallPeerIdentityChanged(userId, peerUserId),
         onPeerAnimationFrame: (peerUserId, frame) => {
           // Continuous channels (amplitude / mouthShape / pitchTrend
           // / etc.) update every frame. The event + eventAt fields
@@ -890,6 +933,13 @@ export default function App() {
         });
       },
       onPrekeysLow: () => void replenisher.trigger(),
+      // Inbound direct message failed on untrusted_identity. The router
+      // already wrote the "[identity changed — verify with peer]" bubble;
+      // here we just flag the peer so ChatScreen's send gate and the
+      // dial gate prompt for the trust-reset instead of encrypting into
+      // the dead old session. No alert — the bubble is the surface.
+      onPeerIdentityChanged: (peerUserId) =>
+        usePeerTrust.getState().markChanged(peerUserId),
       onPeerDeleted: (handle) => {
         // Server told us a direct message we just sent landed on a
         // tombstoned recipient. Surface an in-chat system bubble +

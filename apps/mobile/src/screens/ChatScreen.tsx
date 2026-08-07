@@ -63,7 +63,8 @@ import { useIdentity } from '../store/identity.js';
 import { api, getWsClient, signalProtocol, vouchflow } from '../services.js';
 import { ApiError } from '../api/client.js';
 import { SignalClientError } from '@speakeasy/crypto';
-import { ensureSessionWithPeer, clearSessionCacheFor } from '../crypto/session.js';
+import { ensureSessionWithPeer } from '../crypto/session.js';
+import { usePeerTrust, trustNewIdentity } from '../store/peer-trust.js';
 import { bytesToB64, utf8ToBytes } from '../utils/bytes.js';
 import { diag, diagFingerprint } from '../diag/log.js';
 import { colors, fonts, space } from '../theme/index.js';
@@ -542,6 +543,38 @@ export function ChatScreen({
         return;
       }
       const isSelf = peerId === myUserId;
+      // Identity-change gate. When an INBOUND message/call from this
+      // peer failed on untrusted_identity, encrypting outbound would
+      // NOT fail — the old session still exists, so the ciphertext
+      // "sends" and silently vanishes on their end (they can't decrypt
+      // it). Catching the error below is therefore impossible; the
+      // only working prompt is this pre-flight check against the flag
+      // the router/orchestrator recorded (diag 2026-08-07).
+      if (!isSelf && usePeerTrust.getState().isChanged(peerId)) {
+        diag('chat', 'send: gated on peer identity change', {
+          peerFp: diagFingerprint(peerId),
+          msgId: id,
+        });
+        Alert.alert(
+          `@${peerId}'s identity has changed`,
+          `This usually means they reinstalled the app. It could also indicate a security issue. Trust the new identity and send?`,
+          [
+            {
+              text: 'Cancel',
+              style: 'cancel',
+              onPress: () =>
+                setSendFailure(conversationId, id, 'encrypt_failed:untrusted_identity'),
+            },
+            {
+              text: 'Trust + send',
+              style: 'destructive',
+              onPress: () =>
+                void resendAfterReset({ id, text, attachments, mentions }),
+            },
+          ],
+        );
+        return;
+      }
       // Pack the text + attachments into the v1 envelope. Pre-rebrand
       // peers see legacy raw utf-8 text — `decodePayload` handles both.
       const plaintext = encodePayload({ v: 1, text, attachments, mentions });
@@ -651,8 +684,9 @@ export function ChatScreen({
     mentions?: string[];
   }) {
     try {
-      await signalProtocol.resetPeer(peerId);
-      clearSessionCacheFor(peerId);
+      // Wipes pinned identity + session, drops the JS session cache,
+      // and clears the peer-trust "identity changed" flag in one step.
+      await trustNewIdentity(signalProtocol, peerId);
       // Retry against the original bubble's wire id so the eventual
       // delivered/read acks attach to the bubble the user can already
       // see — minting a fresh id here would leave receipts orphaned.

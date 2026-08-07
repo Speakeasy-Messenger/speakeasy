@@ -16,6 +16,7 @@ import {
   type AnimationFrame,
 } from './animation-channel.js';
 import type { ApiClient } from '../api/client.js';
+import { SignalClientError } from '@speakeasy/crypto';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { ensureSessionWithPeer as EnsureSessionFn } from '../crypto/session.js';
 import { noteSessionEstablishedWith } from '../crypto/session.js';
@@ -95,6 +96,15 @@ export interface CallOrchestratorDeps {
    * record an entry in the local call history.
    */
   onCallFinished: (entry: CallHistoryEntry) => void;
+  /**
+   * Called when a call payload from `peerUserId` fails to decrypt with
+   * `untrusted_identity` — their identity key changed (reinstall). The
+   * call is already dead at that point (we reply call_end); app-level
+   * wiring flags the peer + surfaces a recovery prompt, because
+   * otherwise the callee sees NOTHING and the caller hears "no answer"
+   * (diag 2026-08-07, two dead incoming calls). Optional for tests.
+   */
+  onPeerIdentityChanged?: (peerUserId: string) => void;
   /**
    * Phase 5j Private Call — fired every time an `AnimationFrame`
    * arrives from the peer's data channel (already decoded). The UI
@@ -712,12 +722,24 @@ export class CallOrchestrator {
         callId,
         err: String(err),
       });
+      this.notePeerIdentityChanged(fromUserId, err);
       this.deps.send({
         type: 'call_end',
         to: fromUserId,
         call_id: callId,
         reason: 'hangup',
       });
+    }
+  }
+
+  /** Flag `untrusted_identity` decrypt failures to the app layer — the
+   *  one call-death the user can actually fix (trust-reset the peer). */
+  private notePeerIdentityChanged(peerUserId: string, err: unknown): void {
+    if (
+      err instanceof SignalClientError &&
+      err.reason === 'untrusted_identity'
+    ) {
+      this.deps.onPeerIdentityChanged?.(peerUserId);
     }
   }
 
@@ -741,6 +763,7 @@ export class CallOrchestrator {
       this.clearRingTimeout();
     } catch (err) {
       diag('call', 'incoming answer FAILED', { err: String(err) });
+      this.notePeerIdentityChanged(fromUserId, err);
       this.endLocally('failed');
     }
   }
