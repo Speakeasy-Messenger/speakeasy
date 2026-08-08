@@ -55,6 +55,9 @@ export interface AttachWsOptions {
    * server-level wiring resolves this once and shares it with the
    * routes layer that already uses it (e.g. prekey_low notifications).
    */
+  /** Message-retry queue: handler enqueues each buffered message so a
+   *  missed rich push is re-sent ~45s later. Optional (tests omit it). */
+  messageRetryQueue?: import('../push/message-retry-queue.js').MessageRetryQueue;
   userNotifier: UserNotifier;
   /**
    * Grace window (ms) the mid-call WS-drop monitor waits for a reconnect
@@ -118,6 +121,7 @@ export function attachWebsocket(
         callBuffer,
         ackBuffer,
         userNotifier: opts.userNotifier,
+        messageRetryQueue: opts.messageRetryQueue,
         callDropMonitor,
         eventLog: opts.eventLog,
         apnsVoip: opts.apnsVoip,

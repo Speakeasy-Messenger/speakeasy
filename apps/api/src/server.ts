@@ -74,6 +74,13 @@ import { createRedisCallOfferBuffer } from './ws/call-offer-buffer.redis.js';
 import { createAckBuffer, type AckBuffer } from './ws/ack-buffer.js';
 import { createRedisAckBuffer } from './ws/ack-buffer.redis.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
+import {
+  createMessageRetryQueue,
+  type MessageRetryQueue,
+} from './push/message-retry-queue.js';
+import { createRedisMessageRetryQueue } from './push/message-retry-queue.redis.js';
+import { startMessageRetryWorker } from './push/message-retry-worker.js';
+import { registerDeliveredRoute } from './routes/delivered.js';
 import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { apnsVoipFromEnv } from './push/apns-voip.js';
 import { InMemoryDevicesRepo } from './db/devices.memory.js';
@@ -108,6 +115,9 @@ export interface BuildServerOptions {
   /** Override the ack buffer (test injection). Defaults to Redis-backed
    *  when REDIS_URL is set, else in-memory. */
   ackBuffer?: AckBuffer;
+  /** Override the message-retry queue (test injection). Defaults to
+   *  Redis-backed when a client is available, else in-memory. */
+  messageRetryQueue?: MessageRetryQueue;
   /** Grace window (ms) before a mid-call WS drop ends the call for the
    *  peer. Defaults to DEFAULT_CALL_DROP_GRACE_MS. Tests pass a small
    *  value. */
@@ -351,6 +361,32 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
     const ackBuffer = opts.ackBuffer ?? defaultAckBuffer();
 
+    // Message-retry: re-send the ORIGINAL push (same ciphertext) if the relay
+    // row is still present ~45s after send, i.e. the phone never acked over WS
+    // OR the HTTP delivered-receipt. Redis-backed so a retry enqueued on one
+    // fly machine is claimed exactly once across the fleet.
+    const messageRetryQueue =
+      opts.messageRetryQueue ??
+      (redis ? createRedisMessageRetryQueue(redis) : createMessageRetryQueue());
+    const stopMessageRetryWorker = startMessageRetryWorker({
+      queue: messageRetryQueue,
+      messages,
+      push,
+      groupName: async (groupId) => (await groups.findById(groupId))?.name ?? undefined,
+      log: app.log,
+    });
+    app.addHook('onClose', async () => stopMessageRetryWorker());
+
+    // HTTP delivered-receipt: lets a BACKGROUNDED push handler (no WS) ack a
+    // message, clearing the relay row so it isn't needlessly retried. Shares
+    // applyDeliveryAck with the WS path.
+    await registerDeliveredRoute(app, {
+      messages,
+      ackRouter,
+      ackBuffer,
+      instanceId,
+    });
+
     attachWebsocket(app, {
       validator,
       connections,
@@ -366,6 +402,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       deletedHandles,
       callBuffer,
       ackBuffer,
+      messageRetryQueue,
       userNotifier,
       callDropGraceMs: opts.callDropGraceMs,
       eventLog,

@@ -782,6 +782,25 @@ async function displayCallNotification(data: FcmData): Promise<void> {
  * Anything not decryptable (private device / sealed / call / failure)
  * falls back to a plain single-line banner.
  */
+
+/**
+ * Background delivery receipt. The WebSocket is closed while backgrounded, so a
+ * displayed push can't be acked over it; without an ack the server re-sends the
+ * push ~45s later. POST the id so the relay row clears and no retry fires.
+ * Best-effort and non-blocking: a failure just costs one harmless server retry.
+ */
+async function ackDeliveredHeadless(messageId: string | undefined): Promise<void> {
+  if (!messageId) return;
+  try {
+    const dt = await getCachedDeviceToken();
+    if (!dt) return;
+    await api.reportDelivered(dt, [messageId]);
+    diag('push-bg', 'delivery receipt sent', { msgId: messageId });
+  } catch (err) {
+    diag('push-bg', 'delivery receipt failed (server will retry)', { err: String(err) });
+  }
+}
+
 async function displayPushNotification(data: FcmData): Promise<void> {
   const conversationId = data.conversation_id;
   const receivedAt = Date.now();
@@ -865,6 +884,7 @@ async function displayPushNotification(data: FcmData): Promise<void> {
           withReply: true,
         });
         diag('push-bg', 'messaging notification displayed', { conversationId });
+        void ackDeliveredHeadless(data.message_id);
         return;
       }
     } catch (err) {
@@ -918,6 +938,7 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       diag('push-bg', 'attachment notification displayed (ciphertext dropped)', {
         conversationId,
       });
+      void ackDeliveredHeadless(data.message_id);
       return;
     }
   }

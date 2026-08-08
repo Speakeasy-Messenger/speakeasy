@@ -34,6 +34,8 @@ import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { AckBuffer } from './ack-buffer.js';
 import type { UserNotifier } from './user-notifier.js';
 import { routeCallFrame } from './call-router.js';
+import { applyDeliveryAck } from './delivery-ack.js';
+import { RETRY_DELAY_MS } from '../push/message-retry-queue.js';
 import type { CallDropMonitor } from './call-drop-monitor.js';
 
 const AUTH_TIMEOUT_MS = 10_000;
@@ -89,6 +91,9 @@ interface Deps {
    * answers in a 2-machine deploy.
    */
   userNotifier: UserNotifier;
+  /** Message-retry queue: each buffered message is enqueued so a rich push
+   *  that never landed is re-sent ~45s later (see message-retry-worker.ts). */
+  messageRetryQueue?: import('../push/message-retry-queue.js').MessageRetryQueue;
   /**
    * Ends a call for the surviving party when the peer's WS drops mid-call
    * without a `call_end` (swipe-away / process-kill). Armed from this
@@ -414,27 +419,9 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
         // original sender can emit `delivered` (cross-instance routing).
         // Phase 5f: per-device tracking — `delivered` only fires once
         // every known device of the recipient has acked.
-        const result = await deps.messages.markDeliveredByDevice(
-          msg.message_id,
-          session.deviceToken,
-        );
-        if (result.kind === 'fully_delivered') {
-          void deps.ackRouter.announce({
-            messageId: msg.message_id,
-            senderId: result.senderId,
-            instanceId: deps.instanceId,
-            kind: 'delivered',
-          });
-          // Catch-up: the announce above only reaches a sender who is
-          // online right now. Buffer it so a backgrounded sender still
-          // sees ✓✓ on reconnect.
-          deps.ackBuffer.put(result.senderId, {
-            kind: 'delivered',
-            messageId: msg.message_id,
-          });
-        }
-        // 'pending' (other devices haven't acked yet) and 'not_found'
-        // both produce no further side effect.
+        // Shared with POST /v1/messages/delivered (see ws/delivery-ack.ts)
+        // so the WS and HTTP ack paths can't diverge.
+        await applyDeliveryAck(deps, msg.message_id, session.deviceToken);
         return;
       }
       case 'read': {
@@ -696,6 +683,11 @@ export function handleConnection(socket: WebSocket, deps: Deps): void {
                 ciphertext: msg.ciphertext,
               })
               .catch((err) => deps.log.warn({ err, recipientId }, 'push notify failed'));
+            // Schedule a retry of THIS push: if the row is still unacked ~45s
+            // from now (neither WS nor the HTTP delivered-receipt cleared it),
+            // the phone never processed the push and the worker re-sends the
+            // same rich payload. An acked row is gone by then → no retry.
+            deps.messageRetryQueue?.enqueue(rowId, Date.now() + RETRY_DELAY_MS);
           }),
         );
 
