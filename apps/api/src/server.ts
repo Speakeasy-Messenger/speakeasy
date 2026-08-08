@@ -350,8 +350,6 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const ackRouter = opts.ackRouter ?? defaultAckRouter();
     const callBuffer = opts.callBuffer ?? defaultCallOfferBuffer();
     const ackBuffer = opts.ackBuffer ?? defaultAckBuffer();
-    // Redis-backed when we have a shared client (so a fallback enqueued on one
-    // fly machine is claimed exactly once across the fleet), else in-memory.
 
     attachWebsocket(app, {
       validator,
