@@ -65,6 +65,7 @@ import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vo
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
+import { republishBundleOnce } from './src/crypto/republish-bundle.js';
 import {
   CallOrchestrator,
   callKeepEnabled,
@@ -974,6 +975,10 @@ export default function App() {
       // analysis). `tryRegisterPushToken` is idempotent + dedupes,
       // so this is a no-op when registration already succeeded.
       onAuthed: () => {
+        // One-time repair for bundles poisoned by the fixed-id era: publish
+        // a bundle this device actually holds, so new peers stop sealing
+        // PreKey messages we can't open. See crypto/republish-bundle.ts.
+        void republishBundleOnce(() => replenisher.trigger());
         const dt = useIdentity.getState().deviceToken;
         if (!dt) return;
         void tryRegisterPushToken(dt).catch((err) => {
