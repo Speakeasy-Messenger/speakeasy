@@ -302,7 +302,10 @@ platform :ios do
     # already present, so re-running is safe.
     extra = ENV["REVIEW_NOTES_APPEND"]
     if extra && !extra.strip.empty?
-      detail = (version.get_app_store_review_detail rescue nil)
+     begin
+      # NOTE: creating a review detail fails with "Access Unavailable" when one
+      # already exists, so a failed FETCH must not fall through to create.
+      detail = version.get_app_store_review_detail
       current = (detail&.notes || "")
       if current.include?(extra.strip)
         UI.message("Review notes already contain the addition — leaving as-is.")
@@ -318,6 +321,14 @@ platform :ios do
         end
         UI.success("Appended #{extra.strip.length} chars to App Review notes (now #{merged.length}).")
       end
+     rescue => e
+      # Never fail the job here: attaching the build is the part that cannot be
+      # done from ASC mobile web, and it has already succeeded by this point.
+      # Notes ARE editable on mobile, so a human can finish this in seconds.
+      UI.important("Could not update App Review notes automatically (#{e.class}: #{e.message}).")
+      UI.important("Paste this into App Review Information → Notes by hand:")
+      UI.important(extra.strip)
+     end
     end
 
     # Submitting is a separate, deliberate step: it is outward-facing and this
