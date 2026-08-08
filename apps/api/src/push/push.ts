@@ -83,15 +83,6 @@ export interface PushDeliveryNotice {
    * device then falls back to a generic "New message".
    */
   ciphertext?: string;
-  /**
-   * Fallback re-send flag (push-fallback-worker). When true, Android gets an
-   * `android.notification` block even on a 'rich' device — an OS-rendered
-   * banner that shows even if the app process is dead — and iOS devices are
-   * skipped (their original push already carried a notification block, so a
-   * re-send would just duplicate). Set only by the delayed re-check that fires
-   * when a rich data-only push never landed. Carries no ciphertext.
-   */
-  forceBanner?: boolean;
 }
 
 export interface PushProvider {

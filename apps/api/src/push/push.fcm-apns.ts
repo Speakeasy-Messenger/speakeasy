@@ -129,18 +129,11 @@ export function buildAndroidPushMessage(
     data.ciphertext = notice.ciphertext!;
   }
   const android: admin.messaging.AndroidConfig = { priority: 'high' };
-  // 'private' always wants an OS-rendered banner. `forceBanner` (the delayed
-  // fallback re-send) makes even a 'rich' device get one, because the original
-  // data-only push never ran the app's handler — a killed/Doze'd app shows
-  // nothing otherwise. Tag the fallback by conversation so repeated fallbacks
-  // for the same chat collapse instead of stacking generic banners.
-  if (privacy === 'private' || notice.forceBanner) {
-    android.notification = {
-      title,
-      body,
-      channelId: 'speakeasy_default',
-      ...(notice.forceBanner ? { tag: notice.conversationId } : {}),
-    };
+  // 'private' devices opt out of the decrypted preview, so they want an
+  // OS-rendered banner. 'rich' devices stay data-only: the headless handler
+  // renders the real message text itself.
+  if (privacy === 'private') {
+    android.notification = { title, body, channelId: 'speakeasy_default' };
   }
   return { data, android, tokens };
 }
@@ -235,10 +228,6 @@ export class FcmApnsPushProvider implements PushProvider {
     >();
     for (const d of withPush) {
       const platform = d.platform ?? 'android';
-      // Fallback re-send targets ONLY Android (the data-only-push platform).
-      // iOS already got a notification-block push originally, so re-sending
-      // would just duplicate the banner.
-      if (notice.forceBanner && platform === 'ios') continue;
       const privacy = d.notificationPrivacy ?? 'rich';
       const { title, body } = resolveBannerCopy(notice, privacy);
       const key = `${title}\0${body}\0${platform}\0${privacy}`;

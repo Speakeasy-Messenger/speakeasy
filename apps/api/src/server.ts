@@ -73,12 +73,6 @@ import {
 import { createRedisCallOfferBuffer } from './ws/call-offer-buffer.redis.js';
 import { createAckBuffer, type AckBuffer } from './ws/ack-buffer.js';
 import { createRedisAckBuffer } from './ws/ack-buffer.redis.js';
-import {
-  createPushFallbackQueue,
-  type PushFallbackQueue,
-} from './push/push-fallback-queue.js';
-import { createRedisPushFallbackQueue } from './push/push-fallback-queue.redis.js';
-import { startPushFallbackWorker } from './push/push-fallback-worker.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
 import { FcmApnsPushProvider } from './push/push.fcm-apns.js';
 import { apnsVoipFromEnv } from './push/apns-voip.js';
@@ -114,9 +108,6 @@ export interface BuildServerOptions {
   /** Override the ack buffer (test injection). Defaults to Redis-backed
    *  when REDIS_URL is set, else in-memory. */
   ackBuffer?: AckBuffer;
-  /** Override the push-fallback re-check queue (test injection). Defaults to
-   *  Redis-backed when a Redis client is available, else in-memory. */
-  pushFallbackQueue?: PushFallbackQueue;
   /** Grace window (ms) before a mid-call WS drop ends the call for the
    *  peer. Defaults to DEFAULT_CALL_DROP_GRACE_MS. Tests pass a small
    *  value. */
@@ -361,9 +352,6 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     const ackBuffer = opts.ackBuffer ?? defaultAckBuffer();
     // Redis-backed when we have a shared client (so a fallback enqueued on one
     // fly machine is claimed exactly once across the fleet), else in-memory.
-    const pushFallbackQueue =
-      opts.pushFallbackQueue ??
-      (redis ? createRedisPushFallbackQueue(redis) : createPushFallbackQueue());
 
     attachWebsocket(app, {
       validator,
@@ -381,38 +369,9 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       callBuffer,
       ackBuffer,
       userNotifier,
-      pushFallbackQueue,
       callDropGraceMs: opts.callDropGraceMs,
       eventLog,
       apnsVoip,
-    });
-    // Delayed re-check worker: fires generic OS banners for messages whose rich
-    // data-only push never landed (killed/Doze'd Android app).
-    //
-    // DISABLED BY DEFAULT (2026-08-08). Its premise — "relay row still present
-    // at +45s ⇒ the push never landed" — is false for the case push exists to
-    // serve. A relay row is cleared only by a WebSocket ack, and the client
-    // CLOSES its WebSocket when backgrounded, so a backgrounded device that
-    // received and displayed the rich notification perfectly still leaves the
-    // row in place. The worker then fires a second, GENERIC banner ~45s later,
-    // replacing a good decrypted preview with "new message" — observed in the
-    // field on 2026-08-08 at +42.6s and +47.9s after two correctly-delivered
-    // group messages.
-    //
-    // Re-enable only once a device can report delivery from the background push
-    // handler (it has network — it just received the push — but no WS and no
-    // HTTP ack route today). Then "row present" would genuinely mean undelivered.
-    const stopPushFallbackWorker =
-      process.env.PUSH_FALLBACK_ENABLED === 'true'
-        ? startPushFallbackWorker({
-            queue: pushFallbackQueue,
-            messages,
-            push,
-            log: app.log,
-          })
-        : () => {};
-    app.addHook('onClose', async () => {
-      stopPushFallbackWorker();
     });
     if (redis) {
       app.addHook('onClose', async () => {

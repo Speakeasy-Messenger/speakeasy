@@ -57,12 +57,6 @@ export interface AttachWsOptions {
    */
   userNotifier: UserNotifier;
   /**
-   * Delayed re-check queue for the rich-push fallback. Forwarded to the
-   * message handler so each buffered message schedules a fallback banner if it
-   * stays undelivered. Optional — omitted in unit tests that don't exercise it.
-   */
-  pushFallbackQueue?: import('../push/push-fallback-queue.js').PushFallbackQueue;
-  /**
    * Grace window (ms) the mid-call WS-drop monitor waits for a reconnect
    * before ending the call for the peer. Optional — defaults to
    * DEFAULT_CALL_DROP_GRACE_MS. Tests pass a small value so they don't
@@ -124,7 +118,6 @@ export function attachWebsocket(
         callBuffer,
         ackBuffer,
         userNotifier: opts.userNotifier,
-        pushFallbackQueue: opts.pushFallbackQueue,
         callDropMonitor,
         eventLog: opts.eventLog,
         apnsVoip: opts.apnsVoip,
