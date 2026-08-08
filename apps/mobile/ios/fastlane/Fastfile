@@ -281,11 +281,21 @@ platform :ios do
     # Read-only mode: report state and touch nothing. Safe to run against a
     # version that is already in review.
     if ENV["STATUS_ONLY"] == "true"
-      versions.each do |v|
-        d = (v.get_app_store_review_detail rescue nil)
-        UI.message("  notes_len=#{(d&.notes || '').length}")
+      # Re-fetch WITH the relationships: without includes, `build` and the
+      # review detail come back nil and look like "nothing is set" when they
+      # are in fact set. Report the fetch failing separately from it being empty.
+      detailed = app.get_app_store_versions(includes: "build,appStoreReviewDetail")
+      detailed.each do |v|
+        UI.message("  version=#{v.version_string} state=#{v.app_store_state}")
         b = (v.build rescue nil)
-        UI.message("  attached_build=#{b&.version || 'none'}")
+        UI.message("  attached_build=#{b ? b.version : 'NONE'}")
+        begin
+          d = v.app_store_review_detail
+          UI.message("  notes_len=#{(d&.notes || '').length}")
+          UI.message("  notes_has_video_link=#{(d&.notes || '').include?('drive.google.com')}")
+        rescue => e
+          UI.important("  review-detail fetch FAILED (#{e.class}) — cannot read notes")
+        end
       end
       sub = app.get_in_progress_review_submission(platform: "IOS")
       UI.message("in_progress_review_submission=#{sub ? "id=#{sub.id} state=#{sub.state}" : 'none'}")
