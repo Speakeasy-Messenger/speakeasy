@@ -16,7 +16,16 @@ import { ensureCameraPermission } from '../permissions/runtime.js';
  */
 const PHOTO_MAX_W = 2048;
 const PHOTO_MAX_H = 2048;
-const PHOTO_QUALITY = 0.8;
+// The picker re-encodes to JPEG whenever a resize is requested (which is
+// always, since phone screenshots exceed 2048px). JPEG at 0.8 blocks badly on
+// the sharp text + thin lines in SCREENSHOTS (reported "pixelated" 2026-08-08)
+// — fine for photographs, ugly for UI captures. 0.9 (the picker's PhotoQuality
+// type only allows 0.1 steps; 0.9 is the max short of lossless 1.0) makes the
+// text artifacts close to invisible while a typical screenshot stays well under
+// a megabyte and a photo under ~2MB, so the 3MB ceiling still rarely rejects.
+// Not lossless (that would mean per-format PNG handling + a HEIC-safety path —
+// see #184 — which isn't worth the branching for the gain over 0.9).
+const PHOTO_QUALITY = 0.9;
 const PHOTO_MAX_BYTES = 3_000_000; // pre-base64
 
 const GIF_MAX_BYTES = 1_000_000;
