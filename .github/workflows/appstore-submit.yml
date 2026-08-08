@@ -34,6 +34,10 @@ on:
         description: 'Delete an EMPTY in-progress review submission left by a failed attempt.'
         type: boolean
         default: false
+      submit_existing:
+        description: 'Submit the EXISTING draft submission that already holds the version.'
+        type: boolean
+        default: false
       submit_for_review:
         description: 'Also submit for review? Leave false to only attach the build.'
         type: boolean
@@ -69,4 +73,5 @@ jobs:
           STATUS_ONLY: ${{ inputs.status_only }}
           DIAGNOSE: ${{ inputs.diagnose }}
           CLEAR_EMPTY_SUBMISSION: ${{ inputs.clear_empty_submission }}
+          SUBMIT_EXISTING: ${{ inputs.submit_existing }}
         run: bundle exec fastlane ios submit_build

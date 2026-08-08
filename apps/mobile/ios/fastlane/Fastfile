@@ -327,6 +327,41 @@ platform :ios do
         shots = (loc.get_app_screenshot_sets rescue [])
         UI.message("  locale=#{loc.locale} desc=#{loc.description.to_s.length}ch kw=#{loc.keywords.to_s.length}ch support=#{loc.support_url.inspect} screenshot_sets=#{shots.length}")
       end
+      # List ALL review submissions, not just "in progress": a DRAFT created in
+      # the ASC UI does not match that filter, so orphans stayed invisible while
+      # still holding the version — which is what made every API submit fail
+      # with "appStoreVersions ... is not in valid state" (a version can belong
+      # to only ONE submission).
+      begin
+        all_subs = Spaceship::ConnectAPI.get_review_submissions(
+          app_id: app.id, includes: "items"
+        ).to_models
+        UI.important("review submissions: #{all_subs.length}")
+        all_subs.each do |rs|
+          items = (rs.items || [])
+          vers = items.map { |it| (it.app_store_version&.version_string rescue nil) }.compact
+          UI.message("  id=#{rs.id} state=#{rs.state} items=#{items.length} versions=#{vers.inspect}")
+          if items.empty? && ENV["CLEAR_EMPTY_SUBMISSION"] == "true"
+            begin
+              rs.delete!
+              UI.success("  → deleted EMPTY submission #{rs.id}")
+            rescue => e
+              UI.important("  → could not delete #{rs.id}: #{e.message[0,120]}")
+            end
+          end
+          if ENV["SUBMIT_EXISTING"] == "true" && !items.empty? && rs.state != "WAITING_FOR_REVIEW"
+            begin
+              rs.submit_for_review
+              UI.success("  → SUBMITTED existing submission #{rs.id} for review")
+            rescue => e
+              UI.important("  → submit failed for #{rs.id}: #{e.message[0,200]}")
+            end
+          end
+        end
+      rescue => e
+        UI.important("could not list review submissions: #{e.class}: #{e.message[0,160]}")
+      end
+
       sub = app.get_in_progress_review_submission(platform: "IOS")
       if sub
         items = (sub.items rescue [])
