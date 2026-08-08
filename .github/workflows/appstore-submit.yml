@@ -26,6 +26,14 @@ on:
         description: 'Only report current App Store state; change nothing.'
         type: boolean
         default: false
+      diagnose:
+        description: 'Diagnose why the version is not submittable (changes nothing unless clear_empty_submission).'
+        type: boolean
+        default: false
+      clear_empty_submission:
+        description: 'Delete an EMPTY in-progress review submission left by a failed attempt.'
+        type: boolean
+        default: false
       submit_for_review:
         description: 'Also submit for review? Leave false to only attach the build.'
         type: boolean
@@ -59,4 +67,6 @@ jobs:
           REVIEW_NOTES_APPEND: ${{ inputs.review_notes_append }}
           SUBMIT_FOR_REVIEW: ${{ inputs.submit_for_review }}
           STATUS_ONLY: ${{ inputs.status_only }}
+          DIAGNOSE: ${{ inputs.diagnose }}
+          CLEAR_EMPTY_SUBMISSION: ${{ inputs.clear_empty_submission }}
         run: bundle exec fastlane ios submit_build

@@ -302,6 +302,49 @@ platform :ios do
       next
     end
 
+    # Diagnose why ASC calls a version "not in valid state", and clear any empty
+    # review submission a failed attempt left behind (an orphan blocks the UI).
+    if ENV["DIAGNOSE"] == "true"
+      v = app.get_app_store_versions(includes: "build,appStoreReviewDetail,appStoreVersionLocalizations")
+             .find { |x| x.version_string == ENV.fetch("APP_VERSION", "1.0") }
+      UI.message("version=#{v.version_string} state=#{v.app_store_state} release_type=#{v.release_type}")
+      b = (v.build rescue nil)
+      UI.message("build=#{b&.version} processing=#{b&.processing_state} expired=#{b&.expired}")
+      begin
+        ec = Spaceship::ConnectAPI.get_build(build_id: b.id, includes: "buildBetaDetail")
+        UI.message("build_raw=#{ec.to_models.first.uses_non_exempt_encryption.inspect} (nil = export compliance UNANSWERED)")
+      rescue => e
+        UI.important("export-compliance read failed: #{e.message[0,120]}")
+      end
+      begin
+        ar = app.fetch_age_rating_declaration
+        UI.message("age_rating_declaration=#{ar ? 'present' : 'MISSING'}")
+      rescue => e
+        UI.important("age rating read failed: #{e.message[0,120]}")
+      end
+      UI.message("content_rights=#{(app.content_rights_declaration rescue 'unreadable')}")
+      v.get_app_store_version_localizations.each do |loc|
+        shots = (loc.get_app_screenshot_sets rescue [])
+        UI.message("  locale=#{loc.locale} desc=#{loc.description.to_s.length}ch kw=#{loc.keywords.to_s.length}ch support=#{loc.support_url.inspect} screenshot_sets=#{shots.length}")
+      end
+      sub = app.get_in_progress_review_submission(platform: "IOS")
+      if sub
+        items = (sub.items rescue [])
+        UI.important("in-progress review submission id=#{sub.id} state=#{sub.state} items=#{items.length}")
+        if items.empty? && ENV["CLEAR_EMPTY_SUBMISSION"] == "true"
+          begin
+            sub.delete!
+            UI.success("Deleted the EMPTY review submission (it was blocking the UI).")
+          rescue => e
+            UI.important("could not delete submission: #{e.message[0,160]}")
+          end
+        end
+      else
+        UI.message("no in-progress review submission")
+      end
+      next
+    end
+
     target = ENV.fetch("APP_VERSION", "1.0")
     version = versions.find { |v| v.version_string == target }
     UI.user_error!("No iOS version '#{target}' found on the app") unless version
