@@ -15,9 +15,17 @@ on:
   workflow_dispatch:
     inputs:
       build_number:
-        description: 'CFBundleVersion to attach + submit (e.g. 33)'
+        description: 'CFBundleVersion to attach (e.g. 47)'
         required: true
-        default: '33'
+        default: '47'
+      review_notes_append:
+        description: 'Text to APPEND to App Review Notes (e.g. the demo-video link). Leave blank to skip.'
+        required: false
+        default: ''
+      submit_for_review:
+        description: 'Also submit for review? Leave false to only attach the build.'
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -44,4 +52,6 @@ jobs:
           ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
           ASC_KEY_CONTENT_BASE64: ${{ secrets.ASC_KEY_CONTENT_BASE64 }}
           SUBMIT_BUILD_NUMBER: ${{ inputs.build_number }}
+          REVIEW_NOTES_APPEND: ${{ inputs.review_notes_append }}
+          SUBMIT_FOR_REVIEW: ${{ inputs.submit_for_review }}
         run: bundle exec fastlane ios submit_build

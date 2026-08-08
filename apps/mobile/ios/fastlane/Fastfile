@@ -296,6 +296,39 @@ platform :ios do
     version.select_build(build_id: build.id)
     UI.success("Attached build #{target}(#{build_num}) to version #{version.id}.")
 
+    # App Review Information → Notes. APPEND-only: the existing notes carry the
+    # hand-written "how to get in" instructions, and clobbering them would cost
+    # the reviewer the very context they need. Skips silently if the text is
+    # already present, so re-running is safe.
+    extra = ENV["REVIEW_NOTES_APPEND"]
+    if extra && !extra.strip.empty?
+      detail = (version.get_app_store_review_detail rescue nil)
+      current = (detail&.notes || "")
+      if current.include?(extra.strip)
+        UI.message("Review notes already contain the addition — leaving as-is.")
+      else
+        merged = current.strip.empty? ? extra.strip : "#{current.rstrip}\n\n#{extra.strip}"
+        if merged.length > 4000
+          UI.user_error!("Review notes would be #{merged.length} chars (max 4000). Trim them first.")
+        end
+        if detail
+          detail.update(attributes: { notes: merged })
+        else
+          version.create_app_store_review_detail(attributes: { notes: merged })
+        end
+        UI.success("Appended #{extra.strip.length} chars to App Review notes (now #{merged.length}).")
+      end
+    end
+
+    # Submitting is a separate, deliberate step: it is outward-facing and this
+    # app is set to auto-release on approval. Default OFF so the build swap can
+    # be done for someone who only has ASC mobile web (where the build picker
+    # is desktop-hover-only) while the submit stays their call.
+    unless ENV["SUBMIT_FOR_REVIEW"] == "true"
+      UI.success("Build attached. SUBMIT_FOR_REVIEW is not 'true', so NOT submitting.")
+      next
+    end
+
     # Submit for review via the new ASC review-submission model: find an open
     # submission (or create one), add this version, then submit. Reaching the
     # 'Add for Review' button is unreliable on the ASC mobile web, so do it here.
