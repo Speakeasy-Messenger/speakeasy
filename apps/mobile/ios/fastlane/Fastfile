@@ -349,7 +349,9 @@ platform :ios do
               UI.important("  → could not delete #{rs.id}: #{e.message[0,120]}")
             end
           end
-          if ENV["SUBMIT_EXISTING"] == "true" && !items.empty? && rs.state != "WAITING_FOR_REVIEW"
+          # Only a READY_FOR_REVIEW submission can be submitted. Guard explicitly
+          # so a COMPLETE one (the already-reviewed submission) is never touched.
+          if ENV["SUBMIT_EXISTING"] == "true" && !items.empty? && rs.state == "READY_FOR_REVIEW"
             begin
               rs.submit_for_review
               UI.success("  → SUBMITTED existing submission #{rs.id} for review")
