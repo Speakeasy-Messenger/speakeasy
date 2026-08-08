@@ -278,6 +278,20 @@ platform :ios do
       UI.message("VERSION #{v.version_string} platform=#{v.platform} state=#{v.app_store_state} id=#{v.id}")
     end
 
+    # Read-only mode: report state and touch nothing. Safe to run against a
+    # version that is already in review.
+    if ENV["STATUS_ONLY"] == "true"
+      versions.each do |v|
+        d = (v.get_app_store_review_detail rescue nil)
+        UI.message("  notes_len=#{(d&.notes || '').length}")
+        b = (v.build rescue nil)
+        UI.message("  attached_build=#{b&.version || 'none'}")
+      end
+      sub = app.get_in_progress_review_submission(platform: "IOS")
+      UI.message("in_progress_review_submission=#{sub ? "id=#{sub.id} state=#{sub.state}" : 'none'}")
+      next
+    end
+
     target = ENV.fetch("APP_VERSION", "1.0")
     version = versions.find { |v| v.version_string == target }
     UI.user_error!("No iOS version '#{target}' found on the app") unless version
