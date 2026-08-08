@@ -387,14 +387,30 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
       apnsVoip,
     });
     // Delayed re-check worker: fires generic OS banners for messages whose rich
-    // data-only push never landed (killed/Doze'd Android app). Idempotent across
-    // instances (claimDue removes atomically); unref'd so it never blocks exit.
-    const stopPushFallbackWorker = startPushFallbackWorker({
-      queue: pushFallbackQueue,
-      messages,
-      push,
-      log: app.log,
-    });
+    // data-only push never landed (killed/Doze'd Android app).
+    //
+    // DISABLED BY DEFAULT (2026-08-08). Its premise — "relay row still present
+    // at +45s ⇒ the push never landed" — is false for the case push exists to
+    // serve. A relay row is cleared only by a WebSocket ack, and the client
+    // CLOSES its WebSocket when backgrounded, so a backgrounded device that
+    // received and displayed the rich notification perfectly still leaves the
+    // row in place. The worker then fires a second, GENERIC banner ~45s later,
+    // replacing a good decrypted preview with "new message" — observed in the
+    // field on 2026-08-08 at +42.6s and +47.9s after two correctly-delivered
+    // group messages.
+    //
+    // Re-enable only once a device can report delivery from the background push
+    // handler (it has network — it just received the push — but no WS and no
+    // HTTP ack route today). Then "row present" would genuinely mean undelivered.
+    const stopPushFallbackWorker =
+      process.env.PUSH_FALLBACK_ENABLED === 'true'
+        ? startPushFallbackWorker({
+            queue: pushFallbackQueue,
+            messages,
+            push,
+            log: app.log,
+          })
+        : () => {};
     app.addHook('onClose', async () => {
       stopPushFallbackWorker();
     });
