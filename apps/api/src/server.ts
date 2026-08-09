@@ -363,18 +363,33 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
 
     // Message-retry: re-send the ORIGINAL push (same ciphertext) if the relay
     // row is still present ~45s after send, i.e. the phone never acked over WS
-    // OR the HTTP delivered-receipt. Redis-backed so a retry enqueued on one
-    // fly machine is claimed exactly once across the fleet.
-    const messageRetryQueue =
-      opts.messageRetryQueue ??
-      (redis ? createRedisMessageRetryQueue(redis) : createMessageRetryQueue());
-    const stopMessageRetryWorker = startMessageRetryWorker({
-      queue: messageRetryQueue,
-      messages,
-      push,
-      groupName: async (groupId) => (await groups.findById(groupId))?.name ?? undefined,
-      log: app.log,
-    });
+    // OR the HTTP delivered-receipt.
+    //
+    // OFF BY DEFAULT (gated on PUSH_RETRY_ENABLED). The retry is only safe once
+    // the CLIENT can ack a backgrounded push over HTTP (POST /v1/messages/
+    // delivered, shipped in v1.0.60): a phone that received and displayed the
+    // push but can't say so looks identical to one that never got it, so the
+    // server re-sends and the user gets DUPLICATE notifications. Enabling this
+    // while most devices are on an older build spams every un-updated user for
+    // every message they don't open within ~45s (reported 2026-08-09). Turn it
+    // on only once v1.0.60+ adoption is high — a fly secret + restart, no
+    // redeploy. Injected queue (tests) forces it on regardless of the env.
+    const retryEnabled =
+      opts.messageRetryQueue !== undefined ||
+      process.env.PUSH_RETRY_ENABLED === 'true';
+    const messageRetryQueue = !retryEnabled
+      ? undefined
+      : (opts.messageRetryQueue ??
+        (redis ? createRedisMessageRetryQueue(redis) : createMessageRetryQueue()));
+    const stopMessageRetryWorker = messageRetryQueue
+      ? startMessageRetryWorker({
+          queue: messageRetryQueue,
+          messages,
+          push,
+          groupName: async (groupId) => (await groups.findById(groupId))?.name ?? undefined,
+          log: app.log,
+        })
+      : () => {};
     app.addHook('onClose', async () => stopMessageRetryWorker());
 
     // HTTP delivered-receipt: lets a BACKGROUNDED push handler (no WS) ack a
