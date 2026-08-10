@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import {
   mediaDevices,
   RTCPeerConnection,
@@ -34,6 +34,7 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [backgroundVideoResult, setBackgroundVideoResult] = useState('not-run');
+  const [statsReady, setStatsReady] = useState(false);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const senderRef = useRef<RTCPeerConnection | null>(null);
@@ -41,6 +42,27 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   const backgroundBaselineRef = useRef<{ bytes: number; frames: number } | null>(null);
   const latestStatsRef = useRef<{ bytes: number; frames: number } | null>(null);
   const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const beginBackgroundMeasurement = () => {
+    const baseline = latestStatsRef.current;
+    if (!baseline) return;
+    backgroundBaselineRef.current = baseline;
+    setBackgroundVideoResult('measuring');
+  };
+  const finishBackgroundMeasurement = () => {
+    const receiver = receiverRef.current;
+    if (!receiver) return;
+    const baseline = backgroundBaselineRef.current;
+    if (!baseline) return;
+    // Read after native foreground restoration has settled. If RTP/video
+    // continued while JS was suspended, these native counters jump forward.
+    setTimeout(() => {
+      void readInboundVideoStats(receiver).then((after) => {
+        const passed = after.bytes > baseline.bytes && after.frames > baseline.frames;
+        setBackgroundVideoResult(passed ? 'pass' : 'fail');
+      });
+    }, 1000);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -107,6 +129,7 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
         statsTimerRef.current = setInterval(() => {
           void readInboundVideoStats(receiver).then((stats) => {
             latestStatsRef.current = stats;
+            setStatsReady(true);
           });
         }, 500);
         useCalls.getState().setActive({
@@ -131,26 +154,6 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
       })
       .catch((e) => setError(String(e?.message ?? e)));
 
-    const beginBackgroundMeasurement = () => {
-      const baseline = latestStatsRef.current;
-      if (!baseline) return;
-      backgroundBaselineRef.current = baseline;
-      setBackgroundVideoResult('measuring');
-    };
-    const finishBackgroundMeasurement = () => {
-      const receiver = receiverRef.current;
-      if (!receiver) return;
-      const baseline = backgroundBaselineRef.current;
-      if (!baseline) return;
-      // Read after native foreground restoration has settled. If RTP/video
-      // continued while JS was suspended, these native counters jump forward.
-      setTimeout(() => {
-        void readInboundVideoStats(receiver).then((after) => {
-          const passed = after.bytes > baseline.bytes && after.frames > baseline.frames;
-          setBackgroundVideoResult(passed ? 'pass' : 'fail');
-        });
-      }, 1000);
-    };
     const appStateSub = AppState.addEventListener('change', (state) => {
       // Android can keep React Native's AppState "active" while the Activity is
       // in system PiP. Its native PiP callback below is authoritative there.
@@ -217,6 +220,22 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   return (
     <View style={styles.fill}>
       <VideoCallScreen orchestrator={mock} onClosed={onClosed} />
+      {statsReady && backgroundVideoResult === 'not-run' ? (
+        <Pressable
+          testID="harness-arm-background-video"
+          accessibilityLabel="harness-arm-background-video"
+          onPress={beginBackgroundMeasurement}
+          style={styles.probeControl}
+        />
+      ) : null}
+      {backgroundVideoResult === 'measuring' ? (
+        <Pressable
+          testID="harness-evaluate-background-video"
+          accessibilityLabel="harness-evaluate-background-video"
+          onPress={finishBackgroundMeasurement}
+          style={styles.probeControl}
+        />
+      ) : null}
       <Text
         testID={`harness-background-video-${backgroundVideoResult}`}
         accessibilityLabel={`harness-background-video-${backgroundVideoResult}`}
@@ -265,4 +284,12 @@ const styles = StyleSheet.create({
   // Accessible to Maestro after returning from PiP, visually negligible in
   // screenshots so it cannot mask the pixels being evaluated.
   probe: { position: 'absolute', width: 1, height: 1, opacity: 0.01, top: 0, left: 0 },
+  probeControl: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    opacity: 0.01,
+    right: 0,
+    bottom: 0,
+  },
 });

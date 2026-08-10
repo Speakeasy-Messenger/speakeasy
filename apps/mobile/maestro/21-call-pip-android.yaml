@@ -35,8 +35,12 @@ name: Android video-call PiP + background media continuity
 
 - extendedWaitUntil:
     visible:
-      id: 'harness-background-video-not-run'
+      id: 'harness-arm-background-video'
     timeout: 30000
+- tapOn:
+    id: 'harness-arm-background-video'
+- assertVisible:
+    id: 'harness-background-video-measuring'
 - waitForAnimationToEnd:
     timeout: 2000
 - takeScreenshot: 01-foreground
@@ -50,6 +54,8 @@ name: Android video-call PiP + background media continuity
 # A separate exploratory system-UI run evaluates the actual PiP control because
 # Maestro cannot reliably address OEM PiP chrome from the app accessibility tree.
 - launchApp
+- tapOn:
+    id: 'harness-evaluate-background-video'
 - extendedWaitUntil:
     visible:
       id: 'harness-background-video-pass'

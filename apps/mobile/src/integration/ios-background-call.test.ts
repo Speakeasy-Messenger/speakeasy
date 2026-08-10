@@ -92,6 +92,8 @@ describe('iOS background-call native contracts', () => {
     expect(harness).toContain('readInboundVideoStats');
     expect(harness).toContain('pip.onPipModeChanged');
     expect(harness).toContain('if (!baseline) return;');
+    expect(harness).toContain('harness-arm-background-video');
+    expect(harness).toContain('harness-evaluate-background-video');
     expect(workflow).toContain('zip -qr ../speakeasy-ios-calls.zip speakeasy-ios-calls');
     expect(workflow).toContain('apps/mobile/build/speakeasy-ios-calls.zip');
     expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
