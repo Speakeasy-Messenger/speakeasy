@@ -57,6 +57,10 @@ name: iOS video-call PiP + return (Tier C, real device)
     visible:
       id: 'harness-arm-background-video'
     timeout: 30000
+- tapOn:
+    id: 'harness-arm-background-video'
+- assertVisible:
+    id: 'harness-background-video-measuring'
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
 - takeScreenshot: 01-foreground
@@ -89,6 +93,9 @@ name: iOS video-call PiP + return (Tier C, real device)
 - tapOn: 'Speakeasy'
 - waitForAnimationToEnd:
     timeout: 2000
+- tapOn:
+    id: 'harness-evaluate-background-video'
+    optional: true
 - extendedWaitUntil:
     visible:
       id: 'harness-background-video-pass'

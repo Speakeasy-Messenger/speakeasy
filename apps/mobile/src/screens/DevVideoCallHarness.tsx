@@ -227,7 +227,9 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
           accessibilityRole="button"
           onPress={beginBackgroundMeasurement}
           style={styles.probeControl}
-        />
+        >
+          <Text style={styles.probeControlText}>ARM</Text>
+        </Pressable>
       ) : null}
       {backgroundVideoResult === 'measuring' ? (
         <Pressable
@@ -236,7 +238,9 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
           accessibilityRole="button"
           onPress={finishBackgroundMeasurement}
           style={styles.probeControl}
-        />
+        >
+          <Text style={styles.probeControlText}>CHECK</Text>
+        </Pressable>
       ) : null}
       <Text
         testID={`harness-background-video-${backgroundVideoResult}`}
@@ -290,8 +294,11 @@ const styles = StyleSheet.create({
     position: 'absolute',
     width: 44,
     height: 44,
-    opacity: 0.01,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
     right: 0,
     top: 100,
   },
+  probeControlText: { color: '#fff', fontSize: 9, fontWeight: '700' },
 });

@@ -116,7 +116,7 @@ describe('iOS background-call native contracts', () => {
     expect(androidCloseFlow).toContain("assertNotVisible: '@dev-peer'");
     expect(maestroFlow).toContain("id: 'video-call-pip'");
     expect(maestroFlow).toContain("id: 'harness-arm-background-video'");
-    expect(maestroFlow).not.toContain("id: 'harness-background-video-measuring'");
+    expect(maestroFlow).toContain("id: 'harness-background-video-measuring'");
     expect(maestroFlow).toContain("tapOn: 'Speakeasy'");
     expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");
