@@ -162,7 +162,7 @@ platform :ios do
       output_directory: "build",
       output_name: "Speakeasy-BrowserStack.ipa",
       clean: true,
-      xcargs: 'GCC_PREPROCESSOR_DEFINITIONS="$(inherited) SPEAKEASY_VIDEO_CALL_HARNESS=1"',
+      xcargs: 'SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED=1',
     )
   end
 

@@ -132,7 +132,7 @@ static void SpeakeasyWriteCrash(NSException *exception)
   // native launcher. Production/TestFlight builds never define it and always
   // boot the real app. Keeping the switch native prevents a URL or JS setting
   // from exposing the standalone camera/PiP harness to users.
-#ifdef SPEAKEASY_VIDEO_CALL_HARNESS
+#if SPEAKEASY_VIDEO_CALL_HARNESS
   self.initialProps = @{@"videoCallHarness": @YES};
 #else
   self.initialProps = @{};

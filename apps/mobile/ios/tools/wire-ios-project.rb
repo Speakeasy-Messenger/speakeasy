@@ -103,10 +103,26 @@ end
 
 target.build_configurations.each do |config|
   current = config.build_settings['CODE_SIGN_ENTITLEMENTS']
-  next if current == ENTITLEMENTS
+  if current != ENTITLEMENTS
+    config.build_settings['CODE_SIGN_ENTITLEMENTS'] = ENTITLEMENTS
+    changed << "set CODE_SIGN_ENTITLEMENTS (#{config.name})"
+  end
 
-  config.build_settings['CODE_SIGN_ENTITLEMENTS'] = ENTITLEMENTS
-  changed << "set CODE_SIGN_ENTITLEMENTS (#{config.name})"
+  # Keep the BrowserStack harness define scoped to the app target. Passing
+  # GCC_PREPROCESSOR_DEFINITIONS on xcodebuild's command line overrides every
+  # CocoaPods target's definitions (Firebase_VERSION, PB_ENABLE_MALLOC, etc.).
+  definitions = config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+  definitions = [definitions] unless definitions.is_a?(Array)
+  harness_define = 'SPEAKEASY_VIDEO_CALL_HARNESS=$(SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED)'
+  unless definitions.include?(harness_define)
+    definitions << harness_define
+    config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+    changed << "added app-only video harness define (#{config.name})"
+  end
+  unless config.build_settings.key?('SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED')
+    config.build_settings['SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED'] = '0'
+    changed << "defaulted video harness off (#{config.name})"
+  end
 end
 
 # Embed the VouchflowSDK Swift-package framework. It's a DYNAMIC framework,

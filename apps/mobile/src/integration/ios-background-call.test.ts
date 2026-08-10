@@ -63,17 +63,15 @@ describe('iOS background-call native contracts', () => {
     const app = source('App.tsx');
     const delegate = source('ios/Speakeasy/AppDelegate.mm');
     const fastfile = source('ios/fastlane/Fastfile');
+    const projectWiring = source('ios/tools/wire-ios-project.rb');
 
     expect(app).toContain('videoCallHarness?: boolean;');
-    expect(delegate).toContain('#ifdef SPEAKEASY_VIDEO_CALL_HARNESS');
+    expect(delegate).toContain('#if SPEAKEASY_VIDEO_CALL_HARNESS');
     expect(fastfile).toContain('lane :browserstack do');
-    expect(fastfile).toContain('SPEAKEASY_VIDEO_CALL_HARNESS=1');
-  });
-
-  it('repairs GoogleDataTransport 10.1.0 nanopb compilation during pod install', () => {
-    const podfile = source('ios/Podfile');
-
-    expect(podfile).toContain("'nanopb', 'pb_decode.h'");
-    expect(podfile).toContain('void pb_release(const pb_field_t fields[]');
+    expect(fastfile).toContain('SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED=1');
+    expect(fastfile).not.toContain("xcargs: 'GCC_PREPROCESSOR_DEFINITIONS=");
+    expect(projectWiring).toContain(
+      'SPEAKEASY_VIDEO_CALL_HARNESS=$(SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED)',
+    );
   });
 });

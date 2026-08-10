@@ -90,28 +90,6 @@ target 'Speakeasy' do
       end
     end
 
-    # GoogleDataTransport 10.1.0's published podspec accidentally concatenates
-    # two preprocessor definitions:
-    #   PB_ENABLE_MALLOC=1GDTCOR_VERSION=10.1.0
-    # CocoaPods consequently builds the target without a usable
-    # PB_ENABLE_MALLOC definition, hiding nanopb's pb_release declaration and
-    # failing every GoogleDataTransport source file that calls pb_release.
-    # Patch nanopb's shared declaration once for all consumers; changing the
-    # generated target build setting is insufficient because its xcconfig
-    # reintroduces the malformed definition.
-    nanopb_decode = File.join(installer.sandbox.root, 'nanopb', 'pb_decode.h')
-    if File.exist?(nanopb_decode)
-      contents = File.read(nanopb_decode)
-      marker = "#ifdef __cplusplus\nextern \"C\" {\n#endif"
-      declaration = "\n\n/* Speakeasy: GoogleDataTransport 10.1.0 podspec drops PB_ENABLE_MALLOC. */\nvoid pb_release(const pb_field_t fields[], void *dest_struct);"
-      patched = contents.include?(declaration) ? contents : contents.sub(marker, marker + declaration)
-      if patched != contents
-        File.chmod(0644, nanopb_decode)
-        File.write(nanopb_decode, patched)
-        Pod::UI.puts '[Speakeasy] Patched nanopb: pb_release declaration restored'.green
-      end
-    end
-
     # SQLCipher must be the ONLY sqlite3 the app links. Some pod pulls in the
     # SYSTEM libsqlite3 via `-l"sqlite3"` in the aggregate target's
     # OTHER_LDFLAGS. The system sqlite3 has no encryption, so its sqlite3_key
