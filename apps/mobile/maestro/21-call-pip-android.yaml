@@ -1,0 +1,66 @@
+# Maestro flow: Android video-call background PiP + media continuity.
+#
+# The signed harness encodes the physical device camera through a LOCAL pair of
+# real RTCPeerConnections and renders the receiver's track as the remote feed.
+# After Home -> PiP -> foreground, native inbound-RTP counters must have advanced
+# while JS was backgrounded. This proves capture/encode/receive/render continued;
+# screenshots separately prove the system bubble is filled and sized correctly.
+
+appId: xyz.speakeasyapp.app
+name: Android video-call PiP + background media continuity
+---
+- launchApp
+
+# Clean BrowserStack Android devices ask camera and microphone independently.
+- repeat:
+    times: 2
+    commands:
+      - tapOn:
+          text: 'While using the app'
+          optional: true
+      - tapOn:
+          text: 'Allow'
+          optional: true
+
+# Opening Android's runtime permission surfaces can trigger onUserLeaveHint on
+# some BrowserStack devices, which legitimately moves the active call into PiP.
+# Bring the same process back before taking the foreground baseline so the
+# background transition below happens at a deterministic point.
+- launchApp
+
+# Permission retries take longer than the call screen's three-second chrome
+# timeout. Reveal the controls before asserting the PiP action is available.
+- tapOn:
+    point: '50%,50%'
+
+- extendedWaitUntil:
+    visible:
+      id: 'harness-arm-background-video'
+    timeout: 30000
+- tapOn:
+    id: 'harness-arm-background-video'
+- assertVisible:
+    id: 'harness-background-video-measuring'
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: 01-foreground
+
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: 02-pip-bubble
+
+# Tap the system PiP bubble to reveal its native controls, then use the actual
+# expand/full-screen action. This preserves the running React/WebRTC instance;
+# launchApp would recreate the harness and invalidate the before/after counters.
+- tapOn:
+    id: 'xyz.speakeasyapp.app:id/action_bar_root'
+- extendedWaitUntil:
+    visible: 'Full screen|Expand'
+    timeout: 5000
+- tapOn: 'Full screen|Expand'
+- extendedWaitUntil:
+    visible:
+      id: 'harness-background-video-pass'
+    timeout: 15000
+- takeScreenshot: 03-returned

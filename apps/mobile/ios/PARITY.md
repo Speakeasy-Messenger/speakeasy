@@ -8,8 +8,9 @@ diverge** — so an Android-side fix can't silently fail to reach iOS.
 Keep it current: every new `Platform.OS` branch or `// 🍎` deferral
 should land a row here in the same PR.
 
-_Last audited: 2026-05-18, after the iOS hardening initiative (Steps
-0–2). iOS now builds clean and is CI-gated — see `HARDENING.md`._
+_Base audit: 2026-05-18. Call-path addendum audited 2026-08-10 after the
+real-device backgrounding and diagnostics pass. iOS builds clean and is
+CI-gated — see `HARDENING.md`._
 
 ## 1. Shared — no per-platform work
 
@@ -71,8 +72,16 @@ Audited, accepted as-is (low priority):
 - `permissions/startup.ts`, `permissions/runtime.ts` — iOS no-ops the
   runtime-permission flow (relies on system dialogs); no "denied →
   Settings deep-link" path.
-- `callkeep-bridge.ts` — Android-only CallKeep registration; the iOS
-  CallKit path still needs an end-to-end verification pass.
+- `callkeep-bridge.ts` — iOS CallKit/PushKit registration, incoming-call
+  reporting, answer/end actions, and audio-session ownership are wired and
+  covered by contract tests. Diagnostics now persist native VoIP-push receipt,
+  incoming-call report completion, `didDisplayIncomingCall`, and audio-session
+  activation. A real incoming call must still confirm physical ring/vibration
+  and uninterrupted WebRTC audio on device.
+- `VideoCallScreen.tsx` / `native/pip.ts` — both platforms report PiP entry,
+  native bubble size, close, and return lifecycle. The real-device harness
+  verifies background WebRTC frame continuity and return; iOS close-to-end and
+  a true two-device remote feed remain device assertions.
 
 ## 4. iOS gaps, ranked
 
@@ -80,7 +89,8 @@ Audited, accepted as-is (low priority):
    rich display, and inline reply are all absent on iOS. The one
    large remaining gap; design in `PUSH-PARITY.md`.
 2. Runtime permissions — no Settings deep-link on denial. Acceptable.
-3. CallKit path — declared but unverified end-to-end on iOS.
+3. CallKit physical ring/vibration and WebRTC audio-session coexistence —
+   instrumented and contract-tested, but not yet proven by a real incoming call.
 
 Resolved: first iOS build (Step 0), CI gate (`ios.yml`), Version
 module, crash handler (`AppDelegate.mm`), Vouchflow SDK alignment.

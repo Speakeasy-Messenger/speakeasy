@@ -31,7 +31,12 @@ class MainActivity : ReactActivity() {
    * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
-      DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+      object : DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled) {
+        override fun getLaunchOptions(): Bundle =
+            Bundle().apply {
+              putBoolean("videoCallHarness", BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS)
+            }
+      }
 
   /**
    * Pass `null` instead of `savedInstanceState` so Android does NOT
@@ -218,7 +223,6 @@ class MainActivity : ReactActivity() {
   }
 
   override fun onStop() {
-    super.onStop()
     // End the call when the user CLOSES the PiP bubble (the reported "press X,
     // call keeps going"). The activity stops while it WAS in PiP and did NOT
     // resume to the foreground (onResume would have cleared wasInPip on an
@@ -235,8 +239,21 @@ class MainActivity : ReactActivity() {
     if (dismissed) {
       exitingPip = false
       wasInPip = false
+      getSharedPreferences("speakeasy_pip", Context.MODE_PRIVATE)
+        .edit()
+        .putBoolean("pending_close", true)
+        .putLong("pending_close_at", System.currentTimeMillis())
+        .putString(
+          "pending_close_session",
+          getSharedPreferences("speakeasy_pip", Context.MODE_PRIVATE)
+            .getString("current_session", null),
+        )
+        .apply()
+      // Emit before super.onStop pauses the React host. The persisted flag is
+      // consumed when JS next runs if an OEM suspends too quickly.
       emitJsEvent("SpeakeasyPipClosed", true)
     }
+    super.onStop()
   }
 
   private fun emitJsEvent(name: String, value: Any) {

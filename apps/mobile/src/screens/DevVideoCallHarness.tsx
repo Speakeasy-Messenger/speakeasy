@@ -1,6 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { StyleSheet, Text, View } from 'react-native';
-import { mediaDevices, type MediaStream } from 'react-native-webrtc';
+import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  mediaDevices,
+  RTCPeerConnection,
+  type MediaStream,
+} from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import { VideoCallScreen } from './VideoCallScreen.js';
 import { useCalls } from '../store/calls.js';
@@ -9,6 +13,7 @@ import {
   showOngoingCallNotification,
   dismissOngoingCallNotification,
 } from '../calls/call-notification.js';
+import { pip } from '../native/pip.js';
 
 /**
  * __DEV__-only test harness for the video-call UI — NOT shipped.
@@ -25,9 +30,39 @@ import {
  * App.tsx; flip that flag, reload, and the call screen comes up standalone.
  */
 export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
-  const [stream, setStream] = useState<MediaStream | null>(null);
+  const [localStream, setLocalStream] = useState<MediaStream | null>(null);
+  const [remoteStream, setRemoteStream] = useState<MediaStream | null>(null);
   const [error, setError] = useState<string | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
+  const [backgroundVideoResult, setBackgroundVideoResult] = useState('not-run');
+  const [statsReady, setStatsReady] = useState(false);
+  const localStreamRef = useRef<MediaStream | null>(null);
+  const remoteStreamRef = useRef<MediaStream | null>(null);
+  const senderRef = useRef<RTCPeerConnection | null>(null);
+  const receiverRef = useRef<RTCPeerConnection | null>(null);
+  const backgroundBaselineRef = useRef<{ bytes: number; frames: number } | null>(null);
+  const latestStatsRef = useRef<{ bytes: number; frames: number } | null>(null);
+  const statsTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+  const beginBackgroundMeasurement = () => {
+    const baseline = latestStatsRef.current;
+    if (!baseline) return;
+    backgroundBaselineRef.current = baseline;
+    setBackgroundVideoResult('measuring');
+  };
+  const finishBackgroundMeasurement = () => {
+    const receiver = receiverRef.current;
+    if (!receiver) return;
+    const baseline = backgroundBaselineRef.current;
+    if (!baseline) return;
+    // Read after native foreground restoration has settled. If RTP/video
+    // continued while JS was suspended, these native counters jump forward.
+    setTimeout(() => {
+      void readInboundVideoStats(receiver).then((after) => {
+        const passed = after.bytes > baseline.bytes && after.frames > baseline.frames;
+        setBackgroundVideoResult(passed ? 'pass' : 'fail');
+      });
+    }, 1000);
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -45,14 +80,58 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
     }
     void mediaDevices
       .getUserMedia({ audio: true, video: { facingMode: 'user' } })
-      .then((s) => {
+      .then(async (s) => {
         const ms = s as MediaStream;
         if (cancelled) {
           ms.getTracks().forEach((t) => t.stop());
           return;
         }
-        streamRef.current = ms;
-        setStream(ms);
+        localStreamRef.current = ms;
+        setLocalStream(ms);
+
+        // Encode/decode the camera through two real RTCPeerConnections instead
+        // of painting the local stream twice. The displayed "remote" feed is
+        // therefore proof that camera capture -> WebRTC sender -> receiver ->
+        // renderer is alive. This is still an on-device loopback (no TURN), but
+        // it exercises the exact media pipeline that used to freeze when the
+        // calling app backgrounded.
+        const sender = new RTCPeerConnection({ iceServers: [] });
+        const receiver = new RTCPeerConnection({ iceServers: [] });
+        senderRef.current = sender;
+        receiverRef.current = receiver;
+        ms.getTracks().forEach((track) => sender.addTrack(track, ms));
+
+        const remotePromise = new Promise<MediaStream>((resolve) => {
+          const handler = (event: any) => {
+            const remote = event.streams?.[0] as MediaStream | undefined;
+            if (remote) resolve(remote);
+          };
+          (receiver as any).addEventListener('track', handler);
+        });
+
+        const offer = await sender.createOffer();
+        await sender.setLocalDescription(offer);
+        await waitForIceGathering(sender);
+        await receiver.setRemoteDescription(sender.localDescription!);
+        const answer = await receiver.createAnswer();
+        await receiver.setLocalDescription(answer);
+        await waitForIceGathering(receiver);
+        await sender.setRemoteDescription(receiver.localDescription!);
+
+        const remote = await remotePromise;
+        if (cancelled) return;
+        remoteStreamRef.current = remote;
+        setRemoteStream(remote);
+        // Keep a fresh pre-background baseline. AppState's background callback
+        // gets only a short execution window on iOS; starting getStats there can
+        // be suspended before its promise resolves, so snapshot the last
+        // completed native counters synchronously instead.
+        statsTimerRef.current = setInterval(() => {
+          void readInboundVideoStats(receiver).then((stats) => {
+            latestStatsRef.current = stats;
+            setStatsReady(true);
+          });
+        }, 500);
         useCalls.getState().setActive({
           callId: 'dev-harness',
           peerUserId: 'dev-peer',
@@ -74,11 +153,29 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
         });
       })
       .catch((e) => setError(String(e?.message ?? e)));
+
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      // Android can keep React Native's AppState "active" while the Activity is
+      // in system PiP. Its native PiP callback below is authoritative there.
+      if (Platform.OS === 'android') return;
+      if (state !== 'active') beginBackgroundMeasurement();
+      else finishBackgroundMeasurement();
+    });
+    const removePipModeListener = pip.onPipModeChanged((inPip) => {
+      if (inPip) beginBackgroundMeasurement();
+      else finishBackgroundMeasurement();
+    });
     return () => {
       cancelled = true;
+      appStateSub.remove();
+      removePipModeListener();
+      if (statsTimerRef.current) clearInterval(statsTimerRef.current);
       useCalls.getState().setActive(undefined);
       void dismissOngoingCallNotification();
-      streamRef.current?.getTracks().forEach((t) => t.stop());
+      localStreamRef.current?.getTracks().forEach((t) => t.stop());
+      remoteStreamRef.current?.getTracks().forEach((t) => t.stop());
+      senderRef.current?.close();
+      receiverRef.current?.close();
       try {
         InCallManager.stop();
       } catch {
@@ -94,7 +191,7 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
       </View>
     );
   }
-  if (!stream) {
+  if (!localStream || !remoteStream) {
     return (
       <View style={styles.fill}>
         <Text style={styles.msg}>DEV harness — starting camera…</Text>
@@ -102,24 +199,106 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
     );
   }
 
-  const url = stream.toURL();
+  const localUrl = localStream.toURL();
+  const remoteUrl = remoteStream.toURL();
   // Minimal stand-in for the CallOrchestrator surface VideoCallScreen uses.
   const mock = {
-    getLocalStreamURL: () => url,
+    getLocalStreamURL: () => localUrl,
     onRemoteStreamURL: (cb: (u: string | undefined) => void) => {
-      cb(url);
+      cb(remoteUrl);
       return () => {};
     },
-    hangup: () => onClosed(),
+    hangup: () => {
+      useCalls.getState().setActive(undefined);
+      onClosed();
+    },
     setMicMuted: () => {},
     setSpeakerOn: () => {},
     flipCamera: async () => {},
   } as unknown as CallOrchestrator;
 
-  return <VideoCallScreen orchestrator={mock} onClosed={onClosed} />;
+  return (
+    <View style={styles.fill}>
+      <VideoCallScreen orchestrator={mock} onClosed={onClosed} />
+      {statsReady && backgroundVideoResult === 'not-run' ? (
+        <Pressable
+          testID="harness-arm-background-video"
+          accessibilityLabel="harness-arm-background-video"
+          accessibilityRole="button"
+          onPress={beginBackgroundMeasurement}
+          style={styles.probeControl}
+        >
+          <Text style={styles.probeControlText}>ARM</Text>
+        </Pressable>
+      ) : null}
+      {backgroundVideoResult === 'measuring' ? (
+        <Pressable
+          testID="harness-evaluate-background-video"
+          accessibilityLabel="harness-evaluate-background-video"
+          accessibilityRole="button"
+          onPress={finishBackgroundMeasurement}
+          style={styles.probeControl}
+        >
+          <Text style={styles.probeControlText}>CHECK</Text>
+        </Pressable>
+      ) : null}
+      <Text
+        testID={`harness-background-video-${backgroundVideoResult}`}
+        accessibilityLabel={`harness-background-video-${backgroundVideoResult}`}
+        style={styles.probe}
+      >
+        {backgroundVideoResult}
+      </Text>
+    </View>
+  );
+}
+
+async function waitForIceGathering(pc: RTCPeerConnection): Promise<void> {
+  if (pc.iceGatheringState === 'complete') return;
+  await new Promise<void>((resolve) => {
+    const handler = () => {
+      if (pc.iceGatheringState !== 'complete') return;
+      (pc as any).removeEventListener('icegatheringstatechange', handler);
+      resolve();
+    };
+    (pc as any).addEventListener('icegatheringstatechange', handler);
+    // Close the small race between the pre-listener check and subscription.
+    handler();
+  });
+}
+
+async function readInboundVideoStats(
+  pc: RTCPeerConnection,
+): Promise<{ bytes: number; frames: number }> {
+  let bytes = 0;
+  let frames = 0;
+  const report = await pc.getStats();
+  report.forEach((stat: any) => {
+    if (
+      stat.type !== 'inbound-rtp' ||
+      (stat.kind ?? stat.mediaType) !== 'video'
+    ) return;
+    bytes += Number(stat.bytesReceived ?? 0);
+    frames += Number(stat.framesDecoded ?? stat.framesReceived ?? 0);
+  });
+  return { bytes, frames };
 }
 
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   msg: { color: '#fff', fontSize: 16, padding: 24, textAlign: 'center' },
+  // Accessible to Maestro after returning from PiP, visually negligible in
+  // screenshots so it cannot mask the pixels being evaluated.
+  probe: { position: 'absolute', width: 1, height: 1, opacity: 0.01, top: 0, left: 0 },
+  probeControl: {
+    position: 'absolute',
+    width: 44,
+    height: 44,
+    backgroundColor: '#7c3aed',
+    alignItems: 'center',
+    justifyContent: 'center',
+    right: 0,
+    top: 100,
+  },
+  probeControlText: { color: '#fff', fontSize: 9, fontWeight: '700' },
 });

@@ -43,5 +43,15 @@ ASC UI.)
 
 ## Status
 
-Scaffold only — **not yet validated**. The first `certs` + `beta` run on
-the Mac will shake out signing/profile details before CI is wired.
+Validated in CI. `.github/workflows/release-ios.yml` builds and uploads
+TestFlight betas from `ios-*` tags (or a manual `beta` dispatch), assigns them
+to the `Friends` external-testing group, and rejects release tags that are not
+ancestors of `main`. Manual `release` dispatch builds the App Store artifact;
+submission remains a separate workflow and decision.
+
+For non-uploaded real-device call testing,
+`.github/workflows/browserstack-ios.yml` uses the `browserstack` lane to create
+`Speakeasy-BrowserStack.ipa` with the video-call harness enabled and packages
+`maestro/20-call-pip-ios.yaml` beside it. BrowserStack re-signing cannot validate
+APNs/PushKit delivery, so incoming CallKit ringtone/vibration must be tested with
+the TestFlight build on a registered iPhone.

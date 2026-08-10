@@ -12,7 +12,19 @@
 //
 
 #import <React/RCTBridgeModule.h>
+#import <React/RCTEventEmitter.h>
 
 @interface RCT_EXTERN_REMAP_MODULE(SpeakeasyVersion, VersionModule, NSObject)
+
+@end
+
+@interface RCT_EXTERN_REMAP_MODULE(SpeakeasyNativeDiagnostics, NativeDiagnosticsModule, RCTEventEmitter)
+
+RCT_EXTERN_METHOD(consumePendingPipClose:(NSString *)sessionId
+                  resolver:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(setPipSession:(NSString * _Nullable)sessionId)
+RCT_EXTERN_METHOD(drainNativeDiagnostics:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
 @end

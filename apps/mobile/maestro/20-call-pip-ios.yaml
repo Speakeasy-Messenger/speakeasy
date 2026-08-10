@@ -49,17 +49,32 @@ name: iOS video-call PiP + return (Tier C, real device)
 - tapOn:
     point: '50%,50%'
 
-# Call screen is up once the always-visible local-preview/PiP control is in
-# the tree. Do not key readiness to the bottom end-call control: production
-# intentionally auto-hides that chrome after three idle seconds, faster than
-# a first iOS real-device accessibility-tree query can complete.
+# The harness probe appears only after both local and loopback-remote streams
+# are mounted. Do not key readiness to call chrome: production intentionally
+# auto-hides it after three idle seconds, faster than a first iOS real-device
+# accessibility-tree query can complete.
 - extendedWaitUntil:
     visible:
-      id: 'video-call-pip'
+      id: 'harness-arm-background-video'
     timeout: 30000
+- tapOn:
+    id: 'harness-arm-background-video'
+# The loopback peer connection can raise iOS's one-time local-network prompt
+# after the camera/microphone prompts. Accept it before checking the probe.
+- tapOn:
+    text: 'Allow'
+    optional: true
+- assertVisible:
+    id: 'harness-background-video-measuring'
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
 - takeScreenshot: 01-foreground
+
+# Let the loopback receiver stats sampler capture a stable pre-background
+# baseline. The harness renders the CAMERA only after it has traversed a real
+# WebRTC sender/receiver pair, so this is no longer a local-view-only demo.
+- waitForAnimationToEnd:
+    timeout: 2000
 
 # Explicitly request PiP so entry is deterministic rather than relying
 # only on auto-enter-on-background (which we also exercise next).
@@ -76,15 +91,18 @@ name: iOS video-call PiP + return (Tier C, real device)
     timeout: 3000
 - takeScreenshot: 02-pip-bubble
 
-# (3) Return to the call. Bug #2: on foreground the remote video should
-# repaint immediately, not stay black. Re-asserting the always-visible PiP
-# control proves the RN call screen remounted; the screenshot proves the
-# video actually came back.
-- launchApp
-- extendedWaitUntil:
-    visible:
-      id: 'video-call-pip'
-    timeout: 15000
+# (3) Return to the existing call through the installed app's SpringBoard icon.
+# `launchApp` stops/restarts the React tree on BrowserStack, which destroys the
+# pre-background RTP baseline. Tapping the icon resumes the same process, just
+# as the user returning from Home does, so AppState can evaluate native counters.
+- tapOn: 'Speakeasy'
 - waitForAnimationToEnd:
     timeout: 2000
+- tapOn:
+    id: 'harness-evaluate-background-video'
+    optional: true
+- extendedWaitUntil:
+    visible:
+      id: 'harness-background-video-pass'
+    timeout: 15000
 - takeScreenshot: 03-returned

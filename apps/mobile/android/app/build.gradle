@@ -371,6 +371,11 @@ android {
         buildConfigField "String", "VOUCHFLOW_API_KEY", "\"${vouchflowKey}\""
         buildConfigField "String", "VOUCHFLOW_ENVIRONMENT",
             "\"${project.findProperty('vouchflow.environment') ?: 'sandbox'}\""
+        // Test-only BrowserStack entry point. False for every normal build;
+        // the dedicated harness build opts in with
+        // -Pspeakeasy.videoCallHarness=true.
+        buildConfigField "boolean", "SPEAKEASY_VIDEO_CALL_HARNESS",
+            "${(project.findProperty('speakeasy.videoCallHarness') ?: 'false').toBoolean()}"
     }
     buildFeatures {
         buildConfig true

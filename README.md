@@ -53,6 +53,41 @@ session) in progress.
 The alpha points at a dev sandbox API server on a public IP. Production
 DNS / TLS coming with Phase 5d.
 
+## Real-device call verification
+
+The call test harness boots directly into the production video-call screen,
+feeds the physical camera through a real on-device WebRTC sender/receiver pair,
+and verifies that native RTP frame counters advance while the app is
+backgrounded. It does not place a server-routed two-user call.
+
+- iOS: run **BrowserStack iOS call harness** and use
+  `apps/mobile/maestro/20-call-pip-ios.yaml` with the generated IPA.
+- Android: run **BrowserStack Android call harness** and use
+  `apps/mobile/maestro/21-call-pip-android.yaml` plus
+  `22-call-pip-close-android.yaml` with the generated APK.
+- The workflows publish the signed app and Maestro suite together as a
+  three-day GitHub Actions artifact. BrowserStack credentials stay outside
+  the repository.
+
+The automated stories cover entering background Picture in Picture (PiP),
+continued video encoding/decoding, returning to the same call, and Android's
+PiP close control. Screenshots provide the visual evidence for bubble content
+and sizing. A real two-user call is still required to verify remote behavior,
+iOS PiP close-to-end, and physical iPhone ringtone/vibration.
+
+For a failed real call, open **About**, tap the version five times, choose
+**Copy logs**, and paste the result into the bug report. The 200-event buffer
+persists across app backgrounding and one relaunch. Call diagnostics record app
+state, CallKit/PushKit lifecycle, PiP lifecycle and dimensions, WebRTC
+connection state, and five-second inbound/outbound byte and frame counters.
+The frame-counter entries do not record video frames, SDP, IP addresses, or
+peer identifiers; the copied buffer still contains other support breadcrumbs
+and should be treated as diagnostic data. On iOS, a log can prove that the VoIP
+push arrived, CallKit completed the incoming-call report, and the audio session
+activated; iOS does not expose a reliable callback proving that the speaker or
+vibration motor physically fired, so ringtone/vibration remains an observed
+device assertion.
+
 ## Building from source
 
 ```sh
