@@ -102,6 +102,24 @@ static void SpeakeasyWriteCrash(NSException *exception)
   }
 }
 
+static void SpeakeasyAppendNativeDiagnostic(NSString *message)
+{
+  NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+  @synchronized (defaults) {
+    NSMutableArray<NSDictionary *> *entries =
+        [[defaults arrayForKey:@"SpeakeasyPendingNativeDiagnostics"] mutableCopy]
+        ?: [NSMutableArray array];
+    [entries addObject:@{
+      @"at": @([[NSDate date] timeIntervalSince1970] * 1000.0),
+      @"message": message,
+    }];
+    if (entries.count > 50) {
+      [entries removeObjectsInRange:NSMakeRange(0, entries.count - 50)];
+    }
+    [defaults setObject:entries forKey:@"SpeakeasyPendingNativeDiagnostics"];
+  }
+}
+
 @implementation AppDelegate
 
 - (BOOL)application:(UIApplication *)application didFinishLaunchingWithOptions:(NSDictionary *)launchOptions
@@ -222,12 +240,7 @@ static void SpeakeasyWriteCrash(NSException *exception)
 
 - (void)speakeasyPictureInPictureClosed:(NSNotification *)notification
 {
-  RCTBridge *bridge = self.bridge;
-  if (bridge == nil) { return; }
-  [bridge enqueueJSCall:@"RCTDeviceEventEmitter"
-                 method:@"emit"
-                   args:@[@"SpeakeasyPipClosed", [NSNull null]]
-             completion:NULL];
+  NSLog(@"Speakeasy diagnostics: iOS PiP closed by user");
 }
 
 #pragma mark - PushKit / CallKit
@@ -236,6 +249,8 @@ static void SpeakeasyWriteCrash(NSException *exception)
     didUpdatePushCredentials:(PKPushCredentials *)credentials
                      forType:(PKPushType)type
 {
+  NSLog(@"Speakeasy diagnostics: PushKit credentials updated");
+  SpeakeasyAppendNativeDiagnostic(@"PushKit credentials updated");
   [RNVoipPushNotificationManager didUpdatePushCredentials:credentials
                                                    forType:(NSString *)type];
 }
@@ -260,12 +275,24 @@ static void SpeakeasyWriteCrash(NSException *exception)
   NSString *handle = data[@"handle"] ?: @"unknown";
   NSString *callerName = data[@"caller_name"] ?: handle;
   BOOL hasVideo = [data[@"has_video"] boolValue];
+  NSLog(@"Speakeasy diagnostics: VoIP push received (hasVideo=%@, hasCallId=%@)",
+        hasVideo ? @"YES" : @"NO",
+        [data[@"call_id"] isKindOfClass:[NSString class]] ? @"YES" : @"NO");
+  SpeakeasyAppendNativeDiagnostic(
+      [NSString stringWithFormat:@"VoIP push received hasVideo=%@ hasCallId=%@",
+       hasVideo ? @"YES" : @"NO",
+       [data[@"call_id"] isKindOfClass:[NSString class]] ? @"YES" : @"NO"]);
 
   // Preserve the payload for JS so it can warm the websocket and bind our
   // call_id to the native CallKit UUID. CallKit reporting itself is native and
   // happens immediately, including on a killed-app launch.
   [RNVoipPushNotificationManager didReceiveIncomingPushWithPayload:payload
                                                             forType:(NSString *)type];
+  void (^loggedCompletion)(void) = ^{
+    NSLog(@"Speakeasy diagnostics: CallKit incoming-call report completion");
+    SpeakeasyAppendNativeDiagnostic(@"CallKit incoming-call report completion");
+    if (completion != nil) { completion(); }
+  };
   [RNCallKeep reportNewIncomingCall:uuid
                              handle:handle
                          handleType:@"generic"
@@ -277,7 +304,7 @@ static void SpeakeasyWriteCrash(NSException *exception)
                  supportsUngrouping:NO
                         fromPushKit:YES
                             payload:data
-              withCompletionHandler:completion];
+              withCompletionHandler:loggedCompletion];
 }
 
 

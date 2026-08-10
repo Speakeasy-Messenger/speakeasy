@@ -7,7 +7,7 @@ import {
   type MediaStreamTrack,
 } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
-import { DeviceEventEmitter, Platform, type EmitterSubscription } from 'react-native';
+import { AppState, DeviceEventEmitter, Platform, type EmitterSubscription } from 'react-native';
 import type {
   CallAnswerPayload,
   CallIceCandidate,
@@ -16,6 +16,7 @@ import type {
 } from '@speakeasy/shared';
 import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './types.js';
 import { ANIMATION_CHANNEL_LABEL } from './animation-channel.js';
+import { summarizeVideoStats } from './video-stats.js';
 import { ensureCameraPermission, ensureMicPermission } from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
 import { utf8ToBytes } from '../utils/bytes.js';
@@ -73,6 +74,32 @@ class WebRtcCallPeer implements CallPeer {
   // every modern WebRTC stack populates `audioLevel` on getStats output.
   private audioLevelCb?: (levels: { local: number; remote: number }) => void;
   private audioLevelTimer?: ReturnType<typeof setInterval>;
+  /**
+   * Cumulative video RTP counters sampled every five seconds. The counters
+   * survive a suspended JS timer, so the first sample after foregrounding can
+   * prove whether native WebRTC kept sending and decoding frames in the
+   * background. No frame contents, SDP, IPs, or peer identifiers are logged.
+   */
+  private videoDiagTimer?: ReturnType<typeof setInterval>;
+  private videoDiagAppStateSub?: { remove(): void };
+  private videoDiagAppState = AppState.currentState;
+  private videoDiagActive = false;
+  private videoDiagQueue: Promise<void> = Promise.resolve();
+  private lastVideoDiag?: {
+    at: number;
+    inboundBytes: number;
+    inboundFrames: number;
+    outboundBytes: number;
+    outboundFrames: number;
+  };
+  private backgroundVideoDiag?: {
+    at: number;
+    inboundBytes: number;
+    inboundFrames: number;
+    outboundBytes: number;
+    outboundFrames: number;
+  };
+  private backgroundBoundaryMissed = false;
   /**
    * Phase 5j Private Call — animation data channel. The caller
    * creates this in `openAnimationDataChannel()` BEFORE createOffer
@@ -186,6 +213,11 @@ class WebRtcCallPeer implements CallPeer {
         // Re-assert audio routing now that media is flowing — see
         // reassertAudioRoute() for the callee-mic bug this addresses.
         this.reassertAudioRoute();
+        this.startVideoDiagnostics();
+        this.scheduleVideoStats('connected');
+      } else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
+        this.scheduleVideoStats(s);
+        if (s === 'failed' || s === 'closed') this.stopVideoDiagnostics();
       }
       if (
         s === 'connecting' ||
@@ -332,6 +364,132 @@ class WebRtcCallPeer implements CallPeer {
       });
     } catch (err) {
       diag('webrtc', 'getStats failed', { err: String(err) });
+    }
+  }
+
+  private startVideoDiagnostics(): void {
+    if (this.mediaKind !== 'video' || this.videoDiagTimer) return;
+    this.videoDiagActive = true;
+    this.videoDiagTimer = setInterval(() => {
+      this.scheduleVideoStats('periodic');
+    }, 5_000);
+    this.videoDiagAppState = AppState.currentState;
+    this.videoDiagAppStateSub = AppState.addEventListener('change', (next) => {
+      const previous = this.videoDiagAppState;
+      this.videoDiagAppState = next;
+      if (previous === 'active' && next !== 'active') {
+        this.backgroundBoundaryMissed = false;
+        this.scheduleVideoStats('background-boundary');
+      } else if (previous !== 'active' && next === 'active') {
+        // Sample immediately on resume. This delta starts at the snapshot
+        // taken while leaving active, rather than at an arbitrary periodic
+        // tick, so it measures the suspended interval instead of the first
+        // five seconds of foreground playback.
+        this.scheduleVideoStats('foreground-boundary');
+      }
+    });
+  }
+
+  private stopVideoDiagnostics(): void {
+    this.videoDiagActive = false;
+    if (this.videoDiagTimer) {
+      clearInterval(this.videoDiagTimer);
+      this.videoDiagTimer = undefined;
+    }
+    this.videoDiagAppStateSub?.remove();
+    this.videoDiagAppStateSub = undefined;
+    this.backgroundVideoDiag = undefined;
+    this.backgroundBoundaryMissed = false;
+  }
+
+  private scheduleVideoStats(trigger: string): void {
+    this.videoDiagQueue = this.videoDiagQueue.then(() => this.dumpVideoStats(trigger));
+  }
+
+  private async dumpVideoStats(trigger: string): Promise<void> {
+    if (this.mediaKind !== 'video' || !this.videoDiagActive) return;
+    try {
+      const stats = await this.pc.getStats();
+      if (!this.videoDiagActive) return;
+      if (trigger === 'background-boundary' && this.videoDiagAppState === 'active') {
+        // iOS suspended JS before getStats resolved. A post-resume counter is
+        // not a valid departure baseline, so record an explicit unknown rather
+        // than allowing the foreground sample to claim background flow.
+        this.backgroundVideoDiag = undefined;
+        this.backgroundBoundaryMissed = true;
+        diag('webrtc', 'video background boundary missed', { reason: 'resolved-after-resume' });
+        return;
+      }
+      const reports: Record<string, unknown>[] = [];
+      stats.forEach((report: any) => {
+        reports.push(report as Record<string, unknown>);
+      });
+      const {
+        inboundBytes,
+        inboundFrames,
+        inboundDropped,
+        inboundFreezes,
+        outboundBytes,
+        outboundFrames,
+        inboundWidth,
+        inboundHeight,
+        outboundWidth,
+        outboundHeight,
+      } = summarizeVideoStats(reports);
+
+      const now = Date.now();
+      const prev = this.lastVideoDiag;
+      const backgroundInterval = trigger === 'foreground-boundary' && !!this.backgroundVideoDiag;
+      const backgroundIntervalStatus =
+        trigger !== 'foreground-boundary'
+          ? undefined
+          : backgroundInterval
+            ? 'sampled'
+            : this.backgroundBoundaryMissed
+              ? 'indeterminate'
+              : 'unavailable';
+      const comparison = backgroundInterval ? this.backgroundVideoDiag : prev;
+      const intervalMs = comparison ? Math.max(0, now - comparison.at) : undefined;
+      const inboundBytesDelta = comparison ? inboundBytes - comparison.inboundBytes : undefined;
+      const inboundFramesDelta = comparison ? inboundFrames - comparison.inboundFrames : undefined;
+      const outboundBytesDelta = comparison ? outboundBytes - comparison.outboundBytes : undefined;
+      const outboundFramesDelta = comparison ? outboundFrames - comparison.outboundFrames : undefined;
+      diag('webrtc', `video stats @ ${trigger}`, {
+        backgroundInterval,
+        backgroundIntervalStatus,
+        intervalMs,
+        inboundBytes,
+        inboundBytesDelta,
+        inboundFrames,
+        inboundFramesDelta,
+        inboundFlowing: inboundFramesDelta === undefined ? undefined : inboundFramesDelta > 0,
+        inboundDropped,
+        inboundFreezes,
+        inboundSize: inboundWidth && inboundHeight ? `${inboundWidth}x${inboundHeight}` : undefined,
+        outboundBytes,
+        outboundBytesDelta,
+        outboundFrames,
+        outboundFramesDelta,
+        outboundFlowing: outboundFramesDelta === undefined ? undefined : outboundFramesDelta > 0,
+        outboundSize:
+          outboundWidth && outboundHeight ? `${outboundWidth}x${outboundHeight}` : undefined,
+      });
+      this.lastVideoDiag = {
+        at: now,
+        inboundBytes,
+        inboundFrames,
+        outboundBytes,
+        outboundFrames,
+      };
+      if (trigger === 'background-boundary') {
+        this.backgroundVideoDiag = this.lastVideoDiag;
+      } else if (trigger === 'foreground-boundary') {
+        this.backgroundVideoDiag = undefined;
+        this.backgroundBoundaryMissed = false;
+      }
+    } catch (err) {
+      if (trigger === 'background-boundary') this.backgroundBoundaryMissed = true;
+      diag('webrtc', `video stats @ ${trigger} failed`, { err: String(err) });
     }
   }
 
@@ -508,6 +666,11 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   close(): void {
+    if (this.lastVideoDiag) {
+      diag('webrtc', 'video stats final counters', this.lastVideoDiag);
+    }
+    this.stopVideoDiagnostics();
+    this.lastVideoDiag = undefined;
     if (this.audioLevelTimer) {
       clearInterval(this.audioLevelTimer);
       this.audioLevelTimer = undefined;

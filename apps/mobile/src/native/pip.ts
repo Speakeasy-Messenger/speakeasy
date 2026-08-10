@@ -1,5 +1,4 @@
 import {
-  DeviceEventEmitter,
   NativeEventEmitter,
   NativeModules,
   Platform,
@@ -14,15 +13,33 @@ import {
  */
 interface NativePip {
   setVideoCallActive(active: boolean): void;
+  setPipSession(sessionId: string | null): void;
+  consumePendingPipClose(sessionId: string): Promise<boolean>;
+}
+
+interface NativeDiagnostics {
+  setPipSession(sessionId: string | null): void;
+  consumePendingPipClose(sessionId: string): Promise<boolean>;
+  drainNativeDiagnostics(): Promise<Array<{ at: number; message: string }>>;
+  addListener(eventName: string): void;
+  removeListeners(count: number): void;
 }
 
 const native = (NativeModules as { SpeakeasyPip?: NativePip }).SpeakeasyPip;
+const iosDiagnostics = (
+  NativeModules as { SpeakeasyNativeDiagnostics?: NativeDiagnostics }
+).SpeakeasyNativeDiagnostics;
 
 export const pip = {
   /** Mark a video call as on-screen (Android only). Safe no-op elsewhere. */
   setVideoCallActive(active: boolean): void {
     if (Platform.OS !== 'android') return;
     native?.setVideoCallActive(active);
+  },
+
+  setSession(sessionId: string | null): void {
+    if (Platform.OS === 'ios') iosDiagnostics?.setPipSession(sessionId);
+    if (Platform.OS === 'android') native?.setPipSession(sessionId);
   },
 
   /**
@@ -45,14 +62,30 @@ export const pip = {
    * unsubscribe fn; no-op on non-Android.
    */
   onPipClosed(cb: () => void): () => void {
-    if (Platform.OS === 'ios') {
-      const sub = DeviceEventEmitter.addListener('SpeakeasyPipClosed', cb);
+    if (Platform.OS === 'ios' && iosDiagnostics) {
+      const emitter = new NativeEventEmitter(iosDiagnostics as unknown as never);
+      const sub = emitter.addListener('SpeakeasyPipClosed', () => cb());
       return () => sub.remove();
     }
     if (Platform.OS !== 'android' || !native) return () => {};
     const emitter = new NativeEventEmitter(native as unknown as never);
     const sub = emitter.addListener('SpeakeasyPipClosed', () => cb());
     return () => sub.remove();
+  },
+
+  async consumePendingClose(sessionId: string): Promise<boolean> {
+    if (Platform.OS === 'ios') {
+      return (await iosDiagnostics?.consumePendingPipClose(sessionId)) ?? false;
+    }
+    if (Platform.OS === 'android') {
+      return (await native?.consumePendingPipClose(sessionId)) ?? false;
+    }
+    return false;
+  },
+
+  async drainNativeDiagnostics(): Promise<Array<{ at: number; message: string }>> {
+    if (Platform.OS !== 'ios') return [];
+    return (await iosDiagnostics?.drainNativeDiagnostics()) ?? [];
   },
 
   /**

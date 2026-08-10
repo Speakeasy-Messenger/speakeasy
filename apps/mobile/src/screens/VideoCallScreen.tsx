@@ -111,10 +111,40 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // PiP window on entry, and the bubble shows a cropped corner of it (the
   // reported "top bar shows in the bubble").
   const [appBackgrounded, setAppBackgrounded] = useState(false);
+  const pipCloseHandled = useRef(false);
   useEffect(() => {
-    const sub = AppState.addEventListener('change', (s) => setAppBackgrounded(s !== 'active'));
-    return () => sub.remove();
-  }, []);
+    pipCloseHandled.current = false;
+  }, [active?.callId]);
+  useEffect(() => {
+    diag('call', 'app state at video screen mount', { state: AppState.currentState });
+    const callId = active?.callId;
+    if (!callId) return;
+    pip.setSession(callId);
+    const consumeNativeState = async () => {
+      const entries = await pip.drainNativeDiagnostics();
+      entries.forEach(({ at, message }) => diag('native', message, { nativeAt: at }));
+      if (!pipCloseHandled.current && (await pip.consumePendingClose(callId))) {
+        pipCloseHandled.current = true;
+        diag('call', 'persisted pip close → hangup');
+        orchestrator.hangup();
+      }
+    };
+    void consumeNativeState();
+    const sub = AppState.addEventListener('change', (s) => {
+      diag('call', 'app state change during video call', {
+        state: s,
+        stage: useCalls.getState().active?.stage,
+      });
+      setAppBackgrounded(s !== 'active');
+      // Android emits the live close event before onStop; this persisted path
+      // covers aggressive OEM suspension. iOS consumes AVKit's native flag.
+      void consumeNativeState();
+    });
+    return () => {
+      sub.remove();
+      pip.setSession(null);
+    };
+  }, [active?.callId, orchestrator]);
   // The authoritative "collapse to just the video" signal. True when the native
   // PiP event told us so, OR the app is backgrounded (about to be / already in
   // PiP), OR the window has reflowed to the tiny floating size. Any path drives
@@ -166,8 +196,12 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     // Closing the PiP bubble (vs expanding it back) must END the call —
     // otherwise the camera/mic/ring keep running headless.
     const unsubClosed = pip.onPipClosed(() => {
+      if (pipCloseHandled.current) return;
+      pipCloseHandled.current = true;
       diag('call', 'pip closed → hangup');
       orchestrator.hangup();
+      // Clear the persisted fallback after the live native event succeeds.
+      if (active?.callId) void pip.consumePendingClose(active.callId);
     });
     // Diagnostic breadcrumb for the X-dismiss path (see MainActivity.onStop).
     const unsubLifecycle = pip.onPipLifecycle((info) => diag('call', 'pip lifecycle', { info }));

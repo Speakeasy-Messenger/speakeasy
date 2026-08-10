@@ -18,7 +18,8 @@ describe('iOS background-call native contracts', () => {
       delegate.indexOf('[RNVoipPushNotificationManager voipRegistration];'),
     );
     expect(delegate).toContain('[RNCallKeep reportNewIncomingCall:uuid');
-    expect(delegate).toContain('withCompletionHandler:completion');
+    expect(delegate).toContain('withCompletionHandler:loggedCompletion');
+    expect(delegate).toContain('CallKit incoming-call report completion');
     expect(delegate).toContain('[[NSUUID alloc] initWithUUIDString:uuid]');
   });
 
@@ -38,13 +39,17 @@ describe('iOS background-call native contracts', () => {
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
     const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
     const delegate = source('ios/Speakeasy/AppDelegate.mm');
+    const diagnosticsModule = source('ios/SpeakeasyBridges/Version/VersionModule.swift');
     const pipBridge = source('src/native/pip.ts');
 
     expect(webrtcPatch).toContain('completionHandler(YES);');
     expect(webrtcPatch).toContain('SpeakeasyPictureInPictureClosed');
     expect(delegate).toContain('speakeasyPictureInPictureClosed:');
-    expect(delegate).toContain('@"SpeakeasyPipClosed"');
-    expect(pipBridge).toContain("DeviceEventEmitter.addListener('SpeakeasyPipClosed'");
+    expect(diagnosticsModule).toContain('forKey: "SpeakeasyPendingPipClose"');
+    expect(diagnosticsModule).toContain('final class NativeDiagnosticsModule: RCTEventEmitter');
+    expect(diagnosticsModule).toContain('sendEvent(withName: "SpeakeasyPipClosed"');
+    expect(pipBridge).toContain("emitter.addListener('SpeakeasyPipClosed'");
+    expect(pipBridge).toContain('consumePendingPipClose(sessionId)');
   });
 
   it('lets CallKit own the iOS audio session instead of InCallManager', () => {
@@ -120,5 +125,28 @@ describe('iOS background-call native contracts', () => {
     expect(maestroFlow).toContain("tapOn: 'Speakeasy'");
     expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");
+  });
+
+  it('persists enough breadcrumbs to diagnose a real-device background call', () => {
+    const delegate = source('ios/Speakeasy/AppDelegate.mm');
+    const bridge = source('src/calls/callkeep-bridge.ts');
+    const peer = source('src/calls/webrtc-peer.ts');
+    const screen = source('src/screens/VideoCallScreen.tsx');
+    const diagnosticsScreen = source('src/screens/DiagnosticsScreen.tsx');
+
+    expect(delegate).toContain('VoIP push received');
+    expect(delegate).toContain('CallKit incoming-call report completion');
+    expect(bridge).toContain("diag('callkeep', 'didDisplayIncomingCall'");
+    expect(bridge).toContain("diag('callkeep', 'displayIncomingCall requested'");
+    expect(screen).toContain("diag('call', 'app state change during video call'");
+    expect(screen).toContain("diag('call', 'pip closed → hangup'");
+    expect(peer).toContain('video stats @ ${trigger}');
+    expect(peer).toContain('inboundFlowing:');
+    expect(peer).toContain('outboundFlowing:');
+    expect(peer).toContain("scheduleVideoStats('background-boundary')");
+    expect(peer).toContain("scheduleVideoStats('foreground-boundary')");
+    expect(peer).toContain('backgroundInterval,');
+    expect(screen).toContain('pip.drainNativeDiagnostics()');
+    expect(diagnosticsScreen).toContain('pip.drainNativeDiagnostics()');
   });
 });

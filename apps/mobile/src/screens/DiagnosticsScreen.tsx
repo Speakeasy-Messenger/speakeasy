@@ -12,11 +12,13 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import { AppBar } from '../components/AppBar.js';
 import {
   clearDiag,
+  diag,
   formatDiag,
   getDiagSnapshot,
   subscribeDiag,
   type DiagEntry,
 } from '../diag/log.js';
+import { pip } from '../native/pip.js';
 import {
   clearLastJsCrash,
   readLastJsCrash,
@@ -79,6 +81,9 @@ export function DiagnosticsScreen({ onBack, onOpenAvatarPreview }: Props) {
   useEffect(() => {
     const off = subscribeDiag((e) => setEntries(e.slice()));
     void readLastJsCrash().then(setLastCrash);
+    void pip.drainNativeDiagnostics().then((nativeEntries) => {
+      nativeEntries.forEach(({ at, message }) => diag('native', message, { nativeAt: at }));
+    });
     return off;
   }, []);
 

@@ -33,3 +33,80 @@ final class VersionModule: NSObject {
     ]
   }
 }
+
+/// Bridgeless-safe handoff for native lifecycle breadcrumbs that can happen
+/// while JavaScript is suspended (PushKit, CallKit, and PiP close).
+@objc(NativeDiagnosticsModule)
+final class NativeDiagnosticsModule: RCTEventEmitter {
+  private let defaults = UserDefaults.standard
+  private var hasListeners = false
+
+  override init() {
+    super.init()
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(pictureInPictureClosed(_:)),
+      name: NSNotification.Name("SpeakeasyPictureInPictureClosed"),
+      object: nil
+    )
+  }
+
+  deinit {
+    NotificationCenter.default.removeObserver(self)
+  }
+
+  override static func requiresMainQueueSetup() -> Bool { false }
+
+  override func supportedEvents() -> [String] { ["SpeakeasyPipClosed"] }
+
+  override func startObserving() { hasListeners = true }
+
+  override func stopObserving() { hasListeners = false }
+
+  @objc private func pictureInPictureClosed(_ notification: Notification) {
+    // Persist before emitting so the live JS callback can atomically consume
+    // the fallback without racing AppDelegate's notification observer.
+    defaults.set(true, forKey: "SpeakeasyPendingPipClose")
+    defaults.set(Date().timeIntervalSince1970, forKey: "SpeakeasyPendingPipCloseAt")
+    defaults.set(defaults.string(forKey: "SpeakeasyCurrentPipSession"),
+                 forKey: "SpeakeasyPendingPipCloseSession")
+    var entries = defaults.array(forKey: "SpeakeasyPendingNativeDiagnostics") as? [[String: Any]] ?? []
+    entries.append([
+      "at": Date().timeIntervalSince1970 * 1000,
+      "message": "iOS PiP closed by user",
+    ])
+    defaults.set(Array(entries.suffix(50)), forKey: "SpeakeasyPendingNativeDiagnostics")
+    if hasListeners { sendEvent(withName: "SpeakeasyPipClosed", body: true) }
+  }
+
+  @objc func consumePendingPipClose(
+    _ sessionId: String,
+    resolver resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    let pending = defaults.bool(forKey: "SpeakeasyPendingPipClose")
+    let age = Date().timeIntervalSince1970 - defaults.double(forKey: "SpeakeasyPendingPipCloseAt")
+    let pendingSession = defaults.string(forKey: "SpeakeasyPendingPipCloseSession")
+    defaults.removeObject(forKey: "SpeakeasyPendingPipClose")
+    defaults.removeObject(forKey: "SpeakeasyPendingPipCloseAt")
+    defaults.removeObject(forKey: "SpeakeasyPendingPipCloseSession")
+    resolve(pending && pendingSession == sessionId && age >= 0 && age <= 30)
+  }
+
+  @objc func setPipSession(_ sessionId: String?) {
+    if let sessionId {
+      defaults.set(sessionId, forKey: "SpeakeasyCurrentPipSession")
+    } else {
+      defaults.removeObject(forKey: "SpeakeasyCurrentPipSession")
+    }
+  }
+
+  @objc func drainNativeDiagnostics(
+    _ resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    let entries = defaults.array(forKey: "SpeakeasyPendingNativeDiagnostics") ?? []
+    defaults.removeObject(forKey: "SpeakeasyPendingNativeDiagnostics")
+    resolve(entries)
+  }
+}

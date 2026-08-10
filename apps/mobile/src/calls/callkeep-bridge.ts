@@ -237,6 +237,10 @@ export class CallKeepBridge {
       this.handleCallAction('end', callUUID);
     });
     this.rnCallKeep.addEventListener('didDisplayIncomingCall', (data) => {
+      diag('callkeep', 'didDisplayIncomingCall', {
+        hasCallUUID: !!normalizeUuid(data?.callUUID),
+        fromPushKit: !!data?.fromPushKit,
+      });
       this.bindPushKitCall(data);
     });
     this.rnCallKeep.addEventListener('didLoadWithEvents', (events) => {
@@ -375,6 +379,7 @@ export class CallKeepBridge {
       if (next.isCaller) {
         try {
           RNCallKeep.startCall(uuid, next.peerUserId, `@${next.peerUserId}`, 'generic', isVideo);
+          diag('callkeep', 'startCall requested', { callUUID: uuid, isVideo });
         } catch (err) {
           diag('callkeep', 'startCall failed', { err: String(err) });
         }
@@ -390,9 +395,15 @@ export class CallKeepBridge {
               'generic',
               isVideo,
             );
+            diag('callkeep', 'displayIncomingCall requested', { callUUID: uuid, isVideo });
           } catch (err) {
             diag('callkeep', 'displayIncomingCall failed', { err: String(err) });
           }
+        } else {
+          diag('callkeep', 'displayIncomingCall skipped: already reported by PushKit', {
+            callUUID: uuid,
+            isVideo,
+          });
         }
       }
       this.applyPendingAction(next.callId, uuid);
@@ -404,6 +415,7 @@ export class CallKeepBridge {
         if (uuid) {
           try {
             RNCallKeep.endCall(uuid);
+            diag('callkeep', 'endCall requested', { callUUID: uuid });
           } catch (err) {
             diag('callkeep', 'endCall failed', { err: String(err) });
           }
@@ -420,6 +432,7 @@ export class CallKeepBridge {
       if (uuid) {
         try {
           RNCallKeep.reportConnectedOutgoingCallWithUUID(uuid);
+          diag('callkeep', 'reportConnected requested', { callUUID: uuid });
         } catch (err) {
           diag('callkeep', 'reportConnected failed', { err: String(err) });
         }
