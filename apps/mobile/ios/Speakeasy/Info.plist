@@ -63,18 +63,14 @@
 	<key>ITSAppUsesNonExemptEncryption</key>
 	<false/>
 	<!-- audio keeps the call audio session running while the screen is
-	     off. remote-notification lets a data/content-available push wake
-	     the app in the background to decrypt + post the message
-	     notification (parity with Android's FCM background message
-	     handling). NOTE: no `voip` entry — CallKit/VoIP push is disabled
-	     (IOS_VOIP_CALLKIT_ENABLED off; see ios-1.0.32 revert) and App
-	     Review rejects a voip background mode with no visible CallKit
-	     service (Guideline 2.5.4, July 14 2026 rejection). Re-add it in
-	     the same PR that re-enables CallKit. -->
+	     off. remote-notification wakes the app for ordinary encrypted
+	     message notifications. voip lets PushKit wake the process and
+	     synchronously report an incoming call through CallKit. -->
 	<key>UIBackgroundModes</key>
 	<array>
 		<string>audio</string>
 		<string>remote-notification</string>
+		<string>voip</string>
 	</array>
 	<!-- Deep link: speakeasy://add?handle=<handle>. Encoded in user QR
 	     codes so the iOS camera can hand off to Speakeasy directly. -->

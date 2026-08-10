@@ -7,7 +7,7 @@ import {
   type MediaStreamTrack,
 } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
-import { DeviceEventEmitter, type EmitterSubscription } from 'react-native';
+import { DeviceEventEmitter, Platform, type EmitterSubscription } from 'react-native';
 import type {
   CallAnswerPayload,
   CallIceCandidate,
@@ -16,10 +16,7 @@ import type {
 } from '@speakeasy/shared';
 import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './types.js';
 import { ANIMATION_CHANNEL_LABEL } from './animation-channel.js';
-import {
-  ensureCameraPermission,
-  ensureMicPermission,
-} from '../permissions/runtime.js';
+import { ensureCameraPermission, ensureMicPermission } from '../permissions/runtime.js';
 import { diag } from '../diag/log.js';
 import { utf8ToBytes } from '../utils/bytes.js';
 
@@ -93,7 +90,10 @@ class WebRtcCallPeer implements CallPeer {
   private animationChannel?: any;
   private animationFrameCb?: (payload: Uint8Array) => void;
 
-  constructor(iceServers: IceServer[], private readonly mediaKind: CallMediaKind = 'audio') {
+  constructor(
+    iceServers: IceServer[],
+    private readonly mediaKind: CallMediaKind = 'audio',
+  ) {
     // Speaker default mirrors the orchestrator's `active.speakerOn` so the
     // UI toggle and the actual audio route agree the instant the call
     // connects — no double-tap to reconcile.
@@ -360,9 +360,7 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   onConnectionStateChange(
-    cb: (
-      s: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
-    ) => void,
+    cb: (s: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected') => void,
   ): () => void {
     this.connStateCb = cb;
     return () => {
@@ -384,9 +382,7 @@ class WebRtcCallPeer implements CallPeer {
    * `audioLevel` reported by the spec is RMS-derived and already in
    * [0, 1] — no normalization needed. Floors at 0.
    */
-  onAudioLevels(
-    cb: (levels: { local: number; remote: number }) => void,
-  ): () => void {
+  onAudioLevels(cb: (levels: { local: number; remote: number }) => void): () => void {
     this.audioLevelCb = cb;
     if (!this.audioLevelTimer) {
       this.audioLevelTimer = setInterval(() => {
@@ -499,8 +495,7 @@ class WebRtcCallPeer implements CallPeer {
     // override it.
     void Promise.resolve(InCallManager.getIsWiredHeadsetPluggedIn())
       .then((res: { isWiredHeadsetPluggedIn?: boolean } | boolean) => {
-        const plugged =
-          typeof res === 'boolean' ? res : !!res?.isWiredHeadsetPluggedIn;
+        const plugged = typeof res === 'boolean' ? res : !!res?.isWiredHeadsetPluggedIn;
         if (plugged !== this.headsetPlugged) {
           this.headsetPlugged = plugged;
           diag('webrtc', 'headset seeded at start', { plugged });
@@ -760,7 +755,14 @@ class WebRtcCallPeer implements CallPeer {
     // into a PiP bubble when backgrounded (bug #4 — verified on a real iPhone
     // via the device log: audio-mode = prohibited, video-mode = possible).
     const media = this.mediaKind === 'video' ? 'video' : 'audio';
-    InCallManager.start({ media, auto: true });
+    if (Platform.OS !== 'ios') {
+      InCallManager.start({ media, auto: true });
+    }
+    // iOS deliberately does not call InCallManager.start(): its native module
+    // ignores `auto:false` and always activates AVAudioSession, racing CallKit
+    // and WebRTC's manual-audio handshake. CallKit configures videoChat mode
+    // natively and exclusively owns activation; InCallManager remains useful
+    // here only for route controls, headset events, and screen-on behavior.
     this.startedManager = true;
     InCallManager.setKeepScreenOn(true);
     // Listen for headset plug/unplug and seed the current state BEFORE
@@ -768,7 +770,10 @@ class WebRtcCallPeer implements CallPeer {
     // speaker/earpiece preference.
     this.subscribeHeadset();
     this.applyAudioRoute();
-    diag('webrtc', 'InCallManager started', { speakerOn: this.speakerOn });
+    diag('webrtc', 'call audio controls ready', {
+      speakerOn: this.speakerOn,
+      owner: Platform.OS === 'ios' ? 'callkit' : 'incall-manager',
+    });
   }
 
   /**

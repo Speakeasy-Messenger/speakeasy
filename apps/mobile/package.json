@@ -36,6 +36,7 @@
     "react-native-safe-area-context": "^5.4.0",
     "react-native-screens": "4.9.1",
     "react-native-svg": "15.11.2",
+    "react-native-voip-push-notification": "^3.3.3",
     "react-native-webrtc": "^124.0.7",
     "zustand": "^5.0.2"
   },

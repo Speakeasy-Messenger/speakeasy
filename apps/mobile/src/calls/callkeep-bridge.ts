@@ -23,10 +23,18 @@ type RNCallKeepShape = {
   setup: (opts: unknown) => Promise<unknown>;
   registerAndroidEvents: () => void;
   setAvailable: (v: boolean) => void;
-  addEventListener: (event: string, handler: (arg: { callUUID: string; muted?: boolean }) => void) => void;
+  addEventListener: (event: string, handler: (arg: any) => void) => void;
   removeEventListener: (event: string) => void;
+  getInitialEvents?: () => Promise<Array<{ name: string; data?: any }>>;
+  clearInitialEvents?: () => void;
   startCall: (uuid: string, handle: string, name: string, type: string, video: boolean) => void;
-  displayIncomingCall: (uuid: string, handle: string, name: string, type: string, video: boolean) => void;
+  displayIncomingCall: (
+    uuid: string,
+    handle: string,
+    name: string,
+    type: string,
+    video: boolean,
+  ) => void;
   endCall: (uuid: string) => void;
   reportConnectedOutgoingCallWithUUID: (uuid: string) => void;
 };
@@ -42,7 +50,7 @@ function tryLoadCallKeep(): RNCallKeepShape | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
     const mod = require('react-native-callkeep') as { default?: RNCallKeepShape } | RNCallKeepShape;
-    return ('default' in mod && mod.default) ? mod.default : (mod as RNCallKeepShape);
+    return 'default' in mod && mod.default ? mod.default : (mod as RNCallKeepShape);
   } catch (err) {
     diag('callkeep', 'require failed (fabric incompat?)', { err: String(err) });
     return undefined;
@@ -89,11 +97,9 @@ function tryLoadRTCAudioSession(): RTCAudioSessionShape | undefined {
  * zero-PII stance. Android ConnectionService has no equivalent
  * cloud sync, so no flag is needed there.
  *
- * What this is NOT yet:
- *   - PushKit-driven background ringing on iOS (requires a VoIP push
- *     certificate + a separate push payload schema). Without it,
- *     CallKit only fires while the app is foreground or in a brief
- *     wake window. Phase 6.5 work; flagged in the integration notes.
+ * PushKit reports killed/background incoming calls natively before the JS
+ * runtime exists. This bridge replays those early CallKeep events and binds
+ * the native UUID to the encrypted signaling call id once JS is ready.
  */
 
 interface BridgeDeps {
@@ -108,6 +114,10 @@ export class CallKeepBridge {
   /** Map our internal `call-{ulid}` ids ↔ CallKit's UUID-shaped ids. */
   private readonly idToUuid = new Map<string, string>();
   private readonly uuidToId = new Map<string, string>();
+  /** UUIDs already reported natively by AppDelegate's PushKit callback. */
+  private readonly nativeReportedUuids = new Set<string>();
+  /** CallKit actions can arrive before the encrypted offer has reached JS. */
+  private readonly pendingActions = new Map<string, 'answer' | 'end'>();
   /** Resolved on first start(); `undefined` when the native module
    * isn't available on this build (e.g. new-arch Android with the
    * pre-Fabric callkeep lib). All methods then no-op. */
@@ -195,6 +205,7 @@ export class CallKeepBridge {
         }
       }
       this.attachListeners();
+      await this.replayInitialEvents();
       this.attachStoreSubscriber();
       this.setupDone = true;
       diag('callkeep', 'setup ok');
@@ -208,6 +219,8 @@ export class CallKeepBridge {
     this.rnCallKeep.removeEventListener('answerCall');
     this.rnCallKeep.removeEventListener('endCall');
     this.rnCallKeep.removeEventListener('didPerformSetMutedCallAction');
+    this.rnCallKeep.removeEventListener('didDisplayIncomingCall');
+    this.rnCallKeep.removeEventListener('didLoadWithEvents');
     this.rnCallKeep.removeEventListener('didActivateAudioSession');
     this.rnCallKeep.removeEventListener('didDeactivateAudioSession');
     this.unsubscribeStore?.();
@@ -218,23 +231,16 @@ export class CallKeepBridge {
   private attachListeners(): void {
     if (!this.rnCallKeep) return;
     this.rnCallKeep.addEventListener('answerCall', ({ callUUID }) => {
-      const callId = this.uuidToId.get(callUUID);
-      diag('callkeep', 'answerCall', { callUUID, callId });
-      if (!callId) return;
-      void this.deps.orchestrator.accept().catch((err) => {
-        diag('callkeep', 'accept failed', { err: String(err) });
-      });
+      this.handleCallAction('answer', callUUID);
     });
     this.rnCallKeep.addEventListener('endCall', ({ callUUID }) => {
-      const callId = this.uuidToId.get(callUUID);
-      diag('callkeep', 'endCall', { callUUID, callId });
-      if (!callId) return;
-      const active = this.deps.orchestrator.getActive();
-      if (active?.stage === 'incoming_ringing') {
-        this.deps.orchestrator.decline();
-      } else {
-        this.deps.orchestrator.hangup();
-      }
+      this.handleCallAction('end', callUUID);
+    });
+    this.rnCallKeep.addEventListener('didDisplayIncomingCall', (data) => {
+      this.bindPushKitCall(data);
+    });
+    this.rnCallKeep.addEventListener('didLoadWithEvents', (events) => {
+      this.processInitialEvents(Array.isArray(events) ? events : []);
     });
     this.rnCallKeep.addEventListener('didPerformSetMutedCallAction', ({ muted }) => {
       diag('callkeep', 'mute toggle', { muted: !!muted });
@@ -262,6 +268,84 @@ export class CallKeepBridge {
     });
   }
 
+  private async replayInitialEvents(): Promise<void> {
+    const RNCallKeep = this.rnCallKeep;
+    if (!RNCallKeep?.getInitialEvents) return;
+    try {
+      const events = await RNCallKeep.getInitialEvents();
+      this.processInitialEvents(Array.isArray(events) ? events : []);
+      RNCallKeep.clearInitialEvents?.();
+    } catch (err) {
+      diag('callkeep', 'initial event replay failed', { err: String(err) });
+    }
+  }
+
+  private processInitialEvents(events: Array<{ name: string; data?: any }>): void {
+    // Bind UUIDs first even when answer/end appears earlier in the array.
+    for (const event of events) {
+      if (event.name === 'RNCallKeepDidDisplayIncomingCall') {
+        this.bindPushKitCall(event.data);
+      }
+    }
+    for (const event of events) {
+      if (event.name === 'RNCallKeepPerformAnswerCallAction') {
+        this.handleCallAction('answer', event.data?.callUUID);
+      } else if (event.name === 'RNCallKeepPerformEndCallAction') {
+        this.handleCallAction('end', event.data?.callUUID);
+      }
+    }
+  }
+
+  private bindPushKitCall(data: any): void {
+    const payload = data?.payload as { call_id?: unknown; call_uuid?: unknown } | undefined;
+    const callId = typeof payload?.call_id === 'string' ? payload.call_id : undefined;
+    const rawUuid = data?.callUUID ?? payload?.call_uuid;
+    const uuid = normalizeUuid(rawUuid);
+    if (!callId || !uuid) {
+      diag('callkeep', 'PushKit call missing mapping', {
+        hasCallId: !!callId,
+        hasUuid: !!uuid,
+      });
+      return;
+    }
+    this.idToUuid.set(callId, uuid);
+    this.uuidToId.set(uuid, callId);
+    this.nativeReportedUuids.add(uuid);
+    diag('callkeep', 'PushKit call mapped', { callId, callUUID: uuid });
+    this.applyPendingAction(callId, uuid);
+  }
+
+  private handleCallAction(action: 'answer' | 'end', rawUuid: unknown): void {
+    const uuid = normalizeUuid(rawUuid);
+    const callId = uuid ? this.uuidToId.get(uuid) : undefined;
+    diag('callkeep', `${action}Call`, { callUUID: uuid, callId });
+    if (!uuid || !callId || this.deps.orchestrator.getActive()?.callId !== callId) {
+      if (uuid) this.pendingActions.set(uuid, action);
+      return;
+    }
+    this.performCallAction(action);
+  }
+
+  private applyPendingAction(callId: string, uuid: string): void {
+    if (this.deps.orchestrator.getActive()?.callId !== callId) return;
+    const action = this.pendingActions.get(uuid);
+    if (!action) return;
+    this.pendingActions.delete(uuid);
+    this.performCallAction(action);
+  }
+
+  private performCallAction(action: 'answer' | 'end'): void {
+    if (action === 'answer') {
+      void this.deps.orchestrator.accept().catch((err) => {
+        diag('callkeep', 'accept failed', { err: String(err) });
+      });
+      return;
+    }
+    const active = this.deps.orchestrator.getActive();
+    if (active?.stage === 'incoming_ringing') this.deps.orchestrator.decline();
+    else this.deps.orchestrator.hangup();
+  }
+
   /**
    * Mirror orchestrator state into CallKit/ConnectionService.
    * - `outgoing_ringing` → `startCall` (registers with the system)
@@ -270,7 +354,8 @@ export class CallKeepBridge {
    * - `ended`            → `endCall` (dismiss native UI)
    */
   private attachStoreSubscriber(): void {
-    let prev: ActiveCall | undefined;
+    let prev = useCalls.getState().active;
+    this.diff(undefined, prev);
     this.unsubscribeStore = useCalls.subscribe((s) => {
       const next = s.active;
       this.diff(prev, next);
@@ -294,18 +379,23 @@ export class CallKeepBridge {
           diag('callkeep', 'startCall failed', { err: String(err) });
         }
       } else if (next.stage === 'incoming_ringing') {
-        try {
-          RNCallKeep.displayIncomingCall(
-            uuid,
-            next.peerUserId,
-            `@${next.peerUserId}`,
-            'generic',
-            isVideo,
-          );
-        } catch (err) {
-          diag('callkeep', 'displayIncomingCall failed', { err: String(err) });
+        // AppDelegate already displayed PushKit calls before JS existed. A
+        // second displayIncomingCall produced the historical double ringer.
+        if (!this.nativeReportedUuids.has(uuid)) {
+          try {
+            RNCallKeep.displayIncomingCall(
+              uuid,
+              next.peerUserId,
+              `@${next.peerUserId}`,
+              'generic',
+              isVideo,
+            );
+          } catch (err) {
+            diag('callkeep', 'displayIncomingCall failed', { err: String(err) });
+          }
         }
       }
+      this.applyPendingAction(next.callId, uuid);
       return;
     }
     if (!next) {
@@ -319,6 +409,8 @@ export class CallKeepBridge {
           }
           this.idToUuid.delete(prev.callId);
           this.uuidToId.delete(uuid);
+          this.nativeReportedUuids.delete(uuid);
+          this.pendingActions.delete(uuid);
         }
       }
       return;
@@ -365,4 +457,8 @@ function uuidV4(): string {
     if (i === 7 || i === 11 || i === 15 || i === 19) s += '-';
   }
   return s;
+}
+
+function normalizeUuid(value: unknown): string | undefined {
+  return typeof value === 'string' && value.length > 0 ? value.toLowerCase() : undefined;
 }

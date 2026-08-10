@@ -30,8 +30,10 @@ export interface ApnsVoipConfig {
 }
 
 export interface VoipCallPayload {
-  /** CallKit call UUID — must match the orchestrator's callId. */
+  /** Speakeasy call id used by the encrypted signaling protocol. */
   call_id: string;
+  /** RFC-4122 UUID used only by CallKit. */
+  call_uuid: string;
   /** Caller handle, e.g. "alice". */
   handle: string;
   /** Display name shown on the CallKit screen. */

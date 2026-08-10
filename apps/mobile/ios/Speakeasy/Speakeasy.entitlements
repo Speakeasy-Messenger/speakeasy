@@ -24,6 +24,8 @@
 <dict>
   <key>aps-environment</key>
   <string>production</string>
+  <key>com.apple.developer.avfoundation.multitasking-camera-access</key>
+  <true/>
   <key>com.apple.developer.associated-domains</key>
   <array>
     <string>applinks:speakeasyapp.xyz</string>
@@ -35,23 +37,5 @@
   <array>
     <string>group.xyz.speakeasyapp.app</string>
   </array>
-  <!-- REMOVED 2026-08-07 — com.apple.developer.avfoundation.multitasking-camera-access.
-       It keeps the local camera capturing while backgrounded during a video call
-       (otherwise the peer sees a frozen frame), but Apple REQUIRES a `voip` entry
-       in UIBackgroundModes for it: altool rejects the upload with error 91124,
-       "This app has the … multitasking-camera-access entitlement, so the
-       UIBackgroundModes Info.plist key must contain a voip entry."
-
-       We removed `voip` the same day to clear the Guideline 2.5.4 rejection
-       (VoIP background mode declared with no CallKit/PushKit service behind it),
-       and our reply to App Review states that removal — so re-adding `voip` now
-       would both re-trigger 2.5.4 and make that answer untrue.
-
-       Restore this TOGETHER with `voip` in the same PR that enables CallKit
-       (orchestrator.ts CALLKEEP_ENABLED), which is what legitimately justifies
-       the VoIP background mode. Until then, backgrounding a video call freezes
-       YOUR outgoing video for the peer; receiving their video in PiP is
-       unaffected. Note this entitlement has never shipped in a production build
-       — it existed only on the branch line — so this is not a user regression. -->
 </dict>
 </plist>

@@ -3,8 +3,10 @@ import {
   buildAndroidPushMessage,
   buildIosPushData,
   resolveBannerCopy,
+  selectOrdinaryPushDevices,
 } from './push.fcm-apns.js';
 import type { PushDeliveryNotice } from './push.js';
+import type { DeviceRecord } from '../db/devices.js';
 
 function notice(overrides: Partial<PushDeliveryNotice> = {}): PushDeliveryNotice {
   return {
@@ -41,6 +43,44 @@ describe('buildIosPushData', () => {
     expect(buildIosPushData(notice({ senderId: undefined }), 'rich')).not.toHaveProperty(
       'ciphertext',
     );
+  });
+});
+
+describe('selectOrdinaryPushDevices', () => {
+  const device = (deviceToken: string, overrides: Partial<DeviceRecord> = {}): DeviceRecord => ({
+    deviceToken,
+    userId: 'bob',
+    pushToken: `push-${deviceToken}`,
+    platform: 'ios',
+    enrolledAt: new Date(0),
+    lastSeen: new Date(0),
+    ...overrides,
+  });
+
+  it('suppresses the duplicate banner only for PushKit-capable iPhones', () => {
+    const iosVoip = device('ios-voip', { voipToken: 'voip-1' });
+    const iosBanner = device('ios-banner');
+    const android = device('android', {
+      platform: 'android',
+      voipToken: 'ignored-on-android',
+    });
+
+    expect(
+      selectOrdinaryPushDevices([iosVoip, iosBanner, android], {
+        skipVoipCapableIos: true,
+      }),
+    ).toEqual([iosBanner, android]);
+  });
+
+  it('can target one ordinary token after a per-device VoIP failure', () => {
+    const failed = device('failed', { voipToken: 'voip-failed' });
+    const healthy = device('healthy', { voipToken: 'voip-healthy' });
+
+    expect(
+      selectOrdinaryPushDevices([failed, healthy], {
+        onlyPushTokens: [failed.pushToken!],
+      }),
+    ).toEqual([failed]);
   });
 });
 
@@ -85,7 +125,6 @@ describe('buildAndroidPushMessage', () => {
     // Data still rides along for tap-routing + the foreground path.
     expect(msg.data?.conversation_id).toBe('direct:alice:bob');
   });
-
 });
 
 describe('resolveBannerCopy', () => {

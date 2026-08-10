@@ -83,6 +83,12 @@ export interface PushDeliveryNotice {
    * device then falls back to a generic "New message".
    */
   ciphertext?: string;
+  /** For a live incoming call, omit ordinary APNs banners on iOS devices that
+   * have a PushKit token; CallKit owns that surface and a banner would double
+   * notify. Android and iOS devices without PushKit still receive the fallback. */
+  skipVoipCapableIos?: boolean;
+  /** Internal targeted fallback used when one VoIP APNs delivery fails. */
+  onlyPushTokens?: string[];
 }
 
 export interface PushProvider {

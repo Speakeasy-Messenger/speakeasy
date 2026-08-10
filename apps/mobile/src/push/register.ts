@@ -1,6 +1,9 @@
 import { api, pushNotifications } from '../services.js';
 import { useSettings } from '../store/settings.js';
 import { diag } from '../diag/log.js';
+import { startVoipPush } from './voip-push.js';
+import { prewarmWsForIncomingCall } from './push-handler.js';
+import { getCachedDeviceTokenOrThrow } from '../auth/verify-device.js';
 
 /**
  * Short-lived in-flight + recency cache to collapse the burst of
@@ -80,9 +83,7 @@ function scheduleRetry(deviceToken: string): void {
  *                   specific branch.
  *   - 'register_failed' if the HTTP POST itself errored.
  */
-export async function tryRegisterPushToken(
-  deviceToken: string,
-): Promise<RegisterResult> {
+export async function tryRegisterPushToken(deviceToken: string): Promise<RegisterResult> {
   if (inFlight) {
     return inFlight;
   }
@@ -118,11 +119,24 @@ export function __resetPushRegisterDedupForTests(): void {
 }
 
 async function doRegisterPushToken(deviceToken: string): Promise<RegisterResult> {
+  // PushKit is independent of ordinary notification permission. Start it first
+  // so denying APNs banners cannot silently disable native incoming calls.
+  startVoipPush({
+    getDeviceToken: () => {
+      try {
+        return getCachedDeviceTokenOrThrow();
+      } catch {
+        return deviceToken || undefined;
+      }
+    },
+    registerVoipToken: (dt, voipToken) => api.registerVoipToken(dt, voipToken),
+    prewarmForIncomingCall: prewarmWsForIncomingCall,
+  });
+
   const pushResult = await pushNotifications.getToken();
   if (!pushResult) {
     const reason =
-      (pushNotifications as { lastFailureReason?: string }).lastFailureReason ??
-      'unknown';
+      (pushNotifications as { lastFailureReason?: string }).lastFailureReason ?? 'unknown';
     diag('push', 'no token', { reason });
     // Report the failure to the server so we can diagnose "not receiving
     // push" reports without needing the user to check their diag log.
@@ -138,18 +152,8 @@ async function doRegisterPushToken(deviceToken: string): Promise<RegisterResult>
     privacy,
   });
   try {
-    await api.registerPushToken(
-      deviceToken,
-      pushResult.pushToken,
-      pushResult.platform,
-      privacy,
-    );
+    await api.registerPushToken(deviceToken, pushResult.pushToken, pushResult.platform, privacy);
     diag('push', 'token registered');
-    // NOTE: the iOS VoIP (PushKit) registration that used to run here was
-    // removed 2026-08-07 — the server has never sent a VoIP push
-    // (IOS_VOIP_CALLKIT_ENABLED unset) and the `voip` background mode it
-    // needed was the Guideline 2.5.4 rejection. Incoming calls arrive on the
-    // ordinary APNs push handled below.
     return 'registered';
   } catch (err) {
     diag('push', 'register failed', { err: String(err) });

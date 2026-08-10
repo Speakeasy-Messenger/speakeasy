@@ -6,6 +6,7 @@
 import admin from 'firebase-admin';
 import type { PushDeliveryNotice, PushProvider } from './push.js';
 import type { DevicesRepo } from '../db/devices.js';
+import type { DeviceRecord } from '../db/devices.js';
 import type { EventLogRepo } from '../db/event-log.js';
 
 /**
@@ -96,6 +97,18 @@ export function buildIosPushData(
   return data;
 }
 
+/** Select ordinary FCM/APNs banner targets for this delivery. */
+export function selectOrdinaryPushDevices(
+  devices: DeviceRecord[],
+  notice: Pick<PushDeliveryNotice, 'onlyPushTokens' | 'skipVoipCapableIos'>,
+): DeviceRecord[] {
+  const only = notice.onlyPushTokens ? new Set(notice.onlyPushTokens) : undefined;
+  return devices.filter((device) => {
+    if (!device.pushToken || (only && !only.has(device.pushToken))) return false;
+    return !(notice.skipVoipCapableIos && device.platform === 'ios' && device.voipToken);
+  });
+}
+
 /**
  * Build the FCM message for one Android bucket (devices sharing the same
  * title/body/privacy). The privacy split is the whole point:
@@ -172,8 +185,11 @@ export class FcmApnsPushProvider implements PushProvider {
 
   async notifyDelivery(notice: PushDeliveryNotice): Promise<void> {
     const userDevices = await this.devices.listForUser(notice.userId);
-    const withPush = userDevices.filter((d) => d.pushToken);
+    const withPush = selectOrdinaryPushDevices(userDevices, notice);
     if (withPush.length === 0) {
+      // No ordinary banner is correct when every target iPhone has PushKit;
+      // CallKit is the notification surface for the live call.
+      if (notice.skipVoipCapableIos && userDevices.some((d) => d.voipToken)) return;
       // Recurring report shape: "@<peer> isn't getting push notifications".
       // Almost always this — the recipient never registered an FCM token
       // (denied permission, Firebase unlinked on dev build, or simply
@@ -367,10 +383,7 @@ export class FcmApnsPushProvider implements PushProvider {
             reaped.push(f.token.slice(0, 8));
           } catch (err) {
             // eslint-disable-next-line no-console
-            console.warn(
-              { err: (err as Error).message },
-              'FCM push: clearPushToken failed',
-            );
+            console.warn({ err: (err as Error).message }, 'FCM push: clearPushToken failed');
           }
         }
       }
@@ -379,9 +392,7 @@ export class FcmApnsPushProvider implements PushProvider {
           eventType: 'push.fcm_failure',
           userId: notice.userId,
           payload: {
-            failures: perTokenFailures.map(
-              (f) => f.message ?? f.code ?? 'unknown',
-            ),
+            failures: perTokenFailures.map((f) => f.message ?? f.code ?? 'unknown'),
             successes: totalSuccesses,
             kind,
             reapedTokenPreviews: reaped,

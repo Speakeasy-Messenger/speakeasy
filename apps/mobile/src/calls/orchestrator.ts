@@ -21,10 +21,7 @@ import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { ensureSessionWithPeer as EnsureSessionFn } from '../crypto/session.js';
 import { noteSessionEstablishedWith } from '../crypto/session.js';
 import { b64ToBytes, bytesToB64, utf8FromBytes, utf8ToBytes } from '../utils/bytes.js';
-import {
-  ensureCameraPermission,
-  ensureMicPermission,
-} from '../permissions/runtime.js';
+import { ensureCameraPermission, ensureMicPermission } from '../permissions/runtime.js';
 import { Platform } from 'react-native';
 import { diag } from '../diag/log.js';
 import { uploadDiag } from '../diag/upload.js';
@@ -78,16 +75,7 @@ const CONNECTING_TIMEOUT_MS = 45_000;
  * Kept OFF on Android (ConnectionService + a "calling app" prompt; Android uses
  * the notifee foreground-service pill instead).
  */
-// RECONCILIATION 2026-08-07: kept OFF. `main` (which has shipped every
-// release since v1.0.50) contains no CallKit at all, so leaving this true
-// would make a branch-reconciliation merge silently enable CallKit in
-// production. Its history is exactly why that's unacceptable without a
-// device test: 440203f enabled it, ba07606 disabled it again the same day
-// ("double-rang calls and broke audio"), ab7afba re-enabled it claiming a
-// manual-audio fix that was never confirmed on a real device. Flip this to
-// `Platform.OS === 'ios'` in its OWN PR, after Giselle/@zzz verify an
-// incoming call rings once and audio works both ways.
-const CALLKEEP_ENABLED: boolean = false;
+const CALLKEEP_ENABLED: boolean = Platform.OS === 'ios';
 
 /** Whether the CallKit/ConnectionService bridge is active on this platform.
  *  Exposed so the UI can suppress the in-app IncomingCallScreen when CallKit
@@ -284,10 +272,7 @@ export class CallOrchestrator {
    * navigate to the CallScreen keyed off it. Defaults to audio; pass
    * `'video'` to negotiate a camera track via VideoCallScreen.
    */
-  async startOutgoing(
-    peerUserId: string,
-    kind: CallKind = 'audio',
-  ): Promise<string> {
+  async startOutgoing(peerUserId: string, kind: CallKind = 'audio'): Promise<string> {
     if (this.active) {
       throw new Error('busy: another call is already active');
     }
@@ -382,12 +367,7 @@ export class CallOrchestrator {
         }
       }
       const answer = await this.peer.createAnswer();
-      await this.sendEncrypted(
-        this.active.peerUserId,
-        this.active.callId,
-        'call_answer',
-        answer,
-      );
+      await this.sendEncrypted(this.active.peerUserId, this.active.callId, 'call_answer', answer);
       this.transition('connecting');
       this.clearRingTimeout();
     } catch (err) {
@@ -415,8 +395,7 @@ export class CallOrchestrator {
     if (!this.active) return;
     diag('call', 'hangup', { callId: this.active.callId, stage: this.active.stage });
     const wireReason: CallEndReason =
-      this.active.stage === 'outgoing_dialing' ||
-      this.active.stage === 'outgoing_ringing'
+      this.active.stage === 'outgoing_dialing' || this.active.stage === 'outgoing_ringing'
         ? 'cancel'
         : 'hangup';
     // Wrap the WS send so a non-authed socket (e.g. flapped mid-
@@ -436,8 +415,7 @@ export class CallOrchestrator {
         err: String(err),
       });
     }
-    const localReason: CallEndedReason =
-      wireReason === 'cancel' ? 'cancel' : 'completed';
+    const localReason: CallEndedReason = wireReason === 'cancel' ? 'cancel' : 'completed';
     this.endLocally(localReason);
   }
 
@@ -581,9 +559,7 @@ export class CallOrchestrator {
    * CallScreen mounts after the peer is attached and unmounts before
    * close, so a single subscribe-on-mount is sufficient.
    */
-  onAudioLevels(
-    cb: (levels: { local: number; remote: number }) => void,
-  ): () => void {
+  onAudioLevels(cb: (levels: { local: number; remote: number }) => void): () => void {
     return this.peer?.onAudioLevels?.(cb) ?? (() => {});
   }
 
@@ -803,10 +779,7 @@ export class CallOrchestrator {
   /** Flag `untrusted_identity` decrypt failures to the app layer — the
    *  one call-death the user can actually fix (trust-reset the peer). */
   private notePeerIdentityChanged(peerUserId: string, err: unknown): void {
-    if (
-      err instanceof SignalClientError &&
-      err.reason === 'untrusted_identity'
-    ) {
+    if (err instanceof SignalClientError && err.reason === 'untrusted_identity') {
       this.deps.onPeerIdentityChanged?.(peerUserId);
     }
   }
@@ -850,11 +823,7 @@ export class CallOrchestrator {
     }
   }
 
-  private handleIncomingEnd(
-    fromUserId: string,
-    callId: string,
-    reason: CallEndReason,
-  ): void {
+  private handleIncomingEnd(fromUserId: string, callId: string, reason: CallEndReason): void {
     if (!this.active || this.active.callId !== callId || this.active.peerUserId !== fromUserId) {
       // No live call matches this end. Most often the caller cancelled
       // before their offer drained to us (we may still be showing the
@@ -916,12 +885,10 @@ export class CallOrchestrator {
       void (async () => {
         if (!this.active) return;
         try {
-          await this.sendEncrypted(
-            this.active.peerUserId,
-            this.active.callId,
-            'call_ice',
-            { v: 1, candidates: [candidate] } satisfies CallIcePayload,
-          );
+          await this.sendEncrypted(this.active.peerUserId, this.active.callId, 'call_ice', {
+            v: 1,
+            candidates: [candidate],
+          } satisfies CallIcePayload);
         } catch (err) {
           diag('call', 'local ice send FAILED', { err: String(err) });
         }
@@ -971,8 +938,7 @@ export class CallOrchestrator {
       } else if (state === 'closed') {
         // Closed without a wire-side end — treat as completed if we
         // were connected, hangup otherwise.
-        const local: CallEndedReason =
-          this.active.stage === 'connected' ? 'completed' : 'hangup';
+        const local: CallEndedReason = this.active.stage === 'connected' ? 'completed' : 'hangup';
         this.endLocally(local);
       }
     });

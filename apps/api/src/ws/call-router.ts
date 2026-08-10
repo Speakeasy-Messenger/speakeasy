@@ -15,6 +15,7 @@ import type { UserNotifier } from './user-notifier.js';
 import type { CallOfferBuffer } from './call-offer-buffer.js';
 import type { EventLogRepo } from '../db/event-log.js';
 import type { UserRepo } from '../db/users.js';
+import { createHash } from 'node:crypto';
 
 /**
  * Voice/video call signaling router.
@@ -94,10 +95,7 @@ export type CallRouteResult =
   | { ok: true }
   | { ok: false; code: CallRouteErrorCode; message: string };
 
-export type CallRouteErrorCode =
-  | 'invalid_target'
-  | 'bad_call_id'
-  | 'invalid_ciphertext';
+export type CallRouteErrorCode = 'invalid_target' | 'bad_call_id' | 'invalid_ciphertext';
 
 /**
  * Validate the inbound frame, build the outbound frame, route it, and
@@ -193,63 +191,67 @@ export async function routeCallFrame(
   // gap. Other call frames don't push (mid-call, no wake-up value).
   if (msg.type === 'call_offer') {
     const conversation = conversationIdForDirect(senderUserId, msg.to);
+    const useVoipCallKit =
+      process.env.IOS_VOIP_CALLKIT_ENABLED === 'true' && !!deps.apnsVoip && !!deps.devices;
+    const callNotice = {
+      userId: msg.to,
+      conversationId: conversation,
+      msgType: 'direct' as const,
+      senderId: senderUserId,
+      kind: 'call' as const,
+      callVideo: offerKind === 'video',
+    };
     void deps.push
       .notifyDelivery({
-        userId: msg.to,
-        conversationId: conversation,
-        msgType: 'direct',
-        senderId: senderUserId,
-        // FCM data field — distinguishes "@caller is calling…" from
-        // "@sender: New message" + lets the mobile FCM handler route
-        // to the full-screen ringer.
-        kind: 'call',
-        // Banner copy: "Incoming video call" vs "Incoming call".
-        callVideo: offerKind === 'video',
+        ...callNotice,
+        skipVoipCapableIos: useVoipCallKit,
       })
-      .catch((err) =>
-        deps.log.warn(
-          { err, recipientId: msg.to },
-          'call push notify failed',
-        ),
-      );
+      .catch((err) => deps.log.warn({ err, recipientId: msg.to }, 'call push notify failed'));
 
     // iOS CallKit: also fire a direct-APNs VoIP push so the callee's iPhone
     // rings via the native incoming-call UI even from a killed state (FCM
     // can't deliver VoIP pushes). Best-effort; the regular push above is the
     // Android + fallback path. A 410/Unregistered clears the dead token.
     //
-    // ⚠️ DISABLED (2026-06-29): iOS PushKit hard-requires that EVERY received
-    // VoIP push synchronously report an incoming call to CallKit, or the OS
-    // aborts the app (`_terminateAppIfThereAreUnhandledVoIPPushes`). The
-    // client's CallKit provider is NOT set up — CallKeep is gated off because
-    // its audio-session takeover broke every call (see the stock-ADM fix), so
-    // AppDelegate's reportNewIncomingCall has no CXProvider and the VoIP push
-    // crashes the app on every incoming call. The regular `kind:'call'` push
-    // above still notifies the callee. Re-enable ONLY once the client wires a
-    // real CXProvider (RNCallKeep.setup) and owns the call audio session.
-    const iosVoipCallkitEnabled =
-      process.env.IOS_VOIP_CALLKIT_ENABLED === 'true';
-    if (iosVoipCallkitEnabled && deps.apnsVoip && deps.devices) {
+    // The feature flag stays as a safe rollout switch: only enable it after a
+    // build containing the native AppDelegate CallKeep setup is installed.
+    // Devices with a VoIP token are excluded from the ordinary call banner to
+    // prevent double ringing; a per-device ordinary push is the failure path.
+    if (useVoipCallKit && deps.apnsVoip && deps.devices) {
       const { apnsVoip, devices } = deps;
       void (async () => {
         try {
           const rows = await devices.listForUser(msg.to);
-          const voipTokens = rows
-            .filter((d) => d.platform === 'ios' && d.voipToken)
-            .map((d) => d.voipToken as string);
-          if (voipTokens.length === 0) return;
+          const voipDevices = rows.filter((d) => d.platform === 'ios' && d.voipToken);
+          if (voipDevices.length === 0) return;
           const payload = {
             call_id: String(msg.call_id),
+            call_uuid: callKitUuidForCallId(String(msg.call_id)),
             handle: senderUserId,
             caller_name: senderUserId,
             has_video: offerKind === 'video',
           };
           await Promise.all(
-            voipTokens.map(async (token) => {
+            voipDevices.map(async (device) => {
+              const token = device.voipToken as string;
               const res = await apnsVoip.sendVoipPush(token, payload);
               if (!res.ok && (res.status === 410 || res.reason === 'Unregistered')) {
                 await devices
-                  .clearVoipToken({ voipToken: token, reason: `apns:${res.reason ?? res.status}` })
+                  .clearVoipToken({
+                    voipToken: token,
+                    reason: `apns:${res.reason ?? res.status}`,
+                  })
+                  .catch(() => {});
+              }
+              // A live VoIP delivery failure must not leave the callee with no
+              // signal at all. Target this device's ordinary APNs token only;
+              // successful PushKit devices still avoid the duplicate banner.
+              if (!res.ok && device.pushToken) {
+                await deps.push
+                  .notifyDelivery({
+                    ...callNotice,
+                    onlyPushTokens: [device.pushToken],
+                  })
                   .catch(() => {});
               }
             }),
@@ -280,10 +282,7 @@ export async function routeCallFrame(
         callEvent: 'missed',
       })
       .catch((err) =>
-        deps.log.warn(
-          { err, recipientId: msg.to },
-          'missed-call push notify failed',
-        ),
+        deps.log.warn({ err, recipientId: msg.to }, 'missed-call push notify failed'),
       );
   }
 
@@ -338,9 +337,7 @@ export async function routeCallFrame(
   // cluster.
   const localDevices = deps.connections.getDevices(msg.to);
   const onlineLocally = localDevices.length > 0;
-  const peerInstance = onlineLocally
-    ? deps.instanceId
-    : await deps.presence.lookupInstance(msg.to);
+  const peerInstance = onlineLocally ? deps.instanceId : await deps.presence.lookupInstance(msg.to);
   const onlineSomewhere = onlineLocally || !!peerInstance;
 
   if (onlineSomewhere) {
@@ -374,10 +371,24 @@ export async function routeCallFrame(
   // ringing-window timeout produces the same outcome.
   if (msg.type !== 'call_ice') {
     recordCallRoute(deps, msg.type, msg.to, msg.call_id, senderUserId, {
-      decision: msg.type === 'call_offer' ? 'offline_buffered' : msg.type === 'call_end' ? 'offline_clear_buffer' : 'offline_drop',
+      decision:
+        msg.type === 'call_offer'
+          ? 'offline_buffered'
+          : msg.type === 'call_end'
+            ? 'offline_clear_buffer'
+            : 'offline_drop',
     });
   }
   return ok();
+}
+
+/** Stable RFC-4122-shaped UUID so retries of one offer address one CallKit call. */
+export function callKitUuidForCallId(callId: string): string {
+  const bytes = createHash('sha256').update(`speakeasy-callkit:${callId}`).digest().subarray(0, 16);
+  bytes[6] = (bytes[6]! & 0x0f) | 0x50;
+  bytes[8] = (bytes[8]! & 0x3f) | 0x80;
+  const hex = bytes.toString('hex');
+  return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`;
 }
 
 function recordCallRoute(

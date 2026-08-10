@@ -1,7 +1,7 @@
-import { describe, expect, it, beforeEach, vi } from 'vitest';
+import { afterEach, describe, expect, it, beforeEach, vi } from 'vitest';
 import type { WebSocket } from 'ws';
 import type { FastifyBaseLogger } from 'fastify';
-import { routeCallFrame, type CallRouterDeps } from './call-router.js';
+import { callKitUuidForCallId, routeCallFrame, type CallRouterDeps } from './call-router.js';
 import { createCallOfferBuffer } from './call-offer-buffer.js';
 import { InMemoryConnections } from './connections.js';
 import { InMemoryPresence } from '../presence/memory.js';
@@ -84,12 +84,7 @@ function buildDeps(opts?: {
   }
   if (opts?.extraLocalPeers) {
     for (const peer of opts.extraLocalPeers) {
-      void connections.add(
-        peer.userId,
-        peer.deviceToken,
-        fakeSocket(),
-        peer.capabilities,
-      );
+      void connections.add(peer.userId, peer.deviceToken, fakeSocket(), peer.capabilities);
     }
   }
   const presence = new InMemoryPresence();
@@ -120,6 +115,20 @@ function buildDeps(opts?: {
 
 const CALL_ID = 'call-01HXYZAAAAAAAAAAAAAAAAAAAA';
 const CIPHERTEXT = 'T0ZGRVI=';
+
+afterEach(() => {
+  vi.unstubAllEnvs();
+});
+
+describe('callKitUuidForCallId', () => {
+  it('returns one stable RFC-4122 UUID per signaling call id', () => {
+    const first = callKitUuidForCallId(CALL_ID);
+
+    expect(first).toBe(callKitUuidForCallId(CALL_ID));
+    expect(first).not.toBe(callKitUuidForCallId(`${CALL_ID}-other`));
+    expect(first).toMatch(/^[0-9a-f]{8}-[0-9a-f]{4}-5[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/);
+  });
+});
 
 describe('routeCallFrame — validation', () => {
   it('rejects when `to` is missing', async () => {
@@ -230,6 +239,90 @@ describe('routeCallFrame — always-push for call_offer (rc.58)', () => {
     });
     await new Promise((r) => setImmediate(r));
     expect(deps._push.calls).toHaveLength(1);
+  });
+
+  it('routes PushKit devices through VoIP and suppresses their duplicate banner', async () => {
+    vi.stubEnv('IOS_VOIP_CALLKIT_ENABLED', 'true');
+    const deps = buildDeps();
+    const sendVoipPush = vi.fn(async () => ({ ok: true, status: 200 }));
+    deps.apnsVoip = { sendVoipPush } as unknown as CallRouterDeps['apnsVoip'];
+    deps.devices = {
+      listForUser: vi.fn(async () => [
+        {
+          deviceToken: 'ios-device',
+          userId: 'bob',
+          pushToken: 'ordinary-token',
+          voipToken: 'voip-token',
+          platform: 'ios',
+          enrolledAt: new Date(0),
+          lastSeen: new Date(0),
+        },
+      ]),
+    } as unknown as CallRouterDeps['devices'];
+
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+      kind: 'video',
+    });
+    await new Promise((r) => setImmediate(r));
+
+    expect(deps._push.calls[0]).toMatchObject({
+      kind: 'call',
+      callVideo: true,
+      skipVoipCapableIos: true,
+    });
+    expect(sendVoipPush).toHaveBeenCalledWith(
+      'voip-token',
+      expect.objectContaining({
+        call_id: CALL_ID,
+        call_uuid: callKitUuidForCallId(CALL_ID),
+        has_video: true,
+      }),
+    );
+  });
+
+  it('falls back to the failed iPhone ordinary token when VoIP delivery fails', async () => {
+    vi.stubEnv('IOS_VOIP_CALLKIT_ENABLED', 'true');
+    const deps = buildDeps();
+    deps.apnsVoip = {
+      sendVoipPush: vi.fn(async () => ({
+        ok: false,
+        status: 503,
+        reason: 'ServiceUnavailable',
+      })),
+    } as unknown as CallRouterDeps['apnsVoip'];
+    deps.devices = {
+      listForUser: vi.fn(async () => [
+        {
+          deviceToken: 'ios-device',
+          userId: 'bob',
+          pushToken: 'ordinary-token',
+          voipToken: 'voip-token',
+          platform: 'ios',
+          enrolledAt: new Date(0),
+          lastSeen: new Date(0),
+        },
+      ]),
+      clearVoipToken: vi.fn(async () => {}),
+    } as unknown as CallRouterDeps['devices'];
+
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+    });
+    await new Promise((r) => setImmediate(r));
+    await new Promise((r) => setImmediate(r));
+
+    expect(deps._push.calls).toHaveLength(2);
+    expect(deps._push.calls[1]).toMatchObject({
+      onlyPushTokens: ['ordinary-token'],
+    });
+    expect(deps._push.calls[1]).not.toHaveProperty('skipVoipCapableIos');
   });
 
   it('does NOT push for call_answer / call_ice / non-cancel call_end', async () => {
@@ -579,10 +672,7 @@ describe('routeCallFrame — refuse-video gate', () => {
       reason: 'video_refused',
     });
     // The callee (bob) is never rung, pushed, or buffered.
-    expect(deps._notifier.notify).not.toHaveBeenCalledWith(
-      'bob',
-      expect.anything(),
-    );
+    expect(deps._notifier.notify).not.toHaveBeenCalledWith('bob', expect.anything());
     expect(deps._push.calls).toHaveLength(0);
     expect(await deps.callBuffer.drain('bob')).toEqual([]);
   });

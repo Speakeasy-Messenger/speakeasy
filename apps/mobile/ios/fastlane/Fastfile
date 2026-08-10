@@ -147,6 +147,25 @@ platform :ios do
     match(type: "appstore", readonly: true, api_key: asc_api_key)
   end
 
+  desc "Build a signed, non-uploaded IPA that boots the video/PiP harness"
+  lane :browserstack do
+    setup_ci(force: true)
+    key = asc_api_key
+    match(type: "appstore", readonly: is_ci, api_key: key)
+    pin_signing
+    set_ci_build_number
+    build_app(
+      workspace: WORKSPACE,
+      scheme: SCHEME,
+      export_method: "app-store",
+      export_options: { provisioningProfiles: { APP_IDENTIFIER => PROFILE, EXT_IDENTIFIER => EXT_PROFILE, NSE_IDENTIFIER => NSE_PROFILE } },
+      output_directory: "build",
+      output_name: "Speakeasy-BrowserStack.ipa",
+      clean: true,
+      xcargs: 'GCC_PREPROCESSOR_DEFINITIONS="$(inherited) SPEAKEASY_VIDEO_CALL_HARNESS=1"',
+    )
+  end
+
   desc "Build + upload to TestFlight"
   lane :beta do
     # Create a dedicated, unlocked keychain with the signing key's partition

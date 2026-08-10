@@ -1,0 +1,113 @@
+name: BrowserStack iOS call harness
+
+# Produces a signed IPA that boots directly into the real video-call screen.
+# BrowserStack credentials remain in Trusty Squire; this workflow deliberately
+# handles only Apple signing and exposes the IPA as a short-lived Actions
+# artifact for upload through that vaulted session.
+
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: browserstack-ios-call-harness
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-harness:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Select newest Xcode
+        run: |
+          sudo xcode-select -s "$(ls -d /Applications/Xcode*.app | sort -V | tail -1)"
+          xcodebuild -version
+
+      - name: Cache libsignal prebuilt FFI
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/org.signal.libsignal
+          key: libsignal-${{ runner.os }}-v0.59.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build and verify workspace
+        run: |
+          npm run build
+          npm run typecheck
+          npm run test
+
+      - name: Write Vouchflow.plist
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          test -n "$VOUCHFLOW_WRITE_KEY"
+          sed -e "s|vsk_sandbox_replace_with_real_key|${VOUCHFLOW_WRITE_KEY}|" \
+              -e "s|<string>sandbox</string>|<string>production</string>|" \
+              Vouchflow.plist.example > Vouchflow.plist
+          plutil -lint Vouchflow.plist
+
+      - name: Write GoogleService-Info.plist
+        env:
+          FIREBASE_IOS_PLIST_B64: ${{ secrets.FIREBASE_IOS_PLIST_B64 }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          test -n "$FIREBASE_IOS_PLIST_B64"
+          echo "$FIREBASE_IOS_PLIST_B64" | base64 --decode > GoogleService-Info.plist
+          plutil -lint GoogleService-Info.plist
+
+      - name: Wire iOS project
+        working-directory: apps/mobile/ios
+        run: |
+          gem install xcodeproj --no-document
+          ruby tools/wire-ios-project.rb
+
+      - name: Set up match SSH key
+        env:
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
+        run: |
+          test -n "$MATCH_DEPLOY_KEY"
+          mkdir -p ~/.ssh
+          printf '%s\n' "$MATCH_DEPLOY_KEY" > ~/.ssh/match_key
+          chmod 600 ~/.ssh/match_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          {
+            echo "Host github.com"
+            echo "  IdentityFile ~/.ssh/match_key"
+            echo "  IdentitiesOnly yes"
+          } >> ~/.ssh/config
+
+      - name: Install Ruby dependencies and pods
+        working-directory: apps/mobile/ios
+        run: |
+          bundle install
+          USE_FRAMEWORKS=static pod install
+
+      - name: Build signed harness IPA
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: bundle exec fastlane ios browserstack
+
+      - name: Upload harness artifact
+        uses: actions/upload-artifact@v6
+        with:
+          name: speakeasy-browserstack-ios-${{ github.sha }}
+          path: apps/mobile/ios/build/Speakeasy-BrowserStack.ipa
+          if-no-files-found: error
+          retention-days: 3

@@ -18,19 +18,20 @@
 #   "@peer · 00:NN") is decided by inspecting the screenshots off-device.
 #
 # PRE-CONDITION — harness build:
-#   The standalone call screen comes from the __DEV__ DevVideoCallHarness
-#   (App.tsx DEV_VIDEO_HARNESS flag). Build the .ipa with that flag ON so
-#   the call screen mounts on launch with the device camera as both local
-#   and "remote" feed — no real two-peer WebRTC call or TURN relay needed.
-#   Grant camera before the run (farm capability / pre-seeded TCC).
+#   Run the Fastlane `browserstack` lane (or the matching GitHub workflow).
+#   It defines SPEAKEASY_VIDEO_CALL_HARNESS only for that signed IPA, causing
+#   AppDelegate to pass `videoCallHarness=true` as an initial React prop. The
+#   production/TestFlight build cannot enter this route. The real call screen
+#   mounts with the device camera as both local and "remote" feed, so no
+#   second account, TURN relay, or second iPhone is required for the PiP UI
+#   and foreground-return contracts.
 
 appId: xyz.speakeasyapp.app
 name: iOS video-call PiP + return (Tier C, real device)
 ---
-
 - launchApp
 - tapOn:
-    text: "Wait"
+    text: 'Wait'
     optional: true
 
 # The harness calls getUserMedia(audio+video) + InCallManager.start on mount,
@@ -42,20 +43,20 @@ name: iOS video-call PiP + return (Tier C, real device)
     times: 2
     commands:
       - tapOn:
-          text: "Allow While Using App"
+          text: 'Allow While Using App'
           optional: true
       - tapOn:
-          text: "Allow"
+          text: 'Allow'
           optional: true
       - tapOn:
-          text: "OK"
+          text: 'OK'
           optional: true
 
 # Call screen is up once the end-call button is in the tree. The harness
 # mounts a fake "connected" video call, so this appears without a peer.
 - extendedWaitUntil:
     visible:
-      id: "video-call-end"
+      id: 'video-call-end'
     timeout: 30000
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
@@ -64,7 +65,7 @@ name: iOS video-call PiP + return (Tier C, real device)
 # Explicitly request PiP so entry is deterministic rather than relying
 # only on auto-enter-on-background (which we also exercise next).
 - tapOn:
-    id: "video-call-pip"
+    id: 'video-call-pip'
     optional: true
 
 # (2) Background the app — iOS auto-enters PiP. This screenshot is the
@@ -83,7 +84,7 @@ name: iOS video-call PiP + return (Tier C, real device)
 - launchApp
 - extendedWaitUntil:
     visible:
-      id: "video-call-end"
+      id: 'video-call-end'
     timeout: 15000
 - waitForAnimationToEnd:
     timeout: 2000

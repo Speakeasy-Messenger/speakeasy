@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+#import <AVFAudio/AVFAudio.h>
 // Deep links: forwards inbound URLs to RN's Linking so App.tsx's handler
 // (→ utils/handle-link parseAdd) sees them. Covers BOTH the custom scheme
 // (speakeasy://add?handle=…, via openURL) AND Universal Links
@@ -38,14 +39,8 @@
 // .plist the app throws "No Firebase App '[DEFAULT]'" at startup and never
 // renders. (Counterpart of Android's google-services.json + auto-init.)
 #import <FirebaseCore/FirebaseCore.h>
-// NOTE: PushKit / VoIP-push wiring was REMOVED 2026-08-07. It registered a
-// PKPushRegistry and reported incoming VoIP pushes to CallKit, but the server
-// has never sent one (IOS_VOIP_CALLKIT_ENABLED is unset in production, because
-// a VoIP push with no CXProvider crashes the app on every incoming call), and
-// the `voip` UIBackgroundMode it required was what App Review rejected under
-// Guideline 2.5.4. Incoming calls are delivered by the ordinary APNs push
-// (kind:'call') handled in JS. Restore this only alongside a real CallKit
-// rollout — see orchestrator.ts CALLKEEP_ENABLED.
+#import "RNVoipPushNotificationManager.h"
+#import "RNCallKeep.h"
 
 // Phase 5j Private Call: hook SpeakeasyAudioDevice into
 // react-native-webrtc so EVERY call (audio / video / private)
@@ -133,9 +128,15 @@ static void SpeakeasyWriteCrash(NSException *exception)
   self.moduleName = @"Speakeasy";
   // RN 0.77: required dependency provider for new-arch module setup.
   self.dependencyProvider = [RCTAppDependencyProvider new];
-  // You can add your custom initial props in the dictionary below.
-  // They will be passed down to the ViewController used by React Native.
+  // BrowserStack's signed real-device build compiles this one flag into the
+  // native launcher. Production/TestFlight builds never define it and always
+  // boot the real app. Keeping the switch native prevents a URL or JS setting
+  // from exposing the standalone camera/PiP harness to users.
+#ifdef SPEAKEASY_VIDEO_CALL_HARNESS
+  self.initialProps = @{@"videoCallHarness": @YES};
+#else
   self.initialProps = @{};
+#endif
 
   // Phase 5b iOS: Vouchflow SDK init. Per its README, configure() must be
   // called once at app startup before any other SDK method.
@@ -182,13 +183,81 @@ static void SpeakeasyWriteCrash(NSException *exception)
   // feed the moment it floats. This is the documented react-native-webrtc PiP
   // prerequisite (GetStream/rn-webrtc recipe); it gracefully no-ops on devices
   // where the capture session reports it unsupported, so it's safe to set
-  // unconditionally. NOTE: with the `voip` UIBackgroundMode and the
-  // multitasking-camera-access entitlement both removed (2026-08-07), iOS
-  // reports this unsupported and it no-ops — the local camera suspends while
-  // backgrounded mid-call. Restore both together to re-enable it.
+  // unconditionally. The matching `voip` background mode and multitasking-
+  // camera entitlement are declared in Info.plist / Speakeasy.entitlements.
   [WebRTCModuleOptions sharedInstance].enableMultitaskingCameraAccess = YES;
 
+  // Configure CallKit natively before registering PushKit. A VoIP push can
+  // launch a killed app before React Native exists; reportNewIncomingCall must
+  // already have a CXProvider or iOS terminates the process for an unhandled
+  // VoIP push. JS setup is intentionally allowed to become a no-op after this.
+  [RNCallKeep setup:@{
+    @"appName": @"Speakeasy",
+    @"includesCallsInRecents": @NO,
+    @"supportsVideo": @YES,
+    @"maximumCallGroups": @1,
+    @"maximumCallsPerCallGroup": @1,
+    // VideoChat keeps AVKit PiP eligible. CallKit remains the only owner that
+    // activates/deactivates this session; WebRTC follows its delegate events.
+    @"audioSession": @{
+      @"categoryOptions": @(AVAudioSessionCategoryOptionAllowBluetooth |
+                              AVAudioSessionCategoryOptionAllowBluetoothA2DP),
+      @"mode": AVAudioSessionModeVideoChat,
+    },
+  }];
+  [RNVoipPushNotificationManager voipRegistration];
+
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
+}
+
+#pragma mark - PushKit / CallKit
+
+- (void)pushRegistry:(PKPushRegistry *)registry
+    didUpdatePushCredentials:(PKPushCredentials *)credentials
+                     forType:(PKPushType)type
+{
+  [RNVoipPushNotificationManager didUpdatePushCredentials:credentials
+                                                   forType:(NSString *)type];
+}
+
+- (void)pushRegistry:(PKPushRegistry *)registry
+    didInvalidatePushTokenForType:(PKPushType)type
+{
+  NSLog(@"PushKit token invalidated for type %@", type);
+}
+
+- (void)pushRegistry:(PKPushRegistry *)registry
+    didReceiveIncomingPushWithPayload:(PKPushPayload *)payload
+                              forType:(PKPushType)type
+                withCompletionHandler:(void (^)(void))completion
+{
+  NSMutableDictionary *data = [payload.dictionaryPayload mutableCopy] ?: [NSMutableDictionary dictionary];
+  NSString *uuid = data[@"call_uuid"];
+  if (uuid.length == 0 || [NSUUID UUIDWithString:uuid] == nil) {
+    uuid = [[NSUUID UUID] UUIDString];
+    data[@"call_uuid"] = uuid;
+  }
+  NSString *handle = data[@"handle"] ?: @"unknown";
+  NSString *callerName = data[@"caller_name"] ?: handle;
+  BOOL hasVideo = [data[@"has_video"] boolValue];
+
+  // Preserve the payload for JS so it can warm the websocket and bind our
+  // call_id to the native CallKit UUID. CallKit reporting itself is native and
+  // happens immediately, including on a killed-app launch.
+  [RNVoipPushNotificationManager didReceiveIncomingPushWithPayload:payload
+                                                            forType:(NSString *)type];
+  [RNCallKeep reportNewIncomingCall:uuid
+                             handle:handle
+                         handleType:@"generic"
+                           hasVideo:hasVideo
+                localizedCallerName:callerName
+                    supportsHolding:NO
+                       supportsDTMF:NO
+                   supportsGrouping:NO
+                 supportsUngrouping:NO
+                        fromPushKit:YES
+                            payload:data
+              withCompletionHandler:completion];
 }
 
 

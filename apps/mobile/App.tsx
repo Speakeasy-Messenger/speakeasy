@@ -50,10 +50,7 @@ import {
 import { saveAttachmentsToGallery } from './src/attachments/save-to-gallery.js';
 import { useUiState } from './src/store/ui.js';
 import { consumeStoreResetFlag } from './src/native/db-state.js';
-import {
-  disposeFilter,
-  wrapTrackWithFilter,
-} from './src/native/voice-filter.js';
+import { disposeFilter, wrapTrackWithFilter } from './src/native/voice-filter.js';
 import {
   formantSemitonesForProfile,
   semitonesForProfile,
@@ -61,7 +58,14 @@ import {
 import { attachFeatureEventListener } from './src/calls/feature-event-listener.js';
 import { useBanner } from './src/store/banner.js';
 import { decideBanner } from './src/notifications/banner-policy.js';
-import { api, getWsClient, groupMessaging, pushNotifications, signalProtocol, vouchflow } from './src/services.js'; // vouchflow kept — used by post-enrollment refresh effect
+import {
+  api,
+  getWsClient,
+  groupMessaging,
+  pushNotifications,
+  signalProtocol,
+  vouchflow,
+} from './src/services.js'; // vouchflow kept — used by post-enrollment refresh effect
 import { makeGroupOrchestrator } from './src/crypto/group-orchestration.js';
 import { makeMessageRouter } from './src/ws/message-router.js';
 import { makeReplenisher } from './src/crypto/replenish.js';
@@ -88,10 +92,7 @@ import { tryRegisterPushToken } from './src/push/register.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
 import { SplashScreen } from './src/components/SplashScreen.js';
-import {
-  registerForegroundMessageHandler,
-  usePushNavigation,
-} from './src/push/push-handler.js';
+import { registerForegroundMessageHandler, usePushNavigation } from './src/push/push-handler.js';
 
 // Global unhandled-rejection handler — prevents promise rejections
 // from crashing the RN host on Android.
@@ -267,14 +268,13 @@ let _apfLastApply = 0;
 // overlay's animation length; keeps a stale event from pinning the eyes.
 const EVENT_HOLD_MS = 1600;
 
-// __DEV__-only: flip true (Metro reloads) to boot straight into the
-// standalone video-call test harness — see DevVideoCallHarness. Lets PiP /
-// resize / return be tested with the camera and no real call. Always false
-// in committed source; never reached in release (__DEV__ is false there).
-const DEV_VIDEO_HARNESS = false;
+type AppProps = {
+  /** Native build-only switch used by the signed BrowserStack harness IPA. */
+  videoCallHarness?: boolean;
+};
 
-export default function App() {
-  if (__DEV__ && DEV_VIDEO_HARNESS) {
+export default function App({ videoCallHarness = false }: AppProps) {
+  if (videoCallHarness) {
     const Harness = require('./src/screens/DevVideoCallHarness.js').DevVideoCallHarness;
     return <Harness onClosed={() => {}} />;
   }
@@ -371,8 +371,7 @@ export default function App() {
   // routed to Conversations. The probe finishes in ~300–800ms on
   // a warm Vouchflow keystore, comfortably inside the 1500ms
   // SPLASH_MIN_DURATION_MS floor.
-  const showSplash =
-    !hydrated || !splashHoldElapsed || (!userId && !recoveryDone);
+  const showSplash = !hydrated || !splashHoldElapsed || (!userId && !recoveryDone);
 
   // Pull persisted identity AND conversations off disk on first mount.
   // Renders a blank screen until both are done so the navigator doesn't
@@ -573,8 +572,7 @@ export default function App() {
       // a successful verification as fresh for 30 days; the server must
       // be configured with a matching VOUCHFLOW_MAX_VERIFICATION_AGE_MS.
       const FRESHNESS_MS = 30 * 24 * 60 * 60_000;
-      const { deviceToken: cachedToken, deviceTokenIssuedAt: issuedAt } =
-        useIdentity.getState();
+      const { deviceToken: cachedToken, deviceTokenIssuedAt: issuedAt } = useIdentity.getState();
       const ageMs = issuedAt ? Date.now() - issuedAt : Number.POSITIVE_INFINITY;
       const tokenStillFresh = !!cachedToken && ageMs < FRESHNESS_MS;
 
@@ -714,9 +712,7 @@ export default function App() {
         // the user has a stable identity without needing to visit
         // Settings. The user can pick a different one any time via
         // Settings → Change face.
-        const { defaultAnimalForUser } = await import(
-          './src/avatars/default.js'
-        );
+        const { defaultAnimalForUser } = await import('./src/avatars/default.js');
         const seeded = defaultAnimalForUser(userId);
         await api.setAvatar(dt, seeded);
         useProfiles.getState().set(userId, {
@@ -755,8 +751,7 @@ export default function App() {
       groupMessaging,
       ws,
       getDeviceToken: getToken,
-      getOrCreateDistributionId: (groupId) =>
-        useDistributionIds.getState().getOrCreate(groupId),
+      getOrCreateDistributionId: (groupId) => useDistributionIds.getState().getOrCreate(groupId),
     });
 
     // Set of msgIds we've already shown a banner for. Survives WS
@@ -814,8 +809,7 @@ export default function App() {
           // previous call before the new channel delivers anything.
           usePeerAnimation.getState().clear(entry.peerUserId);
         },
-        onPeerIdentityChanged: (peerUserId) =>
-          handleCallPeerIdentityChanged(userId, peerUserId),
+        onPeerIdentityChanged: (peerUserId) => handleCallPeerIdentityChanged(userId, peerUserId),
         onPeerAnimationFrame: (peerUserId, frame) => {
           // Continuous channels (amplitude / mouthShape / pitchTrend
           // / etc.) update every frame. The event + eventAt fields
@@ -850,8 +844,7 @@ export default function App() {
           // the held event reverts to 'none', so a genuine second laugh
           // (≥2s later, past the detector cooldown) reads as a rising edge
           // again.
-          const isNewEvent =
-            frame.event !== 'none' && frame.event !== prev?.event;
+          const isNewEvent = frame.event !== 'none' && frame.event !== prev?.event;
           // THROTTLE the store write (and thus the call-screen re-render
           // it triggers) to ~10Hz. The data channel delivers 20Hz, and
           // every write re-renders the avatar + fires JS-driver SVG
@@ -873,10 +866,7 @@ export default function App() {
           // one-shot overlay already (re)triggers off `eventAt`, so clearing
           // here doesn't shorten it; it just stops the stale event from
           // pinning continuous-state consumers like the eyes.
-          const eventFresh =
-            !isNewEvent &&
-            !!prev?.eventAt &&
-            nowMs - prev.eventAt < EVENT_HOLD_MS;
+          const eventFresh = !isNewEvent && !!prev?.eventAt && nowMs - prev.eventAt < EVENT_HOLD_MS;
           usePeerAnimation.getState().set(peerUserId, {
             amplitude: frame.amplitude,
             pitchNorm: frame.pitchNorm,
@@ -892,8 +882,7 @@ export default function App() {
             eventAt: isNewEvent ? Date.now() : eventFresh ? prev!.eventAt : 0,
           });
         },
-        getAllowIncomingCalls: () =>
-          useSettings.getState().allowIncomingCalls,
+        getAllowIncomingCalls: () => useSettings.getState().allowIncomingCalls,
         // Phase 5j Private Call — wire the JS shim over the native
         // voice-filter module. wrap installs the DSP into the
         // process-wide holder; dispose clears it on call teardown.
@@ -964,9 +953,7 @@ export default function App() {
       orchestrator,
       // Optional — when callOrch failed to construct, we drop call_*
       // frames; messaging still works.
-      onCallFrame: callOrch
-        ? (frame) => void callOrch!.handleFrame(frame)
-        : undefined,
+      onCallFrame: callOrch ? (frame) => void callOrch!.handleFrame(frame) : undefined,
       // rc.84 — re-sync push token on every WS handshake. Closes
       // the post-signup black hole where the device row exists but
       // push_token is NULL, causing every push to be silently
@@ -993,8 +980,7 @@ export default function App() {
       // here we just flag the peer so ChatScreen's send gate and the
       // dial gate prompt for the trust-reset instead of encrypting into
       // the dead old session. No alert — the bubble is the surface.
-      onPeerIdentityChanged: (peerUserId) =>
-        usePeerTrust.getState().markChanged(peerUserId),
+      onPeerIdentityChanged: (peerUserId) => usePeerTrust.getState().markChanged(peerUserId),
       onPeerDeleted: (handle) => {
         // Server told us a direct message we just sent landed on a
         // tombstoned recipient. Surface an in-chat system bubble +
@@ -1025,12 +1011,10 @@ export default function App() {
         ),
       addToConversation: (conversationId, msg) =>
         useConversations.getState().add(conversationId, msg),
-      markDelivered: (msgId) =>
-        useConversations.getState().markDelivered(msgId),
+      markDelivered: (msgId) => useConversations.getState().markDelivered(msgId),
       markMessageRead: (msgId, readAt) =>
         useConversations.getState().markMessageRead(msgId, readAt),
-      markReadUpTo: (convId, readAt) =>
-        useConversations.getState().markReadUpTo(convId, readAt),
+      markReadUpTo: (convId, readAt) => useConversations.getState().markReadUpTo(convId, readAt),
       ensureGroupHydrated: async (groupId) => {
         // Refetch when we've never seen the group OR our roster is stale.
         //
@@ -1116,12 +1100,9 @@ export default function App() {
             inboundFrom: from,
             inboundText: text,
             inboundTarget: target,
-            inAppNotificationsEnabled:
-              useSettings.getState().inAppNotificationsEnabled,
-            activeConversationId:
-              useUiState.getState().activeConversationId,
-            isMuted: (cid: string) =>
-              !!useConversations.getState().byId[cid]?.muted,
+            inAppNotificationsEnabled: useSettings.getState().inAppNotificationsEnabled,
+            activeConversationId: useUiState.getState().activeConversationId,
+            isMuted: (cid: string) => !!useConversations.getState().byId[cid]?.muted,
             activeCall: useCalls.getState().active,
           },
           msgId,
@@ -1135,8 +1116,7 @@ export default function App() {
           msgId,
           from,
           activeConv: useUiState.getState().activeConversationId,
-          inAppEnabled:
-            useSettings.getState().inAppNotificationsEnabled,
+          inAppEnabled: useSettings.getState().inAppNotificationsEnabled,
         });
         if (decision.kind === 'show') {
           useBanner.getState().show(decision.banner);
@@ -1298,8 +1278,7 @@ export default function App() {
       // the call's process alive. `connectedAt` is undefined until connect; the
       // connect branch below re-displays to add the live duration.
       const pillStart =
-        (s.active?.stage === 'outgoing_dialing' &&
-          prev?.active?.stage !== 'outgoing_dialing') ||
+        (s.active?.stage === 'outgoing_dialing' && prev?.active?.stage !== 'outgoing_dialing') ||
         (prev?.active?.stage === 'incoming_ringing' &&
           s.active != null &&
           s.active.stage !== 'incoming_ringing');
