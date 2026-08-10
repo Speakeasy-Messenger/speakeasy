@@ -233,7 +233,7 @@ static void SpeakeasyWriteCrash(NSException *exception)
 {
   NSMutableDictionary *data = [payload.dictionaryPayload mutableCopy] ?: [NSMutableDictionary dictionary];
   NSString *uuid = data[@"call_uuid"];
-  if (uuid.length == 0 || [NSUUID UUIDWithString:uuid] == nil) {
+  if (uuid.length == 0 || [[NSUUID alloc] initWithUUIDString:uuid] == nil) {
     uuid = [[NSUUID UUID] UUIDString];
     data[@"call_uuid"] = uuid;
   }

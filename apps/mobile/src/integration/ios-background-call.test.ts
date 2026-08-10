@@ -19,6 +19,7 @@ describe('iOS background-call native contracts', () => {
     );
     expect(delegate).toContain('[RNCallKeep reportNewIncomingCall:uuid');
     expect(delegate).toContain('withCompletionHandler:completion');
+    expect(delegate).toContain('[[NSUUID alloc] initWithUUIDString:uuid]');
   });
 
   it('keeps video capture eligible while the app is backgrounded in PiP', () => {
