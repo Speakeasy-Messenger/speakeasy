@@ -73,8 +73,7 @@ describe('iOS background-call native contracts', () => {
   it('repairs GoogleDataTransport 10.1.0 nanopb compilation during pod install', () => {
     const podfile = source('ios/Podfile');
 
-    expect(podfile).toContain("'GDTCORMetrics+GDTCCTSupport.m'");
-    expect(podfile).toContain('#define PB_ENABLE_MALLOC 1');
-    expect(podfile).toContain('extern void pb_release(const pb_field_t fields[]');
+    expect(podfile).toContain("'nanopb', 'pb_decode.h'");
+    expect(podfile).toContain('void pb_release(const pb_field_t fields[]');
   });
 });

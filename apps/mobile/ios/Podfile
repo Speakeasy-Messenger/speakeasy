@@ -95,32 +95,20 @@ target 'Speakeasy' do
     #   PB_ENABLE_MALLOC=1GDTCOR_VERSION=10.1.0
     # CocoaPods consequently builds the target without a usable
     # PB_ENABLE_MALLOC definition, hiding nanopb's pb_release declaration and
-    # failing the archive. Patch the affected translation unit before Xcode
-    # compiles it; changing the generated target build setting is insufficient
-    # because its xcconfig reintroduces the malformed definition.
-    gdt_metrics = File.join(
-      installer.sandbox.root,
-      'GoogleDataTransport',
-      'GoogleDataTransport',
-      'GDTCCTLibrary',
-      'GDTCORMetrics+GDTCCTSupport.m'
-    )
-    if File.exist?(gdt_metrics)
-      contents = File.read(gdt_metrics)
-      # This must precede the first GoogleDataTransport import: its private
-      # header transitively imports pb_decode.h and trips the include guard.
-      marker = '#import "GoogleDataTransport/GDTCCTLibrary/Private/GDTCORMetrics+GDTCCTSupport.h"'
-      define = "#ifndef PB_ENABLE_MALLOC\n#define PB_ENABLE_MALLOC 1\n#endif\n\n"
-      patched = contents.include?(define) ? contents : contents.sub(marker, define + marker)
-      declaration_marker = '#import <nanopb/pb_decode.h>'
-      declaration = "\nextern void pb_release(const pb_field_t fields[], void *dest_struct);"
-      unless patched.include?(declaration)
-        patched = patched.sub(declaration_marker, declaration_marker + declaration)
-      end
+    # failing every GoogleDataTransport source file that calls pb_release.
+    # Patch nanopb's shared declaration once for all consumers; changing the
+    # generated target build setting is insufficient because its xcconfig
+    # reintroduces the malformed definition.
+    nanopb_decode = File.join(installer.sandbox.root, 'nanopb', 'pb_decode.h')
+    if File.exist?(nanopb_decode)
+      contents = File.read(nanopb_decode)
+      marker = "#ifdef __cplusplus\nextern \"C\" {\n#endif"
+      declaration = "\n\n/* Speakeasy: GoogleDataTransport 10.1.0 podspec drops PB_ENABLE_MALLOC. */\nvoid pb_release(const pb_field_t fields[], void *dest_struct);"
+      patched = contents.include?(declaration) ? contents : contents.sub(marker, marker + declaration)
       if patched != contents
-        File.chmod(0644, gdt_metrics)
-        File.write(gdt_metrics, patched)
-        Pod::UI.puts '[Speakeasy] Patched GoogleDataTransport: PB_ENABLE_MALLOC restored'.green
+        File.chmod(0644, nanopb_decode)
+        File.write(nanopb_decode, patched)
+        Pod::UI.puts '[Speakeasy] Patched nanopb: pb_release declaration restored'.green
       end
     end
 
