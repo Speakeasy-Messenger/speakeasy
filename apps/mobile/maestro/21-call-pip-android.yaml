@@ -22,6 +22,12 @@ name: Android video-call PiP + background media continuity
           text: 'Allow'
           optional: true
 
+# Opening Android's runtime permission surfaces can trigger onUserLeaveHint on
+# some BrowserStack devices, which legitimately moves the active call into PiP.
+# Bring the same process back before taking the foreground baseline so the
+# background transition below happens at a deterministic point.
+- launchApp
+
 - extendedWaitUntil:
     visible:
       id: 'video-call-pip'
@@ -48,4 +54,3 @@ name: Android video-call PiP + background media continuity
       id: 'harness-background-video-pass'
     timeout: 15000
 - takeScreenshot: 03-returned
-
