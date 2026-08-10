@@ -75,5 +75,6 @@ describe('iOS background-call native contracts', () => {
 
     expect(podfile).toContain("'GDTCORMetrics+GDTCCTSupport.m'");
     expect(podfile).toContain('#define PB_ENABLE_MALLOC 1');
+    expect(podfile).toContain('extern void pb_release(const pb_field_t fields[]');
   });
 });

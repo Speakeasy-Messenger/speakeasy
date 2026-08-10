@@ -112,6 +112,11 @@ target 'Speakeasy' do
       marker = '#import "GoogleDataTransport/GDTCCTLibrary/Private/GDTCORMetrics+GDTCCTSupport.h"'
       define = "#ifndef PB_ENABLE_MALLOC\n#define PB_ENABLE_MALLOC 1\n#endif\n\n"
       patched = contents.include?(define) ? contents : contents.sub(marker, define + marker)
+      declaration_marker = '#import <nanopb/pb_decode.h>'
+      declaration = "\nextern void pb_release(const pb_field_t fields[], void *dest_struct);"
+      unless patched.include?(declaration)
+        patched = patched.sub(declaration_marker, declaration_marker + declaration)
+      end
       if patched != contents
         File.chmod(0644, gdt_metrics)
         File.write(gdt_metrics, patched)
