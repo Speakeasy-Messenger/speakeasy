@@ -58,7 +58,7 @@ permissions:
 
 jobs:
   release-ios:
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 90
     env:
       LANE: ${{ github.event.inputs.lane || 'beta' }}
@@ -92,7 +92,7 @@ jobs:
 
       - name: Select compatible Xcode
         run: |
-          sudo xcode-select -s /Applications/Xcode_16.4.app
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app
           xcodebuild -version
 
       - name: Cache libsignal prebuilt FFI

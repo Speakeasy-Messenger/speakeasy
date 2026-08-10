@@ -90,6 +90,23 @@ target 'Speakeasy' do
       end
     end
 
+    # GoogleDataTransport 10.1.0's published podspec accidentally concatenates
+    # two preprocessor definitions:
+    #   PB_ENABLE_MALLOC=1GDTCOR_VERSION=10.1.0
+    # CocoaPods consequently builds the target without a usable
+    # PB_ENABLE_MALLOC definition, hiding nanopb's pb_release declaration and
+    # failing the archive. Define it explicitly on the affected pod target.
+    installer.pods_project.targets.each do |pod_target|
+      next unless pod_target.name == 'GoogleDataTransport'
+
+      pod_target.build_configurations.each do |build_config|
+        definitions = build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
+        definitions = [definitions] unless definitions.is_a?(Array)
+        definitions << 'PB_ENABLE_MALLOC=1' unless definitions.include?('PB_ENABLE_MALLOC=1')
+        build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+      end
+    end
+
     # SQLCipher must be the ONLY sqlite3 the app links. Some pod pulls in the
     # SYSTEM libsqlite3 via `-l"sqlite3"` in the aggregate target's
     # OTHER_LDFLAGS. The system sqlite3 has no encryption, so its sqlite3_key

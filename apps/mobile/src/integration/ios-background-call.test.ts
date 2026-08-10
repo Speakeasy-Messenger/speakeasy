@@ -69,4 +69,11 @@ describe('iOS background-call native contracts', () => {
     expect(fastfile).toContain('lane :browserstack do');
     expect(fastfile).toContain('SPEAKEASY_VIDEO_CALL_HARNESS=1');
   });
+
+  it('repairs GoogleDataTransport 10.1.0 nanopb compilation during pod install', () => {
+    const podfile = source('ios/Podfile');
+
+    expect(podfile).toContain("pod_target.name == 'GoogleDataTransport'");
+    expect(podfile).toContain("definitions << 'PB_ENABLE_MALLOC=1'");
+  });
 });

@@ -38,13 +38,13 @@ permissions:
 
 jobs:
   listing-ios:
-    runs-on: macos-15
+    runs-on: macos-latest
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6
 
       - name: Select compatible Xcode
-        run: sudo xcode-select -s /Applications/Xcode_16.4.app
+        run: sudo xcode-select -s /Applications/Xcode_26.4.1.app
 
       - name: bundle install (fastlane)
         working-directory: apps/mobile/ios
