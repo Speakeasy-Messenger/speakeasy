@@ -59,6 +59,11 @@ name: iOS video-call PiP + return (Tier C, real device)
     timeout: 30000
 - tapOn:
     id: 'harness-arm-background-video'
+# The loopback peer connection can raise iOS's one-time local-network prompt
+# after the camera/microphone prompts. Accept it before checking the probe.
+- tapOn:
+    text: 'Allow'
+    optional: true
 - assertVisible:
     id: 'harness-background-video-measuring'
 
