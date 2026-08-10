@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, StyleSheet, Text, View } from 'react-native';
+import { AppState, Platform, StyleSheet, Text, View } from 'react-native';
 import {
   mediaDevices,
   RTCPeerConnection,
@@ -13,6 +13,7 @@ import {
   showOngoingCallNotification,
   dismissOngoingCallNotification,
 } from '../calls/call-notification.js';
+import { pip } from '../native/pip.js';
 
 /**
  * __DEV__-only test harness for the video-call UI — NOT shipped.
@@ -130,14 +131,15 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
       })
       .catch((e) => setError(String(e?.message ?? e)));
 
-    const appStateSub = AppState.addEventListener('change', (state) => {
+    const beginBackgroundMeasurement = () => {
+      const baseline = latestStatsRef.current;
+      if (!baseline) return;
+      backgroundBaselineRef.current = baseline;
+      setBackgroundVideoResult('measuring');
+    };
+    const finishBackgroundMeasurement = () => {
       const receiver = receiverRef.current;
       if (!receiver) return;
-      if (state !== 'active') {
-        backgroundBaselineRef.current = latestStatsRef.current;
-        setBackgroundVideoResult('measuring');
-        return;
-      }
       const baseline = backgroundBaselineRef.current;
       if (!baseline) return;
       // Read after native foreground restoration has settled. If RTP/video
@@ -148,10 +150,22 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
           setBackgroundVideoResult(passed ? 'pass' : 'fail');
         });
       }, 1000);
+    };
+    const appStateSub = AppState.addEventListener('change', (state) => {
+      // Android can keep React Native's AppState "active" while the Activity is
+      // in system PiP. Its native PiP callback below is authoritative there.
+      if (Platform.OS === 'android') return;
+      if (state !== 'active') beginBackgroundMeasurement();
+      else finishBackgroundMeasurement();
+    });
+    const removePipModeListener = pip.onPipModeChanged((inPip) => {
+      if (inPip) beginBackgroundMeasurement();
+      else finishBackgroundMeasurement();
     });
     return () => {
       cancelled = true;
       appStateSub.remove();
+      removePipModeListener();
       if (statsTimerRef.current) clearInterval(statsTimerRef.current);
       useCalls.getState().setActive(undefined);
       void dismissOngoingCallNotification();

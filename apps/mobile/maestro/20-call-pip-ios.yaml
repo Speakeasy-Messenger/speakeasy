@@ -49,13 +49,13 @@ name: iOS video-call PiP + return (Tier C, real device)
 - tapOn:
     point: '50%,50%'
 
-# Call screen is up once the always-visible local-preview/PiP control is in
-# the tree. Do not key readiness to the bottom end-call control: production
-# intentionally auto-hides that chrome after three idle seconds, faster than
-# a first iOS real-device accessibility-tree query can complete.
+# The harness probe appears only after both local and loopback-remote streams
+# are mounted. Do not key readiness to call chrome: production intentionally
+# auto-hides it after three idle seconds, faster than a first iOS real-device
+# accessibility-tree query can complete.
 - extendedWaitUntil:
     visible:
-      id: 'video-call-pip'
+      id: 'harness-background-video-not-run'
     timeout: 30000
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
@@ -83,14 +83,9 @@ name: iOS video-call PiP + return (Tier C, real device)
 - takeScreenshot: 02-pip-bubble
 
 # (3) Return to the call. Bug #2: on foreground the remote video should
-# repaint immediately, not stay black. Re-asserting the always-visible PiP
-# control proves the RN call screen remounted; the screenshot proves the
-# video actually came back.
+# repaint immediately, not stay black. The RTP counter probe proves native
+# video advanced while backgrounded; the screenshot proves it repainted.
 - launchApp
-- extendedWaitUntil:
-    visible:
-      id: 'video-call-pip'
-    timeout: 15000
 - waitForAnimationToEnd:
     timeout: 2000
 - extendedWaitUntil:

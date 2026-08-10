@@ -90,6 +90,8 @@ describe('iOS background-call native contracts', () => {
     );
     expect(harness).toContain('new RTCPeerConnection({ iceServers: [] })');
     expect(harness).toContain('readInboundVideoStats');
+    expect(harness).toContain('pip.onPipModeChanged');
+    expect(harness).toContain('if (!baseline) return;');
     expect(workflow).toContain('zip -qr ../speakeasy-ios-calls.zip speakeasy-ios-calls');
     expect(workflow).toContain('apps/mobile/build/speakeasy-ios-calls.zip');
     expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
