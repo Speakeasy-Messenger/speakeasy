@@ -38,7 +38,7 @@ permissions:
 
 jobs:
   listing-ios:
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v6

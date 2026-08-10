@@ -58,7 +58,7 @@ permissions:
 
 jobs:
   release-ios:
-    runs-on: macos-latest
+    runs-on: macos-15
     timeout-minutes: 90
     env:
       LANE: ${{ github.event.inputs.lane || 'beta' }}
