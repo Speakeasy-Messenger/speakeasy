@@ -50,10 +50,19 @@ name: Android video-call PiP + background media continuity
     timeout: 4000
 - takeScreenshot: 02-pip-bubble
 
-# Reopen to exercise the same lifecycle path as Android's PiP expand control.
-# A separate exploratory system-UI run evaluates the actual PiP control because
-# Maestro cannot reliably address OEM PiP chrome from the app accessibility tree.
-- launchApp
+# Tap the system PiP bubble to reveal its native controls, then use the actual
+# expand/full-screen action. This preserves the running React/WebRTC instance;
+# launchApp would recreate the harness and invalidate the before/after counters.
+- tapOn:
+    point: '75%,82%'
+- extendedWaitUntil:
+    visible: 'Full screen|Expand'
+    timeout: 5000
+- tapOn: 'Full screen|Expand'
+- extendedWaitUntil:
+    visible:
+      id: 'harness-evaluate-background-video'
+    timeout: 10000
 - tapOn:
     id: 'harness-evaluate-background-video'
 - extendedWaitUntil:
