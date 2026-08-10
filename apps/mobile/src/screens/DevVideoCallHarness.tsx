@@ -224,6 +224,7 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
         <Pressable
           testID="harness-arm-background-video"
           accessibilityLabel="harness-arm-background-video"
+          accessibilityRole="button"
           onPress={beginBackgroundMeasurement}
           style={styles.probeControl}
         />
@@ -232,6 +233,7 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
         <Pressable
           testID="harness-evaluate-background-video"
           accessibilityLabel="harness-evaluate-background-video"
+          accessibilityRole="button"
           onPress={finishBackgroundMeasurement}
           style={styles.probeControl}
         />
@@ -290,6 +292,6 @@ const styles = StyleSheet.create({
     height: 44,
     opacity: 0.01,
     right: 0,
-    bottom: 0,
+    top: 100,
   },
 });
