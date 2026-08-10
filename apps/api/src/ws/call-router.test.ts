@@ -325,6 +325,31 @@ describe('routeCallFrame — always-push for call_offer (rc.58)', () => {
     expect(deps._push.calls[1]).not.toHaveProperty('skipVoipCapableIos');
   });
 
+  it('falls back to an unsuppressed ordinary push when VoIP lookup fails', async () => {
+    vi.stubEnv('IOS_VOIP_CALLKIT_ENABLED', 'true');
+    const deps = buildDeps();
+    deps.apnsVoip = {
+      sendVoipPush: vi.fn(),
+    } as unknown as CallRouterDeps['apnsVoip'];
+    deps.devices = {
+      listForUser: vi.fn(async () => {
+        throw new Error('db unavailable');
+      }),
+    } as unknown as CallRouterDeps['devices'];
+
+    await routeCallFrame(deps, 'alice', {
+      type: 'call_offer',
+      to: 'bob',
+      call_id: CALL_ID,
+      ciphertext: CIPHERTEXT,
+    });
+    await new Promise((r) => setImmediate(r));
+
+    expect(deps._push.calls).toHaveLength(2);
+    expect(deps._push.calls[0]).toHaveProperty('skipVoipCapableIos', true);
+    expect(deps._push.calls[1]).not.toHaveProperty('skipVoipCapableIos');
+  });
+
   it('does NOT push for call_answer / call_ice / non-cancel call_end', async () => {
     const deps = buildDeps({
       localPeerOf: { userId: 'bob', deviceToken: 'dvt_bob_phone' },

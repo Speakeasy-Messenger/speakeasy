@@ -258,6 +258,16 @@ export async function routeCallFrame(
           );
         } catch (err) {
           deps.log.warn({ err, recipientId: msg.to }, 'voip push failed');
+          // If the VoIP-device lookup itself failed, the ordinary send above
+          // may already have suppressed iPhones with stored PushKit tokens.
+          // Retry without suppression so a transient DB failure cannot turn
+          // into a completely silent incoming call.
+          await deps.push.notifyDelivery(callNotice).catch((fallbackErr) => {
+            deps.log.warn(
+              { err: fallbackErr, recipientId: msg.to },
+              'voip push ordinary fallback failed',
+            );
+          });
         }
       })();
     }
