@@ -107,7 +107,9 @@ target 'Speakeasy' do
     )
     if File.exist?(gdt_metrics)
       contents = File.read(gdt_metrics)
-      marker = '#import <nanopb/pb.h>'
+      # This must precede the first GoogleDataTransport import: its private
+      # header transitively imports pb_decode.h and trips the include guard.
+      marker = '#import "GoogleDataTransport/GDTCCTLibrary/Private/GDTCORMetrics+GDTCCTSupport.h"'
       define = "#ifndef PB_ENABLE_MALLOC\n#define PB_ENABLE_MALLOC 1\n#endif\n\n"
       patched = contents.include?(define) ? contents : contents.sub(marker, define + marker)
       if patched != contents
