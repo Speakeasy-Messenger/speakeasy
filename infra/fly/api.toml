@@ -25,6 +25,11 @@ kill_timeout = "30s"
   HOST = "0.0.0.0"
   NODE_ENV = "production"
   LOG_LEVEL = "info"
+  # Native iOS builds report PushKit invitations through CallKit. Keep this
+  # rollout switch explicit in production config so a deploy cannot silently
+  # fall back to ordinary notification banners while the APNs credentials are
+  # present as Fly secrets.
+  IOS_VOIP_CALLKIT_ENABLED = "true"
   # VOUCHFLOW_BASE_URL set at deploy time — sandbox vs live.
   # Prometheus /metrics on the main listener (same port as app traffic;
   # no separate :9091 to expose). Scraped by Fly's internal Prometheus.
