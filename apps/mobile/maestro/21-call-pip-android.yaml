@@ -28,6 +28,11 @@ name: Android video-call PiP + background media continuity
 # background transition below happens at a deterministic point.
 - launchApp
 
+# Permission retries take longer than the call screen's three-second chrome
+# timeout. Reveal the controls before asserting the PiP action is available.
+- tapOn:
+    point: '50%,50%'
+
 - extendedWaitUntil:
     visible:
       id: 'video-call-pip'
