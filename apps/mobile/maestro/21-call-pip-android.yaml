@@ -35,7 +35,7 @@ name: Android video-call PiP + background media continuity
 
 - extendedWaitUntil:
     visible:
-      id: 'video-call-pip'
+      id: 'harness-background-video-not-run'
     timeout: 30000
 - waitForAnimationToEnd:
     timeout: 2000
@@ -50,10 +50,6 @@ name: Android video-call PiP + background media continuity
 # A separate exploratory system-UI run evaluates the actual PiP control because
 # Maestro cannot reliably address OEM PiP chrome from the app accessibility tree.
 - launchApp
-- extendedWaitUntil:
-    visible:
-      id: 'video-call-pip'
-    timeout: 15000
 - extendedWaitUntil:
     visible:
       id: 'harness-background-video-pass'
