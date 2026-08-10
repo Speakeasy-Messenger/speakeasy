@@ -60,13 +60,19 @@ describe('iOS background-call native contracts', () => {
     expect(voip).toContain('prewarmForIncomingCall');
   });
 
-  it('keeps the real-device video harness behind a native build flag', () => {
+  it('keeps the real-device video harness behind native build flags', () => {
     const app = source('App.tsx');
     const delegate = source('ios/Speakeasy/AppDelegate.mm');
     const fastfile = source('ios/fastlane/Fastfile');
     const projectWiring = source('ios/tools/wire-ios-project.rb');
     const workflow = source('../../.github/workflows/browserstack-ios.yml');
+    const androidWorkflow = source('../../.github/workflows/browserstack-android.yml');
     const maestroFlow = source('maestro/20-call-pip-ios.yaml');
+    const androidActivity = source(
+      'android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt',
+    );
+    const androidGradle = source('android/app/build.gradle');
+    const harness = source('src/screens/DevVideoCallHarness.tsx');
 
     expect(app).toContain('videoCallHarness?: boolean;');
     expect(delegate).toContain('#if SPEAKEASY_VIDEO_CALL_HARNESS');
@@ -76,9 +82,20 @@ describe('iOS background-call native contracts', () => {
     expect(projectWiring).toContain(
       'SPEAKEASY_VIDEO_CALL_HARNESS=$(SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED)',
     );
+    expect(androidActivity).toContain(
+      'BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS',
+    );
+    expect(androidGradle).toContain(
+      "project.findProperty('speakeasy.videoCallHarness')",
+    );
+    expect(harness).toContain('new RTCPeerConnection({ iceServers: [] })');
+    expect(harness).toContain('readInboundVideoStats');
     expect(workflow).toContain('zip -qr ../speakeasy-ios-calls.zip speakeasy-ios-calls');
     expect(workflow).toContain('apps/mobile/build/speakeasy-ios-calls.zip');
+    expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
+    expect(androidWorkflow).toContain('speakeasy-android-calls.zip');
     expect(maestroFlow).toContain("id: 'video-call-pip'");
+    expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");
   });
 });

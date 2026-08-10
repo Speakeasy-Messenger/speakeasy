@@ -31,7 +31,12 @@ class MainActivity : ReactActivity() {
    * which allows you to enable New Architecture with a single boolean flags [fabricEnabled]
    */
   override fun createReactActivityDelegate(): ReactActivityDelegate =
-      DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled)
+      object : DefaultReactActivityDelegate(this, mainComponentName, fabricEnabled) {
+        override fun getLaunchOptions(): Bundle =
+            Bundle().apply {
+              putBoolean("videoCallHarness", BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS)
+            }
+      }
 
   /**
    * Pass `null` instead of `savedInstanceState` so Android does NOT

@@ -61,6 +61,12 @@ name: iOS video-call PiP + return (Tier C, real device)
 # (1) Foreground baseline — full-screen video call, chrome visible.
 - takeScreenshot: 01-foreground
 
+# Let the loopback receiver stats sampler capture a stable pre-background
+# baseline. The harness renders the CAMERA only after it has traversed a real
+# WebRTC sender/receiver pair, so this is no longer a local-view-only demo.
+- waitForAnimationToEnd:
+    timeout: 2000
+
 # Explicitly request PiP so entry is deterministic rather than relying
 # only on auto-enter-on-background (which we also exercise next).
 - tapOn:
@@ -87,4 +93,8 @@ name: iOS video-call PiP + return (Tier C, real device)
     timeout: 15000
 - waitForAnimationToEnd:
     timeout: 2000
+- extendedWaitUntil:
+    visible:
+      id: 'harness-background-video-pass'
+    timeout: 15000
 - takeScreenshot: 03-returned

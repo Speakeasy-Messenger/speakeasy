@@ -1,0 +1,51 @@
+# Maestro flow: Android video-call background PiP + media continuity.
+#
+# The signed harness encodes the physical device camera through a LOCAL pair of
+# real RTCPeerConnections and renders the receiver's track as the remote feed.
+# After Home -> PiP -> foreground, native inbound-RTP counters must have advanced
+# while JS was backgrounded. This proves capture/encode/receive/render continued;
+# screenshots separately prove the system bubble is filled and sized correctly.
+
+appId: xyz.speakeasyapp.app
+name: Android video-call PiP + background media continuity
+---
+- launchApp
+
+# Clean BrowserStack Android devices ask camera and microphone independently.
+- repeat:
+    times: 2
+    commands:
+      - tapOn:
+          text: 'While using the app'
+          optional: true
+      - tapOn:
+          text: 'Allow'
+          optional: true
+
+- extendedWaitUntil:
+    visible:
+      id: 'video-call-pip'
+    timeout: 30000
+- waitForAnimationToEnd:
+    timeout: 2000
+- takeScreenshot: 01-foreground
+
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 4000
+- takeScreenshot: 02-pip-bubble
+
+# Reopen to exercise the same lifecycle path as Android's PiP expand control.
+# A separate exploratory system-UI run evaluates the actual PiP control because
+# Maestro cannot reliably address OEM PiP chrome from the app accessibility tree.
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: 'video-call-pip'
+    timeout: 15000
+- extendedWaitUntil:
+    visible:
+      id: 'harness-background-video-pass'
+    timeout: 15000
+- takeScreenshot: 03-returned
+
