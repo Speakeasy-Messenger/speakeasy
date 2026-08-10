@@ -54,7 +54,7 @@ name: Android video-call PiP + background media continuity
 # expand/full-screen action. This preserves the running React/WebRTC instance;
 # launchApp would recreate the harness and invalidate the before/after counters.
 - tapOn:
-    point: '75%,82%'
+    id: 'xyz.speakeasyapp.app:id/action_bar_root'
 - extendedWaitUntil:
     visible: 'Full screen|Expand'
     timeout: 5000
