@@ -68,6 +68,7 @@ describe('iOS background-call native contracts', () => {
     const workflow = source('../../.github/workflows/browserstack-ios.yml');
     const androidWorkflow = source('../../.github/workflows/browserstack-android.yml');
     const maestroFlow = source('maestro/20-call-pip-ios.yaml');
+    const androidCloseFlow = source('maestro/22-call-pip-close-android.yaml');
     const androidActivity = source(
       'android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt',
     );
@@ -98,6 +99,9 @@ describe('iOS background-call native contracts', () => {
     expect(workflow).toContain('apps/mobile/build/speakeasy-ios-calls.zip');
     expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
     expect(androidWorkflow).toContain('speakeasy-android-calls.zip');
+    expect(androidWorkflow).toContain('22-call-pip-close-android.yaml');
+    expect(androidCloseFlow).toContain("tapOn: 'Close'");
+    expect(androidCloseFlow).toContain("assertNotVisible: '@dev-peer'");
     expect(maestroFlow).toContain("id: 'video-call-pip'");
     expect(maestroFlow).toContain("id: 'harness-arm-background-video'");
     expect(maestroFlow).toContain("tapOn: 'Speakeasy'");

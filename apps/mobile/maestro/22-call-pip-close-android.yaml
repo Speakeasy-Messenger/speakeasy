@@ -1,0 +1,36 @@
+appId: xyz.speakeasyapp.app
+name: Android PiP close ends the call
+---
+- launchApp
+- repeat:
+    times: 2
+    commands:
+      - tapOn:
+          text: 'While using the app'
+          optional: true
+      - tapOn:
+          text: 'Allow'
+          optional: true
+- launchApp
+- extendedWaitUntil:
+    visible:
+      id: 'harness-arm-background-video'
+    timeout: 30000
+- pressKey: Home
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'xyz.speakeasyapp.app:id/action_bar_root'
+- extendedWaitUntil:
+    visible: 'Close'
+    timeout: 5000
+- tapOn: 'Close'
+- extendedWaitUntil:
+    notVisible:
+      id: 'xyz.speakeasyapp.app:id/action_bar_root'
+    timeout: 10000
+- swipe:
+    start: '50%,0%'
+    end: '50%,75%'
+    duration: 1000
+- assertNotVisible: '@dev-peer'

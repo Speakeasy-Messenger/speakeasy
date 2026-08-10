@@ -74,6 +74,7 @@ jobs:
         run: |
           mkdir -p build/maestro/speakeasy-android-calls
           cp maestro/21-call-pip-android.yaml build/maestro/speakeasy-android-calls/
+          cp maestro/22-call-pip-close-android.yaml build/maestro/speakeasy-android-calls/
           cd build/maestro
           zip -qr ../speakeasy-android-calls.zip speakeasy-android-calls
 
@@ -85,4 +86,3 @@ jobs:
             apps/mobile/build/speakeasy-android-calls.zip
           if-no-files-found: error
           retention-days: 3
-
