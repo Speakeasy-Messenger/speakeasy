@@ -104,10 +104,20 @@ jobs:
           BUILD_NUMBER: ${{ github.run_number }}
         run: bundle exec fastlane ios browserstack
 
+      - name: Package BrowserStack Maestro suite
+        working-directory: apps/mobile
+        run: |
+          mkdir -p build/maestro/speakeasy-ios-calls
+          cp maestro/20-call-pip-ios.yaml build/maestro/speakeasy-ios-calls/
+          cd build/maestro
+          zip -qr ../speakeasy-ios-calls.zip speakeasy-ios-calls
+
       - name: Upload harness artifact
         uses: actions/upload-artifact@v6
         with:
           name: speakeasy-browserstack-ios-${{ github.sha }}
-          path: apps/mobile/ios/build/Speakeasy-BrowserStack.ipa
+          path: |
+            apps/mobile/ios/build/Speakeasy-BrowserStack.ipa
+            apps/mobile/build/speakeasy-ios-calls.zip
           if-no-files-found: error
           retention-days: 3

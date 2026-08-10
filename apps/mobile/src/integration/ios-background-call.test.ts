@@ -65,6 +65,8 @@ describe('iOS background-call native contracts', () => {
     const delegate = source('ios/Speakeasy/AppDelegate.mm');
     const fastfile = source('ios/fastlane/Fastfile');
     const projectWiring = source('ios/tools/wire-ios-project.rb');
+    const workflow = source('../../.github/workflows/browserstack-ios.yml');
+    const maestroFlow = source('maestro/20-call-pip-ios.yaml');
 
     expect(app).toContain('videoCallHarness?: boolean;');
     expect(delegate).toContain('#if SPEAKEASY_VIDEO_CALL_HARNESS');
@@ -74,5 +76,9 @@ describe('iOS background-call native contracts', () => {
     expect(projectWiring).toContain(
       'SPEAKEASY_VIDEO_CALL_HARNESS=$(SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED)',
     );
+    expect(workflow).toContain('zip -qr ../speakeasy-ios-calls.zip speakeasy-ios-calls');
+    expect(workflow).toContain('apps/mobile/build/speakeasy-ios-calls.zip');
+    expect(maestroFlow).toContain("id: 'video-call-pip'");
+    expect(maestroFlow).not.toContain("id: 'video-call-end'");
   });
 });

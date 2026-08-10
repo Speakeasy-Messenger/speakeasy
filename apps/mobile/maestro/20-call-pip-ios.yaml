@@ -30,33 +30,32 @@ appId: xyz.speakeasyapp.app
 name: iOS video-call PiP + return (Tier C, real device)
 ---
 - launchApp
-- tapOn:
-    text: 'Wait'
-    optional: true
 
 # The harness calls getUserMedia(audio+video) + InCallManager.start on mount,
 # raising TWO iOS permission dialogs (camera, then microphone). The active audio
-# session is what lets iOS auto-start PiP from inline. Grant both — wording
-# varies by iOS version, and there are two dialogs, so run the allow-taps twice.
-# All optional so the flow still runs if permission was pre-granted.
+# session is what lets iOS auto-start PiP from inline. On BrowserStack's clean
+# real devices both native prompts use the exact button label "Allow". Keep
+# these required: optional taps each wait for Maestro's full retry timeout when
+# absent, which let the call chrome auto-hide before the readiness assertion.
 - repeat:
     times: 2
     commands:
       - tapOn:
-          text: 'Allow While Using App'
-          optional: true
-      - tapOn:
           text: 'Allow'
-          optional: true
-      - tapOn:
-          text: 'OK'
-          optional: true
 
-# Call screen is up once the end-call button is in the tree. The harness
-# mounts a fake "connected" video call, so this appears without a peer.
+# VideoCallScreen deliberately hides its controls after three idle seconds.
+# Permission handling takes longer than that on a clean iPhone, so reveal the
+# chrome before the foreground baseline capture.
+- tapOn:
+    point: '50%,50%'
+
+# Call screen is up once the always-visible local-preview/PiP control is in
+# the tree. Do not key readiness to the bottom end-call control: production
+# intentionally auto-hides that chrome after three idle seconds, faster than
+# a first iOS real-device accessibility-tree query can complete.
 - extendedWaitUntil:
     visible:
-      id: 'video-call-end'
+      id: 'video-call-pip'
     timeout: 30000
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
@@ -78,13 +77,13 @@ name: iOS video-call PiP + return (Tier C, real device)
 - takeScreenshot: 02-pip-bubble
 
 # (3) Return to the call. Bug #2: on foreground the remote video should
-# repaint immediately, not stay black. Re-asserting the end button proves
-# the RN screen remounted; the screenshot proves the video actually came
-# back (a black frame with a live end button is exactly the #2 failure).
+# repaint immediately, not stay black. Re-asserting the always-visible PiP
+# control proves the RN call screen remounted; the screenshot proves the
+# video actually came back.
 - launchApp
 - extendedWaitUntil:
     visible:
-      id: 'video-call-end'
+      id: 'video-call-pip'
     timeout: 15000
 - waitForAnimationToEnd:
     timeout: 2000
