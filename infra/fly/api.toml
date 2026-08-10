@@ -26,10 +26,10 @@ kill_timeout = "30s"
   NODE_ENV = "production"
   LOG_LEVEL = "info"
   # Native iOS builds report PushKit invitations through CallKit. Keep this
-  # Keep disabled until a build containing the native PushKit/CallKit setup
-  # has passed real-device call/audio validation and reached production users.
-  # Older builds must continue receiving ordinary notification banners.
-  IOS_VOIP_CALLKIT_ENABLED = "false"
+  # Explicit production rollout switch. VoIP-capable iOS installs use the
+  # PushKit/CallKit path; installs without a VoIP token continue receiving the
+  # ordinary notification fallback.
+  IOS_VOIP_CALLKIT_ENABLED = "true"
   # VOUCHFLOW_BASE_URL set at deploy time — sandbox vs live.
   # Prometheus /metrics on the main listener (same port as app traffic;
   # no separate :9091 to expose). Scraped by Fly's internal Prometheus.
