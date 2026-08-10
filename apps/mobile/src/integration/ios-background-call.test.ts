@@ -99,6 +99,8 @@ describe('iOS background-call native contracts', () => {
     expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
     expect(androidWorkflow).toContain('speakeasy-android-calls.zip');
     expect(maestroFlow).toContain("id: 'video-call-pip'");
+    expect(maestroFlow).toContain("id: 'harness-arm-background-video'");
+    expect(maestroFlow).toContain("tapOn: 'Speakeasy'");
     expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");
   });
