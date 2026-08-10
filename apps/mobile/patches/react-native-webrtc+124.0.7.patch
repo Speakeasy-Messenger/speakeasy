@@ -266,6 +266,29 @@ index 5d14d0f..a985ce1 100644
      /**
       * Stops rendering {@link #videoTrack} and releases the associated acquired
       * resources (if rendering is in progress).
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
+index 5137c71..b0796d4 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
+@@ -12,0 +13 @@
++@property(nonatomic, assign) BOOL restoreRequested;
+@@ -218,0 +220,10 @@
++    // Stopping PiP while the source app is still backgrounded means the user
++    // pressed the system close control. Surface that distinction to the host
++    // app so it can end the call instead of leaving camera/mic active headless.
++    if (!self.restoreRequested &&
++        UIApplication.sharedApplication.applicationState == UIApplicationStateBackground) {
++        [[NSNotificationCenter defaultCenter]
++            postNotificationName:@"SpeakeasyPictureInPictureClosed"
++                          object:nil];
++    }
++    self.restoreRequested = NO;
+@@ -231,0 +243,5 @@
++    // The call UI never unmounts while backgrounded, so there is no navigation
++    // work to reconstruct here. Telling AVKit restoration succeeded lets the
++    // native full-screen control foreground the existing call immediately.
++    self.restoreRequested = YES;
++    completionHandler(YES);
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
 index e64005d..dcf08fe 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m

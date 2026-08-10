@@ -35,6 +35,18 @@ describe('iOS background-call native contracts', () => {
     expect(entitlements).toContain('<true/>');
   });
 
+  it('restores the iOS call and ends it when the native PiP close control is used', () => {
+    const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
+    const delegate = source('ios/Speakeasy/AppDelegate.mm');
+    const pipBridge = source('src/native/pip.ts');
+
+    expect(webrtcPatch).toContain('completionHandler(YES);');
+    expect(webrtcPatch).toContain('SpeakeasyPictureInPictureClosed');
+    expect(delegate).toContain('speakeasyPictureInPictureClosed:');
+    expect(delegate).toContain('@"SpeakeasyPipClosed"');
+    expect(pipBridge).toContain("DeviceEventEmitter.addListener('SpeakeasyPipClosed'");
+  });
+
   it('lets CallKit own the iOS audio session instead of InCallManager', () => {
     const peer = source('src/calls/webrtc-peer.ts');
     const bridge = source('src/calls/callkeep-bridge.ts');

@@ -1,4 +1,9 @@
-import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
+import {
+  DeviceEventEmitter,
+  NativeEventEmitter,
+  NativeModules,
+  Platform,
+} from 'react-native';
 
 /**
  * Android Picture-in-Picture bridge for video calls. iOS PiP is handled
@@ -40,6 +45,10 @@ export const pip = {
    * unsubscribe fn; no-op on non-Android.
    */
   onPipClosed(cb: () => void): () => void {
+    if (Platform.OS === 'ios') {
+      const sub = DeviceEventEmitter.addListener('SpeakeasyPipClosed', cb);
+      return () => sub.remove();
+    }
     if (Platform.OS !== 'android' || !native) return () => {};
     const emitter = new NativeEventEmitter(native as unknown as never);
     const sub = emitter.addListener('SpeakeasyPipClosed', () => cb());

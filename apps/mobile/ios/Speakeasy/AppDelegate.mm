@@ -1,6 +1,7 @@
 #import "AppDelegate.h"
 
 #import <React/RCTBundleURLProvider.h>
+#import <React/RCTBridge.h>
 #import <AVFAudio/AVFAudio.h>
 // Deep links: forwards inbound URLs to RN's Linking so App.tsx's handler
 // (→ utils/handle-link parseAdd) sees them. Covers BOTH the custom scheme
@@ -207,7 +208,26 @@ static void SpeakeasyWriteCrash(NSException *exception)
   }];
   [RNVoipPushNotificationManager voipRegistration];
 
+  // react-native-webrtc owns the AVKit PiP controller. Our package patch posts
+  // this native notification only when the user closes PiP while Speakeasy is
+  // still backgrounded (not when they restore the full-screen call).
+  [[NSNotificationCenter defaultCenter]
+      addObserver:self
+         selector:@selector(speakeasyPictureInPictureClosed:)
+             name:@"SpeakeasyPictureInPictureClosed"
+           object:nil];
+
   return [super application:application didFinishLaunchingWithOptions:launchOptions];
+}
+
+- (void)speakeasyPictureInPictureClosed:(NSNotification *)notification
+{
+  RCTBridge *bridge = self.bridge;
+  if (bridge == nil) { return; }
+  [bridge enqueueJSCall:@"RCTDeviceEventEmitter"
+                 method:@"emit"
+                   args:@[@"SpeakeasyPipClosed", [NSNull null]]
+             completion:NULL];
 }
 
 #pragma mark - PushKit / CallKit
