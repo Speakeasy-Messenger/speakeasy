@@ -95,15 +95,25 @@ target 'Speakeasy' do
     #   PB_ENABLE_MALLOC=1GDTCOR_VERSION=10.1.0
     # CocoaPods consequently builds the target without a usable
     # PB_ENABLE_MALLOC definition, hiding nanopb's pb_release declaration and
-    # failing the archive. Define it explicitly on the affected pod target.
-    installer.pods_project.targets.each do |pod_target|
-      next unless pod_target.name == 'GoogleDataTransport'
-
-      pod_target.build_configurations.each do |build_config|
-        definitions = build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] || ['$(inherited)']
-        definitions = [definitions] unless definitions.is_a?(Array)
-        definitions << 'PB_ENABLE_MALLOC=1' unless definitions.include?('PB_ENABLE_MALLOC=1')
-        build_config.build_settings['GCC_PREPROCESSOR_DEFINITIONS'] = definitions
+    # failing the archive. Patch the affected translation unit before Xcode
+    # compiles it; changing the generated target build setting is insufficient
+    # because its xcconfig reintroduces the malformed definition.
+    gdt_metrics = File.join(
+      installer.sandbox.root,
+      'GoogleDataTransport',
+      'GoogleDataTransport',
+      'GDTCCTLibrary',
+      'GDTCORMetrics+GDTCCTSupport.m'
+    )
+    if File.exist?(gdt_metrics)
+      contents = File.read(gdt_metrics)
+      marker = '#import <nanopb/pb.h>'
+      define = "#ifndef PB_ENABLE_MALLOC\n#define PB_ENABLE_MALLOC 1\n#endif\n\n"
+      patched = contents.include?(define) ? contents : contents.sub(marker, define + marker)
+      if patched != contents
+        File.chmod(0644, gdt_metrics)
+        File.write(gdt_metrics, patched)
+        Pod::UI.puts '[Speakeasy] Patched GoogleDataTransport: PB_ENABLE_MALLOC restored'.green
       end
     end
 
