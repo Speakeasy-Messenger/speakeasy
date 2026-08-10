@@ -61,12 +61,6 @@ name: Android video-call PiP + background media continuity
 - tapOn: 'Full screen|Expand'
 - extendedWaitUntil:
     visible:
-      id: 'harness-evaluate-background-video'
-    timeout: 10000
-- tapOn:
-    id: 'harness-evaluate-background-video'
-- extendedWaitUntil:
-    visible:
       id: 'harness-background-video-pass'
     timeout: 15000
 - takeScreenshot: 03-returned
