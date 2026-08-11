@@ -39,6 +39,12 @@ const VIDEO_PIP_OPTS = {
   enabled: true,
   startAutomatically: true,
   stopAutomatically: true,
+  // AVPictureInPictureVideoCallViewController requires a non-zero preferred
+  // content size. react-native-webrtc maps an omitted value to CGSizeZero,
+  // which makes AVKit report contentDimensions (0, 0) and reject PiP startup
+  // on real iOS devices (PGPegasusErrorDomain -1003). Match the portrait
+  // remote-video aspect ratio; AVKit scales this into the system window.
+  preferredSize: { width: 1080, height: 1920 },
 } as const;
 
 // A PiP/floating call window is physically tiny — its smaller dimension is

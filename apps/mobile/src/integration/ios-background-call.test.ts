@@ -41,6 +41,10 @@ describe('iOS background-call native contracts', () => {
     // view, which immediately tears down PiP and revokes background camera use.
     expect(screen).toContain("Platform.OS === 'android' &&");
     expect(screen).toContain('inPip || appBackgrounded ||');
+    // AVKit rejects a video-call PiP source whose preferred content size is
+    // zero. react-native-webrtc defaults an omitted preferredSize to
+    // CGSizeZero, so keep the app-level contract explicit and portrait-sized.
+    expect(screen).toContain('preferredSize: { width: 1080, height: 1920 }');
     expect(webrtcPatch).toContain('will resign active (possible=%@ active=%@ auto=%@)');
     expect(webrtcPatch).toContain(
       'UIApplication.sharedApplication.applicationState == UIApplicationStateActive',
