@@ -279,14 +279,15 @@ index 6e81776..7e93656 100644
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-index 5137c71..4c8a571 100644
+index 5137c71..41f9c4b 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-@@ -2,6 +2,23 @@
+@@ -2,6 +2,24 @@
  #import <AVKit/AVKit.h>
  #import "SampleBufferVideoCallView.h"
 
 +static void SpeakeasyPIPDiagnostic(NSString *message) {
++    NSLog(@"[SpeakeasyPIP] %@", message);
 +    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 +    @synchronized(defaults) {
 +        NSMutableArray *entries =
@@ -306,15 +307,16 @@ index 5137c71..4c8a571 100644
  @interface PIPController ()
 
  @property(nonatomic, strong) AVPictureInPictureVideoCallViewController *pipCallViewController;
-@@ -10,6 +27,7 @@
+@@ -10,6 +28,8 @@
  @property(nonnull, nonatomic, strong) SampleBufferVideoCallView *sampleView;
 
  @property(nonnull, nonatomic, strong) UIView *fallbackView;
 +@property(nonatomic, assign) BOOL restoreRequested;
++@property(nonatomic, assign) BOOL enteredBackgroundAfterResign;
 
  @end
 
-@@ -41,6 +59,19 @@
+@@ -41,6 +61,24 @@
                           forKeyPath:@"pictureInPictureActive"
                              options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
                              context:nil];
@@ -331,10 +333,15 @@ index 5137c71..4c8a571 100644
 +                                                 selector:@selector(applicationDidEnterBackground:)
 +                                                     name:UIApplicationDidEnterBackgroundNotification
 +                                                   object:nil];
++
++        [[NSNotificationCenter defaultCenter] addObserver:self
++                                                 selector:@selector(applicationDidBecomeActive:)
++                                                     name:UIApplicationDidBecomeActiveNotification
++                                                   object:nil];
 
          [[NSNotificationCenter defaultCenter] addObserver:self
                                                   selector:@selector(applicationWillEnterForeground:)
-@@ -56,10 +87,31 @@
+@@ -56,7 +94,65 @@
                          change:(NSDictionary *)change
                         context:(void *)context {
      if ([keyPath isEqualToString:@"pictureInPictureActive"]) {
@@ -345,10 +352,11 @@ index 5137c71..4c8a571 100644
 +    } else if ([keyPath isEqualToString:@"pictureInPicturePossible"]) {
 +        BOOL possible = [change[NSKeyValueChangeNewKey] boolValue];
 +        SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"possible=%@", possible ? @"true" : @"false"]);
-     }
- }
-
++    }
++}
++
 +- (void)applicationWillResignActive:(NSNotification *)notification {
++    self.enteredBackgroundAfterResign = NO;
 +    BOOL possible = self.pipController.isPictureInPicturePossible;
 +    BOOL active = self.pipController.isPictureInPictureActive;
 +    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"will resign active (possible=%@ active=%@ auto=%@)",
@@ -356,18 +364,51 @@ index 5137c71..4c8a571 100644
 +        active ? @"true" : @"false",
 +        self.startAutomatically ? @"true" : @"false"]);
 +
++    if (!self.startAutomatically || active) {
++        return;
++    }
++
++    // `canStartPictureInPictureAutomaticallyFromInline` is documented to
++    // start PiP as the app backgrounds, but on real iOS 18 devices AVKit can
++    // leave the controller inactive. Once that happens, AVFoundation stops an
++    // otherwise multitasking-enabled camera with
++    // VideoDeviceNotAvailableInBackground. Prime the sample-buffer renderer
++    // before asking AVKit to start so the system window never begins black.
++    self.sampleView.shouldRender = YES;
++    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
++        if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive ||
++            !self.startAutomatically || self.pipController.isPictureInPictureActive) {
++            return;
++        }
++        if (self.pipController.isPictureInPicturePossible) {
++            SpeakeasyPIPDiagnostic(@"auto-start fallback requested");
++            [self.pipController startPictureInPicture];
++        } else {
++            SpeakeasyPIPDiagnostic(@"auto-start fallback skipped (not possible)");
++        }
++    });
 +}
 +
 +- (void)applicationDidEnterBackground:(NSNotification *)notification {
++    self.enteredBackgroundAfterResign = YES;
 +    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"did enter background (possible=%@ active=%@)",
 +        self.pipController.isPictureInPicturePossible ? @"true" : @"false",
 +        self.pipController.isPictureInPictureActive ? @"true" : @"false"]);
 +}
 +
- - (void)applicationWillEnterForeground:(NSNotification *)notification {
-     if (_stopAutomatically) {
-         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-@@ -86,6 +138,7 @@
++- (void)applicationDidBecomeActive:(NSNotification *)notification {
++    // Opening Control Center and other transient system overlays also emits
++    // will-resign-active, but does not background the app. Undo a fallback PiP
++    // start in that case so interruptions do not leave a stray floating call.
++    if (!self.enteredBackgroundAfterResign && self.pipController.isPictureInPictureActive) {
++        SpeakeasyPIPDiagnostic(@"transient interruption ended; stopping fallback PiP");
++        [self.pipController stopPictureInPicture];
++    } else if (!self.pipController.isPictureInPictureActive) {
++        self.sampleView.shouldRender = NO;
+     }
+ }
+
+@@ -86,6 +182,7 @@
 
      _videoTrack = videoTrack;
      [videoTrack addRenderer:_sampleView];
@@ -375,7 +416,7 @@ index 5137c71..4c8a571 100644
 
      if (_videoTrack) {
          if (!_sampleView.superview) {
-@@ -155,10 +208,17 @@
+@@ -155,10 +252,17 @@
      }
  }
 
@@ -394,7 +435,7 @@ index 5137c71..4c8a571 100644
  }
 
  @end
-@@ -173,6 +233,7 @@
+@@ -173,6 +277,7 @@
   */
  - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -402,7 +443,7 @@ index 5137c71..4c8a571 100644
  }
 
  /*!
-@@ -183,6 +244,7 @@
+@@ -183,6 +288,7 @@
   */
  - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -410,7 +451,7 @@ index 5137c71..4c8a571 100644
  }
 
  /*!
-@@ -196,6 +258,8 @@
+@@ -196,6 +302,8 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      failedToStartPictureInPictureWithError:(NSError *)error {
      NSLog(@"%@: %@", NSStringFromSelector(_cmd), [error localizedDescription]);  // Objective-C
@@ -419,7 +460,7 @@ index 5137c71..4c8a571 100644
  }
 
  /*!
-@@ -206,6 +270,7 @@
+@@ -206,6 +314,7 @@
   */
  - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -427,7 +468,7 @@ index 5137c71..4c8a571 100644
  }
 
  /*!
-@@ -216,6 +281,19 @@
+@@ -216,6 +325,19 @@
   */
  - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -447,7 +488,7 @@ index 5137c71..4c8a571 100644
  }
 
  /*!
-@@ -229,6 +307,11 @@
+@@ -229,6 +351,11 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL restored))completionHandler {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C

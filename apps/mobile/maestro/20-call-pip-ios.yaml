@@ -91,11 +91,12 @@ name: iOS video-call PiP + return (Tier C, real device)
     timeout: 3000
 - takeScreenshot: 02-pip-bubble
 
-# (3) Return to the existing call through the installed app's SpringBoard icon.
-# `launchApp` stops/restarts the React tree on BrowserStack, which destroys the
-# pre-background RTP baseline. Tapping the icon resumes the same process, just
-# as the user returning from Home does, so AppState can evaluate native counters.
-- tapOn: 'Speakeasy'
+# (3) Return to the existing call without stopping it. `stopApp: false` is
+# Maestro's supported way to foreground the same iOS process, and unlike
+# tapping a SpringBoard icon it is independent of BrowserStack's launcher
+# layout and localized/hidden app labels.
+- launchApp:
+    stopApp: false
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:

@@ -43,9 +43,16 @@ describe('iOS background-call native contracts', () => {
     expect(screen).toContain('inPip || appBackgrounded ||');
     expect(webrtcPatch).toContain('will resign active (possible=%@ active=%@ auto=%@)');
     expect(webrtcPatch).toContain(
-      'UIApplication.sharedApplication.applicationState != UIApplicationStateActive',
+      'UIApplication.sharedApplication.applicationState == UIApplicationStateActive',
     );
     expect(webrtcPatch).toContain('pictureInPicturePossible');
+    expect(webrtcPatch).toContain('self.sampleView.shouldRender = YES');
+    expect(webrtcPatch).toContain('auto-start fallback requested');
+    expect(webrtcPatch).toContain('[self.pipController startPictureInPicture]');
+    expect(webrtcPatch).toContain('UIApplicationDidBecomeActiveNotification');
+    expect(webrtcPatch).toContain(
+      'transient interruption ended; stopping fallback PiP',
+    );
     expect(webrtcPatch).toContain('multitasking requested=%@ supported=%@ enabled=%@');
   });
 
@@ -149,7 +156,7 @@ describe('iOS background-call native contracts', () => {
     expect(maestroFlow).toContain("id: 'video-call-pip'");
     expect(maestroFlow).toContain("id: 'harness-arm-background-video'");
     expect(maestroFlow).toContain("id: 'harness-background-video-measuring'");
-    expect(maestroFlow).toContain("tapOn: 'Speakeasy'");
+    expect(maestroFlow).toContain('stopApp: false');
     expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");
   });
