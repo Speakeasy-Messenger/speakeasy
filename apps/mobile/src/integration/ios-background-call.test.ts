@@ -40,7 +40,8 @@ describe('iOS background-call native contracts', () => {
     // compact renderer during UIApplicationState.inactive unmounts that source
     // view, which immediately tears down PiP and revokes background camera use.
     expect(screen).toContain("Platform.OS === 'android' &&");
-    expect(screen).toContain('inPip || appBackgrounded ||');
+    expect(screen).not.toContain('appBackgrounded');
+    expect(screen).toContain('nativePipSize !== undefined');
     // AVKit rejects a video-call PiP source whose preferred content size is
     // zero. react-native-webrtc defaults an omitted preferredSize to
     // CGSizeZero, so keep the app-level contract explicit and portrait-sized.
@@ -72,6 +73,12 @@ describe('iOS background-call native contracts', () => {
     // resign-active transition races camera suspension and yields black AVKit.
     expect(webrtcPatch).toContain('_sampleView.shouldRender = videoTrack != nil;');
     expect(webrtcPatch).toContain('[SpeakeasyPIPRenderer]');
+    expect(webrtcPatch).toContain('- (void)layoutSubviews');
+    expect(webrtcPatch).toContain('size.width <= 0 || size.height <= 0');
+    expect(webrtcPatch).toContain('[self requestScaleRecalculation]');
+    expect(webrtcPatch).toContain('first sample enqueued');
+    expect(webrtcPatch).toContain('CMSampleTimingInfo timingInfo = {');
+    expect(webrtcPatch).toContain('.duration = kCMTimeInvalid');
   });
 
   it('resizes Android PiP video in place using platform-native seamless resizing', () => {
@@ -86,6 +93,8 @@ describe('iOS background-call native contracts', () => {
     expect(screen).toContain('flex: 0');
     expect(screen).toContain('width: nativePipSize.width');
     expect(screen).toContain('height: nativePipSize.height');
+    expect(screen).not.toContain('appBackgrounded');
+    expect(screen).toContain('nativePipSize !== undefined');
     // Resizing must not remount the WebRTC renderer and drop frames.
     expect(screen).not.toContain('nativePipSize.width}x${nativePipSize.height');
   });
