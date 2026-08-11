@@ -526,7 +526,7 @@ index e64005d..69d7f92 100644
                  [videoTrack addRenderer:self.videoView];
              });
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
-index b1a0b96..8abc1a5 100644
+index b1a0b96..ea7d0d0 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 @@ -3,6 +3,23 @@
@@ -553,15 +553,17 @@ index b1a0b96..8abc1a5 100644
  @protocol SampleBufferRendering<AVQueuedSampleBufferRendering>
 
  - (BOOL)requiresFlushToResumeDecoding;
-@@ -20,6 +37,7 @@
+@@ -20,6 +37,9 @@
  @property(nonatomic, retain) I420Converter *i420Converter;
  @property(nonatomic, strong) id<SampleBufferRendering> renderer;
  @property(nonatomic, assign) NSInteger currentRotation;
 +@property(nonatomic, assign) BOOL loggedFirstFrame;
++@property(nonatomic, assign) BOOL loggedFirstEnqueue;
++@property(nonatomic, assign) CGSize lastBoundsSize;
 
  @end
 
-@@ -47,6 +65,7 @@
+@@ -47,6 +67,7 @@
  - (void)layerFailedToDecode:(NSNotification *)note {
      NSError *error = [[note userInfo] valueForKey:AVSampleBufferDisplayLayerFailedToDecodeNotificationErrorKey];
      NSLog(@"layerFailedToDecode, error: %@", [error localizedDescription]);
@@ -569,7 +571,40 @@ index b1a0b96..8abc1a5 100644
  }
 
  - (AVSampleBufferDisplayLayer *)sampleBufferLayer {
-@@ -82,6 +101,14 @@
+@@ -57,16 +78,30 @@
+     _currentRotation = -1;
+ }
+
++- (void)layoutSubviews {
++    [super layoutSubviews];
++    CGSize size = self.bounds.size;
++    if (!CGSizeEqualToSize(size, self.lastBoundsSize)) {
++        self.lastBoundsSize = size;
++        [self requestScaleRecalculation];
++    }
++}
++
+ - (void)recalculateScale:(RTCVideoRotation)rotation {
+     if (self.currentRotation != rotation) {
+-        self.currentRotation = rotation;
+-
+         CGFloat scale = 1;
+         if (rotation == 90 || rotation == 270) {
+             CGSize size = self.bounds.size;
++            // Remote frames arrive before AVKit lays out its hidden call view.
++            // Never cache a transform calculated from 0x0 bounds.
++            if (size.width <= 0 || size.height <= 0) {
++                return;
++            }
+             scale = size.height / size.width;
+         }
+
++        self.currentRotation = rotation;
++
+         self.sampleBufferLayer.transform = CATransform3DConcat(
+             CATransform3DMakeRotation(rotation / 180.0 * M_PI, 0.0, 0.0, 1.0), CATransform3DMakeScale(scale, scale, 1));
+     }
+@@ -82,6 +117,14 @@
          return;
      }
 
@@ -584,7 +619,7 @@ index b1a0b96..8abc1a5 100644
      // Convert RTCVideoFrame to CMSampleBuffer
      CMSampleBufferRef sampleBuffer = [self sampleBufferFrom:frame];
      if (sampleBuffer == nil) {
-@@ -93,14 +120,14 @@
+@@ -93,14 +136,21 @@
              [self.renderer flush];
          }
 
@@ -600,13 +635,20 @@ index b1a0b96..8abc1a5 100644
 -        [self.renderer enqueueSampleBuffer:sampleBuffer];
 +            // Display the CMSampleBuffer using AVSampleBufferDisplayLayer.
 +            [self.renderer enqueueSampleBuffer:sampleBuffer];
++            if (!self.loggedFirstEnqueue) {
++                self.loggedFirstEnqueue = YES;
++                CGSize size = self.bounds.size;
++                SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:
++                    @"first sample enqueued (bounds=%.0fx%.0f rotation=%ld)",
++                    size.width, size.height, (long)frame.rotation]);
++            }
 +        }
 +        // sampleBufferFrom follows Core Foundation's Create rule. Release it
 +        // even when AVKit is applying backpressure and cannot accept a frame.
          CFRelease(sampleBuffer);
      });
  }
-@@ -115,8 +142,13 @@
+@@ -115,25 +165,36 @@
      }
 
      // Create a CMVideoFormatDescription
@@ -620,10 +662,18 @@ index b1a0b96..8abc1a5 100644
 +        return nil;
 +    }
 
-     // Create CMSampleTimingInfo
-     // Timescale is 90khz according to RTCVideoFrame.h
-@@ -125,15 +157,19 @@
-     timingInfo.decodeTimeStamp = CMTimeMake(rtcVideoFrame.timeStamp, 90000);
+-    // Create CMSampleTimingInfo
+-    // Timescale is 90khz according to RTCVideoFrame.h
+-    CMSampleTimingInfo timingInfo;
+-    timingInfo.presentationTimeStamp = CMTimeMake(rtcVideoFrame.timeStamp, 90000);
+-    timingInfo.decodeTimeStamp = CMTimeMake(rtcVideoFrame.timeStamp, 90000);
++    // DisplayImmediately below makes timestamps irrelevant. Initialize every
++    // field so duration is never undefined stack data.
++    CMSampleTimingInfo timingInfo = {
++        .duration = kCMTimeInvalid,
++        .presentationTimeStamp = kCMTimeInvalid,
++        .decodeTimeStamp = kCMTimeInvalid,
++    };
 
      // Create CMSampleBuffer
 -    CMSampleBufferRef sampleBuffer;
@@ -777,7 +827,7 @@ diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudi
 index cd4fa13..64ab025 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
-@@ -7,13 +7,39 @@
+@@ -7,12 +7,38 @@
 
  @implementation WebRTCModule (RTCAudioSession)
 
@@ -818,4 +868,3 @@ index cd4fa13..64ab025 100644
 +    session.isAudioEnabled = NO;
      return nil;
  }
-
