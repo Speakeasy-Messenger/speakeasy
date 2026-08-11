@@ -279,7 +279,7 @@ index 6e81776..7e93656 100644
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-index 5137c71..41f9c4b 100644
+index 5137c71..fb3a15f 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 @@ -2,6 +2,24 @@
@@ -307,16 +307,15 @@ index 5137c71..41f9c4b 100644
  @interface PIPController ()
 
  @property(nonatomic, strong) AVPictureInPictureVideoCallViewController *pipCallViewController;
-@@ -10,6 +28,8 @@
+@@ -10,6 +28,7 @@
  @property(nonnull, nonatomic, strong) SampleBufferVideoCallView *sampleView;
 
  @property(nonnull, nonatomic, strong) UIView *fallbackView;
 +@property(nonatomic, assign) BOOL restoreRequested;
-+@property(nonatomic, assign) BOOL enteredBackgroundAfterResign;
 
  @end
 
-@@ -41,6 +61,24 @@
+@@ -41,6 +60,24 @@
                           forKeyPath:@"pictureInPictureActive"
                              options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
                              context:nil];
@@ -341,7 +340,7 @@ index 5137c71..41f9c4b 100644
 
          [[NSNotificationCenter defaultCenter] addObserver:self
                                                   selector:@selector(applicationWillEnterForeground:)
-@@ -56,7 +94,65 @@
+@@ -56,7 +93,45 @@
                          change:(NSDictionary *)change
                         context:(void *)context {
      if ([keyPath isEqualToString:@"pictureInPictureActive"]) {
@@ -356,7 +355,6 @@ index 5137c71..41f9c4b 100644
 +}
 +
 +- (void)applicationWillResignActive:(NSNotification *)notification {
-+    self.enteredBackgroundAfterResign = NO;
 +    BOOL possible = self.pipController.isPictureInPicturePossible;
 +    BOOL active = self.pipController.isPictureInPictureActive;
 +    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"will resign active (possible=%@ active=%@ auto=%@)",
@@ -368,47 +366,28 @@ index 5137c71..41f9c4b 100644
 +        return;
 +    }
 +
-+    // `canStartPictureInPictureAutomaticallyFromInline` is documented to
-+    // start PiP as the app backgrounds, but on real iOS 18 devices AVKit can
-+    // leave the controller inactive. Once that happens, AVFoundation stops an
-+    // otherwise multitasking-enabled camera with
-+    // VideoDeviceNotAvailableInBackground. Prime the sample-buffer renderer
-+    // before asking AVKit to start so the system window never begins black.
++    // Prime the sample-buffer renderer before AVKit performs its documented
++    // automatic inline-to-PiP transition. Do not also call
++    // startPictureInPicture here: a manual request races that transition and
++    // fails with AVKit error -1001 on real devices.
 +    self.sampleView.shouldRender = YES;
-+    dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.1 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-+        if (UIApplication.sharedApplication.applicationState == UIApplicationStateActive ||
-+            !self.startAutomatically || self.pipController.isPictureInPictureActive) {
-+            return;
-+        }
-+        if (self.pipController.isPictureInPicturePossible) {
-+            SpeakeasyPIPDiagnostic(@"auto-start fallback requested");
-+            [self.pipController startPictureInPicture];
-+        } else {
-+            SpeakeasyPIPDiagnostic(@"auto-start fallback skipped (not possible)");
-+        }
-+    });
 +}
 +
 +- (void)applicationDidEnterBackground:(NSNotification *)notification {
-+    self.enteredBackgroundAfterResign = YES;
 +    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"did enter background (possible=%@ active=%@)",
 +        self.pipController.isPictureInPicturePossible ? @"true" : @"false",
 +        self.pipController.isPictureInPictureActive ? @"true" : @"false"]);
 +}
 +
 +- (void)applicationDidBecomeActive:(NSNotification *)notification {
-+    // Opening Control Center and other transient system overlays also emits
-+    // will-resign-active, but does not background the app. Undo a fallback PiP
-+    // start in that case so interruptions do not leave a stray floating call.
-+    if (!self.enteredBackgroundAfterResign && self.pipController.isPictureInPictureActive) {
-+        SpeakeasyPIPDiagnostic(@"transient interruption ended; stopping fallback PiP");
-+        [self.pipController stopPictureInPicture];
-+    } else if (!self.pipController.isPictureInPictureActive) {
++    // A transient interruption can prime rendering without entering PiP.
++    // Stop feeding the sample-buffer layer once the app becomes active again.
++    if (!self.pipController.isPictureInPictureActive) {
 +        self.sampleView.shouldRender = NO;
      }
  }
 
-@@ -86,6 +182,7 @@
+@@ -86,6 +161,7 @@
 
      _videoTrack = videoTrack;
      [videoTrack addRenderer:_sampleView];
@@ -416,7 +395,7 @@ index 5137c71..41f9c4b 100644
 
      if (_videoTrack) {
          if (!_sampleView.superview) {
-@@ -155,10 +252,17 @@
+@@ -155,10 +231,17 @@
      }
  }
 
@@ -435,7 +414,7 @@ index 5137c71..41f9c4b 100644
  }
 
  @end
-@@ -173,6 +277,7 @@
+@@ -173,6 +256,7 @@
   */
  - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -443,7 +422,7 @@ index 5137c71..41f9c4b 100644
  }
 
  /*!
-@@ -183,6 +288,7 @@
+@@ -183,6 +267,7 @@
   */
  - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -451,7 +430,7 @@ index 5137c71..41f9c4b 100644
  }
 
  /*!
-@@ -196,6 +302,8 @@
+@@ -196,6 +281,8 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      failedToStartPictureInPictureWithError:(NSError *)error {
      NSLog(@"%@: %@", NSStringFromSelector(_cmd), [error localizedDescription]);  // Objective-C
@@ -460,7 +439,7 @@ index 5137c71..41f9c4b 100644
  }
 
  /*!
-@@ -206,6 +314,7 @@
+@@ -206,6 +293,7 @@
   */
  - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -468,7 +447,7 @@ index 5137c71..41f9c4b 100644
  }
 
  /*!
-@@ -216,6 +325,19 @@
+@@ -216,6 +304,19 @@
   */
  - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -488,7 +467,7 @@ index 5137c71..41f9c4b 100644
  }
 
  /*!
-@@ -229,6 +351,11 @@
+@@ -229,6 +330,11 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL restored))completionHandler {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -541,7 +520,7 @@ index e64005d..69d7f92 100644
                  [videoTrack addRenderer:self.videoView];
              });
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
-index b1a0b96..e40a446 100644
+index b1a0b96..558dd5c 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 @@ -3,6 +3,23 @@
@@ -597,6 +576,67 @@ index b1a0b96..e40a446 100644
      // Convert RTCVideoFrame to CMSampleBuffer
      CMSampleBufferRef sampleBuffer = [self sampleBufferFrom:frame];
      if (sampleBuffer == nil) {
+@@ -93,14 +118,14 @@
+             [self.renderer flush];
+         }
+
+-        if (!self.renderer.readyForMoreMediaData) {
+-            return;
+-        }
+-
+-        [self recalculateScale:frame.rotation];
++        if (self.renderer.readyForMoreMediaData) {
++            [self recalculateScale:frame.rotation];
+
+-        // Display the CMSampleBuffer using AVSampleBufferDisplayLayer
+-        [self.renderer enqueueSampleBuffer:sampleBuffer];
++            // Display the CMSampleBuffer using AVSampleBufferDisplayLayer.
++            [self.renderer enqueueSampleBuffer:sampleBuffer];
++        }
++        // sampleBufferFrom follows Core Foundation's Create rule. Release it
++        // even when AVKit is applying backpressure and cannot accept a frame.
+         CFRelease(sampleBuffer);
+     });
+ }
+@@ -115,8 +140,13 @@
+     }
+
+     // Create a CMVideoFormatDescription
+-    CMVideoFormatDescriptionRef formatDescription;
+-    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer, &formatDescription);
++    CMVideoFormatDescriptionRef formatDescription = NULL;
++    OSStatus formatStatus =
++        CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer, &formatDescription);
++    if (formatStatus != noErr || formatDescription == NULL) {
++        CVPixelBufferRelease(pixelBuffer);
++        return nil;
++    }
+
+     // Create CMSampleTimingInfo
+     // Timescale is 90khz according to RTCVideoFrame.h
+@@ -125,15 +155,19 @@
+     timingInfo.decodeTimeStamp = CMTimeMake(rtcVideoFrame.timeStamp, 90000);
+
+     // Create CMSampleBuffer
+-    CMSampleBufferRef sampleBuffer;
+-    CMSampleBufferCreateForImageBuffer(
++    CMSampleBufferRef sampleBuffer = NULL;
++    OSStatus sampleStatus = CMSampleBufferCreateForImageBuffer(
+         kCFAllocatorDefault, pixelBuffer, true, nil, nil, formatDescription, &timingInfo, &sampleBuffer);
++    CFRelease(formatDescription);
++    CVPixelBufferRelease(pixelBuffer);
++    if (sampleStatus != noErr || sampleBuffer == NULL) {
++        return nil;
++    }
+
+     CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
+     CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
+
+     CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
+-    CVPixelBufferRelease(pixelBuffer);
+     return sampleBuffer;
+ }
+
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 index e7f52a1..d2bc45a 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m

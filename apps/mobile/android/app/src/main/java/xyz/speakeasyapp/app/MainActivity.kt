@@ -6,9 +6,11 @@ import android.app.PictureInPictureParams
 import android.content.Context
 import android.content.Intent
 import android.content.res.Configuration
+import android.graphics.Rect
 import android.os.Build
 import android.os.Bundle
 import android.util.Rational
+import android.view.View
 import com.facebook.react.ReactActivity
 import com.facebook.react.bridge.Arguments
 import com.facebook.react.modules.core.DeviceEventManagerModule
@@ -136,8 +138,19 @@ class MainActivity : ReactActivity() {
     val builder = PictureInPictureParams.Builder()
       // Portrait-ish call window. Android clamps to its allowed range.
       .setAspectRatio(Rational(9, 16))
+    val sourceRect = Rect()
+    val contentView = findViewById<View>(android.R.id.content)
+    if (contentView?.getGlobalVisibleRect(sourceRect) == true && !sourceRect.isEmpty) {
+      // Give Android a current on-screen source for the enter/exit animation.
+      // The React call surface fills this content view while videoCallActive.
+      builder.setSourceRectHint(sourceRect)
+    }
     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
-      builder.setAutoEnterEnabled(videoCallActive)
+      builder
+        .setAutoEnterEnabled(videoCallActive)
+        // Video content can resize continuously; asking Android for a seamless
+        // transition avoids relaunching/remounting the WebRTC render surface.
+        .setSeamlessResizeEnabled(true)
     }
     return builder.build()
   }

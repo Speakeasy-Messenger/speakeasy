@@ -46,32 +46,35 @@ describe('iOS background-call native contracts', () => {
     // CGSizeZero, so keep the app-level contract explicit and portrait-sized.
     expect(screen).toContain('preferredSize: { width: 1080, height: 1920 }');
     expect(webrtcPatch).toContain('will resign active (possible=%@ active=%@ auto=%@)');
-    expect(webrtcPatch).toContain(
-      'UIApplication.sharedApplication.applicationState == UIApplicationStateActive',
-    );
     expect(webrtcPatch).toContain('pictureInPicturePossible');
     expect(webrtcPatch).toContain('self.sampleView.shouldRender = YES');
-    expect(webrtcPatch).toContain('auto-start fallback requested');
-    expect(webrtcPatch).toContain('[self.pipController startPictureInPicture]');
+    // AVKit owns the automatic inline-to-PiP transition. A second manual start
+    // raced it on real iOS 18 devices and failed with error -1001.
+    expect(webrtcPatch).not.toContain('[self.pipController startPictureInPicture]');
+    expect(webrtcPatch).not.toContain('auto-start fallback requested');
     expect(webrtcPatch).toContain('UIApplicationDidBecomeActiveNotification');
-    expect(webrtcPatch).toContain(
-      'transient interruption ended; stopping fallback PiP',
-    );
+    expect(webrtcPatch).toContain('A transient interruption can prime rendering');
+    // Every Core Foundation object created for a PiP frame is released,
+    // including when AVKit applies renderer backpressure.
+    expect(webrtcPatch).toContain('if (self.renderer.readyForMoreMediaData)');
+    expect(webrtcPatch).toContain('CFRelease(sampleBuffer);');
+    expect(webrtcPatch).toContain('CFRelease(formatDescription);');
+    expect(webrtcPatch).toContain('if (sampleStatus != noErr || sampleBuffer == NULL)');
     expect(webrtcPatch).toContain('multitasking requested=%@ supported=%@ enabled=%@');
   });
 
-  it('uses Android native PiP dimensions ahead of stale React layout dimensions', () => {
+  it('resizes Android PiP video in place using platform-native seamless resizing', () => {
     const screen = source('src/screens/VideoCallScreen.tsx');
-    const nativeSizeBranch = screen.slice(
-      screen.indexOf('style={\n              nativePipSize'),
-      screen.indexOf('objectFit="cover"', screen.indexOf('style={\n              nativePipSize')),
+    const activity = source(
+      'android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt',
     );
 
-    expect(nativeSizeBranch).toContain('? { width: nativePipSize.w, height: nativePipSize.h }');
-    expect(nativeSizeBranch).toContain(': pipSize');
-    expect(nativeSizeBranch.indexOf('nativePipSize')).toBeLessThan(
-      nativeSizeBranch.indexOf(': pipSize'),
-    );
+    expect(activity).toContain('builder.setSourceRectHint(sourceRect)');
+    expect(activity).toContain('.setSeamlessResizeEnabled(true)');
+    expect(screen).toContain('key={`pip-${pipFeedTag}`}');
+    expect(screen).toContain('style={StyleSheet.absoluteFill}');
+    expect(screen).not.toContain('npip-${nativePipSize.w}x${nativePipSize.h}');
+    expect(screen).not.toContain('{ width: nativePipSize.w, height: nativePipSize.h }');
   });
 
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
