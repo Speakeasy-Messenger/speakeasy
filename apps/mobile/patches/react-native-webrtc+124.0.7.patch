@@ -279,7 +279,7 @@ index 6e81776..7e93656 100644
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-index 5137c71..a6cdcea 100644
+index 5137c71..4c8a571 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 @@ -2,6 +2,23 @@
@@ -334,7 +334,7 @@ index 5137c71..a6cdcea 100644
 
          [[NSNotificationCenter defaultCenter] addObserver:self
                                                   selector:@selector(applicationWillEnterForeground:)
-@@ -56,10 +87,38 @@
+@@ -56,10 +87,31 @@
                          change:(NSDictionary *)change
                         context:(void *)context {
      if ([keyPath isEqualToString:@"pictureInPictureActive"]) {
@@ -345,9 +345,9 @@ index 5137c71..a6cdcea 100644
 +    } else if ([keyPath isEqualToString:@"pictureInPicturePossible"]) {
 +        BOOL possible = [change[NSKeyValueChangeNewKey] boolValue];
 +        SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"possible=%@", possible ? @"true" : @"false"]);
-+    }
-+}
-+
+     }
+ }
+
 +- (void)applicationWillResignActive:(NSNotification *)notification {
 +    BOOL possible = self.pipController.isPictureInPicturePossible;
 +    BOOL active = self.pipController.isPictureInPictureActive;
@@ -356,15 +356,8 @@ index 5137c71..a6cdcea 100644
 +        active ? @"true" : @"false",
 +        self.startAutomatically ? @"true" : @"false"]);
 +
-+    // Explicitly request PiP while the application is still foreground-
-+    // eligible. This is idempotent if AVKit's automatic-inline path already
-+    // started and closes a real-device race where the bubble flashed and died.
-+    if (self.startAutomatically && possible && !active) {
-+        [self.pipController startPictureInPicture];
-+        SpeakeasyPIPDiagnostic(@"explicit start requested at willResignActive");
-     }
- }
-
++}
++
 +- (void)applicationDidEnterBackground:(NSNotification *)notification {
 +    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"did enter background (possible=%@ active=%@)",
 +        self.pipController.isPictureInPicturePossible ? @"true" : @"false",
@@ -374,7 +367,7 @@ index 5137c71..a6cdcea 100644
  - (void)applicationWillEnterForeground:(NSNotification *)notification {
      if (_stopAutomatically) {
          dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
-@@ -86,6 +145,7 @@
+@@ -86,6 +138,7 @@
 
      _videoTrack = videoTrack;
      [videoTrack addRenderer:_sampleView];
@@ -382,7 +375,7 @@ index 5137c71..a6cdcea 100644
 
      if (_videoTrack) {
          if (!_sampleView.superview) {
-@@ -155,10 +215,17 @@
+@@ -155,10 +208,17 @@
      }
  }
 
@@ -401,7 +394,7 @@ index 5137c71..a6cdcea 100644
  }
 
  @end
-@@ -173,6 +240,7 @@
+@@ -173,6 +233,7 @@
   */
  - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -409,7 +402,7 @@ index 5137c71..a6cdcea 100644
  }
 
  /*!
-@@ -183,6 +251,7 @@
+@@ -183,6 +244,7 @@
   */
  - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -417,7 +410,7 @@ index 5137c71..a6cdcea 100644
  }
 
  /*!
-@@ -196,6 +265,8 @@
+@@ -196,6 +258,8 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      failedToStartPictureInPictureWithError:(NSError *)error {
      NSLog(@"%@: %@", NSStringFromSelector(_cmd), [error localizedDescription]);  // Objective-C
@@ -426,7 +419,7 @@ index 5137c71..a6cdcea 100644
  }
 
  /*!
-@@ -206,6 +277,7 @@
+@@ -206,6 +270,7 @@
   */
  - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -434,7 +427,7 @@ index 5137c71..a6cdcea 100644
  }
 
  /*!
-@@ -216,6 +288,19 @@
+@@ -216,6 +281,19 @@
   */
  - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -454,7 +447,7 @@ index 5137c71..a6cdcea 100644
  }
 
  /*!
-@@ -229,6 +314,11 @@
+@@ -229,6 +307,11 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL restored))completionHandler {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C

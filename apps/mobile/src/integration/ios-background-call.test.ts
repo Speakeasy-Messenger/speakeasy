@@ -41,7 +41,7 @@ describe('iOS background-call native contracts', () => {
     // view, which immediately tears down PiP and revokes background camera use.
     expect(screen).toContain("Platform.OS === 'android' &&");
     expect(screen).toContain('inPip || appBackgrounded ||');
-    expect(webrtcPatch).toContain('explicit start requested at willResignActive');
+    expect(webrtcPatch).toContain('will resign active (possible=%@ active=%@ auto=%@)');
     expect(webrtcPatch).toContain(
       'UIApplication.sharedApplication.applicationState != UIApplicationStateActive',
     );
