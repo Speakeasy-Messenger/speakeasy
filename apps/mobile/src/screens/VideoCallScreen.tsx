@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useRef, useState } from 'react';
 import {
   Animated,
   AppState,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -104,12 +105,15 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // SurfaceView re-creates at the new window size (Android SurfaceViews keep
   // their pre-resize buffer otherwise → the feed fills only part of the bubble).
   const { width: winW, height: winH } = useWindowDimensions();
-  // Backgrounded → the video call is floating in a PiP bubble. Track it so we
-  // can collapse to the bubble-only view IMMEDIATELY on background, without
-  // waiting for the native PiP-mode event (which lands ~1–2 s later). Without
-  // this, the full call UI — top bar and all — briefly renders inside the tiny
-  // PiP window on entry, and the bubble shows a cropped corner of it (the
-  // reported "top bar shows in the bubble").
+  // Android backgrounding means the activity is transitioning into its native
+  // PiP window. Track it so Android can collapse to the bubble-only renderer
+  // immediately, without waiting for the native PiP-mode event.
+  //
+  // Do NOT use this state to switch render trees on iOS. AVKit's content source
+  // is the RTCView carrying `iosPIP`; unmounting it during the intermediate
+  // UIApplicationState.inactive transition releases the PiP controller. The
+  // visible result is a black bubble that flashes for a moment and disappears,
+  // followed by iOS suspending the camera because no PiP session remains.
   const [appBackgrounded, setAppBackgrounded] = useState(false);
   const pipCloseHandled = useRef(false);
   useEffect(() => {
@@ -145,12 +149,11 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       pip.setSession(null);
     };
   }, [active?.callId, orchestrator]);
-  // The authoritative "collapse to just the video" signal. True when the native
-  // PiP event told us so, OR the app is backgrounded (about to be / already in
-  // PiP), OR the window has reflowed to the tiny floating size. Any path drives
-  // BOTH the chrome-hide and the SurfaceView remount.
+  // Android's authoritative "collapse to just the video" signal. iOS must keep
+  // its existing RTCView mounted while AVKit moves that view into system PiP.
   const compact =
-    inPip || appBackgrounded || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE;
+    Platform.OS === 'android' &&
+    (inPip || appBackgrounded || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE);
   useEffect(() => {
     diag('call', 'pip mode change', {
       inPip,
@@ -393,9 +396,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // the view tree, the cleaner the SurfaceView fills the window. Switching into
   // this branch unmounts the full call UI and mounts a fresh single RTCView, so
   // the surface is (re)created at the PiP window size instead of resizing a
-  // stale full-screen one. iOS never hits this branch — its PiP is the
-  // iosPIP/AVPictureInPicture path on the full view; `compact` only flips on
-  // Android's window-size reflow.
+  // stale full-screen one. iOS is explicitly excluded because AVKit requires
+  // the RTCView that owns its content source to remain mounted throughout the
+  // foreground → inactive → background transition.
   if (compact) {
     const pipFeed = remoteUrl ?? localUrl;
     // Which feed is showing — part of the RTCView key below. Without this the
