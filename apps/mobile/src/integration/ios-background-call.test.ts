@@ -27,6 +27,7 @@ describe('iOS background-call native contracts', () => {
     const delegate = source('ios/Speakeasy/AppDelegate.mm');
     const plist = source('ios/Speakeasy/Info.plist');
     const entitlements = source('ios/Speakeasy/Speakeasy.entitlements');
+    const screen = source('src/screens/VideoCallScreen.tsx');
 
     expect(delegate).toContain('enableMultitaskingCameraAccess = YES');
     expect(plist).toContain('<string>voip</string>');
@@ -34,6 +35,11 @@ describe('iOS background-call native contracts', () => {
       '<key>com.apple.developer.avfoundation.multitasking-camera-access</key>',
     );
     expect(entitlements).toContain('<true/>');
+    // iOS AVKit owns the RTCView carrying `iosPIP`. Switching to the Android
+    // compact renderer during UIApplicationState.inactive unmounts that source
+    // view, which immediately tears down PiP and revokes background camera use.
+    expect(screen).toContain("Platform.OS === 'android' &&");
+    expect(screen).toContain('inPip || appBackgrounded ||');
   });
 
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
