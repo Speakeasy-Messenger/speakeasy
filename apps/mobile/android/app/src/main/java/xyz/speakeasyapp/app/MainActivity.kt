@@ -193,8 +193,8 @@ class MainActivity : ReactActivity() {
     emitJsEvent("SpeakeasyPipModeChanged", isInPictureInPictureMode)
     if (isInPictureInPictureMode) {
       wasInPip = true
-      // Hand JS the authoritative PiP window size so the video SurfaceView is
-      // recreated at the true bubble size (see emitPipSize).
+      // Hand JS the authoritative PiP window size for diagnostics. The
+      // TextureView stays mounted and Android resizes it in place.
       emitPipSize(newConfig)
     } else {
       // Exiting PiP — but we don't yet know if it's a dismiss or an expand.
