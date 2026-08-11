@@ -57,15 +57,18 @@ name: iOS video-call PiP + return (Tier C, real device)
     visible:
       id: 'harness-arm-background-video'
     timeout: 30000
-- tapOn:
-    id: 'harness-arm-background-video'
-# The loopback peer connection can raise iOS's one-time local-network prompt
-# after the camera/microphone prompts. Accept it before checking the probe.
+# The loopback peer connection raises iOS's local-network prompt only after
+# the ARM node exists behind it. Dismiss the system modal before touching the
+# underlying React Native control; otherwise Maestro can resolve and "tap" the
+# obscured node without dispatching its onPress.
 - tapOn:
     text: 'Allow'
-    optional: true
-- assertVisible:
-    id: 'harness-background-video-measuring'
+- tapOn:
+    id: 'harness-arm-background-video'
+- extendedWaitUntil:
+    visible:
+      id: 'harness-background-video-measuring'
+    timeout: 10000
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
 - takeScreenshot: 01-foreground

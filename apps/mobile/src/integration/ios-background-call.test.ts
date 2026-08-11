@@ -60,14 +60,21 @@ describe('iOS background-call native contracts', () => {
     expect(webrtcPatch).toContain('CFRelease(sampleBuffer);');
     expect(webrtcPatch).toContain('CFRelease(formatDescription);');
     expect(webrtcPatch).toContain('if (sampleStatus != noErr || sampleBuffer == NULL)');
-    expect(webrtcPatch).toContain('multitasking requested=%@ supported=%@ enabled=%@');
+    // A signed real-device run exposed WebRTCModuleOptions arriving false even
+    // with the capability + entitlement present. The capture controller now
+    // treats live session support as authoritative and verifies the applied
+    // value in diagnostics before capture starts.
+    expect(webrtcPatch).toContain('BOOL enable = requested || supported;');
+    expect(webrtcPatch).toContain('multitasking requested=%@ supported=%@ target=%@ enabled=%@');
+    // PiP must receive at least one foreground frame. Waiting until the
+    // resign-active transition races camera suspension and yields black AVKit.
+    expect(webrtcPatch).toContain('_sampleView.shouldRender = videoTrack != nil;');
+    expect(webrtcPatch).toContain('[SpeakeasyPIPRenderer]');
   });
 
   it('resizes Android PiP video in place using platform-native seamless resizing', () => {
     const screen = source('src/screens/VideoCallScreen.tsx');
-    const activity = source(
-      'android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt',
-    );
+    const activity = source('android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt');
 
     expect(activity).toContain('builder.setSourceRectHint(sourceRect)');
     expect(activity).toContain('.setSeamlessResizeEnabled(true)');
@@ -141,12 +148,8 @@ describe('iOS background-call native contracts', () => {
     expect(projectWiring).toContain(
       'SPEAKEASY_VIDEO_CALL_HARNESS=$(SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED)',
     );
-    expect(androidActivity).toContain(
-      'BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS',
-    );
-    expect(androidGradle).toContain(
-      "project.findProperty('speakeasy.videoCallHarness')",
-    );
+    expect(androidActivity).toContain('BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS');
+    expect(androidGradle).toContain("project.findProperty('speakeasy.videoCallHarness')");
     expect(harness).toContain('new RTCPeerConnection({ iceServers: [] })');
     expect(harness).toContain('readInboundVideoStats');
     expect(harness).toContain('pip.onPipModeChanged');
@@ -163,6 +166,14 @@ describe('iOS background-call native contracts', () => {
     expect(maestroFlow).toContain("id: 'video-call-pip'");
     expect(maestroFlow).toContain("id: 'harness-arm-background-video'");
     expect(maestroFlow).toContain("id: 'harness-background-video-measuring'");
+    expect(
+      maestroFlow.indexOf("text: 'Allow'", maestroFlow.indexOf('local-network prompt')),
+    ).toBeLessThan(
+      maestroFlow.indexOf(
+        "id: 'harness-arm-background-video'",
+        maestroFlow.indexOf('local-network prompt'),
+      ),
+    );
     expect(maestroFlow).toContain('stopApp: false');
     expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");

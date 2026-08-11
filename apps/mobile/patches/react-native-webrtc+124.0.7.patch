@@ -279,7 +279,7 @@ index 6e81776..7e93656 100644
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-index 5137c71..fb3a15f 100644
+index 5137c71..687efa0 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 @@ -2,6 +2,24 @@
@@ -387,15 +387,21 @@ index 5137c71..fb3a15f 100644
      }
  }
 
-@@ -86,6 +161,7 @@
+@@ -86,6 +161,13 @@
 
      _videoTrack = videoTrack;
      [videoTrack addRenderer:_sampleView];
++    // Feed AVSampleBufferDisplayLayer before PiP begins. Enabling this only
++    // during UIApplicationWillResignActive races camera suspension and leaves
++    // AVKit with no drawable, producing a correctly sized but black PiP
++    // window. Foreground pre-roll gives the system a current remote frame;
++    // continued multitasking capture then keeps that frame stream advancing.
++    _sampleView.shouldRender = videoTrack != nil;
 +    SpeakeasyPIPDiagnostic(videoTrack ? @"video track attached" : @"video track cleared");
 
      if (_videoTrack) {
          if (!_sampleView.superview) {
-@@ -155,10 +231,17 @@
+@@ -155,10 +237,17 @@
      }
  }
 
@@ -414,7 +420,7 @@ index 5137c71..fb3a15f 100644
  }
 
  @end
-@@ -173,6 +256,7 @@
+@@ -173,6 +262,7 @@
   */
  - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -422,7 +428,7 @@ index 5137c71..fb3a15f 100644
  }
 
  /*!
-@@ -183,6 +267,7 @@
+@@ -183,6 +273,7 @@
   */
  - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -430,7 +436,7 @@ index 5137c71..fb3a15f 100644
  }
 
  /*!
-@@ -196,6 +281,8 @@
+@@ -196,6 +287,8 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      failedToStartPictureInPictureWithError:(NSError *)error {
      NSLog(@"%@: %@", NSStringFromSelector(_cmd), [error localizedDescription]);  // Objective-C
@@ -439,7 +445,7 @@ index 5137c71..fb3a15f 100644
  }
 
  /*!
-@@ -206,6 +293,7 @@
+@@ -206,6 +299,7 @@
   */
  - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -447,7 +453,7 @@ index 5137c71..fb3a15f 100644
  }
 
  /*!
-@@ -216,6 +304,19 @@
+@@ -216,6 +310,19 @@
   */
  - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -467,7 +473,7 @@ index 5137c71..fb3a15f 100644
  }
 
  /*!
-@@ -229,6 +330,11 @@
+@@ -229,6 +336,11 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL restored))completionHandler {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -520,7 +526,7 @@ index e64005d..69d7f92 100644
                  [videoTrack addRenderer:self.videoView];
              });
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
-index b1a0b96..558dd5c 100644
+index b1a0b96..8abc1a5 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 @@ -3,6 +3,23 @@
@@ -563,20 +569,22 @@ index b1a0b96..558dd5c 100644
  }
 
  - (AVSampleBufferDisplayLayer *)sampleBufferLayer {
-@@ -82,6 +101,12 @@
+@@ -82,6 +101,14 @@
          return;
      }
 
 +    if (!self.loggedFirstFrame) {
 +        self.loggedFirstFrame = YES;
-+        SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:@"first frame (%dx%d rotation=%ld)",
-+            frame.width, frame.height, (long)frame.rotation]);
++        NSString *message = [NSString stringWithFormat:@"first frame (%dx%d rotation=%ld)",
++            frame.width, frame.height, (long)frame.rotation];
++        NSLog(@"[SpeakeasyPIPRenderer] %@", message);
++        SpeakeasySampleBufferDiagnostic(message);
 +    }
 +
      // Convert RTCVideoFrame to CMSampleBuffer
      CMSampleBufferRef sampleBuffer = [self sampleBufferFrom:frame];
      if (sampleBuffer == nil) {
-@@ -93,14 +118,14 @@
+@@ -93,14 +120,14 @@
              [self.renderer flush];
          }
 
@@ -598,7 +606,7 @@ index b1a0b96..558dd5c 100644
          CFRelease(sampleBuffer);
      });
  }
-@@ -115,8 +140,13 @@
+@@ -115,8 +142,13 @@
      }
 
      // Create a CMVideoFormatDescription
@@ -614,7 +622,7 @@ index b1a0b96..558dd5c 100644
 
      // Create CMSampleTimingInfo
      // Timescale is 90khz according to RTCVideoFrame.h
-@@ -125,15 +155,19 @@
+@@ -125,15 +157,19 @@
      timingInfo.decodeTimeStamp = CMTimeMake(rtcVideoFrame.timeStamp, 90000);
 
      // Create CMSampleBuffer
@@ -638,7 +646,7 @@ index b1a0b96..558dd5c 100644
  }
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
-index e7f52a1..d2bc45a 100644
+index e7f52a1..d791e09 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 @@ -3,6 +3,24 @@
@@ -703,7 +711,7 @@ index e7f52a1..d2bc45a 100644
  - (void)startCapture {
      if (self.deviceId) {
          self.device = [AVCaptureDevice deviceWithUniqueID:self.deviceId];
-@@ -63,6 +101,15 @@
+@@ -63,16 +101,41 @@
      self.selectedFormat = format;
 
      AVCaptureSession *session = self.capturer.captureSession;
@@ -717,15 +725,30 @@ index e7f52a1..d2bc45a 100644
 +        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(captureSessionInterruptionEnded:) name:AVCaptureSessionInterruptionEndedNotification object:session];
 +    }
      if (@available(iOS 16.0, *)) {
-         BOOL enable = self.enableMultitaskingCameraAccess;
+-        BOOL enable = self.enableMultitaskingCameraAccess;
++        // Speakeasy ships the multitasking-camera entitlement and uses the
++        // video-call PiP content source.  The app-level WebRTCModuleOptions
++        // flag has proven false on a signed real-device run even though the
++        // session reports this capability as supported, leaving
++        // runWhileMultitasking=0 and stopping capture on background.  Treat
++        // platform support as authoritative here so an initialization-order
++        // miss cannot silently disable the required capture behavior.
++        BOOL requested = self.enableMultitaskingCameraAccess;
++        BOOL supported = session.isMultitaskingCameraAccessSupported;
++        BOOL enable = requested || supported;
          BOOL shouldChange = session.multitaskingCameraAccessEnabled != enable;
-@@ -73,6 +120,12 @@
+-        BOOL canChange = !enable || (enable && session.isMultitaskingCameraAccessSupported);
++        BOOL canChange = !enable || supported;
+
+         if (shouldChange && canChange) {
+             [session beginConfiguration];
              [session setMultitaskingCameraAccessEnabled:enable];
              [session commitConfiguration];
          }
-+        SpeakeasyCaptureDiagnostic([NSString stringWithFormat:@"multitasking requested=%@ supported=%@ enabled=%@",
++        SpeakeasyCaptureDiagnostic([NSString stringWithFormat:@"multitasking requested=%@ supported=%@ target=%@ enabled=%@",
++            requested ? @"true" : @"false",
++            supported ? @"true" : @"false",
 +            enable ? @"true" : @"false",
-+            session.isMultitaskingCameraAccessSupported ? @"true" : @"false",
 +            session.isMultitaskingCameraAccessEnabled ? @"true" : @"false"]);
 +    } else {
 +        SpeakeasyCaptureDiagnostic(@"multitasking API unavailable (< iOS 16)");
