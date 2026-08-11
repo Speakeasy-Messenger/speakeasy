@@ -92,9 +92,9 @@ export const pip = {
    * Subscribe to the authoritative PiP window size (in dp = RN layout units),
    * pushed by native on PiP enter AND on every bubble resize. This is ground
    * truth — RN's own onLayout frequently reports a stale size inside a PiP
-   * window, which left the video SurfaceView holding its pre-resize buffer
-   * (the "video only fills a corner / lags resizing" reports). Keying the
-   * compact RTCView on this size recreates the surface at the true bubble size.
+   * window, which left the video renderer holding its pre-resize bounds (the
+   * "video only fills a corner / lags resizing" reports). The call screen applies
+   * this size to the compact root without remounting the live WebRTC track.
    * Returns an unsubscribe fn; no-op on non-Android.
    */
   onPipResize(cb: (size: { width: number; height: number }) => void): () => void {

@@ -28,6 +28,7 @@ describe('iOS background-call native contracts', () => {
     const plist = source('ios/Speakeasy/Info.plist');
     const entitlements = source('ios/Speakeasy/Speakeasy.entitlements');
     const screen = source('src/screens/VideoCallScreen.tsx');
+    const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
 
     expect(delegate).toContain('enableMultitaskingCameraAccess = YES');
     expect(plist).toContain('<string>voip</string>');
@@ -40,6 +41,53 @@ describe('iOS background-call native contracts', () => {
     // view, which immediately tears down PiP and revokes background camera use.
     expect(screen).toContain("Platform.OS === 'android' &&");
     expect(screen).toContain('inPip || appBackgrounded ||');
+    // AVKit rejects a video-call PiP source whose preferred content size is
+    // zero. react-native-webrtc defaults an omitted preferredSize to
+    // CGSizeZero, so keep the app-level contract explicit and portrait-sized.
+    expect(screen).toContain('preferredSize: { width: 1080, height: 1920 }');
+    expect(webrtcPatch).toContain('will resign active (possible=%@ active=%@ auto=%@)');
+    expect(webrtcPatch).toContain('pictureInPicturePossible');
+    expect(webrtcPatch).toContain('self.sampleView.shouldRender = YES');
+    // AVKit owns the automatic inline-to-PiP transition. A second manual start
+    // raced it on real iOS 18 devices and failed with error -1001.
+    expect(webrtcPatch).not.toContain('[self.pipController startPictureInPicture]');
+    expect(webrtcPatch).not.toContain('auto-start fallback requested');
+    expect(webrtcPatch).toContain('UIApplicationDidBecomeActiveNotification');
+    expect(webrtcPatch).toContain('A transient interruption can prime rendering');
+    // Every Core Foundation object created for a PiP frame is released,
+    // including when AVKit applies renderer backpressure.
+    expect(webrtcPatch).toContain('if (self.renderer.readyForMoreMediaData)');
+    expect(webrtcPatch).toContain('CFRelease(sampleBuffer);');
+    expect(webrtcPatch).toContain('CFRelease(formatDescription);');
+    expect(webrtcPatch).toContain('if (sampleStatus != noErr || sampleBuffer == NULL)');
+    // AVFoundation cannot report multitasking support until WebRTC has built
+    // the session's inputs and outputs. Enabling before start silently left
+    // the final graph at runWhileMultitasking:0 on a real device.
+    expect(webrtcPatch).toContain('BOOL enable = requested && supported;');
+    expect(webrtcPatch).toContain('multitasking post-start requested=%@ supported=%@ target=%@ enabled=%@');
+    expect(webrtcPatch.indexOf('dispatch_semaphore_wait(semaphore')).toBeLessThan(
+      webrtcPatch.indexOf('multitasking post-start requested='),
+    );
+    // PiP must receive at least one foreground frame. Waiting until the
+    // resign-active transition races camera suspension and yields black AVKit.
+    expect(webrtcPatch).toContain('_sampleView.shouldRender = videoTrack != nil;');
+    expect(webrtcPatch).toContain('[SpeakeasyPIPRenderer]');
+  });
+
+  it('resizes Android PiP video in place using platform-native seamless resizing', () => {
+    const screen = source('src/screens/VideoCallScreen.tsx');
+    const activity = source('android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt');
+
+    expect(activity).toContain('builder.setSourceRectHint(sourceRect)');
+    expect(activity).toContain('.setSeamlessResizeEnabled(true)');
+    expect(screen).toContain('key={`pip-${pipFeedTag}`}');
+    expect(screen).toContain('style={StyleSheet.absoluteFill}');
+    expect(screen).toContain('setNativePipSize({ width: s.width, height: s.height })');
+    expect(screen).toContain('flex: 0');
+    expect(screen).toContain('width: nativePipSize.width');
+    expect(screen).toContain('height: nativePipSize.height');
+    // Resizing must not remount the WebRTC renderer and drop frames.
+    expect(screen).not.toContain('nativePipSize.width}x${nativePipSize.height');
   });
 
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
@@ -90,6 +138,7 @@ describe('iOS background-call native contracts', () => {
     const projectWiring = source('ios/tools/wire-ios-project.rb');
     const workflow = source('../../.github/workflows/browserstack-ios.yml');
     const androidWorkflow = source('../../.github/workflows/browserstack-android.yml');
+    const androidPipFlow = source('maestro/21-call-pip-android.yaml');
     const maestroFlow = source('maestro/20-call-pip-ios.yaml');
     const androidCloseFlow = source('maestro/22-call-pip-close-android.yaml');
     const androidActivity = source(
@@ -106,12 +155,8 @@ describe('iOS background-call native contracts', () => {
     expect(projectWiring).toContain(
       'SPEAKEASY_VIDEO_CALL_HARNESS=$(SPEAKEASY_VIDEO_CALL_HARNESS_ENABLED)',
     );
-    expect(androidActivity).toContain(
-      'BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS',
-    );
-    expect(androidGradle).toContain(
-      "project.findProperty('speakeasy.videoCallHarness')",
-    );
+    expect(androidActivity).toContain('BuildConfig.SPEAKEASY_VIDEO_CALL_HARNESS');
+    expect(androidGradle).toContain("project.findProperty('speakeasy.videoCallHarness')");
     expect(harness).toContain('new RTCPeerConnection({ iceServers: [] })');
     expect(harness).toContain('readInboundVideoStats');
     expect(harness).toContain('pip.onPipModeChanged');
@@ -123,12 +168,22 @@ describe('iOS background-call native contracts', () => {
     expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
     expect(androidWorkflow).toContain('speakeasy-android-calls.zip');
     expect(androidWorkflow).toContain('22-call-pip-close-android.yaml');
+    expect(androidPipFlow).toContain("doubleTapOn:\n    id: 'xyz.speakeasyapp.app:id/action_bar_root'");
+    expect(androidPipFlow).toContain('takeScreenshot: 03-pip-resized');
     expect(androidCloseFlow).toContain("tapOn: 'Close'");
     expect(androidCloseFlow).toContain("assertNotVisible: '@dev-peer'");
     expect(maestroFlow).toContain("id: 'video-call-pip'");
     expect(maestroFlow).toContain("id: 'harness-arm-background-video'");
     expect(maestroFlow).toContain("id: 'harness-background-video-measuring'");
-    expect(maestroFlow).toContain("tapOn: 'Speakeasy'");
+    expect(
+      maestroFlow.indexOf("text: 'Allow'", maestroFlow.indexOf('local-network prompt')),
+    ).toBeLessThan(
+      maestroFlow.indexOf(
+        "id: 'harness-arm-background-video'",
+        maestroFlow.indexOf('local-network prompt'),
+      ),
+    );
+    expect(maestroFlow).toContain('stopApp: false');
     expect(maestroFlow).toContain("id: 'harness-background-video-pass'");
     expect(maestroFlow).not.toContain("id: 'video-call-end'");
   });
@@ -139,6 +194,7 @@ describe('iOS background-call native contracts', () => {
     const peer = source('src/calls/webrtc-peer.ts');
     const screen = source('src/screens/VideoCallScreen.tsx');
     const diagnosticsScreen = source('src/screens/DiagnosticsScreen.tsx');
+    const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
 
     expect(delegate).toContain('VoIP push received');
     expect(delegate).toContain('CallKit incoming-call report completion');
@@ -153,6 +209,14 @@ describe('iOS background-call native contracts', () => {
     expect(peer).toContain("scheduleVideoStats('foreground-boundary')");
     expect(peer).toContain('backgroundInterval,');
     expect(screen).toContain('pip.drainNativeDiagnostics()');
+    expect(webrtcPatch).toContain('iOS PiP: ');
+    expect(webrtcPatch).toContain('failed to start');
+    expect(webrtcPatch).toContain('controller dealloc');
+    expect(webrtcPatch).toContain('iOS PiP renderer: ');
+    expect(webrtcPatch).toContain('first frame');
+    expect(webrtcPatch).toContain('decode failed');
+    expect(webrtcPatch).toContain('iOS camera: ');
+    expect(webrtcPatch).toContain('AVCaptureSessionWasInterruptedNotification');
     expect(diagnosticsScreen).toContain('pip.drainNativeDiagnostics()');
   });
 });

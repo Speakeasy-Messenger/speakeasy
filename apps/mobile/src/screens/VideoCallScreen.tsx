@@ -39,6 +39,12 @@ const VIDEO_PIP_OPTS = {
   enabled: true,
   startAutomatically: true,
   stopAutomatically: true,
+  // AVPictureInPictureVideoCallViewController requires a non-zero preferred
+  // content size. react-native-webrtc maps an omitted value to CGSizeZero,
+  // which makes AVKit report contentDimensions (0, 0) and reject PiP startup
+  // on real iOS devices (PGPegasusErrorDomain -1003). Match the portrait
+  // remote-video aspect ratio; AVKit scales this into the system window.
+  preferredSize: { width: 1080, height: 1920 },
 } as const;
 
 // A PiP/floating call window is physically tiny — its smaller dimension is
@@ -85,20 +91,12 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // corner bubble (default once connected); true = local full-screen /
   // remote in the bubble. Tapping the bubble toggles it.
   const [swapped, setSwapped] = useState(false);
-  // Measured size of the PiP/compact window. Tapping the floating bubble makes
-  // Android grow the window; the SurfaceViewRenderer keeps its old buffer
-  // (video stays small, black fills the rest) unless we recreate it. We key the
-  // compact RTCView on this so it remounts — a fresh surface at the new size —
-  // whenever the window's measured size changes.
-  const [pipSize, setPipSize] = useState<{ w: number; h: number } | null>(null);
-  // Authoritative PiP window size from native (dp), pushed on PiP enter + every
-  // bubble resize. Preferred over `pipSize` (RN onLayout) for keying the
-  // compact RTCView, because onLayout often reports a stale size in a PiP
-  // window → the SurfaceView kept its old buffer → "video fills only a corner".
-  const [nativePipSize, setNativePipSize] = useState<{ w: number; h: number } | null>(null);
   // Android system-PiP (the floating window after pressing Home). While in
   // it we hide the overlay chrome so only the video shows in the small frame.
   const [inPip, setInPip] = useState(false);
+  const [nativePipSize, setNativePipSize] = useState<
+    { width: number; height: number } | undefined
+  >();
   // PiP window dimensions. RN reflows to the small window on PiP enter; we use
   // the live size to (a) diagnose the scaling report and (b) confirm inPip
   // actually propagated. The fullscreen RTCView is also keyed on inPip so its
@@ -195,7 +193,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // overlay chrome while in the small PiP frame. No-op on iOS.
   useEffect(() => {
     pip.setVideoCallActive(true);
-    const unsub = pip.onPipModeChanged(setInPip);
+    const unsub = pip.onPipModeChanged((active) => {
+      setInPip(active);
+      if (!active) setNativePipSize(undefined);
+    });
     // Closing the PiP bubble (vs expanding it back) must END the call —
     // otherwise the camera/mic/ring keep running headless.
     const unsubClosed = pip.onPipClosed(() => {
@@ -208,13 +209,17 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     });
     // Diagnostic breadcrumb for the X-dismiss path (see MainActivity.onStop).
     const unsubLifecycle = pip.onPipLifecycle((info) => diag('call', 'pip lifecycle', { info }));
-    // Authoritative bubble size from native (dp) — drives the compact
-    // SurfaceView remount at the true size on enter + every resize.
+    // Keep the native size breadcrumb for device diagnostics. The compact
+    // TextureView now resizes in place with its parent instead of remounting.
     const unsubResize = pip.onPipResize((s) => {
-      setNativePipSize((prev) =>
-        prev && prev.w === s.width && prev.h === s.height ? prev : { w: s.width, h: s.height },
-      );
       diag('call', 'pip native resize', { w: s.width, h: s.height });
+      // Android's Configuration is the authoritative size of the floating
+      // activity. Fabric can leave the React root measured at its old bounds
+      // during an interactive PiP resize; applying these DP dimensions forces
+      // the RTCView/TextureView through onSizeChanged for every system size.
+      if (s.width > 0 && s.height > 0) {
+        setNativePipSize({ width: s.width, height: s.height });
+      }
     });
     return () => {
       pip.setVideoCallActive(false);
@@ -401,63 +406,32 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // foreground → inactive → background transition.
   if (compact) {
     const pipFeed = remoteUrl ?? localUrl;
-    // Which feed is showing — part of the RTCView key below. Without this the
-    // view is keyed only on window size, so the local→remote switch at answer
-    // (same bubble size) never remounts it: react-native-webrtc's Android
-    // SurfaceView keeps painting the OLD stream (your own face) until some
-    // unrelated resize forces a remount. Device logs confirmed the feed went
-    // local→remote with no view refresh until the bubble was tapped/resized.
+    // Remount only when the feed changes. Window-size changes are handled by
+    // the patched TextureView/WebRTCView layout path without destroying EGL.
     const pipFeedTag = pipFeed && pipFeed === remoteUrl ? 'r' : 'l';
     return (
-      // onLayout on the ROOT measures the actual window size (ground truth,
-      // unlike the often-stale Dimensions API in a PiP window). When the user
-      // taps the bubble and Android grows it, this fires with the new size →
-      // pipSize changes → the RTCView's key changes → its SurfaceView is
-      // recreated at the new size instead of staying small.
       <View
-        style={styles.root}
+        style={[
+          styles.root,
+          inPip && nativePipSize
+            ? {
+                flex: 0,
+                width: nativePipSize.width,
+                height: nativePipSize.height,
+              }
+            : undefined,
+        ]}
         onLayout={(e) => {
           const w = Math.round(e.nativeEvent.layout.width);
           const h = Math.round(e.nativeEvent.layout.height);
-          setPipSize((prev) => (prev && prev.w === w && prev.h === h ? prev : { w, h }));
           diag('call', 'pip view layout', { w, h });
         }}
       >
         {pipFeed ? (
           <RTCView
-            // Remount on window SIZE (native PiP size when known) + feed tag.
-            // The TextureView's EGL surface caches its size from creation and
-            // does NOT resize with the view — so at any size other than the one
-            // it was created at, the frame is stretched (the "mismatch when the
-            // bubble expands with controls"). Recreating the EGL surface in-place
-            // crashed (races SurfaceTexture teardown, v1.0.40). Keying on size
-            // instead lets React cleanly remount the view — a fresh TextureView +
-            // EGL surface at the correct size — with no manual EGL calls to race.
-            // Feed tag remounts on the local→remote switch at answer.
-            key={
-              (nativePipSize
-                ? `npip-${nativePipSize.w}x${nativePipSize.h}`
-                : pipSize
-                  ? `pip-${pipSize.w}x${pipSize.h}`
-                  : 'pip') + `-${pipFeedTag}`
-            }
+            key={`pip-${pipFeedTag}`}
             streamURL={pipFeed}
-            // Size the view EXPLICITLY to the authoritative native PiP size (dp),
-            // not absoluteFill. absoluteFill wasn't tracking the PiP resize — when
-            // the bubble expanded, the video view stayed at the original small
-            // size while the window grew (the reported "video stays the size of
-            // the original bubble"). An explicit width/height that changes with
-            // nativePipSize forces the view to the new bounds so the video fills.
-            // Prefer the ROOT onLayout size (pipSize) — it's RN's own reliable
-            // measurement of the actual window and fires on every resize;
-            // nativePipSize (native event) is the fallback.
-            style={
-              pipSize
-                ? { width: pipSize.w, height: pipSize.h }
-                : nativePipSize
-                  ? { width: nativePipSize.w, height: nativePipSize.h }
-                  : StyleSheet.absoluteFill
-            }
+            style={StyleSheet.absoluteFill}
             objectFit="cover"
             mirror={pipFeed === localUrl}
             onDimensionsChange={(e) =>
@@ -466,17 +440,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
                 h: e.nativeEvent.height,
               })
             }
-            // DEFINITIVE diagnostic: the RTCView's ACTUAL native laid-out size vs
-            // the sizes we're feeding it. On expand, if this logs the small size
-            // while pipSize is the big size → RN isn't committing the resize to
-            // the native view in PiP (a native fix is needed); if it logs the big
-            // size but the video still looks small → it's a render-side issue.
             onLayout={(e) =>
               diag('call', 'pip RTCView layout', {
                 w: Math.round(e.nativeEvent.layout.width),
                 h: Math.round(e.nativeEvent.layout.height),
-                pipW: pipSize?.w,
-                nativeW: nativePipSize?.w,
               })
             }
           />

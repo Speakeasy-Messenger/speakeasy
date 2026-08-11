@@ -57,15 +57,18 @@ name: iOS video-call PiP + return (Tier C, real device)
     visible:
       id: 'harness-arm-background-video'
     timeout: 30000
-- tapOn:
-    id: 'harness-arm-background-video'
-# The loopback peer connection can raise iOS's one-time local-network prompt
-# after the camera/microphone prompts. Accept it before checking the probe.
+# The loopback peer connection raises iOS's local-network prompt only after
+# the ARM node exists behind it. Dismiss the system modal before touching the
+# underlying React Native control; otherwise Maestro can resolve and "tap" the
+# obscured node without dispatching its onPress.
 - tapOn:
     text: 'Allow'
-    optional: true
-- assertVisible:
-    id: 'harness-background-video-measuring'
+- tapOn:
+    id: 'harness-arm-background-video'
+- extendedWaitUntil:
+    visible:
+      id: 'harness-background-video-measuring'
+    timeout: 10000
 
 # (1) Foreground baseline — full-screen video call, chrome visible.
 - takeScreenshot: 01-foreground
@@ -91,11 +94,12 @@ name: iOS video-call PiP + return (Tier C, real device)
     timeout: 3000
 - takeScreenshot: 02-pip-bubble
 
-# (3) Return to the existing call through the installed app's SpringBoard icon.
-# `launchApp` stops/restarts the React tree on BrowserStack, which destroys the
-# pre-background RTP baseline. Tapping the icon resumes the same process, just
-# as the user returning from Home does, so AppState can evaluate native counters.
-- tapOn: 'Speakeasy'
+# (3) Return to the existing call without stopping it. `stopApp: false` is
+# Maestro's supported way to foreground the same iOS process, and unlike
+# tapping a SpringBoard icon it is independent of BrowserStack's launcher
+# layout and localized/hidden app labels.
+- launchApp:
+    stopApp: false
 - waitForAnimationToEnd:
     timeout: 2000
 - tapOn:
