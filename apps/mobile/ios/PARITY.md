@@ -79,9 +79,11 @@ Audited, accepted as-is (low priority):
   activation. A real incoming call must still confirm physical ring/vibration
   and uninterrupted WebRTC audio on device.
 - `VideoCallScreen.tsx` / `native/pip.ts` — both platforms report PiP entry,
-  native bubble size, close, and return lifecycle. The real-device harness
-  verifies background WebRTC frame continuity and return; iOS close-to-end and
-  a true two-device remote feed remain device assertions.
+  native bubble size, close, and return lifecycle. Android remounts a compact
+  `RTCView` for its resized activity; iOS deliberately keeps the original
+  `iosPIP` source view mounted while AVKit moves it into system PiP. The
+  real-device harness verifies background WebRTC frame continuity and return;
+  iOS close-to-end and a true two-device remote feed remain device assertions.
 
 ## 4. iOS gaps, ranked
 
