@@ -448,14 +448,19 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             // size while the window grew (the reported "video stays the size of
             // the original bubble"). An explicit width/height that changes with
             // nativePipSize forces the view to the new bounds so the video fills.
-            // Prefer the ROOT onLayout size (pipSize) — it's RN's own reliable
-            // measurement of the actual window and fires on every resize;
-            // nativePipSize (native event) is the fallback.
+            // Prefer Android's authoritative Configuration size. On Samsung,
+            // React Native's root onLayout can remain stuck at the ORIGINAL
+            // PiP bounds after the system expands the bubble. Using that stale
+            // value here recreated the TextureView (the key above changed) and
+            // then immediately forced the new renderer back to the old width /
+            // height, leaving the newly exposed right + bottom area black.
+            // Root onLayout remains a fallback for devices that don't emit a
+            // configuration callback during resize.
             style={
-              pipSize
-                ? { width: pipSize.w, height: pipSize.h }
-                : nativePipSize
-                  ? { width: nativePipSize.w, height: nativePipSize.h }
+              nativePipSize
+                ? { width: nativePipSize.w, height: nativePipSize.h }
+                : pipSize
+                  ? { width: pipSize.w, height: pipSize.h }
                   : StyleSheet.absoluteFill
             }
             objectFit="cover"

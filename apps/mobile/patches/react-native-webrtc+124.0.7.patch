@@ -224,31 +224,31 @@ index 5d14d0f..a985ce1 100644
 +    // a black band) until/unless a re-layout picks up the cover prop. Defaulting
 +    // to FILL matches the app's intent and removes that window.
 +    private static final ScalingType DEFAULT_SCALING_TYPE = ScalingType.SCALE_ASPECT_FILL;
- 
+
      private static final String TAG = WebRTCModule.TAG;
- 
+
 @@ -142,7 +148,7 @@ public class WebRTCView extends ViewGroup {
       * The {@link View} and {@link VideoSink} implementation which
       * actually renders {@link #videoTrack} on behalf of this instance.
       */
 -    private final SurfaceViewRenderer surfaceViewRenderer;
 +    private final TextureViewRenderer surfaceViewRenderer;
- 
+
      /**
       * The {@code VideoTrack}, if any, rendered by this {@code WebRTCView}.
 @@ -157,7 +163,7 @@ public class WebRTCView extends ViewGroup {
      public WebRTCView(Context context) {
          super(context);
- 
+
 -        surfaceViewRenderer = new SurfaceViewRenderer(context);
 +        surfaceViewRenderer = new TextureViewRenderer(context);
          addView(surfaceViewRenderer);
- 
+
          setMirror(false);
 @@ -344,6 +350,20 @@ public class WebRTCView extends ViewGroup {
          surfaceViewRenderer.layout(l, t, r, b);
      }
- 
+
 +    // Speakeasy patch: re-lay-out the child renderer whenever this view's size
 +    // changes. Under RN's New Architecture (Fabric) interop, this legacy view's
 +    // frame is updated directly on an Android PiP resize WITHOUT our onLayout
@@ -266,13 +266,181 @@ index 5d14d0f..a985ce1 100644
      /**
       * Stops rendering {@link #videoTrack} and releases the associated acquired
       * resources (if rendering is in progress).
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.h b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.h
+index 6e81776..7e93656 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.h
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.h
+@@ -18,6 +18,7 @@ API_AVAILABLE(ios(15.0))
+ - (void)togglePIP;
+ - (void)startPIP;
+ - (void)stopPIP;
++- (BOOL)isPictureInPictureActive;
+ - (void)insertFallbackView:(UIView *)subview;
+ - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
+
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-index 5137c71..b0796d4 100644
+index 5137c71..a6cdcea 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-@@ -12,0 +13 @@
+@@ -2,6 +2,23 @@
+ #import <AVKit/AVKit.h>
+ #import "SampleBufferVideoCallView.h"
+
++static void SpeakeasyPIPDiagnostic(NSString *message) {
++    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
++    @synchronized(defaults) {
++        NSMutableArray *entries =
++            [[defaults arrayForKey:@"SpeakeasyPendingNativeDiagnostics"] mutableCopy]
++            ?: [NSMutableArray array];
++        [entries addObject:@{
++            @"at": @([[NSDate date] timeIntervalSince1970] * 1000.0),
++            @"message": [@"iOS PiP: " stringByAppendingString:message],
++        }];
++        if (entries.count > 50) {
++            [entries removeObjectsInRange:NSMakeRange(0, entries.count - 50)];
++        }
++        [defaults setObject:entries forKey:@"SpeakeasyPendingNativeDiagnostics"];
++    }
++}
++
+ @interface PIPController ()
+
+ @property(nonatomic, strong) AVPictureInPictureVideoCallViewController *pipCallViewController;
+@@ -10,6 +27,7 @@
+ @property(nonnull, nonatomic, strong) SampleBufferVideoCallView *sampleView;
+
+ @property(nonnull, nonatomic, strong) UIView *fallbackView;
 +@property(nonatomic, assign) BOOL restoreRequested;
-@@ -218,0 +220,10 @@
+
+ @end
+
+@@ -41,6 +59,19 @@
+                          forKeyPath:@"pictureInPictureActive"
+                             options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
+                             context:nil];
++        [_pipController addObserver:self
++                         forKeyPath:@"pictureInPicturePossible"
++                            options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
++                            context:nil];
++
++        [[NSNotificationCenter defaultCenter] addObserver:self
++                                                 selector:@selector(applicationWillResignActive:)
++                                                     name:UIApplicationWillResignActiveNotification
++                                                   object:nil];
++        [[NSNotificationCenter defaultCenter] addObserver:self
++                                                 selector:@selector(applicationDidEnterBackground:)
++                                                     name:UIApplicationDidEnterBackgroundNotification
++                                                   object:nil];
+
+         [[NSNotificationCenter defaultCenter] addObserver:self
+                                                  selector:@selector(applicationWillEnterForeground:)
+@@ -56,10 +87,38 @@
+                         change:(NSDictionary *)change
+                        context:(void *)context {
+     if ([keyPath isEqualToString:@"pictureInPictureActive"]) {
+-        _sampleView.shouldRender = [change[NSKeyValueChangeNewKey] boolValue];
++        BOOL active = [change[NSKeyValueChangeNewKey] boolValue];
++        _sampleView.shouldRender = active;
++        SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"active=%@", active ? @"true" : @"false"]);
++    } else if ([keyPath isEqualToString:@"pictureInPicturePossible"]) {
++        BOOL possible = [change[NSKeyValueChangeNewKey] boolValue];
++        SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"possible=%@", possible ? @"true" : @"false"]);
++    }
++}
++
++- (void)applicationWillResignActive:(NSNotification *)notification {
++    BOOL possible = self.pipController.isPictureInPicturePossible;
++    BOOL active = self.pipController.isPictureInPictureActive;
++    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"will resign active (possible=%@ active=%@ auto=%@)",
++        possible ? @"true" : @"false",
++        active ? @"true" : @"false",
++        self.startAutomatically ? @"true" : @"false"]);
++
++    // Explicitly request PiP while the application is still foreground-
++    // eligible. This is idempotent if AVKit's automatic-inline path already
++    // started and closes a real-device race where the bubble flashed and died.
++    if (self.startAutomatically && possible && !active) {
++        [self.pipController startPictureInPicture];
++        SpeakeasyPIPDiagnostic(@"explicit start requested at willResignActive");
+     }
+ }
+
++- (void)applicationDidEnterBackground:(NSNotification *)notification {
++    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"did enter background (possible=%@ active=%@)",
++        self.pipController.isPictureInPicturePossible ? @"true" : @"false",
++        self.pipController.isPictureInPictureActive ? @"true" : @"false"]);
++}
++
+ - (void)applicationWillEnterForeground:(NSNotification *)notification {
+     if (_stopAutomatically) {
+         dispatch_after(dispatch_time(DISPATCH_TIME_NOW, 0.5 * NSEC_PER_SEC), dispatch_get_main_queue(), ^{
+@@ -86,6 +145,7 @@
+
+     _videoTrack = videoTrack;
+     [videoTrack addRenderer:_sampleView];
++    SpeakeasyPIPDiagnostic(videoTrack ? @"video track attached" : @"video track cleared");
+
+     if (_videoTrack) {
+         if (!_sampleView.superview) {
+@@ -155,10 +215,17 @@
+     }
+ }
+
++- (BOOL)isPictureInPictureActive {
++    return _pipController.isPictureInPictureActive;
++}
++
+ - (void)dealloc {
++    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"controller dealloc (active=%@)",
++        _pipController.isPictureInPictureActive ? @"true" : @"false"]);
+     [_videoTrack removeRenderer:_sampleView];
+     [_pipController removeObserver:self forKeyPath:@"pictureInPictureActive"];
+-    [[NSNotificationCenter defaultCenter] removeObserver:self name:UIApplicationDidBecomeActiveNotification object:nil];
++    [_pipController removeObserver:self forKeyPath:@"pictureInPicturePossible"];
++    [[NSNotificationCenter defaultCenter] removeObserver:self];
+ }
+
+ @end
+@@ -173,6 +240,7 @@
+  */
+ - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+     NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
++    SpeakeasyPIPDiagnostic(@"will start");
+ }
+
+ /*!
+@@ -183,6 +251,7 @@
+  */
+ - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+     NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
++    SpeakeasyPIPDiagnostic(@"did start");
+ }
+
+ /*!
+@@ -196,6 +265,8 @@
+ - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
+     failedToStartPictureInPictureWithError:(NSError *)error {
+     NSLog(@"%@: %@", NSStringFromSelector(_cmd), [error localizedDescription]);  // Objective-C
++    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"failed to start (%ld: %@)",
++        (long)error.code, error.localizedDescription]);
+ }
+
+ /*!
+@@ -206,6 +277,7 @@
+  */
+ - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+     NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
++    SpeakeasyPIPDiagnostic(@"will stop");
+ }
+
+ /*!
+@@ -216,6 +288,19 @@
+  */
+ - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
+     NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
++    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"did stop (restoreRequested=%@ appState=%ld)",
++        self.restoreRequested ? @"true" : @"false",
++        (long)UIApplication.sharedApplication.applicationState]);
 +    // Stopping PiP while the source app is still backgrounded means the user
 +    // pressed the system close control. Surface that distinction to the host
 +    // app so it can end the call instead of leaving camera/mic active headless.
@@ -283,19 +451,43 @@ index 5137c71..b0796d4 100644
 +                          object:nil];
 +    }
 +    self.restoreRequested = NO;
-@@ -231,0 +243,5 @@
+ }
+
+ /*!
+@@ -229,6 +314,11 @@
+ - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
+     restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL restored))completionHandler {
+     NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
 +    // The call UI never unmounts while backgrounded, so there is no navigation
 +    // work to reconstruct here. Telling AVKit restoration succeeded lets the
 +    // native full-screen control foreground the existing call immediately.
 +    self.restoreRequested = YES;
 +    completionHandler(YES);
+ }
+
+ @end
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
-index e64005d..dcf08fe 100644
+index e64005d..69d7f92 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
-@@ -290,7 +290,19 @@
+@@ -158,6 +158,14 @@
+
+ - (void)API_AVAILABLE(ios(15.0))setPIPOptions:(NSDictionary *)pipOptions {
+     if (!pipOptions) {
++        // Fabric can transiently replay an undefined prop while the app moves
++        // through UIApplicationState.inactive. Releasing the controller in
++        // that window tears down system PiP and iOS then suspends the camera.
++        // Preserve it until foreground or until the owning view deallocates.
++        if (_pipController &&
++            UIApplication.sharedApplication.applicationState != UIApplicationStateActive) {
++            return;
++        }
+         _pipController = nil;
+         return;
+     }
+@@ -290,7 +298,19 @@
          }
- 
+
          // See "didMoveToWindow" above.
 -        if (videoTrack && self.window) {
 +        //
@@ -314,14 +506,166 @@ index e64005d..dcf08fe 100644
              dispatch_async(_module.workerQueue, ^{
                  [videoTrack addRenderer:self.videoView];
              });
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
+index b1a0b96..e40a446 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
+@@ -3,6 +3,23 @@
+ #import <WebRTC/WebRTC.h>
+ #import "I420Converter.h"
+
++static void SpeakeasySampleBufferDiagnostic(NSString *message) {
++    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
++    @synchronized(defaults) {
++        NSMutableArray *entries =
++            [[defaults arrayForKey:@"SpeakeasyPendingNativeDiagnostics"] mutableCopy]
++            ?: [NSMutableArray array];
++        [entries addObject:@{
++            @"at": @([[NSDate date] timeIntervalSince1970] * 1000.0),
++            @"message": [@"iOS PiP renderer: " stringByAppendingString:message],
++        }];
++        if (entries.count > 50) {
++            [entries removeObjectsInRange:NSMakeRange(0, entries.count - 50)];
++        }
++        [defaults setObject:entries forKey:@"SpeakeasyPendingNativeDiagnostics"];
++    }
++}
++
+ @protocol SampleBufferRendering<AVQueuedSampleBufferRendering>
+
+ - (BOOL)requiresFlushToResumeDecoding;
+@@ -20,6 +37,7 @@
+ @property(nonatomic, retain) I420Converter *i420Converter;
+ @property(nonatomic, strong) id<SampleBufferRendering> renderer;
+ @property(nonatomic, assign) NSInteger currentRotation;
++@property(nonatomic, assign) BOOL loggedFirstFrame;
+
+ @end
+
+@@ -47,6 +65,7 @@
+ - (void)layerFailedToDecode:(NSNotification *)note {
+     NSError *error = [[note userInfo] valueForKey:AVSampleBufferDisplayLayerFailedToDecodeNotificationErrorKey];
+     NSLog(@"layerFailedToDecode, error: %@", [error localizedDescription]);
++    SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:@"decode failed (%@)", error.localizedDescription]);
+ }
+
+ - (AVSampleBufferDisplayLayer *)sampleBufferLayer {
+@@ -82,6 +101,12 @@
+         return;
+     }
+
++    if (!self.loggedFirstFrame) {
++        self.loggedFirstFrame = YES;
++        SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:@"first frame (%dx%d rotation=%ld)",
++            frame.width, frame.height, (long)frame.rotation]);
++    }
++
+     // Convert RTCVideoFrame to CMSampleBuffer
+     CMSampleBufferRef sampleBuffer = [self sampleBufferFrom:frame];
+     if (sampleBuffer == nil) {
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
+index e7f52a1..d2bc45a 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
+@@ -3,6 +3,24 @@
+ #import "VideoCaptureController.h"
+
+ #import <React/RCTLog.h>
++#import <UIKit/UIKit.h>
++
++static void SpeakeasyCaptureDiagnostic(NSString *message) {
++    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
++    @synchronized(defaults) {
++        NSMutableArray *entries =
++            [[defaults arrayForKey:@"SpeakeasyPendingNativeDiagnostics"] mutableCopy]
++            ?: [NSMutableArray array];
++        [entries addObject:@{
++            @"at": @([[NSDate date] timeIntervalSince1970] * 1000.0),
++            @"message": [@"iOS camera: " stringByAppendingString:message],
++        }];
++        if (entries.count > 50) {
++            [entries removeObjectsInRange:NSMakeRange(0, entries.count - 50)];
++        }
++        [defaults setObject:entries forKey:@"SpeakeasyPendingNativeDiagnostics"];
++    }
++}
+
+ @interface VideoCaptureController ()
+
+@@ -14,6 +32,7 @@
+ @property(nonatomic, assign) int width;
+ @property(nonatomic, assign) int height;
+ @property(nonatomic, assign) int frameRate;
++@property(nonatomic, weak) AVCaptureSession *observedSession;
+
+ @end
+
+@@ -31,9 +50,28 @@
+ }
+
+ - (void)dealloc {
++    if (self.observedSession) {
++        [[NSNotificationCenter defaultCenter] removeObserver:self
++                                                        name:AVCaptureSessionWasInterruptedNotification
++                                                      object:self.observedSession];
++        [[NSNotificationCenter defaultCenter] removeObserver:self
++                                                        name:AVCaptureSessionInterruptionEndedNotification
++                                                      object:self.observedSession];
++    }
+     self.device = NULL;
+ }
+
++- (void)captureSessionWasInterrupted:(NSNotification *)notification {
++    NSNumber *reason = notification.userInfo[AVCaptureSessionInterruptionReasonKey];
++    SpeakeasyCaptureDiagnostic([NSString stringWithFormat:@"interrupted (reason=%@ background=%@)",
++        reason ?: @"unknown",
++        UIApplication.sharedApplication.applicationState == UIApplicationStateBackground ? @"true" : @"false"]);
++}
++
++- (void)captureSessionInterruptionEnded:(NSNotification *)notification {
++    SpeakeasyCaptureDiagnostic(@"interruption ended");
++}
++
+ - (void)startCapture {
+     if (self.deviceId) {
+         self.device = [AVCaptureDevice deviceWithUniqueID:self.deviceId];
+@@ -63,6 +101,15 @@
+     self.selectedFormat = format;
+
+     AVCaptureSession *session = self.capturer.captureSession;
++    if (self.observedSession != session) {
++        if (self.observedSession) {
++            [[NSNotificationCenter defaultCenter] removeObserver:self name:AVCaptureSessionWasInterruptedNotification object:self.observedSession];
++            [[NSNotificationCenter defaultCenter] removeObserver:self name:AVCaptureSessionInterruptionEndedNotification object:self.observedSession];
++        }
++        self.observedSession = session;
++        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(captureSessionWasInterrupted:) name:AVCaptureSessionWasInterruptedNotification object:session];
++        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(captureSessionInterruptionEnded:) name:AVCaptureSessionInterruptionEndedNotification object:session];
++    }
+     if (@available(iOS 16.0, *)) {
+         BOOL enable = self.enableMultitaskingCameraAccess;
+         BOOL shouldChange = session.multitaskingCameraAccessEnabled != enable;
+@@ -73,6 +120,12 @@
+             [session setMultitaskingCameraAccessEnabled:enable];
+             [session commitConfiguration];
+         }
++        SpeakeasyCaptureDiagnostic([NSString stringWithFormat:@"multitasking requested=%@ supported=%@ enabled=%@",
++            enable ? @"true" : @"false",
++            session.isMultitaskingCameraAccessSupported ? @"true" : @"false",
++            session.isMultitaskingCameraAccessEnabled ? @"true" : @"false"]);
++    } else {
++        SpeakeasyCaptureDiagnostic(@"multitasking API unavailable (< iOS 16)");
+     }
+
+     RCTLog(@"[VideoCaptureController] Capture will start");
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 index cd4fa13..64ab025 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 @@ -7,13 +7,39 @@
- 
+
  @implementation WebRTCModule (RTCAudioSession)
- 
+
 +// Speakeasy patch: manual-audio mode for CallKit coexistence.
 +//
 +// Stock react-native-webrtc 124 never sets `useManualAudio`, so WebRTC's ADM
@@ -350,7 +694,7 @@ index cd4fa13..64ab025 100644
 +    session.isAudioEnabled = YES;
      return nil;
  }
- 
+
  RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidDeactivate) {
 -    [[RTCAudioSession sharedInstance] audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
 +    RTCAudioSession *session = [RTCAudioSession sharedInstance];
@@ -359,4 +703,4 @@ index cd4fa13..64ab025 100644
 +    session.isAudioEnabled = NO;
      return nil;
  }
- 
+

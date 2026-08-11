@@ -28,6 +28,7 @@ describe('iOS background-call native contracts', () => {
     const plist = source('ios/Speakeasy/Info.plist');
     const entitlements = source('ios/Speakeasy/Speakeasy.entitlements');
     const screen = source('src/screens/VideoCallScreen.tsx');
+    const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
 
     expect(delegate).toContain('enableMultitaskingCameraAccess = YES');
     expect(plist).toContain('<string>voip</string>');
@@ -40,6 +41,26 @@ describe('iOS background-call native contracts', () => {
     // view, which immediately tears down PiP and revokes background camera use.
     expect(screen).toContain("Platform.OS === 'android' &&");
     expect(screen).toContain('inPip || appBackgrounded ||');
+    expect(webrtcPatch).toContain('explicit start requested at willResignActive');
+    expect(webrtcPatch).toContain(
+      'UIApplication.sharedApplication.applicationState != UIApplicationStateActive',
+    );
+    expect(webrtcPatch).toContain('pictureInPicturePossible');
+    expect(webrtcPatch).toContain('multitasking requested=%@ supported=%@ enabled=%@');
+  });
+
+  it('uses Android native PiP dimensions ahead of stale React layout dimensions', () => {
+    const screen = source('src/screens/VideoCallScreen.tsx');
+    const nativeSizeBranch = screen.slice(
+      screen.indexOf('style={\n              nativePipSize'),
+      screen.indexOf('objectFit="cover"', screen.indexOf('style={\n              nativePipSize')),
+    );
+
+    expect(nativeSizeBranch).toContain('? { width: nativePipSize.w, height: nativePipSize.h }');
+    expect(nativeSizeBranch).toContain(': pipSize');
+    expect(nativeSizeBranch.indexOf('nativePipSize')).toBeLessThan(
+      nativeSizeBranch.indexOf(': pipSize'),
+    );
   });
 
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
@@ -139,6 +160,7 @@ describe('iOS background-call native contracts', () => {
     const peer = source('src/calls/webrtc-peer.ts');
     const screen = source('src/screens/VideoCallScreen.tsx');
     const diagnosticsScreen = source('src/screens/DiagnosticsScreen.tsx');
+    const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
 
     expect(delegate).toContain('VoIP push received');
     expect(delegate).toContain('CallKit incoming-call report completion');
@@ -153,6 +175,14 @@ describe('iOS background-call native contracts', () => {
     expect(peer).toContain("scheduleVideoStats('foreground-boundary')");
     expect(peer).toContain('backgroundInterval,');
     expect(screen).toContain('pip.drainNativeDiagnostics()');
+    expect(webrtcPatch).toContain('iOS PiP: ');
+    expect(webrtcPatch).toContain('failed to start');
+    expect(webrtcPatch).toContain('controller dealloc');
+    expect(webrtcPatch).toContain('iOS PiP renderer: ');
+    expect(webrtcPatch).toContain('first frame');
+    expect(webrtcPatch).toContain('decode failed');
+    expect(webrtcPatch).toContain('iOS camera: ');
+    expect(webrtcPatch).toContain('AVCaptureSessionWasInterruptedNotification');
     expect(diagnosticsScreen).toContain('pip.drainNativeDiagnostics()');
   });
 });
