@@ -50,6 +50,16 @@ name: Android video-call PiP + background media continuity
     timeout: 4000
 - takeScreenshot: 02-pip-bubble
 
+# Android's system PiP window toggles between its compact and expanded bounds
+# on a double tap. Exercise a real viewport change before restoring the call;
+# the before/after screenshots verify that video still fills the whole bubble
+# and keeps its aspect ratio instead of retaining the first surface size.
+- doubleTapOn:
+    id: 'xyz.speakeasyapp.app:id/action_bar_root'
+- waitForAnimationToEnd:
+    timeout: 3000
+- takeScreenshot: 03-pip-resized
+
 # Tap the system PiP bubble to reveal its native controls, then use the actual
 # expand/full-screen action. This preserves the running React/WebRTC instance;
 # launchApp would recreate the harness and invalidate the before/after counters.
@@ -63,4 +73,4 @@ name: Android video-call PiP + background media continuity
     visible:
       id: 'harness-background-video-pass'
     timeout: 15000
-- takeScreenshot: 03-returned
+- takeScreenshot: 04-returned

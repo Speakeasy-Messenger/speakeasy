@@ -646,7 +646,7 @@ index b1a0b96..8abc1a5 100644
  }
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
-index e7f52a1..d791e09 100644
+index e7f52a1..f9ce877 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 @@ -3,6 +3,24 @@
@@ -711,50 +711,68 @@ index e7f52a1..d791e09 100644
  - (void)startCapture {
      if (self.deviceId) {
          self.device = [AVCaptureDevice deviceWithUniqueID:self.deviceId];
-@@ -63,16 +101,41 @@
+@@ -63,18 +101,15 @@
      self.selectedFormat = format;
 
      AVCaptureSession *session = self.capturer.captureSession;
+-    if (@available(iOS 16.0, *)) {
+-        BOOL enable = self.enableMultitaskingCameraAccess;
+-        BOOL shouldChange = session.multitaskingCameraAccessEnabled != enable;
+-        BOOL canChange = !enable || (enable && session.isMultitaskingCameraAccessSupported);
+-
+-        if (shouldChange && canChange) {
+-            [session beginConfiguration];
+-            [session setMultitaskingCameraAccessEnabled:enable];
+-            [session commitConfiguration];
 +    if (self.observedSession != session) {
 +        if (self.observedSession) {
 +            [[NSNotificationCenter defaultCenter] removeObserver:self name:AVCaptureSessionWasInterruptedNotification object:self.observedSession];
 +            [[NSNotificationCenter defaultCenter] removeObserver:self name:AVCaptureSessionInterruptionEndedNotification object:self.observedSession];
-+        }
+         }
 +        self.observedSession = session;
 +        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(captureSessionWasInterrupted:) name:AVCaptureSessionWasInterruptedNotification object:session];
 +        [[NSNotificationCenter defaultCenter] addObserver:self selector:@selector(captureSessionInterruptionEnded:) name:AVCaptureSessionInterruptionEndedNotification object:session];
-+    }
-     if (@available(iOS 16.0, *)) {
--        BOOL enable = self.enableMultitaskingCameraAccess;
-+        // Speakeasy ships the multitasking-camera entitlement and uses the
-+        // video-call PiP content source.  The app-level WebRTCModuleOptions
-+        // flag has proven false on a signed real-device run even though the
-+        // session reports this capability as supported, leaving
-+        // runWhileMultitasking=0 and stopping capture on background.  Treat
-+        // platform support as authoritative here so an initialization-order
-+        // miss cannot silently disable the required capture behavior.
+     }
+-
+     RCTLog(@"[VideoCaptureController] Capture will start");
+
+     // Starting the capture happens on another thread. Wait for it.
+@@ -95,6 +130,35 @@
+                         }];
+
+     dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
++
++    // RTCCameraVideoCapturer creates its inputs/outputs inside
++    // startCaptureWithDevice. Before that completes, AVFoundation reports
++    // isMultitaskingCameraAccessSupported == NO even for an entitled video-call
++    // session. Configuring the flag before start therefore silently skipped it
++    // and the finalized graph was logged by mediaserverd as
++    // runWhileMultitasking:0. Apply it only after WebRTC has built the graph so
++    // the capability check describes the session that will actually run.
++    if (@available(iOS 16.0, *)) {
 +        BOOL requested = self.enableMultitaskingCameraAccess;
 +        BOOL supported = session.isMultitaskingCameraAccessSupported;
-+        BOOL enable = requested || supported;
-         BOOL shouldChange = session.multitaskingCameraAccessEnabled != enable;
--        BOOL canChange = !enable || (enable && session.isMultitaskingCameraAccessSupported);
-+        BOOL canChange = !enable || supported;
-
-         if (shouldChange && canChange) {
-             [session beginConfiguration];
-             [session setMultitaskingCameraAccessEnabled:enable];
-             [session commitConfiguration];
-         }
-+        SpeakeasyCaptureDiagnostic([NSString stringWithFormat:@"multitasking requested=%@ supported=%@ target=%@ enabled=%@",
++        BOOL enable = requested && supported;
++        BOOL shouldChange = session.multitaskingCameraAccessEnabled != enable;
++
++        if (shouldChange) {
++            [session beginConfiguration];
++            session.multitaskingCameraAccessEnabled = enable;
++            [session commitConfiguration];
++        }
++        NSString *message = [NSString stringWithFormat:@"multitasking post-start requested=%@ supported=%@ target=%@ enabled=%@",
 +            requested ? @"true" : @"false",
 +            supported ? @"true" : @"false",
 +            enable ? @"true" : @"false",
-+            session.isMultitaskingCameraAccessEnabled ? @"true" : @"false"]);
++            session.isMultitaskingCameraAccessEnabled ? @"true" : @"false"];
++        NSLog(@"[SpeakeasyCamera] %@", message);
++        SpeakeasyCaptureDiagnostic(message);
 +    } else {
 +        SpeakeasyCaptureDiagnostic(@"multitasking API unavailable (< iOS 16)");
-     }
++    }
+ }
 
-     RCTLog(@"[VideoCaptureController] Capture will start");
+ - (void)stopCapture {
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 index cd4fa13..64ab025 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m

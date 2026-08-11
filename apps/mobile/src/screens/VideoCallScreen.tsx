@@ -94,6 +94,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // Android system-PiP (the floating window after pressing Home). While in
   // it we hide the overlay chrome so only the video shows in the small frame.
   const [inPip, setInPip] = useState(false);
+  const [nativePipSize, setNativePipSize] = useState<
+    { width: number; height: number } | undefined
+  >();
   // PiP window dimensions. RN reflows to the small window on PiP enter; we use
   // the live size to (a) diagnose the scaling report and (b) confirm inPip
   // actually propagated. The fullscreen RTCView is also keyed on inPip so its
@@ -190,7 +193,10 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // overlay chrome while in the small PiP frame. No-op on iOS.
   useEffect(() => {
     pip.setVideoCallActive(true);
-    const unsub = pip.onPipModeChanged(setInPip);
+    const unsub = pip.onPipModeChanged((active) => {
+      setInPip(active);
+      if (!active) setNativePipSize(undefined);
+    });
     // Closing the PiP bubble (vs expanding it back) must END the call —
     // otherwise the camera/mic/ring keep running headless.
     const unsubClosed = pip.onPipClosed(() => {
@@ -207,6 +213,13 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     // TextureView now resizes in place with its parent instead of remounting.
     const unsubResize = pip.onPipResize((s) => {
       diag('call', 'pip native resize', { w: s.width, h: s.height });
+      // Android's Configuration is the authoritative size of the floating
+      // activity. Fabric can leave the React root measured at its old bounds
+      // during an interactive PiP resize; applying these DP dimensions forces
+      // the RTCView/TextureView through onSizeChanged for every system size.
+      if (s.width > 0 && s.height > 0) {
+        setNativePipSize({ width: s.width, height: s.height });
+      }
     });
     return () => {
       pip.setVideoCallActive(false);
@@ -398,7 +411,16 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     const pipFeedTag = pipFeed && pipFeed === remoteUrl ? 'r' : 'l';
     return (
       <View
-        style={styles.root}
+        style={[
+          styles.root,
+          inPip && nativePipSize
+            ? {
+                flex: 0,
+                width: nativePipSize.width,
+                height: nativePipSize.height,
+              }
+            : undefined,
+        ]}
         onLayout={(e) => {
           const w = Math.round(e.nativeEvent.layout.width);
           const h = Math.round(e.nativeEvent.layout.height);
