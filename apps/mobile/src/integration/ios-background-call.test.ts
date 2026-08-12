@@ -152,6 +152,19 @@ describe('iOS background-call native contracts', () => {
     );
   });
 
+  it('clears stale Android auto-enter eligibility when a non-call screen resumes', () => {
+    const activity = source(
+      'android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt',
+    );
+    const onResume = activity.slice(
+      activity.indexOf('override fun onResume()'),
+      activity.indexOf('override fun onStop()'),
+    );
+
+    expect(onResume).toContain('setPictureInPictureParams(buildPipParams())');
+    expect(onResume).toContain('videoCallActive');
+  });
+
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
     const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
     const delegate = source('ios/Speakeasy/AppDelegate.mm');

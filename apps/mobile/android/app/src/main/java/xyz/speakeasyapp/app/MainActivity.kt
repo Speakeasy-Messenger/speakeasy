@@ -230,6 +230,18 @@ class MainActivity : ReactActivity() {
 
   override fun onResume() {
     super.onResume()
+    // JS can clear videoCallActive while there is no current Activity (for
+    // example while a dismissed call/PiP is tearing down). In that case the
+    // static flag is correct but Android may still retain this Activity's last
+    // autoEnterEnabled=true params. Rebuild them on every resume so pressing
+    // Home from Chat can never reuse stale video-call PiP eligibility.
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+      try {
+        setPictureInPictureParams(buildPipParams())
+      } catch (_: IllegalStateException) {
+        // Activity not yet in a state that accepts PiP params — ignore.
+      }
+    }
     // Reopened into the app (expanded from PiP) — not a dismiss. Don't end call.
     exitingPip = false
     wasInPip = false
