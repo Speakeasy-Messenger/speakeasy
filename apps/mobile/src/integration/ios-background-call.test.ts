@@ -65,7 +65,9 @@ describe('iOS background-call native contracts', () => {
     // the session's inputs and outputs. Enabling before start silently left
     // the final graph at runWhileMultitasking:0 on a real device.
     expect(webrtcPatch).toContain('BOOL enable = requested && supported;');
-    expect(webrtcPatch).toContain('multitasking post-start requested=%@ supported=%@ target=%@ enabled=%@');
+    expect(webrtcPatch).toContain(
+      'multitasking post-start requested=%@ supported=%@ target=%@ enabled=%@',
+    );
     expect(webrtcPatch.indexOf('dispatch_semaphore_wait(semaphore')).toBeLessThan(
       webrtcPatch.indexOf('multitasking post-start requested='),
     );
@@ -74,16 +76,60 @@ describe('iOS background-call native contracts', () => {
     expect(webrtcPatch).toContain('_sampleView.shouldRender = videoTrack != nil;');
     expect(webrtcPatch).toContain('[SpeakeasyPIPRenderer]');
     expect(webrtcPatch).toContain('- (void)layoutSubviews');
-    expect(webrtcPatch).toContain('size.width <= 0 || size.height <= 0');
+    expect(webrtcPatch).toContain('bounds.width <= 0 || bounds.height <= 0');
     expect(webrtcPatch).toContain('[self requestScaleRecalculation]');
+    // The sample layer receives landscape pixels plus a 90°/270° WebRTC
+    // rotation. Cropping the raw layer before that rotation creates the
+    // extreme face zoom seen on-device. Keep the raw layer fitted, then apply
+    // contain/cover using the rotated frame and the live AVKit viewport.
+    expect(webrtcPatch).toContain(
+      'self.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;',
+    );
+    expect(webrtcPatch).toContain(
+      'self.sampleView.aspectFill = fit == RTCVideoViewObjectFitCover;',
+    );
+    expect(webrtcPatch).toContain(
+      'CGFloat scale = self.aspectFill ? MAX(scaleX, scaleY) : MIN(scaleX, scaleY);',
+    );
+    expect(webrtcPatch).toContain('recalculateScaleForFrame');
+    expect(webrtcPatch).toContain('layout changed (bounds=%.0fx%.0f)');
+    expect(webrtcPatch).toContain('mode=%@ scale=%.3f');
     expect(webrtcPatch).toContain('first sample enqueued');
     expect(webrtcPatch).toContain('CMSampleTimingInfo timingInfo = {');
     expect(webrtcPatch).toContain('.duration = kCMTimeInvalid');
   });
 
+  it('covers both compact and expanded iOS PiP viewports after rotation', () => {
+    const rotatedCoverSize = (viewportWidth: number, viewportHeight: number) => {
+      const frameWidth = 1280;
+      const frameHeight = 720;
+      const frameAspect = frameWidth / frameHeight;
+      const viewportAspect = viewportWidth / viewportHeight;
+      const fitted =
+        frameAspect > viewportAspect
+          ? { width: viewportWidth, height: viewportWidth / frameAspect }
+          : { width: viewportHeight * frameAspect, height: viewportHeight };
+      const rotated = { width: fitted.height, height: fitted.width };
+      const scale = Math.max(viewportWidth / rotated.width, viewportHeight / rotated.height);
+      return { width: rotated.width * scale, height: rotated.height * scale };
+    };
+
+    const compact = rotatedCoverSize(1080, 1920);
+    expect(compact.width).toBeCloseTo(1080);
+    expect(compact.height).toBeCloseTo(1920);
+
+    // AVKit can make the expanded bubble wider without changing the video.
+    // The old `height / width` scale yielded an 810px-wide feed here. Cover
+    // must instead fill the full 1080px width and crop only the excess height.
+    const expanded = rotatedCoverSize(1080, 1440);
+    expect(expanded.width).toBeCloseTo(1080);
+    expect(expanded.height).toBeGreaterThanOrEqual(1440);
+  });
+
   it('resizes Android PiP video in place using platform-native seamless resizing', () => {
     const screen = source('src/screens/VideoCallScreen.tsx');
     const activity = source('android/app/src/main/java/xyz/speakeasyapp/app/MainActivity.kt');
+    const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
 
     expect(activity).toContain('builder.setSourceRectHint(sourceRect)');
     expect(activity).toContain('.setSeamlessResizeEnabled(true)');
@@ -97,6 +143,13 @@ describe('iOS background-call native contracts', () => {
     expect(screen).toContain('nativePipSize !== undefined');
     // Resizing must not remount the WebRTC renderer and drop frames.
     expect(screen).not.toContain('nativePipSize.width}x${nativePipSize.height');
+    // Fabric/Samsung can resize the outer legacy WebRTCView without a normal
+    // child-layout pass. The callback dimensions are authoritative; deferring
+    // to the stock runnable can read the stale compact parent geometry.
+    expect(webrtcPatch).toContain('onLayout(/* changed */ false, 0, 0, w, h);');
+    expect(webrtcPatch).not.toContain(
+      'onSizeChanged(int w, int h, int oldw, int oldh) {\n+        super.onSizeChanged(w, h, oldw, oldh);\n+        post(requestSurfaceViewRendererLayoutRunnable);',
+    );
   });
 
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
@@ -177,7 +230,9 @@ describe('iOS background-call native contracts', () => {
     expect(androidWorkflow).toContain('-Pspeakeasy.videoCallHarness=true');
     expect(androidWorkflow).toContain('speakeasy-android-calls.zip');
     expect(androidWorkflow).toContain('22-call-pip-close-android.yaml');
-    expect(androidPipFlow).toContain("doubleTapOn:\n    id: 'xyz.speakeasyapp.app:id/action_bar_root'");
+    expect(androidPipFlow).toContain(
+      "doubleTapOn:\n    id: 'xyz.speakeasyapp.app:id/action_bar_root'",
+    );
     expect(androidPipFlow).toContain('takeScreenshot: 03-pip-resized');
     expect(androidCloseFlow).toContain("tapOn: 'Close'");
     expect(androidCloseFlow).toContain("assertNotVisible: '@dev-peer'");

@@ -253,14 +253,14 @@ index 5d14d0f..a985ce1 100644
 +    // changes. Under RN's New Architecture (Fabric) interop, this legacy view's
 +    // frame is updated directly on an Android PiP resize WITHOUT our onLayout
 +    // re-running — so the child surfaceViewRenderer kept its pre-resize bounds
-+    // and the video stayed at the old (small) size inside the grown bubble
-+    // (device logs: outer RTCView resized to the new size, video did not).
-+    // onSizeChanged fires on the frame update; posting requestSurfaceViewRenderer
-+    // Layout re-runs onLayout against the NEW bounds after this pass.
++    // and the video stayed at the old (small) size inside the grown bubble.
++    // Use the authoritative callback dimensions synchronously. Posting the
++    // stock relayout runnable loses these values and reads getLeft/getRight;
++    // Samsung PiP can still expose the old parent geometry at that point.
 +    @Override
 +    protected void onSizeChanged(int w, int h, int oldw, int oldh) {
 +        super.onSizeChanged(w, h, oldw, oldh);
-+        post(requestSurfaceViewRendererLayoutRunnable);
++        onLayout(/* changed */ false, 0, 0, w, h);
 +    }
 +
      /**
@@ -279,7 +279,7 @@ index 6e81776..7e93656 100644
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
-index 5137c71..687efa0 100644
+index 5137c71..bb7bd02 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 @@ -2,6 +2,24 @@
@@ -401,7 +401,20 @@ index 5137c71..687efa0 100644
 
      if (_videoTrack) {
          if (!_sampleView.superview) {
-@@ -155,10 +237,17 @@
+@@ -109,11 +191,7 @@
+ }
+
+ - (void)setObjectFit:(RTCVideoViewObjectFit)fit {
+-    if (fit == RTCVideoViewObjectFitCover) {
+-        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
+-    } else {
+-        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+-    }
++    self.sampleView.aspectFill = fit == RTCVideoViewObjectFitCover;
+ }
+
+ - (CGSize)preferredSize {
+@@ -155,10 +233,17 @@
      }
  }
 
@@ -420,7 +433,7 @@ index 5137c71..687efa0 100644
  }
 
  @end
-@@ -173,6 +262,7 @@
+@@ -173,6 +258,7 @@
   */
  - (void)pictureInPictureControllerWillStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -428,7 +441,7 @@ index 5137c71..687efa0 100644
  }
 
  /*!
-@@ -183,6 +273,7 @@
+@@ -183,6 +269,7 @@
   */
  - (void)pictureInPictureControllerDidStartPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -436,7 +449,7 @@ index 5137c71..687efa0 100644
  }
 
  /*!
-@@ -196,6 +287,8 @@
+@@ -196,6 +283,8 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      failedToStartPictureInPictureWithError:(NSError *)error {
      NSLog(@"%@: %@", NSStringFromSelector(_cmd), [error localizedDescription]);  // Objective-C
@@ -445,7 +458,7 @@ index 5137c71..687efa0 100644
  }
 
  /*!
-@@ -206,6 +299,7 @@
+@@ -206,6 +295,7 @@
   */
  - (void)pictureInPictureControllerWillStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -453,7 +466,7 @@ index 5137c71..687efa0 100644
  }
 
  /*!
-@@ -216,6 +310,19 @@
+@@ -216,6 +306,19 @@
   */
  - (void)pictureInPictureControllerDidStopPictureInPicture:(AVPictureInPictureController *)pictureInPictureController {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -473,7 +486,7 @@ index 5137c71..687efa0 100644
  }
 
  /*!
-@@ -229,6 +336,11 @@
+@@ -229,6 +332,11 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
      restoreUserInterfaceForPictureInPictureStopWithCompletionHandler:(void (^)(BOOL restored))completionHandler {
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
@@ -525,8 +538,20 @@ index e64005d..69d7f92 100644
              dispatch_async(_module.workerQueue, ^{
                  [videoTrack addRenderer:self.videoView];
              });
+diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.h b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.h
+index 6f7e5a2..6641650 100644
+--- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.h
++++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.h
+@@ -7,6 +7,7 @@
+
+ @property(nonnull, nonatomic, readonly) AVSampleBufferDisplayLayer *sampleBufferLayer;
+ @property(nonatomic, assign) BOOL shouldRender;
++@property(nonatomic, assign) BOOL aspectFill;
+
+ - (void)requestScaleRecalculation;
+ @end
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
-index b1a0b96..ea7d0d0 100644
+index b1a0b96..d346a67 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
 @@ -3,6 +3,23 @@
@@ -553,17 +578,30 @@ index b1a0b96..ea7d0d0 100644
  @protocol SampleBufferRendering<AVQueuedSampleBufferRendering>
 
  - (BOOL)requiresFlushToResumeDecoding;
-@@ -20,6 +37,9 @@
+@@ -20,6 +37,10 @@
  @property(nonatomic, retain) I420Converter *i420Converter;
  @property(nonatomic, strong) id<SampleBufferRendering> renderer;
  @property(nonatomic, assign) NSInteger currentRotation;
 +@property(nonatomic, assign) BOOL loggedFirstFrame;
 +@property(nonatomic, assign) BOOL loggedFirstEnqueue;
 +@property(nonatomic, assign) CGSize lastBoundsSize;
++@property(nonatomic, assign) CGSize lastFrameSize;
 
  @end
 
-@@ -47,6 +67,7 @@
+@@ -40,6 +61,11 @@
+         } else {
+             _renderer = self.sampleBufferLayer;
+         }
++        // Rotation is applied to the display layer below. Keep its unrotated
++        // content in aspect-fit mode, then implement contain/cover against the
++        // ROTATED frame dimensions. Applying resizeAspectFill before rotating
++        // crops the landscape pixel buffer first and produces an extreme zoom.
++        self.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;
+     }
+     return self;
+ }
+@@ -47,6 +73,7 @@
  - (void)layerFailedToDecode:(NSNotification *)note {
      NSError *error = [[note userInfo] valueForKey:AVSampleBufferDisplayLayerFailedToDecodeNotificationErrorKey];
      NSLog(@"layerFailedToDecode, error: %@", [error localizedDescription]);
@@ -571,40 +609,81 @@ index b1a0b96..ea7d0d0 100644
  }
 
  - (AVSampleBufferDisplayLayer *)sampleBufferLayer {
-@@ -57,16 +78,30 @@
+@@ -57,19 +84,63 @@
      _currentRotation = -1;
  }
 
+-- (void)recalculateScale:(RTCVideoRotation)rotation {
+-    if (self.currentRotation != rotation) {
+-        self.currentRotation = rotation;
++- (void)setAspectFill:(BOOL)aspectFill {
++    if (_aspectFill != aspectFill) {
++        _aspectFill = aspectFill;
++        [self requestScaleRecalculation];
++    }
++    self.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;
++}
+
+-        CGFloat scale = 1;
+-        if (rotation == 90 || rotation == 270) {
+-            CGSize size = self.bounds.size;
+-            scale = size.height / size.width;
+-        }
 +- (void)layoutSubviews {
 +    [super layoutSubviews];
 +    CGSize size = self.bounds.size;
 +    if (!CGSizeEqualToSize(size, self.lastBoundsSize)) {
 +        self.lastBoundsSize = size;
 +        [self requestScaleRecalculation];
++        SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:
++            @"layout changed (bounds=%.0fx%.0f)", size.width, size.height]);
 +    }
 +}
-+
- - (void)recalculateScale:(RTCVideoRotation)rotation {
-     if (self.currentRotation != rotation) {
--        self.currentRotation = rotation;
--
-         CGFloat scale = 1;
-         if (rotation == 90 || rotation == 270) {
-             CGSize size = self.bounds.size;
-+            // Remote frames arrive before AVKit lays out its hidden call view.
-+            // Never cache a transform calculated from 0x0 bounds.
-+            if (size.width <= 0 || size.height <= 0) {
-+                return;
-+            }
-             scale = size.height / size.width;
-         }
 
-+        self.currentRotation = rotation;
-+
-         self.sampleBufferLayer.transform = CATransform3DConcat(
-             CATransform3DMakeRotation(rotation / 180.0 * M_PI, 0.0, 0.0, 1.0), CATransform3DMakeScale(scale, scale, 1));
+-        self.sampleBufferLayer.transform = CATransform3DConcat(
+-            CATransform3DMakeRotation(rotation / 180.0 * M_PI, 0.0, 0.0, 1.0), CATransform3DMakeScale(scale, scale, 1));
++- (void)recalculateScaleForFrame:(RTCVideoFrame *)frame {
++    CGSize frameSize = CGSizeMake(frame.width, frame.height);
++    if (self.currentRotation == frame.rotation && CGSizeEqualToSize(self.lastFrameSize, frameSize)) {
++        return;
      }
-@@ -82,6 +117,14 @@
++
++    CGSize bounds = self.bounds.size;
++    // Remote frames arrive before AVKit lays out its hidden call view. Never
++    // cache a transform calculated from 0x0 bounds; layoutSubviews invalidates
++    // the rotation cache when the compact or expanded PiP size arrives.
++    if (bounds.width <= 0 || bounds.height <= 0 || frame.width <= 0 || frame.height <= 0) {
++        return;
++    }
++
++    CGFloat frameAspect = (CGFloat)frame.width / (CGFloat)frame.height;
++    CGFloat boundsAspect = bounds.width / bounds.height;
++    CGSize fitted;
++    if (frameAspect > boundsAspect) {
++        fitted = CGSizeMake(bounds.width, bounds.width / frameAspect);
++    } else {
++        fitted = CGSizeMake(bounds.height * frameAspect, bounds.height);
++    }
++
++    BOOL quarterTurn = frame.rotation == 90 || frame.rotation == 270;
++    CGSize rotated = quarterTurn ? CGSizeMake(fitted.height, fitted.width) : fitted;
++    CGFloat scaleX = bounds.width / rotated.width;
++    CGFloat scaleY = bounds.height / rotated.height;
++    CGFloat scale = self.aspectFill ? MAX(scaleX, scaleY) : MIN(scaleX, scaleY);
++
++    self.currentRotation = frame.rotation;
++    self.lastFrameSize = frameSize;
++    self.sampleBufferLayer.transform = CATransform3DConcat(
++        CATransform3DMakeRotation(frame.rotation / 180.0 * M_PI, 0.0, 0.0, 1.0),
++        CATransform3DMakeScale(scale, scale, 1));
++    SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:
++        @"transform (bounds=%.0fx%.0f frame=%.0fx%.0f rotation=%ld mode=%@ scale=%.3f)",
++        bounds.width, bounds.height, frameSize.width, frameSize.height,
++        (long)frame.rotation, self.aspectFill ? @"cover" : @"contain", scale]);
+ }
+
+ /** The size of the video frame. */
+@@ -82,6 +153,14 @@
          return;
      }
 
@@ -619,20 +698,15 @@ index b1a0b96..ea7d0d0 100644
      // Convert RTCVideoFrame to CMSampleBuffer
      CMSampleBufferRef sampleBuffer = [self sampleBufferFrom:frame];
      if (sampleBuffer == nil) {
-@@ -93,14 +136,21 @@
+@@ -93,14 +172,21 @@
              [self.renderer flush];
          }
 
 -        if (!self.renderer.readyForMoreMediaData) {
 -            return;
--        }
--
--        [self recalculateScale:frame.rotation];
 +        if (self.renderer.readyForMoreMediaData) {
-+            [self recalculateScale:frame.rotation];
-
--        // Display the CMSampleBuffer using AVSampleBufferDisplayLayer
--        [self.renderer enqueueSampleBuffer:sampleBuffer];
++            [self recalculateScaleForFrame:frame];
++
 +            // Display the CMSampleBuffer using AVSampleBufferDisplayLayer.
 +            [self.renderer enqueueSampleBuffer:sampleBuffer];
 +            if (!self.loggedFirstEnqueue) {
@@ -642,13 +716,18 @@ index b1a0b96..ea7d0d0 100644
 +                    @"first sample enqueued (bounds=%.0fx%.0f rotation=%ld)",
 +                    size.width, size.height, (long)frame.rotation]);
 +            }
-+        }
+         }
+-
+-        [self recalculateScale:frame.rotation];
+-
+-        // Display the CMSampleBuffer using AVSampleBufferDisplayLayer
+-        [self.renderer enqueueSampleBuffer:sampleBuffer];
 +        // sampleBufferFrom follows Core Foundation's Create rule. Release it
 +        // even when AVKit is applying backpressure and cannot accept a frame.
          CFRelease(sampleBuffer);
      });
  }
-@@ -115,25 +165,36 @@
+@@ -115,25 +201,36 @@
      }
 
      // Create a CMVideoFormatDescription
@@ -696,7 +775,7 @@ index b1a0b96..ea7d0d0 100644
  }
 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
-index e7f52a1..f9ce877 100644
+index e7f52a1..837cc59 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 @@ -3,6 +3,24 @@
@@ -827,7 +906,7 @@ diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudi
 index cd4fa13..64ab025 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
-@@ -7,12 +7,38 @@
+@@ -7,13 +7,39 @@
 
  @implementation WebRTCModule (RTCAudioSession)
 
