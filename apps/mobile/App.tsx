@@ -33,7 +33,11 @@ import { GroupMarkCacheWarmer } from './src/avatars/GroupMarkCacheWarmer.js';
 import { useIdentity } from './src/store/identity.js';
 import { useBlocks } from './src/store/blocks.js';
 import { useOwnership } from './src/store/ownership.js';
-import { useConversations, flushConversationsPersist } from './src/store/conversations.js';
+import {
+  useConversations,
+  drainBackgroundMessageInbox,
+  flushConversationsPersist,
+} from './src/store/conversations.js';
 import { useShare } from './src/store/share.js';
 import { consumePendingShare } from './src/native/share-receive.js';
 import { useGroups } from './src/store/groups.js';
@@ -1131,6 +1135,7 @@ export default function App({ videoCallHarness = false }: AppProps) {
     // it's still connected, the next ws.send() throws, and the user
     // sees a crash. Force a reconnect on `active` if we're not
     // already in `authed` state.
+    let foregroundInboxRetry: ReturnType<typeof setTimeout> | null = null;
     const lifecycleSub = AppState.addEventListener('change', (next) => {
       diag('app', 'AppState change', { next, wsState: ws.getState() });
       // Privacy cover: paint an opaque sheet over the UI whenever the app
@@ -1149,6 +1154,17 @@ export default function App({ videoCallHarness = false }: AppProps) {
       const callActiveForCover = !!useCalls.getState().active;
       useUiState.getState().setPrivacyCovered(next !== 'active' && !callActiveForCover);
       if (next === 'active') {
+        // A headless Android push can persist a decrypted message while this
+        // already-hydrated process is backgrounded. A warm notification tap
+        // does not call hydrate() again, so explicitly merge that inbox now.
+        // Repeat once after the transition to cover a handler that was still
+        // decrypting/enqueueing at the exact moment AppState became active.
+        void drainBackgroundMessageInbox();
+        if (foregroundInboxRetry) clearTimeout(foregroundInboxRetry);
+        foregroundInboxRetry = setTimeout(() => {
+          foregroundInboxRetry = null;
+          void drainBackgroundMessageInbox();
+        }, 2_000);
         // The ongoing-call pill is posted at call-connect and persists for the
         // whole call (dropped on call end), so we no longer dismiss it on
         // foreground — it just sits quietly in the shade while the in-app call
@@ -1357,6 +1373,7 @@ export default function App({ videoCallHarness = false }: AppProps) {
 
     return () => {
       diag('app', 'cleanup router for userId', { userId });
+      if (foregroundInboxRetry) clearTimeout(foregroundInboxRetry);
       lifecycleSub.remove();
       unsubscribe();
       callsUnsub();

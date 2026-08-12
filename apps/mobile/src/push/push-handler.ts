@@ -787,10 +787,11 @@ async function displayCallNotification(data: FcmData): Promise<void> {
  */
 
 /**
- * Background delivery receipt. The WebSocket is closed while backgrounded, so a
- * displayed push can't be acked over it; without an ack the server re-sends the
- * push ~45s later. POST the id so the relay row clears and no retry fires.
- * Best-effort and non-blocking: a failure just costs one harmless server retry.
+ * Background delivery receipt. This is a destructive acknowledgement: the
+ * server stops replaying this message to the current device, and may delete the
+ * relay payload when every target device has acknowledged it. Call it only
+ * after the complete message has been persisted locally, never merely because
+ * a content-free notification banner was displayed.
  */
 async function ackDeliveredHeadless(messageId: string | undefined): Promise<void> {
   if (!messageId) return;
@@ -814,6 +815,7 @@ async function displayPushNotification(data: FcmData): Promise<void> {
     data.ciphertext &&
     data.sender_id
   ) {
+    let persistedForForeground = false;
     try {
       const decrypted = await decryptForNotification(data);
       if (decrypted && data.message_id) {
@@ -827,6 +829,7 @@ async function displayPushNotification(data: FcmData): Promise<void> {
             receivedAt,
             sentAt: Number(data.sent_at),
           }));
+          persistedForForeground = true;
           diag('push-bg', 'decrypted message persisted for fast foreground load', {
             conversationId,
             msgId: data.message_id,
@@ -887,7 +890,14 @@ async function displayPushNotification(data: FcmData): Promise<void> {
           withReply: true,
         });
         diag('push-bg', 'messaging notification displayed', { conversationId });
-        void ackDeliveredHeadless(data.message_id);
+        if (persistedForForeground) {
+          void ackDeliveredHeadless(data.message_id);
+        } else {
+          diag('push-bg', 'delivery receipt withheld — message not persisted', {
+            conversationId,
+            msgId: data.message_id,
+          });
+        }
         return;
       }
     } catch (err) {
@@ -941,7 +951,13 @@ async function displayPushNotification(data: FcmData): Promise<void> {
       diag('push-bg', 'attachment notification displayed (ciphertext dropped)', {
         conversationId,
       });
-      void ackDeliveredHeadless(data.message_id);
+      // The push contains no decryptable payload, so the notification is not
+      // the message. Keep the relay row pending; the next WebSocket connection
+      // must replay and persist the real encrypted attachment before acking.
+      diag('push-bg', 'delivery receipt withheld — awaiting WS attachment replay', {
+        conversationId,
+        msgId: data.message_id,
+      });
       return;
     }
   }

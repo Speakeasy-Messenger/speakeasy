@@ -10,7 +10,10 @@ import {
   pendingInboundFromDecryptedPush,
 } from './pending-inbound.js';
 import type { ChatMessage } from '../store/conversations.js';
-import { useConversations } from '../store/conversations.js';
+import {
+  drainBackgroundMessageInbox,
+  useConversations,
+} from '../store/conversations.js';
 import { newMessageId } from '@speakeasy/shared';
 
 const { secureStore, failConversationWrites } = vi.hoisted(() => ({
@@ -119,6 +122,33 @@ describe('shouldSuppressPushForMute', () => {
 
     await expect(drainPendingInboundMessages({ add, persist })).resolves.toBe(0);
     expect(add).toHaveBeenCalledTimes(1);
+  });
+
+  it('merges a message queued after hydration on warm foreground resume', async () => {
+    await useConversations.getState().reset();
+    await useConversations.getState().hydrate();
+    const pending = {
+      conversationId: 'dm-warm-resume',
+      message: message('warm-resume-message'),
+    };
+
+    // This is the state produced by the headless handler while the already
+    // hydrated app process is backgrounded. hydrate() will not run again.
+    await enqueuePendingInboundMessage(pending);
+    expect(
+      useConversations.getState().byId[pending.conversationId],
+    ).toBeUndefined();
+
+    await expect(drainBackgroundMessageInbox()).resolves.toBe(1);
+    expect(
+      useConversations.getState().byId[pending.conversationId]?.messages,
+    ).toEqual([
+      expect.objectContaining({
+        ...pending.message,
+        receivedAt: expect.any(Number),
+      }),
+    ]);
+    await expect(drainBackgroundMessageInbox()).resolves.toBe(0);
   });
 
   it('converts direct and group decrypted payloads without losing attachments', () => {
