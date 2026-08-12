@@ -209,7 +209,7 @@ index 0000000..26e4d45
 +    }
 +}
 diff --git a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
-index 5d14d0f..a985ce1 100644
+index 5d14d0f..d4151ba 100644
 --- a/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
 +++ b/node_modules/react-native-webrtc/android/src/main/java/com/oney/WebRTCModule/WebRTCView.java
 @@ -47,7 +47,13 @@ public class WebRTCView extends ViewGroup {
@@ -224,31 +224,31 @@ index 5d14d0f..a985ce1 100644
 +    // a black band) until/unless a re-layout picks up the cover prop. Defaulting
 +    // to FILL matches the app's intent and removes that window.
 +    private static final ScalingType DEFAULT_SCALING_TYPE = ScalingType.SCALE_ASPECT_FILL;
-
+ 
      private static final String TAG = WebRTCModule.TAG;
-
+ 
 @@ -142,7 +148,7 @@ public class WebRTCView extends ViewGroup {
       * The {@link View} and {@link VideoSink} implementation which
       * actually renders {@link #videoTrack} on behalf of this instance.
       */
 -    private final SurfaceViewRenderer surfaceViewRenderer;
 +    private final TextureViewRenderer surfaceViewRenderer;
-
+ 
      /**
       * The {@code VideoTrack}, if any, rendered by this {@code WebRTCView}.
 @@ -157,7 +163,7 @@ public class WebRTCView extends ViewGroup {
      public WebRTCView(Context context) {
          super(context);
-
+ 
 -        surfaceViewRenderer = new SurfaceViewRenderer(context);
 +        surfaceViewRenderer = new TextureViewRenderer(context);
          addView(surfaceViewRenderer);
-
+ 
          setMirror(false);
 @@ -344,6 +350,20 @@ public class WebRTCView extends ViewGroup {
          surfaceViewRenderer.layout(l, t, r, b);
      }
-
+ 
 +    // Speakeasy patch: re-lay-out the child renderer whenever this view's size
 +    // changes. Under RN's New Architecture (Fabric) interop, this legacy view's
 +    // frame is updated directly on an Android PiP resize WITHOUT our onLayout
@@ -277,7 +277,7 @@ index 6e81776..7e93656 100644
 +- (BOOL)isPictureInPictureActive;
  - (void)insertFallbackView:(UIView *)subview;
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit;
-
+ 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
 index 5137c71..bb7bd02 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/PIPController.m
@@ -285,7 +285,7 @@ index 5137c71..bb7bd02 100644
 @@ -2,6 +2,24 @@
  #import <AVKit/AVKit.h>
  #import "SampleBufferVideoCallView.h"
-
+ 
 +static void SpeakeasyPIPDiagnostic(NSString *message) {
 +    NSLog(@"[SpeakeasyPIP] %@", message);
 +    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
@@ -305,16 +305,16 @@ index 5137c71..bb7bd02 100644
 +}
 +
  @interface PIPController ()
-
+ 
  @property(nonatomic, strong) AVPictureInPictureVideoCallViewController *pipCallViewController;
 @@ -10,6 +28,7 @@
  @property(nonnull, nonatomic, strong) SampleBufferVideoCallView *sampleView;
-
+ 
  @property(nonnull, nonatomic, strong) UIView *fallbackView;
 +@property(nonatomic, assign) BOOL restoreRequested;
-
+ 
  @end
-
+ 
 @@ -41,6 +60,24 @@
                           forKeyPath:@"pictureInPictureActive"
                              options:NSKeyValueObservingOptionInitial | NSKeyValueObservingOptionNew
@@ -337,7 +337,7 @@ index 5137c71..bb7bd02 100644
 +                                                 selector:@selector(applicationDidBecomeActive:)
 +                                                     name:UIApplicationDidBecomeActiveNotification
 +                                                   object:nil];
-
+ 
          [[NSNotificationCenter defaultCenter] addObserver:self
                                                   selector:@selector(applicationWillEnterForeground:)
 @@ -56,7 +93,45 @@
@@ -386,9 +386,9 @@ index 5137c71..bb7bd02 100644
 +        self.sampleView.shouldRender = NO;
      }
  }
-
+ 
 @@ -86,6 +161,13 @@
-
+ 
      _videoTrack = videoTrack;
      [videoTrack addRenderer:_sampleView];
 +    // Feed AVSampleBufferDisplayLayer before PiP begins. Enabling this only
@@ -398,12 +398,12 @@ index 5137c71..bb7bd02 100644
 +    // continued multitasking capture then keeps that frame stream advancing.
 +    _sampleView.shouldRender = videoTrack != nil;
 +    SpeakeasyPIPDiagnostic(videoTrack ? @"video track attached" : @"video track cleared");
-
+ 
      if (_videoTrack) {
          if (!_sampleView.superview) {
 @@ -109,11 +191,7 @@
  }
-
+ 
  - (void)setObjectFit:(RTCVideoViewObjectFit)fit {
 -    if (fit == RTCVideoViewObjectFitCover) {
 -        self.sampleView.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspectFill;
@@ -412,12 +412,12 @@ index 5137c71..bb7bd02 100644
 -    }
 +    self.sampleView.aspectFill = fit == RTCVideoViewObjectFitCover;
  }
-
+ 
  - (CGSize)preferredSize {
 @@ -155,10 +233,17 @@
      }
  }
-
+ 
 +- (BOOL)isPictureInPictureActive {
 +    return _pipController.isPictureInPictureActive;
 +}
@@ -431,7 +431,7 @@ index 5137c71..bb7bd02 100644
 +    [_pipController removeObserver:self forKeyPath:@"pictureInPicturePossible"];
 +    [[NSNotificationCenter defaultCenter] removeObserver:self];
  }
-
+ 
  @end
 @@ -173,6 +258,7 @@
   */
@@ -439,7 +439,7 @@ index 5137c71..bb7bd02 100644
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
 +    SpeakeasyPIPDiagnostic(@"will start");
  }
-
+ 
  /*!
 @@ -183,6 +269,7 @@
   */
@@ -447,7 +447,7 @@ index 5137c71..bb7bd02 100644
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
 +    SpeakeasyPIPDiagnostic(@"did start");
  }
-
+ 
  /*!
 @@ -196,6 +283,8 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
@@ -456,7 +456,7 @@ index 5137c71..bb7bd02 100644
 +    SpeakeasyPIPDiagnostic([NSString stringWithFormat:@"failed to start (%ld: %@)",
 +        (long)error.code, error.localizedDescription]);
  }
-
+ 
  /*!
 @@ -206,6 +295,7 @@
   */
@@ -464,7 +464,7 @@ index 5137c71..bb7bd02 100644
      NSLog(@"%@", NSStringFromSelector(_cmd));  // Objective-C
 +    SpeakeasyPIPDiagnostic(@"will stop");
  }
-
+ 
  /*!
 @@ -216,6 +306,19 @@
   */
@@ -484,7 +484,7 @@ index 5137c71..bb7bd02 100644
 +    }
 +    self.restoreRequested = NO;
  }
-
+ 
  /*!
 @@ -229,6 +332,11 @@
  - (void)pictureInPictureController:(AVPictureInPictureController *)pictureInPictureController
@@ -496,14 +496,14 @@ index 5137c71..bb7bd02 100644
 +    self.restoreRequested = YES;
 +    completionHandler(YES);
  }
-
+ 
  @end
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
 index e64005d..69d7f92 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/RTCVideoViewManager.m
 @@ -158,6 +158,14 @@
-
+ 
  - (void)API_AVAILABLE(ios(15.0))setPIPOptions:(NSDictionary *)pipOptions {
      if (!pipOptions) {
 +        // Fabric can transiently replay an undefined prop while the app moves
@@ -519,7 +519,7 @@ index e64005d..69d7f92 100644
      }
 @@ -290,7 +298,19 @@
          }
-
+ 
          // See "didMoveToWindow" above.
 -        if (videoTrack && self.window) {
 +        //
@@ -543,11 +543,11 @@ index 6f7e5a2..6641650 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.h
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.h
 @@ -7,6 +7,7 @@
-
+ 
  @property(nonnull, nonatomic, readonly) AVSampleBufferDisplayLayer *sampleBufferLayer;
  @property(nonatomic, assign) BOOL shouldRender;
 +@property(nonatomic, assign) BOOL aspectFill;
-
+ 
  - (void)requestScaleRecalculation;
  @end
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/SampleBufferVideoCallView.m
@@ -557,7 +557,7 @@ index b1a0b96..d346a67 100644
 @@ -3,6 +3,23 @@
  #import <WebRTC/WebRTC.h>
  #import "I420Converter.h"
-
+ 
 +static void SpeakeasySampleBufferDiagnostic(NSString *message) {
 +    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
 +    @synchronized(defaults) {
@@ -576,7 +576,7 @@ index b1a0b96..d346a67 100644
 +}
 +
  @protocol SampleBufferRendering<AVQueuedSampleBufferRendering>
-
+ 
  - (BOOL)requiresFlushToResumeDecoding;
 @@ -20,6 +37,10 @@
  @property(nonatomic, retain) I420Converter *i420Converter;
@@ -586,9 +586,9 @@ index b1a0b96..d346a67 100644
 +@property(nonatomic, assign) BOOL loggedFirstEnqueue;
 +@property(nonatomic, assign) CGSize lastBoundsSize;
 +@property(nonatomic, assign) CGSize lastFrameSize;
-
+ 
  @end
-
+ 
 @@ -40,6 +61,11 @@
          } else {
              _renderer = self.sampleBufferLayer;
@@ -607,12 +607,12 @@ index b1a0b96..d346a67 100644
      NSLog(@"layerFailedToDecode, error: %@", [error localizedDescription]);
 +    SpeakeasySampleBufferDiagnostic([NSString stringWithFormat:@"decode failed (%@)", error.localizedDescription]);
  }
-
+ 
  - (AVSampleBufferDisplayLayer *)sampleBufferLayer {
 @@ -57,19 +84,63 @@
      _currentRotation = -1;
  }
-
+ 
 -- (void)recalculateScale:(RTCVideoRotation)rotation {
 -    if (self.currentRotation != rotation) {
 -        self.currentRotation = rotation;
@@ -623,7 +623,7 @@ index b1a0b96..d346a67 100644
 +    }
 +    self.sampleBufferLayer.videoGravity = AVLayerVideoGravityResizeAspect;
 +}
-
+ 
 -        CGFloat scale = 1;
 -        if (rotation == 90 || rotation == 270) {
 -            CGSize size = self.bounds.size;
@@ -639,7 +639,7 @@ index b1a0b96..d346a67 100644
 +            @"layout changed (bounds=%.0fx%.0f)", size.width, size.height]);
 +    }
 +}
-
+ 
 -        self.sampleBufferLayer.transform = CATransform3DConcat(
 -            CATransform3DMakeRotation(rotation / 180.0 * M_PI, 0.0, 0.0, 1.0), CATransform3DMakeScale(scale, scale, 1));
 +- (void)recalculateScaleForFrame:(RTCVideoFrame *)frame {
@@ -681,12 +681,12 @@ index b1a0b96..d346a67 100644
 +        bounds.width, bounds.height, frameSize.width, frameSize.height,
 +        (long)frame.rotation, self.aspectFill ? @"cover" : @"contain", scale]);
  }
-
+ 
  /** The size of the video frame. */
 @@ -82,6 +153,14 @@
          return;
      }
-
+ 
 +    if (!self.loggedFirstFrame) {
 +        self.loggedFirstFrame = YES;
 +        NSString *message = [NSString stringWithFormat:@"first frame (%dx%d rotation=%ld)",
@@ -701,7 +701,7 @@ index b1a0b96..d346a67 100644
 @@ -93,14 +172,21 @@
              [self.renderer flush];
          }
-
+ 
 -        if (!self.renderer.readyForMoreMediaData) {
 -            return;
 +        if (self.renderer.readyForMoreMediaData) {
@@ -729,7 +729,7 @@ index b1a0b96..d346a67 100644
  }
 @@ -115,25 +201,36 @@
      }
-
+ 
      // Create a CMVideoFormatDescription
 -    CMVideoFormatDescriptionRef formatDescription;
 -    CMVideoFormatDescriptionCreateForImageBuffer(kCFAllocatorDefault, pixelBuffer, &formatDescription);
@@ -740,7 +740,7 @@ index b1a0b96..d346a67 100644
 +        CVPixelBufferRelease(pixelBuffer);
 +        return nil;
 +    }
-
+ 
 -    // Create CMSampleTimingInfo
 -    // Timescale is 90khz according to RTCVideoFrame.h
 -    CMSampleTimingInfo timingInfo;
@@ -753,7 +753,7 @@ index b1a0b96..d346a67 100644
 +        .presentationTimeStamp = kCMTimeInvalid,
 +        .decodeTimeStamp = kCMTimeInvalid,
 +    };
-
+ 
      // Create CMSampleBuffer
 -    CMSampleBufferRef sampleBuffer;
 -    CMSampleBufferCreateForImageBuffer(
@@ -765,22 +765,22 @@ index b1a0b96..d346a67 100644
 +    if (sampleStatus != noErr || sampleBuffer == NULL) {
 +        return nil;
 +    }
-
+ 
      CFArrayRef attachments = CMSampleBufferGetSampleAttachmentsArray(sampleBuffer, YES);
      CFMutableDictionaryRef dict = (CFMutableDictionaryRef)CFArrayGetValueAtIndex(attachments, 0);
-
+ 
      CFDictionarySetValue(dict, kCMSampleAttachmentKey_DisplayImmediately, kCFBooleanTrue);
 -    CVPixelBufferRelease(pixelBuffer);
      return sampleBuffer;
  }
-
+ 
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 index e7f52a1..837cc59 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/VideoCaptureController.m
 @@ -3,6 +3,24 @@
  #import "VideoCaptureController.h"
-
+ 
  #import <React/RCTLog.h>
 +#import <UIKit/UIKit.h>
 +
@@ -800,20 +800,20 @@ index e7f52a1..837cc59 100644
 +        [defaults setObject:entries forKey:@"SpeakeasyPendingNativeDiagnostics"];
 +    }
 +}
-
+ 
  @interface VideoCaptureController ()
-
+ 
 @@ -14,6 +32,7 @@
  @property(nonatomic, assign) int width;
  @property(nonatomic, assign) int height;
  @property(nonatomic, assign) int frameRate;
 +@property(nonatomic, weak) AVCaptureSession *observedSession;
-
+ 
  @end
-
+ 
 @@ -31,9 +50,28 @@
  }
-
+ 
  - (void)dealloc {
 +    if (self.observedSession) {
 +        [[NSNotificationCenter defaultCenter] removeObserver:self
@@ -825,7 +825,7 @@ index e7f52a1..837cc59 100644
 +    }
      self.device = NULL;
  }
-
+ 
 +- (void)captureSessionWasInterrupted:(NSNotification *)notification {
 +    NSNumber *reason = notification.userInfo[AVCaptureSessionInterruptionReasonKey];
 +    SpeakeasyCaptureDiagnostic([NSString stringWithFormat:@"interrupted (reason=%@ background=%@)",
@@ -842,7 +842,7 @@ index e7f52a1..837cc59 100644
          self.device = [AVCaptureDevice deviceWithUniqueID:self.deviceId];
 @@ -63,18 +101,15 @@
      self.selectedFormat = format;
-
+ 
      AVCaptureSession *session = self.capturer.captureSession;
 -    if (@available(iOS 16.0, *)) {
 -        BOOL enable = self.enableMultitaskingCameraAccess;
@@ -864,11 +864,11 @@ index e7f52a1..837cc59 100644
      }
 -
      RCTLog(@"[VideoCaptureController] Capture will start");
-
+ 
      // Starting the capture happens on another thread. Wait for it.
 @@ -95,6 +130,35 @@
                          }];
-
+ 
      dispatch_semaphore_wait(semaphore, DISPATCH_TIME_FOREVER);
 +
 +    // RTCCameraVideoCapturer creates its inputs/outputs inside
@@ -900,16 +900,16 @@ index e7f52a1..837cc59 100644
 +        SpeakeasyCaptureDiagnostic(@"multitasking API unavailable (< iOS 16)");
 +    }
  }
-
+ 
  - (void)stopCapture {
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 index cd4fa13..64ab025 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 @@ -7,13 +7,39 @@
-
+ 
  @implementation WebRTCModule (RTCAudioSession)
-
+ 
 +// Speakeasy patch: manual-audio mode for CallKit coexistence.
 +//
 +// Stock react-native-webrtc 124 never sets `useManualAudio`, so WebRTC's ADM
@@ -938,7 +938,7 @@ index cd4fa13..64ab025 100644
 +    session.isAudioEnabled = YES;
      return nil;
  }
-
+ 
  RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidDeactivate) {
 -    [[RTCAudioSession sharedInstance] audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
 +    RTCAudioSession *session = [RTCAudioSession sharedInstance];
@@ -947,3 +947,4 @@ index cd4fa13..64ab025 100644
 +    session.isAudioEnabled = NO;
      return nil;
  }
+ 

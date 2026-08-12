@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
 
 const repoRoot = resolve(__dirname, '../../../..');
@@ -9,6 +10,16 @@ function source(relativePath: string): string {
 }
 
 describe('coordinated mobile release contracts', () => {
+  it('keeps the react-native-webrtc patch parseable by clean installs', () => {
+    const patchPath = resolve(repoRoot, 'apps/mobile/patches/react-native-webrtc+124.0.7.patch');
+    const result = spawnSync('git', ['apply', '--numstat', patchPath], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it('builds both Android artifacts in one Gradle invocation', () => {
     const workflow = source('.github/workflows/release-play.yml');
 
