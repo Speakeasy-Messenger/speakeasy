@@ -78,7 +78,7 @@ end
 # collides with one already uploaded for the same CFBundleShortVersionString.
 # The Android side derives versionCode from the git tag; iOS has no such
 # derivation, so set the build number from a monotonic CI counter
-# (BUILD_NUMBER env = github.run_number). No-op for a local run that doesn't
+# (BUILD_NUMBER env = github.run_id). No-op for a local run that doesn't
 # set it — you'd bump manually or let Xcode's value stand.
 def set_ci_build_number
   bn = ENV["BUILD_NUMBER"]
@@ -166,8 +166,8 @@ platform :ios do
     )
   end
 
-  desc "Build + upload to TestFlight"
-  lane :beta do
+  desc "Build a signed TestFlight IPA without uploading it"
+  lane :build_beta do
     # Create a dedicated, unlocked keychain with the signing key's partition
     # list set for NON-INTERACTIVE codesign. Without this, codesign blocks on
     # a GUI "allow access" prompt that never comes — on a CI runner it hangs
@@ -186,10 +186,16 @@ platform :ios do
       output_name: "Speakeasy.ipa",
       clean: true,
     )
+  end
+
+  desc "Upload an already-built IPA to TestFlight and distribute it"
+  lane :upload_beta do
+    key = asc_api_key
     groups = external_beta_group_names
     distribute = !groups.empty?
     upload_to_testflight(
       api_key: key,
+      ipa: ENV["IPA_PATH"] || "build/Speakeasy.ipa",
       # Auto-release to every external group (so testers actually get the
       # build — that release step used to be manual and was the real reason
       # builds went stale). Releasing REQUIRES a processed build, so we wait
@@ -206,6 +212,12 @@ platform :ios do
       # release with TESTFLIGHT_CHANGELOG.
       changelog: distribute ? (ENV["TESTFLIGHT_CHANGELOG"] || "Bug fixes and improvements.") : nil,
     )
+  end
+
+  desc "Build + upload to TestFlight"
+  lane :beta do
+    build_beta
+    upload_beta
   end
 
   desc "Add an ALREADY-UPLOADED, processed TestFlight build to the external " \

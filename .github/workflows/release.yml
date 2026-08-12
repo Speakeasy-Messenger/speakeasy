@@ -1,6 +1,7 @@
 name: Release APK
 
-# Triggered when a tag matching `alpha-*` is pushed (e.g. `alpha-0.2.0`).
+# Manual fallback for rebuilding a direct-download APK. Automatic tag releases
+# are handled by release-play.yml so Android is compiled only once.
 # Builds the release APK with the real Vouchflow API key (via repo
 # secret) and uploads it as an asset on the matching GitHub release.
 #
@@ -20,10 +21,7 @@ name: Release APK
 # CI takes it from there — APK lands on the release a few minutes later.
 
 on:
-  push:
-    # alpha-*  → alpha RCs (versionName "0.7.0-rc.84", code = rc number)
-    # v*       → production / GA (versionName "1.0.0", code = encoded semver)
-    tags: ['alpha-*', 'v*']
+  workflow_dispatch:
 
 permissions:
   contents: write

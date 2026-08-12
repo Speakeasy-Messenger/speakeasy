@@ -1,62 +1,36 @@
-name: Release to Play Store (Internal)
+name: Coordinated Mobile Beta Release
 
-# Triggered alongside the existing direct-download APK release workflow.
-# Same `alpha-*` tags, separate job — uploads the signed AAB to the
-# Play Console Internal Testing track via the AndroidPublisher REST API.
-#
-# Internal Testing is a closed list of testers (max 100), invisible to
-# anyone outside the list. Safe to run on every RC: doesn't affect
-# direct-download testers, doesn't appear in Play Store search, and
-# doesn't require Google review.
-#
-# Auth path: Workload Identity Federation (no static service-account
-# JSON to leak/rotate). The GCP-side setup lives in project
-# speakeasy-mobile-497702: pool `github-actions-pool`, provider
-# `github`, SA `fastlane-play-publisher@speakeasy-mobile-497702`.
-# See PARITY / PLAY-STORE-SETUP docs for the GCP console steps.
-#
-# Releases publish with status=completed — the AAB auto-promotes to the
-# Internal Testing tester list on upload, no "Send to testers" click
-# needed. See the detailed rationale at the RELEASE_STATUS step below
-# (incl. the full-screen-intent declaration caveat).
+# A single tag now builds Android once while iOS archives in parallel.
+# Publication is still ordered: Android reaches Play beta first, then the
+# already-built IPA uploads to TestFlight. alpha-* tags remain Android
+# Internal-only release candidates; v* tags run the complete beta sequence.
 
 on:
   push:
-    # alpha-*  → alpha RCs → Internal Testing (versionCode = rc number)
-    # v*       → production / GA build → Internal Testing, then promote to
-    #           Production via play-promote.yml (versionCode = encoded semver)
     tags: ['alpha-*', 'v*']
 
+concurrency:
+  group: mobile-beta-${{ github.ref }}
+  cancel-in-progress: false
+
 permissions:
-  contents: read
-  # google-github-actions/auth requires id-token: write to read the
-  # GitHub OIDC token that gets exchanged for a GCP access token.
+  contents: write
   id-token: write
 
 jobs:
-  release-play:
+  android-release:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     steps:
       - uses: actions/checkout@v6
 
-      # ── Release provenance guard ────────────────────────────────────────
-      # A release tag MUST point at a commit that is on `main`. On
-      # 2026-06-27 I forked the codebase, kept shipping releases from the
-      # branch, then moved releases back to `main` at v1.0.50 — silently
-      # dropping 69 commits that had already shipped. Users lost fixes for
-      # six weeks (prekey decrypt, push delivery, call-chrome auto-hide),
-      # and each resurfaced as a fresh "regression". Nothing detected it,
-      # because tagging any commit was allowed. This fails the release
-      # instead. If it trips: merge the branch to main first, then re-tag.
       - name: Assert the tag is on main
         run: |
           git fetch --no-tags --depth=200 origin main
           if git merge-base --is-ancestor "$GITHUB_SHA" origin/main; then
             echo "✅ $GITHUB_SHA is on main"
           else
-            echo "::error::Release tag ${GITHUB_REF##*/} points at $GITHUB_SHA, which is NOT an ancestor of origin/main."
-            echo "::error::Releasing off-main is what caused the v1.0.50 regression cascade. Merge to main, then re-tag."
+            echo "::error::Release tag ${GITHUB_REF##*/} is not an ancestor of origin/main. Merge to main, then re-tag."
             exit 1
           fi
 
@@ -82,9 +56,8 @@ jobs:
             ~/.gradle/caches
             ~/.gradle/wrapper
             apps/mobile/android/.gradle
-          key: gradle-play-${{ runner.os }}-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/**/gradle-wrapper.properties') }}
+          key: gradle-release-${{ runner.os }}-${{ hashFiles('apps/mobile/android/**/*.gradle*', 'apps/mobile/android/**/gradle-wrapper.properties') }}
           restore-keys: |
-            gradle-play-${{ runner.os }}-
             gradle-release-${{ runner.os }}-
             gradle-${{ runner.os }}-
 
@@ -94,7 +67,7 @@ jobs:
       - name: Build workspace packages
         run: npm run build
 
-      - name: Build release AAB
+      - name: Build signed APK and AAB together
         working-directory: apps/mobile/android
         env:
           ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
@@ -103,99 +76,88 @@ jobs:
           ORG_GRADLE_PROJECT_RELEASE_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
           ORG_GRADLE_PROJECT_RELEASE_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
         run: |
-          if [ -z "$VOUCHFLOW_WRITE_KEY" ]; then
-            echo "::error::VOUCHFLOW_WRITE_KEY secret is not set."
-            exit 1
-          fi
-          if [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
-            echo "::error::ANDROID_KEYSTORE_BASE64 secret is not set — cannot sign the release AAB."
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ] || [ -z "$ANDROID_KEYSTORE_BASE64" ]; then
+            echo "::error::Android release secrets are incomplete."
             exit 1
           fi
           keystore="$RUNNER_TEMP/speakeasy-release.keystore"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
-          # bundleRelease produces an .aab (Android App Bundle) instead
-          # of the .apk that assembleRelease produces. Play Store only
-          # accepts AABs since 2021.
-          ./gradlew :app:bundleRelease --no-daemon \
+          ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY" \
             -Pvouchflow.environment=production \
             -PRELEASE_STORE_FILE="$keystore"
 
-      - name: Assert built AAB carries the tag version
-        # Same defensive check as the APK pipeline — fail before publishing
-        # if the version-derivation chain produces a wrong manifest. AABs
-        # need bundletool to extract the manifest (aapt2 only handles APK
-        # format). bundletool is a single jar; download + run.
+      - name: Assert APK signing and artifact versions
         run: |
           tag="${GITHUB_REF##*/}"
-          # Mirror app/build.gradle: code = (M*10000+m*100+p)*1000 + sub,
-          # sub = rc number for alpha-<semver>-rc.N, else 999 for v<semver>.
           case "$tag" in
             v*-hotfix.*)
-              # GA hotfix re-cut: versionName stays the base GA semver, the
-              # versionCode advances into the 1000+ hotfix sub-range (see
-              # app/build.gradle computedVersionCode). v1.0.1-hotfix.1 →
-              # name 1.0.1, code (10001)*1000 + (999+1) = 10002000.
               base_name="${tag#v}"; expected_name="${base_name%-hotfix.*}"
               hf="${tag##*-hotfix.}"; sub=$((999 + 10#$hf)) ;;
-            v*)  expected_name="${tag#v}";     sub=999 ;;
-            *)   expected_name="${tag#alpha-}"; sub="${tag##*-rc.}" ;;
+            v*) expected_name="${tag#v}"; sub=999 ;;
+            *) expected_name="${tag#alpha-}"; sub="${tag##*-rc.}" ;;
           esac
           IFS=. read -r MA MI PA <<< "${expected_name%%-*}"
           expected_code=$(( (10#$MA * 10000 + 10#$MI * 100 + 10#$PA) * 1000 + 10#$sub ))
+          apk="apps/mobile/android/app/build/outputs/apk/release/app-release.apk"
           aab="apps/mobile/android/app/build/outputs/bundle/release/app-release.aab"
 
-          # Pinned to a known-good bundletool release. Bump deliberately;
-          # newer versions occasionally change command-line surface area
-          # (e.g. xpath output formatting).
+          apksigner=$(find "$ANDROID_SDK_ROOT/build-tools" -name apksigner -type f | sort -V | tail -1)
+          certs=$("$apksigner" verify --print-certs "$apk")
+          echo "$certs"
+          if echo "$certs" | grep -q "CN=Android Debug"; then
+            echo "::error::Release APK is debug-signed."
+            exit 1
+          fi
+
+          aapt=$(find "$ANDROID_SDK_ROOT/build-tools" -name aapt -type f -executable | sort -V | tail -1)
+          badging=$("$aapt" dump badging "$apk")
+          apk_name=$(echo "$badging" | grep -oP "versionName='\K[^']+")
+          apk_code=$(echo "$badging" | grep -oP "versionCode='\K[^']+")
+
           BUNDLETOOL_VERSION=1.18.1
           bundletool="$RUNNER_TEMP/bundletool.jar"
           curl -fsSL -o "$bundletool" \
             "https://github.com/google/bundletool/releases/download/${BUNDLETOOL_VERSION}/bundletool-all-${BUNDLETOOL_VERSION}.jar"
+          aab_name=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionName)
+          aab_code=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionCode)
 
-          # bundletool's --xpath returns the attribute value as a plain
-          # string on stdout (with a trailing newline). No quoting,
-          # no JSON wrapper. Manifest attributes are in the `android:`
-          # namespace — omit the prefix and the xpath silently returns
-          # empty (bundletool doesn't warn).
-          actual_name=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionName)
-          actual_code=$(java -jar "$bundletool" dump manifest --bundle="$aab" --xpath=/manifest/@android:versionCode)
-
-          echo "Expected versionName: $expected_name"
-          echo "Expected versionCode: $expected_code"
-          echo "Actual versionName:   $actual_name"
-          echo "Actual versionCode:   $actual_code"
-
-          fail=0
-          if [ "$actual_name" != "$expected_name" ]; then
-            echo "::error::AAB versionName ($actual_name) does not match tag ($expected_name)"
-            fail=1
+          echo "Expected: $expected_name ($expected_code)"
+          echo "APK:      $apk_name ($apk_code)"
+          echo "AAB:      $aab_name ($aab_code)"
+          if [ "$apk_name" != "$expected_name" ] || [ "$apk_code" != "$expected_code" ] || \
+             [ "$aab_name" != "$expected_name" ] || [ "$aab_code" != "$expected_code" ]; then
+            echo "::error::A release artifact version does not match the tag."
+            exit 1
           fi
-          if [ "$actual_code" != "$expected_code" ]; then
-            echo "::error::AAB versionCode ($actual_code) does not match tag-derived code ($expected_code)"
-            fail=1
-          fi
-          exit $fail
 
-      - name: Upload AAB as a downloadable artifact
-        # So the signed release bundle can be grabbed from the run even when
-        # the Play upload below fails (e.g. the one-time full-screen-intent
-        # 403 — the declaration form in Play Console only appears once a
-        # bundle carrying USE_FULL_SCREEN_INTENT has been uploaded, so the
-        # break-the-deadlock move is to download this AAB and upload it once
-        # via the Console UI, complete the declaration, then let CI take over).
+      - name: Upload AAB artifact
         uses: actions/upload-artifact@v4
         with:
           name: app-release-aab-${{ github.ref_name }}
           path: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
           if-no-files-found: error
 
-      - name: Authenticate to Google Cloud via Workload Identity Federation
-        # Exchanges the GitHub OIDC token for a short-lived GCP access
-        # token that impersonates the fastlane-play-publisher SA. The
-        # access token is exposed as the step's `access_token` output
-        # AND written to a credentials file at $GOOGLE_APPLICATION_CREDENTIALS.
-        # Our upload script uses the access_token output directly.
+      - name: Rename APK with version tag
+        id: rename
+        run: |
+          out="speakeasy-${GITHUB_REF##*/}.apk"
+          cp apps/mobile/android/app/build/outputs/apk/release/app-release.apk "$out"
+          echo "apk=$out" >> "$GITHUB_OUTPUT"
+
+      - name: Upload APK to GitHub release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          tag="${GITHUB_REF##*/}"
+          if gh release view "$tag" >/dev/null 2>&1; then
+            gh release upload "$tag" "${{ steps.rename.outputs.apk }}" --clobber
+          else
+            gh release create "$tag" "${{ steps.rename.outputs.apk }}" \
+              --title "$tag" --notes "Mobile artifacts built by the coordinated release workflow."
+          fi
+
+      - name: Authenticate to Google Cloud
         id: gcp-auth
         uses: google-github-actions/auth@v3
         with:
@@ -204,16 +166,7 @@ jobs:
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/androidpublisher
 
-      - name: Upload to Internal App Sharing (review-free install link)
-        # The "update behind the review" path: a Play-hosted install link
-        # that bypasses the track review, so testers get the latest build
-        # via Play (no sideload) even while an App-content / full-screen-
-        # intent declaration review holds the normal track release. Best-
-        # effort — never fails the build (see the script). The link is
-        # printed to the run summary. The automatic @speaker broadcast is
-        # MUTED: ADMIN_TOKEN is intentionally NOT passed, so the script's
-        # `if [ -n "$ADMIN_TOKEN" ]` broadcast block is skipped. Announce
-        # deliberately via `gh workflow run announce.yml` instead.
+      - name: Upload to Internal App Sharing
         env:
           ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
           PACKAGE_NAME: xyz.speakeasyapp.app
@@ -221,37 +174,149 @@ jobs:
           RELEASE_NAME: ${{ github.ref_name }}
         run: bash scripts/play-internal-share.sh
 
-      - name: Upload AAB to Play Console Internal Testing track
+      - name: Publish to Play Internal
         env:
           ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
           PACKAGE_NAME: xyz.speakeasyapp.app
           AAB_PATH: apps/mobile/android/app/build/outputs/bundle/release/app-release.aab
           TRACK: internal
-          # Play Console release name is what shows up in the dashboard's
-          # "Release name" column — use the full tag so it's bisectable
-          # against the GitHub release.
           RELEASE_NAME: ${{ github.ref_name }}
-          # 'completed' auto-rolls the AAB out to the Internal Testing
-          # tester list on upload — no Play Console click required.
-          # Safe for Internal: that track is the founder's hand-picked
-          # tester list, doesn't undergo Google review, and is the
-          # whole point of the pipeline (every RC should reach testers
-          # without manual ceremony). Open / Production promotions
-          # still go through `play-promote.yml` with their own status
-          # choice and Google review gating.
-          #
-          # Was 'draft' through rc.34. Flipped after a tester reported
-          # the Play Store wasn't surfacing the upgrade — every RC was
-          # silently waiting on a "Send to testers" click that wasn't
-          # always remembered.
-          #
-          # FULL-SCREEN INTENT: a 'completed' commit of a bundle carrying
-          # USE_FULL_SCREEN_INTENT is rejected (403 "you must let us know…")
-          # until the full-screen-intent declaration is filed in Play Console
-          # (Monitor and improve → App content). Declaration submitted for
-          # Google review at rc.72 — testing here whether SUBMISSION clears
-          # the upload gate (vs needing full APPROVAL). If this 'completed'
-          # commit 403s, revert to 'draft' (which commits regardless) until
-          # the review is approved.
           RELEASE_STATUS: completed
         run: bash scripts/play-publish.sh
+
+      - name: Promote Android to beta
+        if: startsWith(github.ref_name, 'v')
+        env:
+          ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
+          PACKAGE_NAME: xyz.speakeasyapp.app
+          FROM_TRACK: internal
+          TO_TRACK: beta
+          RELEASE_STATUS: completed
+        run: bash scripts/play-promote-track.sh
+
+  ios-archive:
+    if: startsWith(github.ref_name, 'v')
+    runs-on: macos-latest
+    timeout-minutes: 75
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Assert the tag is on main
+        run: |
+          git fetch --no-tags --depth=200 origin main
+          git merge-base --is-ancestor "$GITHUB_SHA" origin/main || {
+            echo "::error::Release tag is not on main."; exit 1;
+          }
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Select compatible Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app
+          xcodebuild -version
+
+      - name: Cache libsignal prebuilt FFI
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/org.signal.libsignal
+          key: libsignal-${{ runner.os }}-v0.59.0
+
+      - name: Install dependencies and build workspace
+        run: |
+          npm ci
+          npm run build
+
+      - name: Write production iOS configuration
+        working-directory: apps/mobile/ios/Speakeasy
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+          FIREBASE_IOS_PLIST_B64: ${{ secrets.FIREBASE_IOS_PLIST_B64 }}
+        run: |
+          if [ -z "$VOUCHFLOW_WRITE_KEY" ] || [ -z "$FIREBASE_IOS_PLIST_B64" ]; then
+            echo "::error::iOS release configuration secrets are incomplete."; exit 1
+          fi
+          sed -e "s|vsk_sandbox_replace_with_real_key|${VOUCHFLOW_WRITE_KEY}|" \
+              -e "s|<string>sandbox</string>|<string>production</string>|" \
+              Vouchflow.plist.example > Vouchflow.plist
+          echo "$FIREBASE_IOS_PLIST_B64" | base64 --decode > GoogleService-Info.plist
+          plutil -lint Vouchflow.plist GoogleService-Info.plist
+
+      - name: Wire iOS project
+        working-directory: apps/mobile/ios
+        run: |
+          gem install xcodeproj --no-document
+          ruby tools/wire-ios-project.rb
+
+      - name: Set up SSH key for match
+        env:
+          MATCH_DEPLOY_KEY: ${{ secrets.MATCH_DEPLOY_KEY }}
+        run: |
+          if [ -z "$MATCH_DEPLOY_KEY" ]; then
+            echo "::error::MATCH_DEPLOY_KEY is not set."; exit 1
+          fi
+          mkdir -p ~/.ssh
+          printf '%s\n' "$MATCH_DEPLOY_KEY" > ~/.ssh/match_key
+          chmod 600 ~/.ssh/match_key
+          ssh-keyscan github.com >> ~/.ssh/known_hosts 2>/dev/null
+          {
+            echo "Host github.com"
+            echo "  IdentityFile ~/.ssh/match_key"
+            echo "  IdentitiesOnly yes"
+          } >> ~/.ssh/config
+
+      - name: Install fastlane and CocoaPods
+        working-directory: apps/mobile/ios
+        run: bundle install
+
+      - name: Install pods
+        working-directory: apps/mobile/ios
+        run: USE_FRAMEWORKS=static pod install
+
+      - name: Build signed TestFlight IPA
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
+          BUILD_NUMBER: ${{ github.run_id }}
+        run: bundle exec fastlane ios build_beta
+
+      - name: Upload IPA artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: testflight-ipa-${{ github.ref_name }}
+          path: apps/mobile/ios/build/Speakeasy.ipa
+          retention-days: 1
+          if-no-files-found: error
+
+  ios-testflight:
+    if: startsWith(github.ref_name, 'v')
+    needs: [android-release, ios-archive]
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Download prebuilt IPA
+        uses: actions/download-artifact@v4
+        with:
+          name: testflight-ipa-${{ github.ref_name }}
+          path: testflight-ipa
+
+      - name: Install fastlane
+        working-directory: apps/mobile/ios
+        run: bundle install
+
+      - name: Upload to TestFlight
+        working-directory: apps/mobile/ios
+        env:
+          ASC_KEY_ID: ${{ secrets.ASC_KEY_ID }}
+          ASC_ISSUER_ID: ${{ secrets.ASC_ISSUER_ID }}
+          ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
+          IPA_PATH: ${{ github.workspace }}/testflight-ipa/Speakeasy.ipa
+          TESTFLIGHT_EXTERNAL_GROUPS: Friends
+        run: bundle exec fastlane ios upload_beta
