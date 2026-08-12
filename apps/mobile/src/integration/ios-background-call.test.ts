@@ -165,6 +165,15 @@ describe('iOS background-call native contracts', () => {
     expect(onResume).toContain('videoCallActive');
   });
 
+  it('remounts Android video renderers when their assigned feed changes', () => {
+    const screen = source('src/screens/VideoCallScreen.tsx');
+
+    expect(screen).toContain("fullscreenIsLocal ? 'local' : 'remote'");
+    expect(screen).toContain('key={`fs-${fullscreenFeedTag}`}');
+    expect(screen).toContain("swapped ? 'remote' : 'local'");
+    expect(screen).toContain('key={`bubble-${bubbleFeedTag}`}');
+  });
+
   it('restores the iOS call and ends it when the native PiP close control is used', () => {
     const webrtcPatch = source('patches/react-native-webrtc+124.0.7.patch');
     const delegate = source('ios/Speakeasy/AppDelegate.mm');
