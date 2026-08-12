@@ -69,10 +69,13 @@ import {
   pendingInboundFromDecryptedPush,
 } from './pending-inbound.js';
 import {
+  consumeForegroundTap,
+  createForegroundTapDrain,
   directPeerForPush,
   notificationTapData,
   parsePersistedPush,
   toPersistedPush,
+  type ForegroundTap,
   type PersistedPush,
 } from './push-tap-target.js';
 
@@ -1511,6 +1514,38 @@ export function usePushNavigation(
       if (p) void route(p, 'fg-tap');
     });
 
+    const drainForegroundTap = createForegroundTapDrain<
+      ForegroundTap<PersistedPush>
+    >({
+      consume: async () => {
+        const tapped = await consumeForegroundTap<PersistedPush>({
+          consumeNative: async () => {
+            const nativeTap = await NotifMessaging.consumePendingTap();
+            return nativeTap
+              ? toPersistedPush(nativeTap as unknown as FcmData)
+              : null;
+          },
+          consumeDeferred: consumeRawPush,
+        });
+        if (!tapped) return null;
+        if (tapped.source === 'native' && tapped.nativeAttempt > 1) {
+          diag('push-nav', 'native tap arrived after foreground edge', {
+            attempt: tapped.nativeAttempt,
+            conversationId: tapped.value.conversationId,
+          });
+        }
+        return tapped;
+      },
+      // Finish routing a tap already removed from the one-shot native slot
+      // even if this effect is cleaned up while the asynchronous drain runs.
+      // routeTarget reads navRef.current, so a remount remains safe.
+      handle: (tapped) =>
+        route(
+          tapped.value,
+          tapped.source === 'native' ? 'native-tap-resume' : 'resume-tap',
+        ),
+    });
+
     // A tap that landed while the app was backgrounded was persisted by
     // notifee.onBackgroundEvent — drain it when the app returns active.
     // Same for native messaging notifications, whose tap target is
@@ -1518,18 +1553,7 @@ export function usePushNavigation(
     const appStateSub = AppState.addEventListener('change', (state) => {
       if (state !== 'active') return;
       void drainPendingReplies();
-      void (async () => {
-        const nativeTap = await NotifMessaging.consumePendingTap();
-        if (nativeTap && !cancelled) {
-          const np = toPersistedPush(nativeTap as unknown as FcmData);
-          if (np) {
-            await route(np, 'native-tap-resume');
-            return;
-          }
-        }
-        const deferred = await consumeRawPush();
-        if (deferred && !cancelled) await route(deferred, 'resume-tap');
-      })();
+      if (!cancelled) void drainForegroundTap();
     });
 
     // iOS warm tap: app backgrounded, user taps the OS-rendered banner.

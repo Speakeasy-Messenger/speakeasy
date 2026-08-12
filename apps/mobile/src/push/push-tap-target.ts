@@ -20,6 +20,76 @@ export type PersistedPush = {
   persistedAt: number;
 };
 
+export type ForegroundTap<T> = {
+  source: 'native' | 'deferred';
+  value: T;
+  nativeAttempt: number;
+};
+
+/**
+ * Coalesce repeated AppState `active` notifications into one tap drain.
+ * Consuming the native slot is destructive, so overlapping drains must share
+ * both the consume and handle phases or one callback can steal the tap from
+ * the callback that would have routed it.
+ */
+export function createForegroundTapDrain<T>(args: {
+  consume: () => Promise<T | null>;
+  handle: (value: T) => Promise<void>;
+}): () => Promise<void> {
+  let activeDrain: Promise<void> | null = null;
+
+  return () => {
+    if (activeDrain) return activeDrain;
+    activeDrain = (async () => {
+      const value = await args.consume();
+      if (value) await args.handle(value);
+    })().finally(() => {
+      activeDrain = null;
+    });
+    return activeDrain;
+  };
+}
+
+/**
+ * Drain a tap when Android returns the app to the foreground.
+ *
+ * MainActivity and React Native do not guarantee that `onNewIntent` has
+ * populated the native tap slot before JS observes AppState `active`. Check
+ * the slot immediately, preserve the legacy deferred/notifee path, then poll
+ * the native slot briefly so a late intent cannot strand the tap until the
+ * next foreground transition.
+ */
+export async function consumeForegroundTap<T>(args: {
+  consumeNative: () => Promise<T | null>;
+  consumeDeferred: () => Promise<T | null>;
+  wait?: (ms: number) => Promise<void>;
+  retryDelaysMs?: readonly number[];
+}): Promise<ForegroundTap<T> | null> {
+  const wait =
+    args.wait ?? ((ms) => new Promise((resolve) => setTimeout(resolve, ms)));
+  const retryDelays = args.retryDelaysMs ?? [100, 400];
+
+  const immediateNative = await args.consumeNative();
+  if (immediateNative) {
+    return { source: 'native', value: immediateNative, nativeAttempt: 1 };
+  }
+
+  const deferred = await args.consumeDeferred();
+  if (deferred) {
+    return { source: 'deferred', value: deferred, nativeAttempt: 1 };
+  }
+
+  for (let i = 0; i < retryDelays.length; i += 1) {
+    await wait(retryDelays[i]!);
+    const native = await args.consumeNative();
+    if (native) {
+      return { source: 'native', value: native, nativeAttempt: i + 2 };
+    }
+  }
+
+  return null;
+}
+
 /** Keep every field required to route a notification after it is tapped. */
 export function notificationTapData(data: PushTapData): Record<string, string> {
   return {
