@@ -340,6 +340,16 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
     if (autoHideActive) setActivityNonce((n) => n + 1);
   }, [autoHideActive]);
 
+  useEffect(() => {
+    if (Platform.OS !== 'android' || !active) return;
+    const hasRemote = !!remoteUrl && active.stage === 'connected';
+    diag('call', 'video slot assignment', {
+      fullscreen: !hasRemote || swapped ? 'local' : 'remote',
+      bubble: hasRemote ? (swapped ? 'remote' : 'local') : 'none',
+      stage: active.stage,
+    });
+  }, [active?.stage, remoteUrl, swapped]);
+
   if (!active) {
     return (
       <SafeAreaView style={[styles.root, { backgroundColor: themed.cream }]}>
@@ -385,7 +395,16 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
   // The bubble only exists once both feeds are present (i.e. connected).
   const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
-
+  // Android/Fabric can deliver the full-screen local→remote prop update while
+  // mounting the local bubble in the same commit. Reusing both native WebRTC
+  // renderers in that handoff occasionally leaves their track attachments
+  // racing, which paints the two feeds alternately until the user swaps twice.
+  // Give Android a fresh renderer whenever a slot changes ownership. Keep iOS
+  // stable because AVKit requires its PiP source RTCView to remain mounted.
+  const fullscreenFeedTag =
+    Platform.OS === 'android' ? (fullscreenIsLocal ? 'local' : 'remote') : 'stable';
+  const bubbleFeedTag =
+    Platform.OS === 'android' ? (swapped ? 'remote' : 'local') : 'stable';
   // Android PiP / floating window: render ONLY the remote video, full-bleed,
   // and nothing else. This is the proven react-native-webrtc PiP recipe ("show
   // only the video") — the tiny window has no room for chrome, and the simpler
@@ -459,7 +478,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           // native PiP event doesn't arrive. (The ~250ms placeholder on PiP
           // entry is Android's own surface-reestablish behavior, not this
           // remount — verified identical with a stable key.)
-          key={`fs-${compact}`}
+          key={`fs-${fullscreenFeedTag}`}
           streamURL={fullscreenUrl}
           style={styles.remoteView}
           objectFit="cover"
@@ -557,6 +576,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             }}
           >
             <RTCView
+              key={`bubble-${bubbleFeedTag}`}
               streamURL={pipUrl}
               style={StyleSheet.absoluteFill}
               objectFit="cover"
