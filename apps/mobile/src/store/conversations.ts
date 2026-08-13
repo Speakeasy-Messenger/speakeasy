@@ -415,6 +415,40 @@ export async function flushConversationsPersist(opts?: {
   }
 }
 
+/**
+ * Merge messages decrypted by Android's headless push handler into the live
+ * conversation store.
+ *
+ * Hydration calls this on cold launch, while App.tsx also calls it whenever
+ * the app returns to the foreground. The latter is essential for a warm
+ * notification tap: the process and hydrated Zustand store can survive in
+ * the background, so hydrate() does not run again even though the headless
+ * handler has appended new records to the encrypted inbox.
+ */
+export async function drainBackgroundMessageInbox(): Promise<number> {
+  const state = useConversations.getState();
+  if (!state.hydrated || !persistGateOpen) return 0;
+
+  try {
+    const count = await drainPendingInboundMessages({
+      add: (conversationId, message) =>
+        useConversations.getState().add(conversationId, message),
+      persist: () => flushConversationsPersist({ throwOnFailure: true }),
+    });
+    if (count > 0) {
+      diag('persist', 'drained background message inbox', { count });
+    }
+    return count;
+  } catch (err) {
+    // Keep the inbox intact. A later foreground pass, cold launch, or WS
+    // replay can recover it without losing the server message id.
+    diag('persist', 'background message inbox drain failed', {
+      err: String(err),
+    });
+    return 0;
+  }
+}
+
 export const useConversations = create<ConversationsState>((set, get) => ({
   byId: {},
   hydrated: false,
@@ -880,18 +914,10 @@ export const useConversations = create<ConversationsState>((set, get) => ({
       set({ hydrated: true });
     }
     try {
-      const count = await drainPendingInboundMessages({
-        add: (conversationId, message) => get().add(conversationId, message),
-        persist: () => flushConversationsPersist({ throwOnFailure: true }),
-      });
-      if (count > 0) {
-        diag('persist', 'drained background message inbox', { count });
-      }
+      await drainBackgroundMessageInbox();
       await persistPushMuteSnapshot(get().byId);
     } catch (err) {
-      // Keep the inbox intact for the next launch. The WS replay remains a
-      // fallback for this session, so a transient DB error is non-fatal.
-      diag('persist', 'background message inbox drain failed', {
+      diag('persist', 'push mute snapshot refresh failed', {
         err: String(err),
       });
     }
