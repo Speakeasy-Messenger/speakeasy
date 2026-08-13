@@ -42,7 +42,10 @@ import { CALL_NOTIF_ACTIONS } from '../calls/call-notification.js';
 import { getActiveCallControls } from '../calls/call-controls-registry.js';
 import type { NavigationContainerRef } from '@react-navigation/native';
 import type { RootStack } from '../navigation/RootNavigator.js';
-import { useConversations } from '../store/conversations.js';
+import {
+  drainBackgroundMessageInbox,
+  useConversations,
+} from '../store/conversations.js';
 import { useGroups } from '../store/groups.js';
 import { resolveGroupBannerTitle } from './group-banner-title.js';
 import { useDistributionIds } from '../store/distribution-ids.js';
@@ -78,6 +81,9 @@ import {
   type ForegroundTap,
   type PersistedPush,
 } from './push-tap-target.js';
+import {
+  routeForegroundPush,
+} from './foreground-push-presentation.js';
 
 type RemoteMessage = FirebaseMessagingTypes.RemoteMessage;
 
@@ -1339,18 +1345,55 @@ if (Platform.OS === 'ios') {
 // ---------------------------------------------------------------------------
 
 let foregroundHandlerUnsub: (() => void) | undefined;
+let foregroundNotificationUiReady = false;
+
+/**
+ * The native AppState can become `active` before React has finished mounting
+ * the navigator and its InAppBanner. During that cold-launch window Firebase
+ * routes data messages through `onMessage`, even though there is no usable UI
+ * to present them. App.tsx flips this only after NavigationContainer.onReady.
+ */
+export function setForegroundNotificationUiReady(ready: boolean): void {
+  foregroundNotificationUiReady = ready;
+}
 
 export function registerForegroundMessageHandler(): void {
   if (foregroundHandlerUnsub) return;
 
   foregroundHandlerUnsub = messaging().onMessage((remoteMessage: RemoteMessage) => {
     const data = (remoteMessage.data ?? {}) as FcmData;
-    // No notification while the app is foregrounded — the message
-    // renders in-app once it drains over the WebSocket.
-    diag('push-fg', 'foreground push received (no banner)', {
+    const input = {
+      platform: Platform.OS,
+      uiReady: foregroundNotificationUiReady,
       conversationId: data.conversation_id,
-      kind: data.notify_kind,
-      msgType: data.msg_type,
+      notifyKind: data.notify_kind,
+    };
+    void routeForegroundPush({
+      input,
+      displaySystemNotification: () => displayPushNotification(data),
+      drainPersistedMessage: drainBackgroundMessageInbox,
+      onBeforeSystemDisplay: () => {
+        diag('push-fg', 'foreground push arrived before UI ready — displaying notification', {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+        });
+      },
+      onSystemDisplayError: (err) => {
+        diag('push-fg', 'pre-UI notification display failed', {
+          conversationId: data.conversation_id,
+          err: String(err),
+        });
+      },
+      onNormalForeground: () => {
+        // No notification while the app is foregrounded — the message
+        // renders in-app once it drains over the WebSocket.
+        diag('push-fg', 'foreground push received (no banner)', {
+          conversationId: data.conversation_id,
+          kind: data.notify_kind,
+          msgType: data.msg_type,
+        });
+      },
     });
   });
 
