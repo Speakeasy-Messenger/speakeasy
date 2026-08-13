@@ -89,9 +89,13 @@ export class SpeakeasyWsClient {
   private reconnectAttempts = 0;
   private intentionalClose = false;
   // True after a socket closed mid-`authenticating` (a bad token). The
-  // next `handleOpen` then asks `getToken` for a freshly re-attested
-  // token instead of the cached (likely-bad) one.
+  // reconnect path then obtains a freshly re-attested token before it opens
+  // the replacement socket.
   private lastAuthFailed = false;
+  // A forced refresh can present Face ID / passkey UI and take longer than
+  // the server's unauthenticated-socket deadline. Refresh before opening the
+  // replacement socket, then consume the token immediately from handleOpen.
+  private prefetchedAuthToken?: string;
   // True while an `onAuthRejected` re-enroll is running. Stops a fast
   // 4003 reconnect cycle from spawning a re-enroll per close.
   private authRecoveryInFlight = false;
@@ -141,6 +145,7 @@ export class SpeakeasyWsClient {
   close(): void {
     this.intentionalClose = true;
     this.clearTimers();
+    this.prefetchedAuthToken = undefined;
     if (this.socket && this.socket.readyState <= 1) {
       this.socket.close(1000, 'client_close');
     }
@@ -417,9 +422,13 @@ export class SpeakeasyWsClient {
   private async handleOpen(): Promise<void> {
     this.setState('authenticating');
     try {
-      const token = await this.opts.getToken(
-        this.lastAuthFailed ? { forceRefresh: true } : undefined,
-      );
+      const prefetchedToken = this.prefetchedAuthToken;
+      this.prefetchedAuthToken = undefined;
+      const token =
+        prefetchedToken ??
+        (await this.opts.getToken(
+          this.lastAuthFailed ? { forceRefresh: true } : undefined,
+        ));
       // Phase 5j Private Call: declare this device's call-kind
       // capabilities so the server (a) UNION-aggregates them for
       // sender-side preflight (`GET /v1/users/:id`) and (b) only
@@ -534,7 +543,27 @@ export class SpeakeasyWsClient {
     const max = this.opts.maxReconnectMs ?? 30_000;
     const delay = Math.min(max, base * 2 ** this.reconnectAttempts);
     this.reconnectAttempts++;
-    this.reconnectTimer = setTimeout(() => this.openSocket(), delay);
+    this.reconnectTimer = setTimeout(() => {
+      if (!this.lastAuthFailed) {
+        this.openSocket();
+        return;
+      }
+
+      // Do not open a socket until interactive verification completes. The
+      // server closes sockets that remain unauthenticated for 10 seconds;
+      // Face ID / passkey UI can legitimately take longer than that.
+      void this.opts
+        .getToken({ forceRefresh: true })
+        .then((token) => {
+          if (this.intentionalClose || this.state !== 'reconnecting') return;
+          this.prefetchedAuthToken = token;
+          this.openSocket();
+        })
+        .catch(() => {
+          if (this.intentionalClose || this.state !== 'reconnecting') return;
+          this.scheduleReconnect();
+        });
+    }, delay);
   }
 
   private startPingLoop(): void {

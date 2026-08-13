@@ -151,7 +151,7 @@ describe('SpeakeasyWsClient', () => {
     await Promise.resolve();
     first.fire('close', { code: 4004, reason: 'low_confidence' });
 
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
     const second = FakeSocket.instances[1]!;
     second.open();
     await Promise.resolve();
@@ -443,12 +443,15 @@ describe('SpeakeasyWsClient', () => {
     });
   });
 
-  it('re-attests (getToken forceRefresh) after a socket closes mid-authentication', async () => {
+  it('finishes slow re-attestation before opening the replacement socket', async () => {
     const calls: Array<{ forceRefresh?: boolean } | undefined> = [];
-    let n = 0;
+    let finishRefresh!: (token: string) => void;
     const getToken = async (opts?: { forceRefresh?: boolean }) => {
       calls.push(opts);
-      return `tok-${++n}`;
+      if (!opts?.forceRefresh) return 'tok-1';
+      return new Promise<string>((resolve) => {
+        finishRefresh = resolve;
+      });
     };
     const { client } = makeClient(getToken);
     client.connect();
@@ -462,15 +465,25 @@ describe('SpeakeasyWsClient', () => {
     expect(client.getState()).toBe('reconnecting');
 
     vi.advanceTimersByTime(100);
+    await Promise.resolve();
+
+    // Device verification may require Face ID / passkey UI and take longer
+    // than the server's 10-second unauthenticated-socket deadline. No socket
+    // should exist until verification has produced the replacement token.
+    expect(calls[1]).toEqual({ forceRefresh: true });
+    expect(FakeSocket.instances).toHaveLength(1);
+    vi.advanceTimersByTime(20_000);
+    expect(FakeSocket.instances).toHaveLength(1);
+
+    finishRefresh('tok-2');
+    await Promise.resolve();
+    await Promise.resolve();
     const second = FakeSocket.instances[1]!;
     second.open();
     await Promise.resolve();
     await Promise.resolve();
 
-    // First connect: plain getToken. Reconnect after the auth-phase
-    // close: getToken is asked to force a fresh re-attestation.
     expect(calls[0]).toBeUndefined();
-    expect(calls[1]).toEqual({ forceRefresh: true });
     expect(JSON.parse(second.sent[0]!)).toEqual({ type: 'auth', token: 'tok-2' });
   });
 
@@ -535,7 +548,7 @@ describe('SpeakeasyWsClient', () => {
     finishReenroll();
     await Promise.resolve();
     await Promise.resolve();
-    vi.advanceTimersByTime(100);
+    await vi.advanceTimersByTimeAsync(100);
     expect(FakeSocket.instances).toHaveLength(2);
   });
 
