@@ -96,7 +96,11 @@ import { tryRegisterPushToken } from './src/push/register.js';
 import { parseAdd } from './src/utils/handle-link.js';
 import { colors } from './src/theme/index.js';
 import { SplashScreen } from './src/components/SplashScreen.js';
-import { registerForegroundMessageHandler, usePushNavigation } from './src/push/push-handler.js';
+import {
+  registerForegroundMessageHandler,
+  setForegroundNotificationUiReady,
+  usePushNavigation,
+} from './src/push/push-handler.js';
 
 // Global unhandled-rejection handler — prevents promise rejections
 // from crashing the RN host on Android.
@@ -1398,7 +1402,10 @@ export default function App({ videoCallHarness = false }: AppProps) {
             >
               <RootNavigator
                 navRef={navRef}
-                onReady={() => setNavReady(true)}
+                onReady={() => {
+                  setForegroundNotificationUiReady(true);
+                  setNavReady(true);
+                }}
                 callOrchestrator={callOrchestrator}
                 onBannerTap={(target) => {
                   if (target.kind === 'direct') {
