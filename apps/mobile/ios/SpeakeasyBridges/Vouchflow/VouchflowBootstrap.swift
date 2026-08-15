@@ -7,9 +7,10 @@
 //  doesn't bridge to ObjC, so AppDelegate.mm can't construct one
 //  directly. We expose a string-typed shim instead.
 //
-//  SDK 2.0.0: `VouchflowConfig` now ships with correct default pin values
-//  for the Let's Encrypt E7 intermediate. No need to pass empty/TODO
-//  placeholders — the SDK's defaults are production-ready.
+//  The SDK's August 2026 defaults still include an expired leaf pin. SDK 2.4.0
+//  also checks pins before evaluating server trust, so a public intermediate
+//  is not safe here. Pin the current production leaf in both SDK slots until
+//  Vouchflow evaluates hostname/chain validity before its SPKI comparison.
 //
 
 import Foundation
@@ -18,20 +19,22 @@ import VouchflowSDK
 @objc(SpeakeasyVouchflowBootstrap)
 public final class SpeakeasyVouchflowBootstrap: NSObject {
 
+    private static let productionLeafPin = "mX8Bi7dmXyNH4V/rjrvMcP1ZcxBzrnRmnNPnAvi1kTs="
+
     /// Called once from AppDelegate at app launch. Reads the api key and
     /// environment string out of the gitignored Speakeasy/Vouchflow.plist
     /// (template at Vouchflow.plist.example).
     ///
-    /// SDK 2.0.0: certificate pins use the SDK's built-in defaults (Let's
-    /// Encrypt E7 intermediate). In debug builds the SDK warns if pins are
-    /// placeholder strings; in release builds placeholder pins block all
-    /// requests. We pass the real defaults through now.
+    /// Supplying the leaf in both slots prevents the SDK's OR comparison from
+    /// accepting a public intermediate before normal server trust is checked.
     @objc public static func configure(apiKey: String, environment: String) throws {
         let env: VouchflowEnvironment = (environment == "sandbox") ? .sandbox : .production
         let cfg = VouchflowConfig(
             apiKey: apiKey,
             environment: env,
-            keychainAccessGroup: nil
+            keychainAccessGroup: nil,
+            leafCertificatePin: productionLeafPin,
+            intermediateCertificatePin: productionLeafPin
         )
         try Vouchflow.configure(cfg)
     }
