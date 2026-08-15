@@ -32,6 +32,15 @@ import dev.vouchflow.sdk.Vouchflow
 import dev.vouchflow.sdk.VouchflowConfig
 import dev.vouchflow.sdk.VouchflowEnvironment
 
+// Pin the issuing intermediates, not the short-lived leaf certificate.  Let's
+// Encrypt may serve either YE1 or YE2 while rotating api.vouchflow.dev.  The
+// Vouchflow SDK accepts a connection when any configured SPKI pin appears in
+// the otherwise-valid certificate chain.
+private const val VOUCHFLOW_LETS_ENCRYPT_YE1_PIN =
+    "brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
+private const val VOUCHFLOW_LETS_ENCRYPT_YE2_PIN =
+    "s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y="
+
 class MainApplication : Application(), ReactApplication {
 
   override val reactNativeHost: ReactNativeHost =
@@ -76,14 +85,11 @@ class MainApplication : Application(), ReactApplication {
     // BuildConfig fields come from android/gradle.properties (gitignored
     // for the API key — see android/gradle.properties.example).
     //
-    // Certificate pinning: as of android-sdk 2.2.0 the SDK ships the CORRECT
-    // production default pins for api.vouchflow.dev (SPKI SHA-256 of the leaf
-    // + Let's Encrypt intermediate) and validates the format, so we no longer
-    // hardcode leaf/intermediate pins here — pin rotation is now owned by SDK
-    // releases. Earlier SDKs (≤2.1.3) shipped a stale default pin, which is
-    // why v1.0.4 failed (PinningFailure) and v1.0.5/1.0.6 had to set the pins
-    // manually (and v1.0.5 hit the `sha256/` double-prefix trap the 2.2.0
-    // `require()` now rejects). With 2.2.0 the plain config is correct.
+    // Override the SDK defaults because android-sdk 2.3.0 still pins the leaf
+    // that expired during the August 2026 YE1 → YE2 rotation. The property
+    // names are historical: OkHttp matches both values against the full peer
+    // chain, so using the two issuing intermediates preserves pinning without
+    // coupling app availability to a 90-day leaf certificate.
     Vouchflow.configure(
         VouchflowConfig(
             apiKey = BuildConfig.VOUCHFLOW_API_KEY,
@@ -91,6 +97,8 @@ class MainApplication : Application(), ReactApplication {
                 if (BuildConfig.VOUCHFLOW_ENVIRONMENT == "sandbox")
                     VouchflowEnvironment.SANDBOX
                 else VouchflowEnvironment.PRODUCTION,
+            leafCertificatePin = VOUCHFLOW_LETS_ENCRYPT_YE2_PIN,
+            intermediateCertificatePin = VOUCHFLOW_LETS_ENCRYPT_YE1_PIN,
         ))
   }
 
