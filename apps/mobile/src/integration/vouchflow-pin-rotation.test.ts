@@ -17,16 +17,22 @@ const ios = readFileSync(
 
 const YE1_PIN = 'brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=';
 const YE2_PIN = 's/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=';
+const CURRENT_LEAF_PIN = 'mX8Bi7dmXyNH4V/rjrvMcP1ZcxBzrnRmnNPnAvi1kTs=';
 const EXPIRED_LEAF_PIN = 'NQ7reZqY0tQjef9LBQwbs0gHjrdrroWrd+scM74zQrU=';
 
 describe('Vouchflow certificate pin rotation', () => {
-  it.each([
-    ['Android', android],
-    ['iOS', ios],
-  ])('%s explicitly configures both active issuing intermediates', (_platform, source) => {
+  it('configures both active issuing intermediates on Android', () => {
+    const source = android;
     expect(source).toContain(YE1_PIN);
     expect(source).toContain(YE2_PIN);
     expect(source).not.toContain(EXPIRED_LEAF_PIN);
+  });
+
+  it('pins only the current leaf on iOS until SDK trust evaluation is fixed', () => {
+    expect(ios).toContain(CURRENT_LEAF_PIN);
+    expect(ios).not.toContain(YE1_PIN);
+    expect(ios).not.toContain(YE2_PIN);
+    expect(ios).not.toContain(EXPIRED_LEAF_PIN);
   });
 
   it('passes the YE1 and YE2 pins into the Android SDK config', () => {
@@ -38,8 +44,8 @@ describe('Vouchflow certificate pin rotation', () => {
     );
   });
 
-  it('passes the YE1 and YE2 pins into the iOS SDK config', () => {
-    expect(ios).toMatch(/leafCertificatePin:\s*letsEncryptYE2Pin/);
-    expect(ios).toMatch(/intermediateCertificatePin:\s*letsEncryptYE1Pin/);
+  it('passes the current leaf into both iOS SDK pin slots', () => {
+    expect(ios).toMatch(/leafCertificatePin:\s*productionLeafPin/);
+    expect(ios).toMatch(/intermediateCertificatePin:\s*productionLeafPin/);
   });
 });
