@@ -299,6 +299,7 @@ export default function App({ videoCallHarness = false }: AppProps) {
   // RootNavigator below would never see the orchestrator. State triggers
   // a re-render and the navigator picks up the new prop on next pass.
   const [callOrchestrator, setCallOrchestrator] = useState<CallOrchestrator | undefined>(undefined);
+  const [incomingUiFallbackCallId, setIncomingUiFallbackCallId] = useState<string>();
   // Splash hold flag. We render the splash while either (a) stores
   // are still hydrating OR (b) the minimum-display timer hasn't
   // elapsed. The two AND together give us "splash visible at least
@@ -497,6 +498,15 @@ export default function App({ videoCallHarness = false }: AppProps) {
   // landing on the conversation list. Covers cold start, warm
   // resume, and deferred (background-handler persisted) taps.
   usePushNavigation(navRef, navReady, callOrchestrator);
+
+  useEffect(() => {
+    if (!navReady || !incomingUiFallbackCallId) return;
+    const active = useCalls.getState().active;
+    if (active?.callId === incomingUiFallbackCallId && active.stage === 'incoming_ringing') {
+      navRef.current?.navigate('IncomingCall');
+    }
+    setIncomingUiFallbackCallId(undefined);
+  }, [incomingUiFallbackCallId, navReady]);
 
   // Cold-start "Share → Speakeasy": when launched from a killed state via the
   // share sheet, the AppState 'active' change may not fire — drain the shared
@@ -891,6 +901,7 @@ export default function App({ videoCallHarness = false }: AppProps) {
           });
         },
         getAllowIncomingCalls: () => useSettings.getState().allowIncomingCalls,
+        onIncomingUiFallback: setIncomingUiFallbackCallId,
         // Phase 5j Private Call — wire the JS shim over the native
         // voice-filter module. wrap installs the DSP into the
         // process-wide holder; dispose clears it on call teardown.
@@ -1368,6 +1379,8 @@ export default function App({ videoCallHarness = false }: AppProps) {
       callNotifUnsub();
       setActiveCallControls(undefined);
       void dismissOngoingCallNotification();
+      callOrch?.dispose();
+      setIncomingUiFallbackCallId(undefined);
       setCallOrchestrator(undefined);
       ws.close();
     };

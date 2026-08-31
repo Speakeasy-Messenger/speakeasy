@@ -169,8 +169,11 @@ export interface CallOrchestratorDeps {
   ringTimeoutMs?: number;
   /** Setter so tests can inject a deterministic connecting-stage timeout. */
   connectingTimeoutMs?: number;
+  onIncomingUiFallback?: (callId: string) => void;
   callKeepEnabled?: boolean;
-  callKeepFactory?: (orchestrator: CallOrchestrator) => Pick<CallKeepBridge, 'start'>;
+  callKeepFactory?: (
+    orchestrator: CallOrchestrator,
+  ) => Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop'>>;
 }
 
 export interface CallHistoryEntry {
@@ -217,7 +220,7 @@ export class CallOrchestrator {
   private connectingAt?: number;
   private peer?: CallPeer;
   /** CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
-  private callKeep?: Pick<CallKeepBridge, 'start'>;
+  private callKeep?: Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop'>>;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private connectingTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
@@ -276,6 +279,17 @@ export class CallOrchestrator {
 
   getActive(): ActiveCall | undefined {
     return this.active;
+  }
+
+  showIncomingCallFallback(callId: string): void {
+    if (this.active?.callId !== callId || this.active.stage !== 'incoming_ringing') return;
+    this.deps.onIncomingUiFallback?.(callId);
+  }
+
+  dispose(): void {
+    this.callKeep?.stop?.();
+    this.callKeep = undefined;
+    this.callKeepStart = undefined;
   }
 
   /**

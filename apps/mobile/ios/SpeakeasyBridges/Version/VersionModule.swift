@@ -37,6 +37,7 @@ final class VersionModule: NSObject {
 @objc(CallKitReportStore)
 final class CallKitReportStore: NSObject {
   private static let key = "SpeakeasyPendingCallKitReports"
+  private static let lock = NSLock()
   private let defaults: UserDefaults
 
   @objc init(defaults: UserDefaults) {
@@ -46,6 +47,8 @@ final class CallKitReportStore: NSObject {
 
   @objc(registerCallId:callUUID:at:)
   func register(callId: String, callUUID: String, at: Double) -> [String] {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
     var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
     var removed = reports.filter { report in
       let candidateCallId = report["call_id"] as? String
@@ -83,6 +86,8 @@ final class CallKitReportStore: NSObject {
   }
 
   func pending(nowMs: Double, maxAgeMs: Double) -> [[String: Any]] {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
     let reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
     return reports.compactMap { report in
       guard let callUUID = report["call_uuid"] as? String,
@@ -98,6 +103,8 @@ final class CallKitReportStore: NSObject {
   }
 
   func acknowledge(callUUID: String) {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
     var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
     reports.removeAll { report in
       guard let candidateUUID = report["call_uuid"] as? String else { return false }

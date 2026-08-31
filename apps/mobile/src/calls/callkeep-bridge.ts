@@ -125,6 +125,7 @@ const IOS_ORPHAN_CLEANUP_MS = 30_000;
 
 export class CallKeepBridge {
   private setupDone = false;
+  private lifecycleGeneration = 0;
   private unsubscribeStore?: () => void;
   private unsubscribeNativeReports?: () => void;
   private nativeReportSource?: NativeCallKitReportSource;
@@ -138,6 +139,8 @@ export class CallKeepBridge {
   private readonly nativeReportedUuids = new Set<string>();
   private readonly nativeHandoffUuids = new Set<string>();
   private readonly failedNativeUuids = new Map<string, string>();
+  private readonly fallbackCallIds = new Map<string, string>();
+  private readonly releasedFallbackCallIds = new Set<string>();
   private readonly acknowledgedNativeUuids = new Set<string>();
   /** CallKit actions can arrive before the encrypted offer has reached JS. */
   private readonly pendingActions = new Map<string, 'answer' | 'end'>();
@@ -150,6 +153,7 @@ export class CallKeepBridge {
 
   async start(): Promise<void> {
     if (this.setupDone) return;
+    const generation = ++this.lifecycleGeneration;
     const RNCallKeep = this.deps.callKeep ?? tryLoadCallKeep();
     if (!RNCallKeep) {
       diag('callkeep', 'native module unavailable — bridge no-ops');
@@ -206,6 +210,7 @@ export class CallKeepBridge {
           },
         },
       });
+      if (generation !== this.lifecycleGeneration) return;
       if (Platform.OS === 'android') {
         RNCallKeep.registerAndroidEvents();
         RNCallKeep.setAvailable(true);
@@ -228,8 +233,10 @@ export class CallKeepBridge {
         }
       }
       this.attachListeners();
-      await this.attachNativeReportHandoff();
-      await this.replayInitialEvents();
+      await this.attachNativeReportHandoff(generation);
+      if (generation !== this.lifecycleGeneration) return;
+      await this.replayInitialEvents(generation);
+      if (generation !== this.lifecycleGeneration) return;
       this.attachStoreSubscriber();
       this.setupDone = true;
       diag('callkeep', 'setup ok');
@@ -239,14 +246,14 @@ export class CallKeepBridge {
   }
 
   stop(): void {
-    if (!this.setupDone || !this.rnCallKeep) return;
-    this.rnCallKeep.removeEventListener('answerCall');
-    this.rnCallKeep.removeEventListener('endCall');
-    this.rnCallKeep.removeEventListener('didPerformSetMutedCallAction');
-    this.rnCallKeep.removeEventListener('didDisplayIncomingCall');
-    this.rnCallKeep.removeEventListener('didLoadWithEvents');
-    this.rnCallKeep.removeEventListener('didActivateAudioSession');
-    this.rnCallKeep.removeEventListener('didDeactivateAudioSession');
+    this.lifecycleGeneration += 1;
+    this.rnCallKeep?.removeEventListener('answerCall');
+    this.rnCallKeep?.removeEventListener('endCall');
+    this.rnCallKeep?.removeEventListener('didPerformSetMutedCallAction');
+    this.rnCallKeep?.removeEventListener('didDisplayIncomingCall');
+    this.rnCallKeep?.removeEventListener('didLoadWithEvents');
+    this.rnCallKeep?.removeEventListener('didActivateAudioSession');
+    this.rnCallKeep?.removeEventListener('didDeactivateAudioSession');
     this.unsubscribeStore?.();
     this.unsubscribeStore = undefined;
     this.unsubscribeNativeReports?.();
@@ -255,17 +262,22 @@ export class CallKeepBridge {
     this.incomingFallbackTimers.clear();
     for (const timer of this.orphanCleanupTimers.values()) clearTimeout(timer);
     this.orphanCleanupTimers.clear();
+    this.nativeRecoveryInFlight.clear();
+    this.fallbackCallIds.clear();
+    this.releasedFallbackCallIds.clear();
     this.setupDone = false;
   }
 
-  private async attachNativeReportHandoff(): Promise<void> {
+  private async attachNativeReportHandoff(generation: number): Promise<void> {
     if (this.platform() !== 'ios') return;
     const source = this.deps.nativeReports ?? nativeCallKitReports;
     this.nativeReportSource = source;
-    this.unsubscribeNativeReports = source.subscribe((report) => this.applyNativeReport(report));
+    this.unsubscribeNativeReports = source.subscribe((report) => {
+      if (generation === this.lifecycleGeneration) this.applyNativeReport(report);
+    });
     try {
       const reports = await source.drain();
-      this.applyDrainedNativeReports(reports);
+      if (generation === this.lifecycleGeneration) this.applyDrainedNativeReports(reports);
     } catch (err) {
       diag('callkeep', 'native CallKit handoff drain failed', { err: String(err) });
     }
@@ -316,11 +328,12 @@ export class CallKeepBridge {
     });
   }
 
-  private async replayInitialEvents(): Promise<void> {
+  private async replayInitialEvents(generation: number): Promise<void> {
     const RNCallKeep = this.rnCallKeep;
     if (!RNCallKeep?.getInitialEvents) return;
     try {
       const events = await RNCallKeep.getInitialEvents();
+      if (generation !== this.lifecycleGeneration) return;
       this.processInitialEvents(Array.isArray(events) ? events : []);
       RNCallKeep.clearInitialEvents?.();
     } catch (err) {
@@ -345,10 +358,20 @@ export class CallKeepBridge {
   }
 
   private handleDisplayedIncomingCall(data: any): void {
-    if (!isPushKit(data?.fromPushKit)) return;
     const payload = data?.payload as { call_id?: unknown; call_uuid?: unknown } | undefined;
     const rawUuid = data?.callUUID ?? payload?.call_uuid;
     const uuid = normalizeUuid(rawUuid);
+    if (!isPushKit(data?.fromPushKit)) {
+      const fallbackCallId = uuid ? this.fallbackCallIds.get(uuid) : undefined;
+      if (!uuid || !fallbackCallId) return;
+      this.fallbackCallIds.delete(uuid);
+      if (this.displayFailed(data?.error, data?.errorCode)) {
+        if (this.idToUuid.get(fallbackCallId) === uuid) this.idToUuid.delete(fallbackCallId);
+        this.uuidToId.delete(uuid);
+        this.releaseIncomingFallback(fallbackCallId, data?.errorCode ?? data?.error);
+      }
+      return;
+    }
     const payloadCallId = typeof payload?.call_id === 'string' ? payload.call_id : undefined;
     const callId = payloadCallId ?? (uuid ? this.uuidToId.get(uuid) : undefined);
     if (!callId || !uuid) {
@@ -356,7 +379,7 @@ export class CallKeepBridge {
         hasCallId: !!callId,
         hasUuid: !!uuid,
       });
-      if (uuid) this.recoverDisplayedCall(uuid, data?.error);
+      if (uuid) this.recoverDisplayedCall(uuid, data?.error, data?.errorCode);
       return;
     }
     const authoritativeUuid = this.idToUuid.get(callId);
@@ -369,10 +392,10 @@ export class CallKeepBridge {
       return;
     }
     if (!authoritativeUuid) {
-      this.recoverDisplayedCall(uuid, data?.error);
+      this.recoverDisplayedCall(uuid, data?.error, data?.errorCode);
       return;
     }
-    this.settleNativeDisplay(callId, uuid, data?.error);
+    this.settleNativeDisplay(callId, uuid, data?.error, data?.errorCode);
   }
 
   private bindNativeReport(report: NativeCallKitReport): void {
@@ -401,9 +424,21 @@ export class CallKeepBridge {
     this.applyPendingAction(callId, uuid);
   }
 
-  private settleNativeDisplay(callId: string, uuid: string, error: unknown): void {
+  private settleNativeDisplay(
+    callId: string,
+    uuid: string,
+    error: unknown,
+    errorCode?: unknown,
+  ): void {
     if (this.idToUuid.get(callId) !== uuid) return;
-    if (typeof error === 'string' && error.length > 0) {
+    if (errorCode === 'CallUUIDAlreadyExists') {
+      this.failedNativeUuids.delete(uuid);
+      this.nativeReportedUuids.add(uuid);
+      this.cancelIncomingFallback(callId);
+      diag('callkeep', 'duplicate native CallKit report confirmed', { callId, callUUID: uuid });
+      return;
+    }
+    if (this.displayFailed(error, errorCode)) {
       this.nativeReportedUuids.delete(uuid);
       this.failedNativeUuids.set(uuid, callId);
       this.nativeHandoffUuids.delete(uuid);
@@ -423,19 +458,22 @@ export class CallKeepBridge {
     diag('callkeep', 'native CallKit report confirmed', { callId, callUUID: uuid });
   }
 
-  private recoverDisplayedCall(uuid: string, error: unknown): void {
+  private recoverDisplayedCall(uuid: string, error: unknown, errorCode?: unknown): void {
     if (this.nativeRecoveryInFlight.has(uuid)) return;
     this.nativeRecoveryInFlight.add(uuid);
+    const generation = this.lifecycleGeneration;
     const source = this.nativeReportSource ?? this.deps.nativeReports ?? nativeCallKitReports;
     void source
       .drain()
       .then((reports) => {
+        if (generation !== this.lifecycleGeneration) return;
         this.applyDrainedNativeReports(reports);
         const callId = this.uuidToId.get(uuid);
-        if (callId) this.settleNativeDisplay(callId, uuid, error);
+        if (callId) this.settleNativeDisplay(callId, uuid, error, errorCode);
         else this.endOrphan(uuid, 'PushKit report missing authoritative mapping');
       })
       .catch((err) => {
+        if (generation !== this.lifecycleGeneration) return;
         diag('callkeep', 'native CallKit mapping recovery failed', {
           callUUID: uuid,
           err: String(err),
@@ -460,7 +498,7 @@ export class CallKeepBridge {
       return;
     }
     if (this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid)) {
-      this.settleNativeDisplay(callId, uuid, undefined);
+      this.settleNativeDisplay(callId, uuid, undefined, undefined);
     }
     this.performCallAction(action);
   }
@@ -471,7 +509,7 @@ export class CallKeepBridge {
     if (!action) return;
     this.pendingActions.delete(uuid);
     if (this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid)) {
-      this.settleNativeDisplay(callId, uuid, undefined);
+      this.settleNativeDisplay(callId, uuid, undefined, undefined);
     }
     this.performCallAction(action);
   }
@@ -514,14 +552,17 @@ export class CallKeepBridge {
   private recoverMappingOrEnd(uuid: string, reason: string): void {
     if (this.nativeRecoveryInFlight.has(uuid)) return;
     this.nativeRecoveryInFlight.add(uuid);
+    const generation = this.lifecycleGeneration;
     const source = this.nativeReportSource ?? this.deps.nativeReports ?? nativeCallKitReports;
     void source
       .drain()
       .then((reports) => {
+        if (generation !== this.lifecycleGeneration) return;
         const ended = this.applyDrainedNativeReports(reports);
         if (!this.uuidToId.has(uuid) && !ended.has(uuid)) this.endOrphan(uuid, reason);
       })
       .catch((err) => {
+        if (generation !== this.lifecycleGeneration) return;
         diag('callkeep', 'native CallKit mapping recovery failed', {
           callUUID: uuid,
           err: String(err),
@@ -628,6 +669,7 @@ export class CallKeepBridge {
         this.endOrphan(tentativeUuid, 'native CallKit report confirmation timed out');
       }
       const uuid = this.allocUuid(call.callId);
+      this.fallbackCallIds.set(uuid, call.callId);
       try {
         this.rnCallKeep?.displayIncomingCall(
           uuid,
@@ -641,7 +683,11 @@ export class CallKeepBridge {
           isVideo: active.kind === 'video',
         });
       } catch (err) {
+        this.fallbackCallIds.delete(uuid);
+        if (this.idToUuid.get(call.callId) === uuid) this.idToUuid.delete(call.callId);
+        this.uuidToId.delete(uuid);
         diag('callkeep', 'displayIncomingCall fallback failed', { err: String(err) });
+        this.releaseIncomingFallback(call.callId, err);
       }
     }, this.deps.incomingFallbackDelayMs ?? IOS_NATIVE_REPORT_GRACE_MS);
     this.incomingFallbackTimers.set(call.callId, timer);
@@ -651,6 +697,23 @@ export class CallKeepBridge {
     const timer = this.incomingFallbackTimers.get(callId);
     if (timer) clearTimeout(timer);
     this.incomingFallbackTimers.delete(callId);
+  }
+
+  private releaseIncomingFallback(callId: string, error: unknown): void {
+    if (this.releasedFallbackCallIds.has(callId)) return;
+    const active = this.deps.orchestrator.getActive();
+    if (active?.callId !== callId || active.stage !== 'incoming_ringing') return;
+    this.releasedFallbackCallIds.add(callId);
+    diag('callkeep', 'system incoming-call UI unavailable', { callId, error: String(error) });
+    this.deps.orchestrator.showIncomingCallFallback(callId);
+  }
+
+  private displayFailed(error: unknown, errorCode: unknown): boolean {
+    if (errorCode === 'CallUUIDAlreadyExists') return false;
+    return (
+      (typeof error === 'string' ? error.length > 0 : error != null) ||
+      (typeof errorCode === 'string' && errorCode.length > 0)
+    );
   }
 
   /**
@@ -744,6 +807,8 @@ export class CallKeepBridge {
           }
           this.idToUuid.delete(prev.callId);
           this.uuidToId.delete(uuid);
+          this.fallbackCallIds.delete(uuid);
+          this.releasedFallbackCallIds.delete(prev.callId);
           this.nativeReportedUuids.delete(uuid);
           this.nativeHandoffUuids.delete(uuid);
           this.pendingActions.delete(uuid);

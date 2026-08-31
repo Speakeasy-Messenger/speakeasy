@@ -57,4 +57,30 @@ final class CallKitReportStoreTests: XCTestCase {
     store.acknowledge(callUUID: staleUUID)
     XCTAssertTrue(store.pending(nowMs: 121_001, maxAgeMs: 120_000).isEmpty)
   }
+
+  func testConcurrentRegistrationAndAcknowledgementPreserveNewMappings() {
+    let secondStore = CallKitReportStore(defaults: defaults)
+    let oldUUIDs = (0..<10).map { String(format: "00000000-0000-0000-0000-%012d", $0) }
+    let newUUIDs = (10..<20).map { String(format: "00000000-0000-0000-0000-%012d", $0) }
+    for (index, uuid) in oldUUIDs.enumerated() {
+      _ = store.register(callId: "old-\(index)", callUUID: uuid, at: 1_000)
+    }
+
+    DispatchQueue.concurrentPerform(iterations: 20) { index in
+      if index < oldUUIDs.count {
+        store.acknowledge(callUUID: oldUUIDs[index])
+      } else {
+        let newIndex = index - oldUUIDs.count
+        _ = secondStore.register(
+          callId: "new-\(newIndex)",
+          callUUID: newUUIDs[newIndex],
+          at: 2_000
+        )
+      }
+    }
+
+    let pending = store.pending(nowMs: 2_000, maxAgeMs: 120_000)
+    let pendingUUIDs = Set(pending.compactMap { $0["call_uuid"] as? String })
+    XCTAssertEqual(pendingUUIDs, Set(newUUIDs))
+  }
 }

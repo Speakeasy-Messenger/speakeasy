@@ -75,6 +75,7 @@ function harness(opts: {
           startup = bridge!.start();
           return startup;
         },
+        stop: () => bridge!.stop(),
       };
     },
   });
@@ -135,7 +136,8 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
 
       expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(scenario.callUUID, 1);
       expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(scenario.callUUID);
-      h.bridge().stop();
+      h.orchestrator.dispose();
+      expect(h.callKeep.removeEventListener).toHaveBeenCalled();
     }
   });
 });
