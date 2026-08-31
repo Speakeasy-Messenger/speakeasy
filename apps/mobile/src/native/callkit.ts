@@ -1,8 +1,9 @@
 import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 
 export interface NativeCallKitReport {
-  callId: string;
+  callId?: string;
   callUUID: string;
+  expired?: boolean;
 }
 
 export interface NativeCallKitReportSource {
@@ -22,10 +23,16 @@ const native = (NativeModules as { SpeakeasyNativeDiagnostics?: NativeCallKitHan
 /** Normalize the native dictionary without trusting arbitrary bridge values. */
 export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const raw = value as { call_id?: unknown; call_uuid?: unknown };
-  if (typeof raw.call_id !== 'string' || raw.call_id.length === 0) return undefined;
+  const raw = value as { call_id?: unknown; call_uuid?: unknown; expired?: unknown };
   if (typeof raw.call_uuid !== 'string' || raw.call_uuid.length === 0) return undefined;
-  return { callId: raw.call_id, callUUID: raw.call_uuid.toLowerCase() };
+  const callId = typeof raw.call_id === 'string' && raw.call_id.length > 0 ? raw.call_id : undefined;
+  const expired = raw.expired === true;
+  if (!callId && !expired) return undefined;
+  return {
+    ...(callId ? { callId } : {}),
+    callUUID: raw.call_uuid.toLowerCase(),
+    ...(expired ? { expired: true } : {}),
+  };
 }
 
 /**

@@ -291,25 +291,20 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
   // on react-native-callkeep forwarding its nested payload (the field missing
   // in the real-device double-call log).
   if (callId != nil) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    CallKitReportStore *store = [[CallKitReportStore alloc] initWithDefaults:defaults];
+    NSArray<NSString *> *displacedUUIDs = [store registerCallId:callId
+                                                      callUUID:uuid
+                                                            at:[[NSDate date] timeIntervalSince1970] * 1000];
+    for (NSString *displacedUUID in displacedUUIDs) {
+      [RNCallKeep endCallWithUUID:displacedUUID reason:1];
+      SpeakeasyAppendNativeDiagnostic(@"Superseded CallKit call ended");
+    }
     NSDictionary *report = @{
       @"call_id": callId,
       @"call_uuid": uuid,
       @"at": @([[NSDate date] timeIntervalSince1970] * 1000),
     };
-    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
-    NSMutableArray *reports = [[defaults arrayForKey:@"SpeakeasyPendingCallKitReports"] mutableCopy]
-        ?: [NSMutableArray array];
-    NSIndexSet *duplicates = [reports indexesOfObjectsPassingTest:
-        ^BOOL(NSDictionary *candidate, NSUInteger idx, BOOL *stop) {
-      return [candidate[@"call_id"] isEqualToString:callId] ||
-             [candidate[@"call_uuid"] isEqualToString:uuid];
-    }];
-    [reports removeObjectsAtIndexes:duplicates];
-    [reports addObject:report];
-    if (reports.count > 20) {
-      [reports removeObjectsInRange:NSMakeRange(0, reports.count - 20)];
-    }
-    [defaults setObject:reports forKey:@"SpeakeasyPendingCallKitReports"];
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"SpeakeasyCallKitReported"
                       object:nil

@@ -116,7 +116,10 @@ interface BridgeDeps {
   callKeep?: RNCallKeepShape;
   nativeReports?: NativeCallKitReportSource;
   platform?: string;
+  incomingFallbackDelayMs?: number;
 }
+
+const IOS_NATIVE_REPORT_GRACE_MS = 1_500;
 
 export class CallKeepBridge {
   private setupDone = false;
@@ -124,6 +127,7 @@ export class CallKeepBridge {
   private unsubscribeNativeReports?: () => void;
   private nativeReportSource?: NativeCallKitReportSource;
   private readonly nativeRecoveryInFlight = new Set<string>();
+  private readonly incomingFallbackTimers = new Map<string, ReturnType<typeof setTimeout>>();
   /** Map our internal `call-{ulid}` ids ↔ CallKit's UUID-shaped ids. */
   private readonly idToUuid = new Map<string, string>();
   private readonly uuidToId = new Map<string, string>();
@@ -241,6 +245,8 @@ export class CallKeepBridge {
     this.unsubscribeStore = undefined;
     this.unsubscribeNativeReports?.();
     this.unsubscribeNativeReports = undefined;
+    for (const timer of this.incomingFallbackTimers.values()) clearTimeout(timer);
+    this.incomingFallbackTimers.clear();
     this.setupDone = false;
   }
 
@@ -251,7 +257,7 @@ export class CallKeepBridge {
     this.unsubscribeNativeReports = source.subscribe((report) => this.bindNativeReport(report));
     try {
       const reports = await source.drain();
-      for (const report of reports) this.bindNativeReport(report);
+      this.applyDrainedNativeReports(reports);
     } catch (err) {
       diag('callkeep', 'native CallKit handoff drain failed', { err: String(err) });
     }
@@ -353,6 +359,8 @@ export class CallKeepBridge {
     const uuid = normalizeUuid(report.callUUID);
     if (!callId || !uuid) return;
 
+    this.cancelIncomingFallback(callId);
+
     // A call id must own exactly one CallKit UUID. If a legacy/random sibling
     // exists, report it ended before adopting the native PushKit UUID so an
     // answer can never cause the sibling to resolve as a decline.
@@ -436,8 +444,8 @@ export class CallKeepBridge {
     void source
       .drain()
       .then((reports) => {
-        for (const report of reports) this.bindNativeReport(report);
-        if (!this.uuidToId.has(uuid)) this.endOrphan(uuid, reason);
+        const ended = this.applyDrainedNativeReports(reports);
+        if (!this.uuidToId.has(uuid) && !ended.has(uuid)) this.endOrphan(uuid, reason);
       })
       .catch((err) => {
         diag('callkeep', 'native CallKit mapping recovery failed', {
@@ -447,6 +455,61 @@ export class CallKeepBridge {
         this.endOrphan(uuid, reason);
       })
       .finally(() => this.nativeRecoveryInFlight.delete(uuid));
+  }
+
+  private applyDrainedNativeReports(reports: NativeCallKitReport[]): Set<string> {
+    const ended = new Set<string>();
+    for (const report of reports) {
+      const uuid = normalizeUuid(report.callUUID);
+      if (report.expired) {
+        if (uuid) {
+          this.endOrphan(uuid, 'stale native CallKit mapping');
+          ended.add(uuid);
+        }
+      } else {
+        this.bindNativeReport(report);
+      }
+    }
+    return ended;
+  }
+
+  private scheduleIncomingFallback(call: ActiveCall): void {
+    if (this.incomingFallbackTimers.has(call.callId) || this.idToUuid.has(call.callId)) return;
+    const timer = setTimeout(() => {
+      this.incomingFallbackTimers.delete(call.callId);
+      const active = this.deps.orchestrator.getActive();
+      if (
+        !active ||
+        active.callId !== call.callId ||
+        active.stage !== 'incoming_ringing' ||
+        this.idToUuid.has(call.callId)
+      ) {
+        return;
+      }
+      const uuid = this.allocUuid(call.callId);
+      try {
+        this.rnCallKeep?.displayIncomingCall(
+          uuid,
+          active.peerUserId,
+          `@${active.peerUserId}`,
+          'generic',
+          active.kind === 'video',
+        );
+        diag('callkeep', 'displayIncomingCall requested: native report fallback', {
+          callUUID: uuid,
+          isVideo: active.kind === 'video',
+        });
+      } catch (err) {
+        diag('callkeep', 'displayIncomingCall fallback failed', { err: String(err) });
+      }
+    }, this.deps.incomingFallbackDelayMs ?? IOS_NATIVE_REPORT_GRACE_MS);
+    this.incomingFallbackTimers.set(call.callId, timer);
+  }
+
+  private cancelIncomingFallback(callId: string): void {
+    const timer = this.incomingFallbackTimers.get(callId);
+    if (timer) clearTimeout(timer);
+    this.incomingFallbackTimers.delete(callId);
   }
 
   /**
@@ -470,9 +533,6 @@ export class CallKeepBridge {
     const RNCallKeep = this.rnCallKeep;
     if (!RNCallKeep) return;
     if (!prev && next) {
-      // Native PushKit is the sole incoming reporter on iOS. Never allocate a
-      // random UUID or call displayIncomingCall here: adopt the mapping that
-      // AppDelegate persisted before its mandatory CallKit report.
       const uuid =
         !next.isCaller && this.platform() === 'ios'
           ? this.idToUuid.get(next.callId)
@@ -491,11 +551,17 @@ export class CallKeepBridge {
         }
       } else if (next.stage === 'incoming_ringing') {
         if (this.platform() === 'ios') {
-          diag('callkeep', 'displayIncomingCall skipped: adopting native PushKit report', {
-            callUUID: uuid,
-            hasMapping: !!uuid,
-            isVideo,
-          });
+          if (uuid && this.nativeReportedUuids.has(uuid)) {
+            diag('callkeep', 'displayIncomingCall skipped: adopting native PushKit report', {
+              callUUID: uuid,
+              isVideo,
+            });
+          } else {
+            this.scheduleIncomingFallback(next);
+            diag('callkeep', 'awaiting native PushKit report before incoming-call fallback', {
+              isVideo,
+            });
+          }
         } else if (uuid && !this.nativeReportedUuids.has(uuid)) {
           try {
             RNCallKeep.displayIncomingCall(
@@ -521,6 +587,7 @@ export class CallKeepBridge {
     }
     if (!next) {
       if (prev) {
+        this.cancelIncomingFallback(prev.callId);
         const uuid = this.idToUuid.get(prev.callId);
         if (uuid) {
           try {
