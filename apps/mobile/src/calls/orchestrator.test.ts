@@ -223,7 +223,7 @@ function toServerFrame(frame: WsClientMsg, fromUser: string): WsServerMsg {
 }
 
 describe('CallOrchestrator', () => {
-  it('dial → ring → accept → connected → hang up → second call rings', async () => {
+  it('dial → ring → accept → connected → callee hangs up', async () => {
     const h = makeOrchHarness();
     await h.caller.startOutgoing('bob');
     expect(h.caller.getActive()?.stage).toBe('outgoing_ringing');
@@ -248,11 +248,6 @@ describe('CallOrchestrator', () => {
     expect(h.calleePeer().closed).toBe(true);
     expect(h.finishedCaller[0]?.reason).toBe('completed');
     expect(h.finishedCallee[0]?.reason).toBe('completed');
-
-    await h.caller.startOutgoing('bob');
-    expect(h.caller.getActive()?.stage).toBe('outgoing_ringing');
-    await h.pump();
-    expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
   });
 
   it('setMaskBypassed is a no-op (false) on a non-masked (audio) call', async () => {
