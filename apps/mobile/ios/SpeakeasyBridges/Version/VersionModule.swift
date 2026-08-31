@@ -82,9 +82,8 @@ final class CallKitReportStore: NSObject {
     }
   }
 
-  func consume(nowMs: Double, maxAgeMs: Double) -> [[String: Any]] {
+  func pending(nowMs: Double, maxAgeMs: Double) -> [[String: Any]] {
     let reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
-    defaults.removeObject(forKey: Self.key)
     return reports.compactMap { report in
       guard let callUUID = report["call_uuid"] as? String,
             !callUUID.isEmpty else {
@@ -95,6 +94,19 @@ final class CallKitReportStore: NSObject {
       var result = report
       result["expired"] = expired
       return result
+    }
+  }
+
+  func acknowledge(callUUID: String) {
+    var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
+    reports.removeAll { report in
+      guard let candidateUUID = report["call_uuid"] as? String else { return false }
+      return candidateUUID.caseInsensitiveCompare(callUUID) == .orderedSame
+    }
+    if reports.isEmpty {
+      defaults.removeObject(forKey: Self.key)
+    } else {
+      defaults.set(reports, forKey: Self.key)
     }
   }
 }
@@ -163,7 +175,11 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
     rejecter reject: RCTPromiseRejectBlock
   ) {
     let nowMs = Date().timeIntervalSince1970 * 1000
-    resolve(callKitReports.consume(nowMs: nowMs, maxAgeMs: 120_000))
+    resolve(callKitReports.pending(nowMs: nowMs, maxAgeMs: 120_000))
+  }
+
+  @objc func acknowledgePendingCallKitReport(_ callUUID: String) {
+    callKitReports.acknowledge(callUUID: callUUID)
   }
 
   @objc func consumePendingPipClose(

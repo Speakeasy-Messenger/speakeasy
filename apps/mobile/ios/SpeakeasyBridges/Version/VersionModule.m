@@ -28,5 +28,6 @@ RCT_EXTERN_METHOD(drainNativeDiagnostics:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
 RCT_EXTERN_METHOD(consumePendingCallKitReports:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(acknowledgePendingCallKitReport:(NSString *)callUUID)
 
 @end

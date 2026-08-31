@@ -34,22 +34,27 @@ final class CallKitReportStoreTests: XCTestCase {
       [firstUUID]
     )
 
-    let reports = store.consume(nowMs: 2_000, maxAgeMs: 120_000)
+    let reports = store.pending(nowMs: 2_000, maxAgeMs: 120_000)
     XCTAssertEqual(reports.count, 1)
     XCTAssertEqual(reports[0]["call_id"] as? String, "call-1")
     XCTAssertEqual(reports[0]["call_uuid"] as? String, secondUUID)
     XCTAssertEqual(reports[0]["expired"] as? Bool, false)
+    XCTAssertEqual(store.pending(nowMs: 2_000, maxAgeMs: 120_000).count, 1)
+    store.acknowledge(callUUID: secondUUID)
+    XCTAssertTrue(store.pending(nowMs: 2_000, maxAgeMs: 120_000).isEmpty)
   }
 
-  func testConsumeReturnsStaleMappingForExplicitCleanupAndClearsPersistence() {
+  func testPendingReturnsStaleMappingUntilExplicitCleanupAcknowledgement() {
     let staleUUID = "90a63483-79f1-4dda-b0b0-63a4ba62f642"
     _ = store.register(callId: "call-stale", callUUID: staleUUID, at: 1_000)
 
-    let reports = store.consume(nowMs: 121_001, maxAgeMs: 120_000)
+    let reports = store.pending(nowMs: 121_001, maxAgeMs: 120_000)
 
     XCTAssertEqual(reports.count, 1)
     XCTAssertEqual(reports[0]["call_uuid"] as? String, staleUUID)
     XCTAssertEqual(reports[0]["expired"] as? Bool, true)
-    XCTAssertTrue(store.consume(nowMs: 121_001, maxAgeMs: 120_000).isEmpty)
+    XCTAssertEqual(store.pending(nowMs: 121_001, maxAgeMs: 120_000).count, 1)
+    store.acknowledge(callUUID: staleUUID)
+    XCTAssertTrue(store.pending(nowMs: 121_001, maxAgeMs: 120_000).isEmpty)
   }
 }

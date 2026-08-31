@@ -4,15 +4,18 @@ export interface NativeCallKitReport {
   callId?: string;
   callUUID: string;
   expired?: boolean;
+  reportedAtMs?: number;
 }
 
 export interface NativeCallKitReportSource {
   drain(): Promise<NativeCallKitReport[]>;
   subscribe(listener: (report: NativeCallKitReport) => void): () => void;
+  acknowledge(callUUID: string): void;
 }
 
 interface NativeCallKitHandoff {
   consumePendingCallKitReports(): Promise<unknown>;
+  acknowledgePendingCallKitReport(callUUID: string): void;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -23,15 +26,23 @@ const native = (NativeModules as { SpeakeasyNativeDiagnostics?: NativeCallKitHan
 /** Normalize the native dictionary without trusting arbitrary bridge values. */
 export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | undefined {
   if (!value || typeof value !== 'object') return undefined;
-  const raw = value as { call_id?: unknown; call_uuid?: unknown; expired?: unknown };
+  const raw = value as {
+    call_id?: unknown;
+    call_uuid?: unknown;
+    expired?: unknown;
+    at?: unknown;
+  };
   if (typeof raw.call_uuid !== 'string' || raw.call_uuid.length === 0) return undefined;
   const callId = typeof raw.call_id === 'string' && raw.call_id.length > 0 ? raw.call_id : undefined;
   const expired = raw.expired === true;
+  const reportedAtMs =
+    typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : undefined;
   if (!callId && !expired) return undefined;
   return {
     ...(callId ? { callId } : {}),
     callUUID: raw.call_uuid.toLowerCase(),
     ...(expired ? { expired: true } : {}),
+    ...(reportedAtMs !== undefined ? { reportedAtMs } : {}),
   };
 }
 
@@ -60,5 +71,10 @@ export const nativeCallKitReports: NativeCallKitReportSource = {
       if (report) listener(report);
     });
     return () => subscription.remove();
+  },
+
+  acknowledge(callUUID: string): void {
+    if (Platform.OS !== 'ios' || !native?.acknowledgePendingCallKitReport) return;
+    native.acknowledgePendingCallKitReport(callUUID);
   },
 };
