@@ -702,6 +702,7 @@ export class CallOrchestrator {
   ): Promise<void> {
     const generation = this.lifecycleGeneration;
     let incomingPeer: CallPeer | undefined;
+    let transferredIncomingPeer: CallPeer | undefined;
     if (!this.isCurrentGeneration(generation)) return;
     const cancelled = this.recentlyCancelled.get(callId);
     if (cancelled?.peerUserId === fromUserId) {
@@ -804,36 +805,20 @@ export class CallOrchestrator {
         // peerConnection still negotiates audio-only media.
         mediaKind: mediaKindForCall(kind),
       });
-      if (!this.isCurrentGeneration(generation)) {
-        peer.close();
-        return;
-      }
-      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) {
-        peer.close();
-        return;
-      }
       incomingPeer = peer;
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       await peer.setRemoteOffer(payload);
-      if (!this.isCurrentGeneration(generation)) {
-        peer.close();
-        return;
-      }
-      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) {
-        peer.close();
-        return;
-      }
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
       // store subscriber mirrors this incoming call into the native ring UI.
       await this.ensureCallKeepStarted();
-      if (!this.isCurrentGeneration(generation)) {
-        peer.close();
-        return;
-      }
-      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) {
-        peer.close();
-        return;
-      }
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       this.attachPeer(peer);
+      transferredIncomingPeer = peer;
+      incomingPeer = undefined;
       this.setActive({
         callId,
         peerUserId: fromUserId,
@@ -875,8 +860,12 @@ export class CallOrchestrator {
         reason: 'hangup',
       });
       this.rejectIncomingCall(callId);
-      if (incomingPeer && this.peer === incomingPeer) this.cleanup();
-      else incomingPeer?.close();
+      if (transferredIncomingPeer && this.peer === transferredIncomingPeer) {
+        this.cleanup();
+        transferredIncomingPeer = undefined;
+      }
+    } finally {
+      incomingPeer?.close();
     }
   }
 

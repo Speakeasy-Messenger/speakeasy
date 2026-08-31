@@ -2,6 +2,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WsClientMsg } from '@speakeasy/shared';
 import { MockSignalProtocolClient } from '../native/mock-signal-protocol.js';
 import type { NativeCallKitReport } from '../native/callkit.js';
+import { createSerializedFilterOperations } from '../native/voice-filter.js';
 import { CallKeepBridge } from './callkeep-bridge.js';
 import { CallOrchestrator } from './orchestrator.js';
 
@@ -28,6 +29,8 @@ function harness(opts: {
   deferDecrypt?: boolean;
   deferPeer?: boolean;
   deferAnswer?: boolean;
+  deferRemoteOfferFailure?: boolean;
+  deferFilter?: boolean;
 }) {
   const sent: WsClientMsg[] = [];
   const signalProtocol = new MockSignalProtocolClient();
@@ -75,13 +78,22 @@ function harness(opts: {
         releaseAnswer = resolve;
       })
     : undefined;
+  let releaseRemoteOffer: (() => void) | undefined;
+  const remoteOfferGate = opts.deferRemoteOfferFailure
+    ? new Promise<void>((resolve) => {
+        releaseRemoteOffer = resolve;
+      })
+    : undefined;
   const peer = {
     createOffer: vi.fn(async () => ({ v: 1, sdp: 'offer', candidates: [] })),
     createAnswer: vi.fn(async () => {
       await answerGate;
       return { v: 1, sdp: 'answer', candidates: [] };
     }),
-    setRemoteOffer: vi.fn(async () => undefined),
+    setRemoteOffer: vi.fn(async () => {
+      await remoteOfferGate;
+      if (opts.deferRemoteOfferFailure) throw new Error('remote offer rejected');
+    }),
     setRemoteAnswer: vi.fn(async () => undefined),
     addRemoteIce: vi.fn(async () => undefined),
     onLocalIce: vi.fn(() => () => undefined),
@@ -100,6 +112,26 @@ function harness(opts: {
       return peer;
     }),
   };
+  let releaseFilter: (() => void) | undefined;
+  const filterGate = opts.deferFilter
+    ? new Promise<void>((resolve) => {
+        releaseFilter = resolve;
+      })
+    : undefined;
+  const filterEvents: string[] = [];
+  const voiceFilter = opts.deferFilter
+    ? createSerializedFilterOperations(
+        async (callId: string) => {
+          filterEvents.push(`wrap-start:${callId}`);
+          await filterGate;
+          filterEvents.push(`wrap-end:${callId}`);
+          return callId;
+        },
+        async () => {
+          filterEvents.push('dispose');
+        },
+      )
+    : undefined;
   let bridge: CallKeepBridge | undefined;
   let startup: Promise<void> | undefined;
   const orchestrator = new CallOrchestrator({
@@ -112,6 +144,7 @@ function harness(opts: {
     ensureSessionWithPeer: vi.fn() as never,
     onStateChange: vi.fn(),
     onCallFinished: vi.fn(),
+    voiceFilter,
     getAllowIncomingCalls: () => opts.allowIncoming ?? true,
     callKeepEnabled: true,
     callKeepFactory: (owner) => {
@@ -143,6 +176,10 @@ function harness(opts: {
     releaseDecrypt: () => releaseDecrypt?.(),
     releasePeer: () => releasePeer?.(),
     releaseAnswer: () => releaseAnswer?.(),
+    releaseRemoteOffer: () => releaseRemoteOffer?.(),
+    releaseFilter: () => releaseFilter?.(),
+    filterEvents,
+    voiceFilter,
     emitNativeReport: (callId: string, callUUID: string) =>
       nativeReportListener?.({ callId, callUUID }),
     bridge: () => bridge!,
@@ -270,6 +307,29 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
     expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[2], 2);
   });
 
+  it('closes an incoming peer whose remote offer rejects after disposal', async () => {
+    const h = harness({
+      callId: 'call-remount-remote-offer',
+      callUUID: UUIDS[3]!,
+      deferRemoteOfferFailure: true,
+    });
+    await h.startup();
+    const processing = h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'android-peer',
+      call_id: 'call-remount-remote-offer',
+      ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
+    });
+    await vi.waitFor(() => expect(h.peer.setRemoteOffer).toHaveBeenCalled());
+
+    h.orchestrator.dispose();
+    h.releaseRemoteOffer();
+    await processing;
+
+    expect(h.peer.close).toHaveBeenCalledOnce();
+    expect(h.orchestrator.getActive()).toBeUndefined();
+  });
+
   it('ends an unmatched native call as soon as its peer sends call_end', async () => {
     const h = harness({
       callId: 'call-ended-before-offer',
@@ -329,6 +389,30 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
 
     await expect(dialing).rejects.toThrow('orchestrator disposed');
     expect(h.peer.close).toHaveBeenCalled();
+    expect(h.sent.filter((frame) => frame.type === 'call_offer')).toHaveLength(0);
+  });
+
+  it('disposes a filter wrap that completes after orchestrator disposal', async () => {
+    const h = harness({
+      callId: 'call-filter-remount',
+      callUUID: UUIDS[2]!,
+      deferFilter: true,
+    });
+    await h.startup();
+    const dialing = h.orchestrator.startOutgoing('android-peer', 'private');
+    await vi.waitFor(() => expect(h.filterEvents[0]).toMatch(/^wrap-start:/));
+
+    h.orchestrator.dispose();
+    const nextWrap = h.voiceFilter!.wrap('next-call');
+    h.releaseFilter();
+
+    await expect(dialing).rejects.toThrow('orchestrator disposed');
+    await expect(nextWrap).resolves.toBe('next-call');
+    expect(h.filterEvents).toHaveLength(5);
+    expect(h.filterEvents[1]).toMatch(/^wrap-end:/);
+    expect(h.filterEvents[2]).toBe('dispose');
+    expect(h.filterEvents[3]).toBe('wrap-start:next-call');
+    expect(h.filterEvents[4]).toBe('wrap-end:next-call');
     expect(h.sent.filter((frame) => frame.type === 'call_offer')).toHaveLength(0);
   });
 

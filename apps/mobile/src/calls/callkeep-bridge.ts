@@ -797,8 +797,9 @@ export class CallKeepBridge {
     this.diff(undefined, prev);
     this.unsubscribeStore = useCalls.subscribe((s) => {
       const next = s.active;
-      this.diff(prev, next);
+      const previous = prev;
       prev = next;
+      this.diff(previous, next);
     });
   }
 

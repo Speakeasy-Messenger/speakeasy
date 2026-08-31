@@ -39,6 +39,19 @@ function incoming(): ActiveCall {
   };
 }
 
+function outgoing(callId: string): ActiveCall {
+  return {
+    callId,
+    peerUserId: 'second-peer',
+    isCaller: true,
+    stage: 'outgoing_dialing',
+    stageEnteredAt: 2,
+    micMuted: false,
+    speakerOn: false,
+    kind: 'audio',
+  };
+}
+
 function harness(
   initialReports: NativeCallKitReport[] = [],
   initialEvents: Array<{ name: string; data?: any }> = [],
@@ -404,6 +417,31 @@ describe('CallKeepBridge native PushKit adoption', () => {
 
     expect(h.orchestrator.accept).toHaveBeenCalledOnce();
     expect(h.callKeep.displayIncomingCall).not.toHaveBeenCalled();
+    h.bridge.stop();
+  });
+
+  it('reports a second call after replaying an early native end', async () => {
+    const secondCallId = 'call-01M1AJ1HXE7A4GPFDF0B9QNS02';
+    const h = harness(
+      [{ callId: CALL_ID, callUUID: NATIVE_UUID }],
+      [
+        {
+          name: 'RNCallKeepPerformEndCallAction',
+          data: { callUUID: NATIVE_UUID },
+        },
+      ],
+    );
+    h.orchestrator.decline.mockImplementation(() => {
+      useCalls.getState().setActive(undefined);
+    });
+
+    await h.bridge.start();
+    useCalls.getState().setActive(incoming());
+    useCalls.getState().setActive(outgoing(secondCallId));
+
+    expect(h.orchestrator.decline).toHaveBeenCalledOnce();
+    expect(h.callKeep.startCall).toHaveBeenCalledOnce();
+    expect(h.callKeep.startCall.mock.calls[0]?.[1]).toBe('second-peer');
     h.bridge.stop();
   });
 

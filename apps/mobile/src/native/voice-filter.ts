@@ -105,6 +105,25 @@ export class FilterError extends Error {
   }
 }
 
+export function createSerializedFilterOperations<TArgs extends unknown[], TResult>(
+  wrap: (...args: TArgs) => Promise<TResult>,
+  dispose: () => Promise<void>,
+): { wrap: (...args: TArgs) => Promise<TResult>; dispose: () => Promise<void> } {
+  let tail = Promise.resolve();
+  const enqueue = <T>(operation: () => Promise<T>): Promise<T> => {
+    const result = tail.then(operation);
+    tail = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
+  };
+  return {
+    wrap: (...args) => enqueue(() => wrap(...args)),
+    dispose: () => enqueue(dispose),
+  };
+}
+
 function getNative(): NativeVoiceFilterModule | undefined {
   // Wrapped in try/catch because react-native isn't loadable from
   // pure-Node test runners. Returning undefined sends every call
@@ -202,7 +221,7 @@ export function isOutboundMaskActive(): boolean {
  * Smoke/Velvet/Glass values. Pass `null` for either to fall back to
  * the native default.
  */
-export async function wrapTrackWithFilter(
+async function wrapTrackWithFilterNative(
   trackId: string,
   semitones: number | null,
   formantSemitones: number | null,
@@ -227,6 +246,19 @@ export async function wrapTrackWithFilter(
   }
 }
 
+const serializedFilterOperations = createSerializedFilterOperations(
+  wrapTrackWithFilterNative,
+  disposeFilterNative,
+);
+
+export function wrapTrackWithFilter(
+  trackId: string,
+  semitones: number | null,
+  formantSemitones: number | null,
+): Promise<string> {
+  return serializedFilterOperations.wrap(trackId, semitones, formantSemitones);
+}
+
 /**
  * Live mask on/off for the active call (#13). `bypassed = true` reveals
  * the user's real voice; `false` re-masks. Returns whether the native
@@ -247,7 +279,7 @@ export async function setFilterBypass(bypassed: boolean): Promise<boolean> {
 }
 
 /** Release filter resources for the active call. Idempotent. */
-export async function disposeFilter(): Promise<void> {
+async function disposeFilterNative(): Promise<void> {
   const native = getNative();
   if (!native) return;
   try {
@@ -255,6 +287,10 @@ export async function disposeFilter(): Promise<void> {
   } catch {
     /* dispose is best-effort; engine will be torn down by call_end anyway */
   }
+}
+
+export function disposeFilter(): Promise<void> {
+  return serializedFilterOperations.dispose();
 }
 
 const FILTER_ERROR_CODES = new Set<FilterErrorCode>([
