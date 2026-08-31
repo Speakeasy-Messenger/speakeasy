@@ -151,8 +151,6 @@ export class CallKeepBridge {
   /** Map our internal `call-{ulid}` ids ↔ CallKit's UUID-shaped ids. */
   private readonly idToUuid = new Map<string, string>();
   private readonly uuidToId = new Map<string, string>();
-  /** UUIDs already reported natively by AppDelegate's PushKit callback. */
-  private readonly nativeReportedUuids = new Set<string>();
   private readonly nativeHandoffUuids = new Set<string>();
   private readonly failedNativeUuids = new Map<string, string>();
   private readonly fallbackCallIds = new Map<string, string>();
@@ -277,14 +275,12 @@ export class CallKeepBridge {
       }
       this.idToUuid.delete(callId);
       this.uuidToId.delete(uuid);
-      this.nativeReportedUuids.delete(uuid);
       this.nativeHandoffUuids.delete(uuid);
       this.failedNativeUuids.delete(uuid);
       this.pendingActions.delete(uuid);
     }
     this.idToUuid.clear();
     this.uuidToId.clear();
-    this.nativeReportedUuids.clear();
     this.nativeHandoffUuids.clear();
     this.failedNativeUuids.clear();
     this.pendingActions.clear();
@@ -410,12 +406,10 @@ export class CallKeepBridge {
   }
 
   private handleDisplayedIncomingCall(data: any): void {
-    const payload = data?.payload as { call_id?: unknown; call_uuid?: unknown } | undefined;
-    const rawUuid = data?.callUUID ?? payload?.call_uuid;
-    const uuid = normalizeUuid(rawUuid);
-    if (!isPushKit(data?.fromPushKit)) {
-      const fallbackCallId = uuid ? this.fallbackCallIds.get(uuid) : undefined;
-      if (!uuid || !fallbackCallId) return;
+    const uuid = normalizeUuid(data?.callUUID);
+    if (!uuid) return;
+    const fallbackCallId = this.fallbackCallIds.get(uuid);
+    if (fallbackCallId) {
       this.fallbackCallIds.delete(uuid);
       if (this.displayFailed(data?.error, data?.errorCode)) {
         if (this.idToUuid.get(fallbackCallId) === uuid) this.idToUuid.delete(fallbackCallId);
@@ -424,29 +418,8 @@ export class CallKeepBridge {
       }
       return;
     }
-    const payloadCallId = typeof payload?.call_id === 'string' ? payload.call_id : undefined;
-    const callId = payloadCallId ?? (uuid ? this.uuidToId.get(uuid) : undefined);
-    if (!callId || !uuid) {
-      diag('callkeep', 'PushKit call missing mapping', {
-        hasCallId: !!callId,
-        hasUuid: !!uuid,
-      });
-      if (uuid) this.recoverDisplayedCall(uuid, data?.error, data?.errorCode);
-      return;
-    }
-    const authoritativeUuid = this.idToUuid.get(callId);
-    if (authoritativeUuid && authoritativeUuid !== uuid) {
-      diag('callkeep', 'stale CallKit display callback ignored', {
-        callId,
-        callUUID: uuid,
-        authoritativeUUID: authoritativeUuid,
-      });
-      return;
-    }
-    if (!authoritativeUuid) {
-      this.recoverDisplayedCall(uuid, data?.error, data?.errorCode);
-      return;
-    }
+    const callId = this.uuidToId.get(uuid);
+    if (!callId || !this.nativeHandoffUuids.has(uuid)) return;
     this.settleNativeDisplay(callId, uuid, data?.error, data?.errorCode);
   }
 
@@ -489,13 +462,11 @@ export class CallKeepBridge {
     if (this.idToUuid.get(callId) !== uuid) return;
     if (errorCode === 'CallUUIDAlreadyExists') {
       this.failedNativeUuids.delete(uuid);
-      this.nativeReportedUuids.add(uuid);
       this.cancelIncomingFallback(callId);
       diag('callkeep', 'duplicate native CallKit report confirmed', { callId, callUUID: uuid });
       return;
     }
     if (this.displayFailed(error, errorCode)) {
-      this.nativeReportedUuids.delete(uuid);
       this.failedNativeUuids.set(uuid, callId);
       this.nativeHandoffUuids.delete(uuid);
       this.idToUuid.delete(callId);
@@ -509,34 +480,8 @@ export class CallKeepBridge {
       return;
     }
     this.failedNativeUuids.delete(uuid);
-    this.nativeReportedUuids.add(uuid);
     this.cancelIncomingFallback(callId);
     diag('callkeep', 'native CallKit report confirmed', { callId, callUUID: uuid });
-  }
-
-  private recoverDisplayedCall(uuid: string, error: unknown, errorCode?: unknown): void {
-    if (this.nativeRecoveryInFlight.has(uuid)) return;
-    this.nativeRecoveryInFlight.add(uuid);
-    const generation = this.lifecycleGeneration;
-    const source = this.nativeReportSource ?? this.deps.nativeReports ?? nativeCallKitReports;
-    void source
-      .drain()
-      .then((reports) => {
-        if (generation !== this.lifecycleGeneration) return;
-        this.applyDrainedNativeReports(reports);
-        const callId = this.uuidToId.get(uuid);
-        if (callId) this.settleNativeDisplay(callId, uuid, error, errorCode);
-        else this.endOrphan(uuid, 'PushKit report missing authoritative mapping');
-      })
-      .catch((err) => {
-        if (generation !== this.lifecycleGeneration) return;
-        diag('callkeep', 'native CallKit mapping recovery failed', {
-          callUUID: uuid,
-          err: String(err),
-        });
-        this.endOrphan(uuid, 'PushKit report mapping recovery failed');
-      })
-      .finally(() => this.nativeRecoveryInFlight.delete(uuid));
   }
 
   private handleCallAction(action: 'answer' | 'end', rawUuid: unknown): void {
@@ -601,7 +546,6 @@ export class CallKeepBridge {
     this.uuidToId.delete(uuid);
     this.fallbackCallIds.delete(uuid);
     if (callId) this.releasedFallbackCallIds.delete(callId);
-    this.nativeReportedUuids.delete(uuid);
     this.nativeHandoffUuids.delete(uuid);
     this.failedNativeUuids.delete(uuid);
     this.pendingActions.delete(uuid);
@@ -703,13 +647,7 @@ export class CallKeepBridge {
   }
 
   private scheduleIncomingFallback(call: ActiveCall): void {
-    const mappedUuid = this.idToUuid.get(call.callId);
-    if (
-      this.incomingFallbackTimers.has(call.callId) ||
-      (mappedUuid !== undefined && this.nativeReportedUuids.has(mappedUuid))
-    ) {
-      return;
-    }
+    if (this.incomingFallbackTimers.has(call.callId)) return;
     const timer = setTimeout(() => {
       this.incomingFallbackTimers.delete(call.callId);
       const active = this.deps.orchestrator.getActive();
@@ -720,8 +658,6 @@ export class CallKeepBridge {
       ) {
         return;
       }
-      const tentativeUuid = this.idToUuid.get(call.callId);
-      if (tentativeUuid && this.nativeReportedUuids.has(tentativeUuid)) return;
       const failedUuid = [...this.failedNativeUuids].find(([, id]) => id === call.callId)?.[0];
       if (!failedUuid) {
         this.releaseIncomingFallback(call.callId, 'native CallKit report not confirmed');
@@ -819,18 +755,19 @@ export class CallKeepBridge {
         }
       } else if (next.stage === 'incoming_ringing') {
         if (this.platform() === 'ios') {
-          if (uuid && this.nativeReportedUuids.has(uuid)) {
+          if (uuid && this.nativeHandoffUuids.has(uuid)) {
             diag('callkeep', 'displayIncomingCall skipped: adopting native PushKit report', {
               callUUID: uuid,
               isVideo,
             });
+            this.scheduleIncomingFallback(next);
           } else {
             this.scheduleIncomingFallback(next);
             diag('callkeep', 'awaiting native PushKit report before incoming-call fallback', {
               isVideo,
             });
           }
-        } else if (uuid && !this.nativeReportedUuids.has(uuid)) {
+        } else if (uuid) {
           try {
             RNCallKeep.displayIncomingCall(
               uuid,
@@ -843,11 +780,6 @@ export class CallKeepBridge {
           } catch (err) {
             diag('callkeep', 'displayIncomingCall failed', { err: String(err) });
           }
-        } else if (uuid) {
-          diag('callkeep', 'displayIncomingCall skipped: already reported by PushKit', {
-            callUUID: uuid,
-            isVideo,
-          });
         }
       }
       if (uuid) this.applyPendingAction(next.callId, uuid);
@@ -870,7 +802,6 @@ export class CallKeepBridge {
           this.uuidToId.delete(uuid);
           this.fallbackCallIds.delete(uuid);
           this.releasedFallbackCallIds.delete(prev.callId);
-          this.nativeReportedUuids.delete(uuid);
           this.nativeHandoffUuids.delete(uuid);
           this.pendingActions.delete(uuid);
           if (nativeOwned) this.acknowledgeNativeReport(uuid);
@@ -929,8 +860,4 @@ function uuidV4(): string {
 
 function normalizeUuid(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value.toLowerCase() : undefined;
-}
-
-function isPushKit(value: unknown): boolean {
-  return value === true || value === 1 || value === '1';
 }
