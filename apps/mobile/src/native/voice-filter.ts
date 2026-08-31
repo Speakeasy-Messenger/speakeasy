@@ -99,7 +99,10 @@ export type FilterErrorCode =
   | 'route_lost';
 
 export class FilterError extends Error {
-  constructor(public readonly code: FilterErrorCode, message?: string) {
+  constructor(
+    public readonly code: FilterErrorCode,
+    message?: string,
+  ) {
     super(message ?? code);
     this.name = 'FilterError';
   }
@@ -160,10 +163,7 @@ function getNative(): NativeVoiceFilterModule | undefined {
  * voice-call type on iOS (the default "Call" is masked-audio), which broke all
  * iOS calls in build 16. Connecting-unmasked is the prior, working behavior.
  */
-export function decidePrivateCallAvailable(
-  os: string,
-  nativeIsAvailable: boolean,
-): boolean {
+export function decidePrivateCallAvailable(os: string, nativeIsAvailable: boolean): boolean {
   if (os !== 'ios' && os !== 'android') return false;
   return nativeIsAvailable === true;
 }
@@ -177,10 +177,7 @@ export function decidePrivateCallAvailable(
  * device" indicator instead of implying the voice is disguised. Flip iOS to
  * true here only when the iOS masking path is genuinely re-hooked (RE-HOOK.md).
  */
-export function decideOutboundMaskActive(
-  os: string,
-  nativeIsAvailable: boolean,
-): boolean {
+export function decideOutboundMaskActive(os: string, nativeIsAvailable: boolean): boolean {
   if (os !== 'android') return false; // iOS masking not wired yet
   return nativeIsAvailable === true;
 }

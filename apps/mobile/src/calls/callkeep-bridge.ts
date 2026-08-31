@@ -680,8 +680,7 @@ export class CallKeepBridge {
       this.pendingActions.set(uuid, action);
       return;
     }
-    const nativeOwned =
-      this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid);
+    const nativeOwned = this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid);
     if (nativeOwned) {
       this.settleNativeDisplay(callId, uuid, undefined, undefined);
       this.acknowledgeNativeReport(uuid);
@@ -694,8 +693,7 @@ export class CallKeepBridge {
     const action = this.pendingActions.get(uuid);
     if (!action) return;
     this.pendingActions.delete(uuid);
-    const nativeOwned =
-      this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid);
+    const nativeOwned = this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid);
     if (nativeOwned) {
       this.settleNativeDisplay(callId, uuid, undefined, undefined);
       this.acknowledgeNativeReport(uuid);

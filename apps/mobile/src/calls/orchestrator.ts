@@ -369,7 +369,9 @@ export class CallOrchestrator {
         if (filterResult === 'ended') return callId;
         if (filterResult === 'stale') {
           throw new Error(
-            this.isCurrentGeneration(generation) ? 'call no longer active' : 'orchestrator disposed',
+            this.isCurrentGeneration(generation)
+              ? 'call no longer active'
+              : 'orchestrator disposed',
           );
         }
         this.assertActiveGeneration(generation, callId);
@@ -422,7 +424,9 @@ export class CallOrchestrator {
         }
         if (filterResult === 'stale') {
           throw new Error(
-            this.isCurrentGeneration(generation) ? 'call no longer active' : 'orchestrator disposed',
+            this.isCurrentGeneration(generation)
+              ? 'call no longer active'
+              : 'orchestrator disposed',
           );
         }
         this.assertActivePeer(generation, active.callId, peer);

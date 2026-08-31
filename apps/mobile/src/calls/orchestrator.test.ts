@@ -640,8 +640,9 @@ describe('CallOrchestrator', () => {
 
       await expect(firstDial).rejects.toThrow('call no longer active');
       expect(h.caller.getActive()?.callId).toBe(secondCallId);
-      expect(h.callerOut.filter((frame) => frame.type === 'call_offer' && frame.call_id === firstCallId))
-        .toHaveLength(0);
+      expect(
+        h.callerOut.filter((frame) => frame.type === 'call_offer' && frame.call_id === firstCallId),
+      ).toHaveLength(0);
     });
 
     it('cleanup invokes voiceFilter.dispose so the next call starts fresh', async () => {

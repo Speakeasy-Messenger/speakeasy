@@ -1,6 +1,6 @@
 # iOS ⇄ Android parity
 
-Speakeasy is one React Native 0.76.5 codebase. Almost all of
+Speakeasy is one React Native codebase. Almost all of
 `apps/mobile/src/` is shared TypeScript and reaches both platforms for
 free. This document is the **ledger of where the two platforms actually
 diverge** — so an Android-side fix can't silently fail to reach iOS.
@@ -77,12 +77,18 @@ Audited, accepted as-is (low priority):
   covered by contract tests. `AppDelegate` performs the mandatory native report
   and is the source of truth: it persists the `call_id` ↔ CallKit UUID mapping
   before reporting, and JS adopts that mapping without displaying a second
-  CallKit call. Only an explicit native-report failure permits JS to retry
-  `displayIncomingCall`, reusing the failed report's UUID; if that retry fails,
-  the app shows its in-app incoming-call UI. Diagnostics persist native
-  VoIP-push receipt, incoming-call report completion, `didDisplayIncomingCall`,
-  and audio-session activation. A real incoming call must still confirm
-  physical ring/vibration and uninterrupted WebRTC audio on device.
+  CallKit call. Warm apps receive the mapping by notification; killed or
+  suspended apps drain a persisted queue capped at 20 reports, with entries
+  treated as stale after two minutes. Answer/end actions route through that
+  mapping and replay after signaling becomes active; superseded siblings are
+  ended before adoption. Only an explicit native-report failure permits JS to
+  retry `displayIncomingCall`, reusing the failed report's UUID; if that retry
+  fails, the app shows its in-app incoming-call UI. With no native report, the
+  bounded fallback uses the in-app UI instead of allocating a second iOS UUID.
+  Diagnostics persist native VoIP-push receipt, incoming-call report
+  completion, `didDisplayIncomingCall`, and audio-session activation. A real
+  incoming call must still confirm physical ring/vibration and uninterrupted
+  WebRTC audio on device.
 - `VideoCallScreen.tsx` / `native/pip.ts` — both platforms report PiP entry,
   native bubble size, close, and return lifecycle. Android remounts a compact
   `RTCView` for its resized activity; iOS deliberately keeps the original

@@ -169,8 +169,7 @@ function harness(opts: {
           return startup;
         },
         stop: () => bridge!.stop(),
-        rejectIncomingCall: (callId, peerUserId) =>
-          bridge!.rejectIncomingCall(callId, peerUserId),
+        rejectIncomingCall: (callId, peerUserId) => bridge!.rejectIncomingCall(callId, peerUserId),
       };
     },
   });

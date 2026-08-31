@@ -187,9 +187,7 @@ describe('CallKeepBridge native PushKit adoption', () => {
 
   it('ends an authoritative native call before fallback when CallKeep setup fails', async () => {
     vi.useFakeTimers();
-    const h = harness([
-      { callId: CALL_ID, callUUID: NATIVE_UUID, reportCompleted: true },
-    ]);
+    const h = harness([{ callId: CALL_ID, callUUID: NATIVE_UUID, reportCompleted: true }]);
     h.callKeep.setup.mockRejectedValueOnce(new Error('CallKeep setup unavailable'));
     await h.bridge.start();
 

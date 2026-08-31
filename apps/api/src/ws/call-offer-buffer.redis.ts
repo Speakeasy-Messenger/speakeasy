@@ -23,9 +23,9 @@ import type { BufferedCallFrame, CallOfferBuffer } from './call-offer-buffer.js'
  * = best-effort drop. The caller's ringing-window timeout produces
  * the same "no answer" outcome the user would see without the
  * buffer at all, so silently swallowing the error matches the
- * existing live-route-only fallback. Drain failures are logged but
- * also non-fatal (worst case the device gets the FCM push and the
- * call screen never opens — same as pre-buffer behavior).
+ * existing live-route-only fallback. Drain failures are also non-fatal and
+ * return no frames (worst case the device gets the FCM push and the call
+ * screen never opens — same as pre-buffer behavior).
  */
 
 const TTL_MS = 30_000;
@@ -42,8 +42,7 @@ end
 return redis.call('DEL', KEYS[1])
 `;
 
-const callIdPrefix = (callId: string): string =>
-  `{"callId":${JSON.stringify(callId)},`;
+const callIdPrefix = (callId: string): string => `{"callId":${JSON.stringify(callId)},`;
 
 interface StoredEntry {
   callId: string;
@@ -128,18 +127,15 @@ export function createRedisCallOfferBuffer(
 
     clear(toUserId, callId) {
       const key = keyFor(toUserId);
-      void redis
-        .eval(CLEAR_IF_MATCHING_LUA, 1, key, callIdPrefix(callId))
-        .catch(() => {
-          /* silent — see file header */
-        });
+      void redis.eval(CLEAR_IF_MATCHING_LUA, 1, key, callIdPrefix(callId)).catch(() => {
+        /* silent — see file header */
+      });
     },
 
     async drain(toUserId) {
       const key = keyFor(toUserId);
-      // Atomic read-and-delete via GETDEL (Redis 6.2+). Falls back to
-      // MULTI{GET,DEL} if GETDEL is unavailable — but Fly Redis ships
-      // 7.x so we're safe.
+      // Atomic read-and-delete via GETDEL (Redis 6.2+). Fly Redis ships 7.x;
+      // if the command is unavailable or Redis fails, draining is best-effort.
       let raw: string | null;
       try {
         raw = await redis.getdel(key);
