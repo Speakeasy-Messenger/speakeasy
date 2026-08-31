@@ -26,5 +26,7 @@ RCT_EXTERN_METHOD(consumePendingPipClose:(NSString *)sessionId
 RCT_EXTERN_METHOD(setPipSession:(NSString * _Nullable)sessionId)
 RCT_EXTERN_METHOD(drainNativeDiagnostics:(RCTPromiseResolveBlock)resolve
                   rejecter:(RCTPromiseRejectBlock)reject)
+RCT_EXTERN_METHOD(consumePendingCallKitReports:(RCTPromiseResolveBlock)resolve
+                  rejecter:(RCTPromiseRejectBlock)reject)
 
 @end

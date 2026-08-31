@@ -49,6 +49,12 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
       name: NSNotification.Name("SpeakeasyPictureInPictureClosed"),
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(callKitReported(_:)),
+      name: NSNotification.Name("SpeakeasyCallKitReported"),
+      object: nil
+    )
   }
 
   deinit {
@@ -57,7 +63,9 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
 
   override static func requiresMainQueueSetup() -> Bool { false }
 
-  override func supportedEvents() -> [String] { ["SpeakeasyPipClosed"] }
+  override func supportedEvents() -> [String] {
+    ["SpeakeasyPipClosed", "SpeakeasyCallKitReported"]
+  }
 
   override func startObserving() { hasListeners = true }
 
@@ -77,6 +85,25 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
     ])
     defaults.set(Array(entries.suffix(50)), forKey: "SpeakeasyPendingNativeDiagnostics")
     if hasListeners { sendEvent(withName: "SpeakeasyPipClosed", body: true) }
+  }
+
+  @objc private func callKitReported(_ notification: Notification) {
+    guard hasListeners, let report = notification.userInfo else { return }
+    sendEvent(withName: "SpeakeasyCallKitReported", body: report)
+  }
+
+  @objc func consumePendingCallKitReports(
+    _ resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    let key = "SpeakeasyPendingCallKitReports"
+    let nowMs = Date().timeIntervalSince1970 * 1000
+    let reports = (defaults.array(forKey: key) as? [[String: Any]] ?? []).filter { report in
+      guard let at = report["at"] as? Double else { return false }
+      return at <= nowMs && nowMs - at <= 120_000
+    }
+    defaults.removeObject(forKey: key)
+    resolve(reports)
   }
 
   @objc func consumePendingPipClose(

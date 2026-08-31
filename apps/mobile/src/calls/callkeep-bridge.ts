@@ -3,6 +3,11 @@ import { diag } from '../diag/log.js';
 import type { CallOrchestrator } from './orchestrator.js';
 import type { ActiveCall } from './types.js';
 import { useCalls } from '../store/calls.js';
+import {
+  nativeCallKitReports,
+  type NativeCallKitReport,
+  type NativeCallKitReportSource,
+} from '../native/callkit.js';
 
 /**
  * Lazy-loaded `react-native-callkeep`. The lib's CommonJS
@@ -36,6 +41,7 @@ type RNCallKeepShape = {
     video: boolean,
   ) => void;
   endCall: (uuid: string) => void;
+  reportEndCallWithUUID: (uuid: string, reason: number) => void;
   reportConnectedOutgoingCallWithUUID: (uuid: string) => void;
 };
 
@@ -106,11 +112,18 @@ interface BridgeDeps {
   orchestrator: CallOrchestrator;
   /** Display name shown on the native UI. We use the @handle. */
   appName?: string;
+  /** Injectable seams keep the native adoption contract executable in tests. */
+  callKeep?: RNCallKeepShape;
+  nativeReports?: NativeCallKitReportSource;
+  platform?: string;
 }
 
 export class CallKeepBridge {
   private setupDone = false;
   private unsubscribeStore?: () => void;
+  private unsubscribeNativeReports?: () => void;
+  private nativeReportSource?: NativeCallKitReportSource;
+  private readonly nativeRecoveryInFlight = new Set<string>();
   /** Map our internal `call-{ulid}` ids ↔ CallKit's UUID-shaped ids. */
   private readonly idToUuid = new Map<string, string>();
   private readonly uuidToId = new Map<string, string>();
@@ -127,7 +140,7 @@ export class CallKeepBridge {
 
   async start(): Promise<void> {
     if (this.setupDone) return;
-    const RNCallKeep = tryLoadCallKeep();
+    const RNCallKeep = this.deps.callKeep ?? tryLoadCallKeep();
     if (!RNCallKeep) {
       diag('callkeep', 'native module unavailable — bridge no-ops');
       this.setupDone = true; // mark so we don't retry every call
@@ -205,6 +218,7 @@ export class CallKeepBridge {
         }
       }
       this.attachListeners();
+      await this.attachNativeReportHandoff();
       await this.replayInitialEvents();
       this.attachStoreSubscriber();
       this.setupDone = true;
@@ -225,7 +239,22 @@ export class CallKeepBridge {
     this.rnCallKeep.removeEventListener('didDeactivateAudioSession');
     this.unsubscribeStore?.();
     this.unsubscribeStore = undefined;
+    this.unsubscribeNativeReports?.();
+    this.unsubscribeNativeReports = undefined;
     this.setupDone = false;
+  }
+
+  private async attachNativeReportHandoff(): Promise<void> {
+    if (this.platform() !== 'ios') return;
+    const source = this.deps.nativeReports ?? nativeCallKitReports;
+    this.nativeReportSource = source;
+    this.unsubscribeNativeReports = source.subscribe((report) => this.bindNativeReport(report));
+    try {
+      const reports = await source.drain();
+      for (const report of reports) this.bindNativeReport(report);
+    } catch (err) {
+      diag('callkeep', 'native CallKit handoff drain failed', { err: String(err) });
+    }
   }
 
   private attachListeners(): void {
@@ -302,16 +331,40 @@ export class CallKeepBridge {
 
   private bindPushKitCall(data: any): void {
     const payload = data?.payload as { call_id?: unknown; call_uuid?: unknown } | undefined;
-    const callId = typeof payload?.call_id === 'string' ? payload.call_id : undefined;
     const rawUuid = data?.callUUID ?? payload?.call_uuid;
     const uuid = normalizeUuid(rawUuid);
+    const payloadCallId = typeof payload?.call_id === 'string' ? payload.call_id : undefined;
+    const callId = payloadCallId ?? (uuid ? this.uuidToId.get(uuid) : undefined);
     if (!callId || !uuid) {
       diag('callkeep', 'PushKit call missing mapping', {
         hasCallId: !!callId,
         hasUuid: !!uuid,
       });
+      if (uuid && isPushKit(data?.fromPushKit)) {
+        this.recoverMappingOrEnd(uuid, 'PushKit report missing call_id mapping');
+      }
       return;
     }
+    this.bindNativeReport({ callId, callUUID: uuid });
+  }
+
+  private bindNativeReport(report: NativeCallKitReport): void {
+    const callId = report.callId;
+    const uuid = normalizeUuid(report.callUUID);
+    if (!callId || !uuid) return;
+
+    // A call id must own exactly one CallKit UUID. If a legacy/random sibling
+    // exists, report it ended before adopting the native PushKit UUID so an
+    // answer can never cause the sibling to resolve as a decline.
+    const siblingUuid = this.idToUuid.get(callId);
+    if (siblingUuid && siblingUuid !== uuid) {
+      this.endOrphan(siblingUuid, 'superseded by native PushKit mapping');
+    }
+    const siblingCallId = this.uuidToId.get(uuid);
+    if (siblingCallId && siblingCallId !== callId) {
+      this.idToUuid.delete(siblingCallId);
+    }
+
     this.idToUuid.set(callId, uuid);
     this.uuidToId.set(uuid, callId);
     this.nativeReportedUuids.add(uuid);
@@ -323,8 +376,14 @@ export class CallKeepBridge {
     const uuid = normalizeUuid(rawUuid);
     const callId = uuid ? this.uuidToId.get(uuid) : undefined;
     diag('callkeep', `${action}Call`, { callUUID: uuid, callId });
-    if (!uuid || !callId || this.deps.orchestrator.getActive()?.callId !== callId) {
-      if (uuid) this.pendingActions.set(uuid, action);
+    if (!uuid) return;
+    if (!callId) {
+      this.pendingActions.set(uuid, action);
+      this.recoverMappingOrEnd(uuid, `${action} action missing call_id mapping`);
+      return;
+    }
+    if (this.deps.orchestrator.getActive()?.callId !== callId) {
+      this.pendingActions.set(uuid, action);
       return;
     }
     this.performCallAction(action);
@@ -350,6 +409,46 @@ export class CallKeepBridge {
     else this.deps.orchestrator.hangup();
   }
 
+  private endOrphan(uuid: string, reason: string): void {
+    try {
+      // FAILED is react-native-callkeep END_CALL_REASONS.FAILED. Reporting the
+      // end directly avoids emitting a synthetic endCall action into JS.
+      this.rnCallKeep?.reportEndCallWithUUID(uuid, 1);
+      diag('callkeep', 'orphan CallKit call ended', { callUUID: uuid, reason });
+    } catch (err) {
+      diag('callkeep', 'orphan CallKit cleanup failed', {
+        callUUID: uuid,
+        reason,
+        err: String(err),
+      });
+    }
+    const callId = this.uuidToId.get(uuid);
+    if (callId && this.idToUuid.get(callId) === uuid) this.idToUuid.delete(callId);
+    this.uuidToId.delete(uuid);
+    this.nativeReportedUuids.delete(uuid);
+    this.pendingActions.delete(uuid);
+  }
+
+  private recoverMappingOrEnd(uuid: string, reason: string): void {
+    if (this.nativeRecoveryInFlight.has(uuid)) return;
+    this.nativeRecoveryInFlight.add(uuid);
+    const source = this.nativeReportSource ?? this.deps.nativeReports ?? nativeCallKitReports;
+    void source
+      .drain()
+      .then((reports) => {
+        for (const report of reports) this.bindNativeReport(report);
+        if (!this.uuidToId.has(uuid)) this.endOrphan(uuid, reason);
+      })
+      .catch((err) => {
+        diag('callkeep', 'native CallKit mapping recovery failed', {
+          callUUID: uuid,
+          err: String(err),
+        });
+        this.endOrphan(uuid, reason);
+      })
+      .finally(() => this.nativeRecoveryInFlight.delete(uuid));
+  }
+
   /**
    * Mirror orchestrator state into CallKit/ConnectionService.
    * - `outgoing_ringing` → `startCall` (registers with the system)
@@ -371,12 +470,19 @@ export class CallKeepBridge {
     const RNCallKeep = this.rnCallKeep;
     if (!RNCallKeep) return;
     if (!prev && next) {
-      const uuid = this.allocUuid(next.callId);
+      // Native PushKit is the sole incoming reporter on iOS. Never allocate a
+      // random UUID or call displayIncomingCall here: adopt the mapping that
+      // AppDelegate persisted before its mandatory CallKit report.
+      const uuid =
+        !next.isCaller && this.platform() === 'ios'
+          ? this.idToUuid.get(next.callId)
+          : this.allocUuid(next.callId);
       // Report the actual media kind so CallKit treats a video call as a
       // video call — required for the iOS background video-call context
       // that Picture-in-Picture relies on (bug #4).
       const isVideo = next.kind === 'video';
       if (next.isCaller) {
+        if (!uuid) return;
         try {
           RNCallKeep.startCall(uuid, next.peerUserId, `@${next.peerUserId}`, 'generic', isVideo);
           diag('callkeep', 'startCall requested', { callUUID: uuid, isVideo });
@@ -384,9 +490,13 @@ export class CallKeepBridge {
           diag('callkeep', 'startCall failed', { err: String(err) });
         }
       } else if (next.stage === 'incoming_ringing') {
-        // AppDelegate already displayed PushKit calls before JS existed. A
-        // second displayIncomingCall produced the historical double ringer.
-        if (!this.nativeReportedUuids.has(uuid)) {
+        if (this.platform() === 'ios') {
+          diag('callkeep', 'displayIncomingCall skipped: adopting native PushKit report', {
+            callUUID: uuid,
+            hasMapping: !!uuid,
+            isVideo,
+          });
+        } else if (uuid && !this.nativeReportedUuids.has(uuid)) {
           try {
             RNCallKeep.displayIncomingCall(
               uuid,
@@ -399,14 +509,14 @@ export class CallKeepBridge {
           } catch (err) {
             diag('callkeep', 'displayIncomingCall failed', { err: String(err) });
           }
-        } else {
+        } else if (uuid) {
           diag('callkeep', 'displayIncomingCall skipped: already reported by PushKit', {
             callUUID: uuid,
             isVideo,
           });
         }
       }
-      this.applyPendingAction(next.callId, uuid);
+      if (uuid) this.applyPendingAction(next.callId, uuid);
       return;
     }
     if (!next) {
@@ -449,6 +559,10 @@ export class CallKeepBridge {
     }
     return uuid;
   }
+
+  private platform(): string {
+    return this.deps.platform ?? Platform.OS;
+  }
 }
 
 /**
@@ -474,4 +588,8 @@ function uuidV4(): string {
 
 function normalizeUuid(value: unknown): string | undefined {
   return typeof value === 'string' && value.length > 0 ? value.toLowerCase() : undefined;
+}
+
+function isPushKit(value: unknown): boolean {
+  return value === true || value === 1 || value === '1';
 }
