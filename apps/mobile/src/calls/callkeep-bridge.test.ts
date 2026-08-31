@@ -54,7 +54,7 @@ function harness(
     addEventListener: vi.fn((event: string, listener: (value: any) => void) => {
       listeners.set(event, listener);
     }),
-    removeEventListener: vi.fn(),
+    removeEventListener: vi.fn((event: string) => listeners.delete(event)),
     getInitialEvents: vi.fn(async () => initialEvents),
     clearInitialEvents: vi.fn(),
     startCall: vi.fn(),
@@ -176,6 +176,34 @@ describe('CallKeepBridge native PushKit adoption', () => {
     expect(h.orchestrator.decline).toHaveBeenCalledOnce();
     expect(h.orchestrator.accept).not.toHaveBeenCalled();
     expect(h.orchestrator.hangup).not.toHaveBeenCalled();
+    h.bridge.stop();
+  });
+
+  it('does not recover a locally requested end as an orphan', async () => {
+    const h = harness([{ callId: CALL_ID, callUUID: NATIVE_UUID }]);
+    await h.bridge.start();
+    useCalls.getState().setActive(incoming());
+
+    useCalls.getState().setActive(undefined);
+    h.emitCallKeep('endCall', { callUUID: NATIVE_UUID });
+    await Promise.resolve();
+
+    expect(h.callKeep.endCall).toHaveBeenCalledWith(NATIVE_UUID);
+    expect(h.callKeep.reportEndCallWithUUID).not.toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(h.orchestrator.decline).not.toHaveBeenCalled();
+    expect(h.orchestrator.hangup).not.toHaveBeenCalled();
+    h.bridge.stop();
+  });
+
+  it('ends a rejected call immediately when its native mapping arrives late', async () => {
+    const h = harness();
+    await h.bridge.start();
+
+    h.bridge.rejectIncomingCall(CALL_ID);
+    h.emitNativeReport({ callId: CALL_ID, callUUID: NATIVE_UUID });
+
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(NATIVE_UUID);
     h.bridge.stop();
   });
 

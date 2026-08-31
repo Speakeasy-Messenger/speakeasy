@@ -173,7 +173,8 @@ export interface CallOrchestratorDeps {
   callKeepEnabled?: boolean;
   callKeepFactory?: (
     orchestrator: CallOrchestrator,
-  ) => Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop'>>;
+  ) => Pick<CallKeepBridge, 'start'> &
+    Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
 }
 
 export interface CallHistoryEntry {
@@ -220,7 +221,8 @@ export class CallOrchestrator {
   private connectingAt?: number;
   private peer?: CallPeer;
   /** CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
-  private callKeep?: Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop'>>;
+  private callKeep?: Pick<CallKeepBridge, 'start'> &
+    Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private connectingTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
@@ -231,6 +233,8 @@ export class CallOrchestrator {
   /** Monotonic counter the sender stamps on outbound animation frames. */
   private outboundAnimationSeq = 0;
   private callKeepStart?: Promise<void>;
+  private disposed = false;
+  private lifecycleGeneration = 0;
 
   /**
    * Sequential queue for inbound call frames.
@@ -264,7 +268,7 @@ export class CallOrchestrator {
    * disabled; concurrent startup paths share the same promise.
    */
   private async ensureCallKeepStarted(): Promise<void> {
-    if (!this.callKeepIsEnabled()) return;
+    if (this.disposed || !this.callKeepIsEnabled()) return;
     if (!this.callKeep) {
       this.callKeep =
         this.deps.callKeepFactory?.(this) ?? new CallKeepBridge({ orchestrator: this });
@@ -287,6 +291,12 @@ export class CallOrchestrator {
   }
 
   dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.lifecycleGeneration += 1;
+    this.callFrameQueue = [];
+    if (this.active) this.hangup();
+    else this.cleanup();
     this.callKeep?.stop?.();
     this.callKeep = undefined;
     this.callKeepStart = undefined;
@@ -298,6 +308,7 @@ export class CallOrchestrator {
    * `'video'` to negotiate a camera track via VideoCallScreen.
    */
   async startOutgoing(peerUserId: string, kind: CallKind = 'audio'): Promise<string> {
+    if (this.disposed) throw new Error('orchestrator disposed');
     if (this.active) {
       throw new Error('busy: another call is already active');
     }
@@ -308,6 +319,7 @@ export class CallOrchestrator {
     // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
     // store subscriber catches this call-start. No-op while CALLKEEP_ENABLED.
     await this.ensureCallKeepStarted();
+    if (this.disposed) throw new Error('orchestrator disposed');
     this.setActive({
       callId,
       peerUserId,
@@ -612,6 +624,7 @@ export class CallOrchestrator {
    * Non-call frames pass through immediately.
    */
   async handleFrame(frame: WsServerMsg): Promise<void> {
+    if (this.disposed) return;
     const isCallFrame =
       frame.type === 'call_offer' ||
       frame.type === 'call_answer' ||
@@ -662,6 +675,9 @@ export class CallOrchestrator {
     callId: string,
     ciphertextB64: string,
   ): Promise<void> {
+    const generation = this.lifecycleGeneration;
+    let incomingPeer: CallPeer | undefined;
+    if (!this.isCurrentGeneration(generation)) return;
     if (this.recentlyCancelled.has(callId)) {
       // The caller already sent call_end for this callId (they hung up
       // before/around when the server buffered their offer). Drop the
@@ -671,6 +687,7 @@ export class CallOrchestrator {
         fromUserId,
         callId,
       });
+      this.rejectIncomingCall(callId);
       return;
     }
     if (this.active) {
@@ -697,6 +714,7 @@ export class CallOrchestrator {
         reason: 'busy',
       });
       diag('call', 'incoming offer rejected: busy', { fromUserId, callId });
+      this.rejectIncomingCall(callId);
       return;
     }
     // SETTINGS.md §4.1: "Allow incoming calls" toggle. When off,
@@ -714,10 +732,12 @@ export class CallOrchestrator {
         fromUserId,
         callId,
       });
+      this.rejectIncomingCall(callId);
       return;
     }
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallOfferPayload;
+      if (!this.isCurrentGeneration(generation)) return;
       // Resolve + validate the call kind. Absent ⇒ 'audio' (back-compat
       // with pre-rc.34 clients that never set the field). Unknown ⇒
       // silently abort: the brand promise hole this closes is a future
@@ -738,6 +758,7 @@ export class CallOrchestrator {
           callId,
           kind: rawKind,
         });
+        this.rejectIncomingCall(callId);
         return;
       }
       diag('call', 'handleIncomingOffer: decrypted', {
@@ -746,6 +767,7 @@ export class CallOrchestrator {
         kind,
       });
       const iceServers = await this.fetchIceServers();
+      if (!this.isCurrentGeneration(generation)) return;
       const peer = await this.deps.peerFactory.create({
         iceServers,
         role: 'callee',
@@ -754,11 +776,18 @@ export class CallOrchestrator {
         // peerConnection still negotiates audio-only media.
         mediaKind: mediaKindForCall(kind),
       });
+      if (!this.isCurrentGeneration(generation)) {
+        peer.close();
+        return;
+      }
+      incomingPeer = peer;
       this.attachPeer(peer);
       await peer.setRemoteOffer(payload);
+      if (!this.isCurrentGeneration(generation)) return;
       // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
       // store subscriber mirrors this incoming call into the native ring UI.
       await this.ensureCallKeepStarted();
+      if (!this.isCurrentGeneration(generation)) return;
       this.setActive({
         callId,
         peerUserId: fromUserId,
@@ -786,6 +815,7 @@ export class CallOrchestrator {
       // doesn't gate any wire-side work.
       void this.warmUpPermissions(kind);
     } catch (err) {
+      if (!this.isCurrentGeneration(generation)) return;
       diag('call', 'incoming offer FAILED', {
         fromUserId,
         callId,
@@ -798,7 +828,17 @@ export class CallOrchestrator {
         call_id: callId,
         reason: 'hangup',
       });
+      this.rejectIncomingCall(callId);
+      if (incomingPeer && this.peer === incomingPeer) this.cleanup();
     }
+  }
+
+  private isCurrentGeneration(generation: number): boolean {
+    return !this.disposed && generation === this.lifecycleGeneration;
+  }
+
+  private rejectIncomingCall(callId: string): void {
+    this.callKeep?.rejectIncomingCall?.(callId);
   }
 
   /** Flag `untrusted_identity` decrypt failures to the app layer — the

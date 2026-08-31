@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import type { WsClientMsg } from '@speakeasy/shared';
 import { MockSignalProtocolClient } from '../native/mock-signal-protocol.js';
+import type { NativeCallKitReport } from '../native/callkit.js';
 import { CallKeepBridge } from './callkeep-bridge.js';
 import { CallOrchestrator } from './orchestrator.js';
 
@@ -8,6 +9,7 @@ const UUIDS = [
   '38c37551-9389-55a1-b8fc-bab3ed28db31',
   '26686650-db46-5378-92d3-19da7c9a947d',
   'cda1e118-cf94-5fd7-9b09-ea5784eb60fb',
+  '44d4bbbc-b7c2-58ea-a99d-1b0953136e20',
 ];
 
 function offer(payload: unknown): string {
@@ -23,11 +25,22 @@ function harness(opts: {
   callUUID: string;
   allowIncoming?: boolean;
   decryptFailure?: boolean;
+  deferDecrypt?: boolean;
 }) {
   const sent: WsClientMsg[] = [];
   const signalProtocol = new MockSignalProtocolClient();
   if (opts.decryptFailure) {
     vi.spyOn(signalProtocol, 'decrypt').mockRejectedValue(new Error('decrypt failed'));
+  }
+  let releaseDecrypt: (() => void) | undefined;
+  if (opts.deferDecrypt) {
+    const gate = new Promise<void>((resolve) => {
+      releaseDecrypt = resolve;
+    });
+    vi.spyOn(signalProtocol, 'decrypt').mockImplementation(async (_peer, ciphertext) => {
+      await gate;
+      return ciphertext.slice(1);
+    });
   }
   const callKeep = {
     setup: vi.fn(async () => undefined),
@@ -43,18 +56,31 @@ function harness(opts: {
     reportEndCallWithUUID: vi.fn(),
     reportConnectedOutgoingCallWithUUID: vi.fn(),
   };
+  let nativeReportListener: ((report: NativeCallKitReport) => void) | undefined;
   const nativeReports = {
     drain: vi.fn(async () => [{ callId: opts.callId, callUUID: opts.callUUID }]),
-    subscribe: vi.fn(() => () => undefined),
+    subscribe: vi.fn((listener) => {
+      nativeReportListener = listener;
+      return () => {
+        nativeReportListener = undefined;
+      };
+    }),
     acknowledge: vi.fn(),
   };
+  const peer = {
+    setRemoteOffer: vi.fn(async () => undefined),
+    onLocalIce: vi.fn(() => () => undefined),
+    onConnectionStateChange: vi.fn(() => () => undefined),
+    close: vi.fn(),
+  };
+  const peerFactory = { create: vi.fn(async () => peer) };
   let bridge: CallKeepBridge | undefined;
   let startup: Promise<void> | undefined;
   const orchestrator = new CallOrchestrator({
     myUserId: 'ios-user',
     signalProtocol,
     api: { fetchTurnCredentials: vi.fn(async () => []) } as never,
-    peerFactory: { create: vi.fn() } as never,
+    peerFactory: peerFactory as never,
     getDeviceToken: async () => 'dvt-ios',
     send: (frame) => sent.push(frame),
     ensureSessionWithPeer: vi.fn() as never,
@@ -76,6 +102,7 @@ function harness(opts: {
           return startup;
         },
         stop: () => bridge!.stop(),
+        rejectIncomingCall: (callId) => bridge!.rejectIncomingCall(callId),
       };
     },
   });
@@ -84,6 +111,12 @@ function harness(opts: {
     callKeep,
     nativeReports,
     sent,
+    signalProtocol,
+    peer,
+    peerFactory,
+    releaseDecrypt: () => releaseDecrypt?.(),
+    emitNativeReport: (callId: string, callUUID: string) =>
+      nativeReportListener?.({ callId, callUUID }),
     bridge: () => bridge!,
     startup: () => startup!,
   };
@@ -95,7 +128,6 @@ afterEach(() => {
 
 describe('CallOrchestrator iOS CallKit bootstrap', () => {
   it('ends unactivated native reports across every pre-ringing rejection path', async () => {
-    vi.useFakeTimers();
     const cases = [
       {
         callId: 'call-decrypt-failure',
@@ -132,12 +164,81 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
       const end = h.sent.find((frame) => frame.type === 'call_end');
       expect(end?.type === 'call_end' ? end.reason : undefined).toBe(scenario.reason);
 
-      await vi.advanceTimersByTimeAsync(100);
-
       expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(scenario.callUUID, 1);
       expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(scenario.callUUID);
       h.orchestrator.dispose();
       expect(h.callKeep.removeEventListener).toHaveBeenCalled();
     }
+  });
+
+  it('ends a second native call immediately when signaling rejects it as busy', async () => {
+    const h = harness({
+      callId: 'call-active',
+      callUUID: UUIDS[0]!,
+    });
+    await h.startup();
+    await h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'android-peer',
+      call_id: 'call-active',
+      ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
+    });
+    h.emitNativeReport('call-busy', UUIDS[3]!);
+
+    await h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'second-peer',
+      call_id: 'call-busy',
+      ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
+    });
+
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[3], 1);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(UUIDS[3]);
+    h.orchestrator.dispose();
+  });
+
+  it('ends active CallKit ownership when its orchestrator is disposed', async () => {
+    const h = harness({
+      callId: 'call-remount-active',
+      callUUID: UUIDS[1]!,
+    });
+    await h.startup();
+    await h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'android-peer',
+      call_id: 'call-remount-active',
+      ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
+    });
+
+    h.orchestrator.dispose();
+
+    expect(h.orchestrator.getActive()).toBeUndefined();
+    expect(h.peer.close).toHaveBeenCalled();
+    expect(h.callKeep.endCall).toHaveBeenCalledWith(UUIDS[1]);
+  });
+
+  it('invalidates an in-flight offer when its orchestrator is disposed', async () => {
+    const h = harness({
+      callId: 'call-remount-in-flight',
+      callUUID: UUIDS[2]!,
+      deferDecrypt: true,
+    });
+    await h.startup();
+    const processing = h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'android-peer',
+      call_id: 'call-remount-in-flight',
+      ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
+    });
+    await vi.waitFor(() => expect(h.signalProtocol.decrypt).toHaveBeenCalled());
+
+    h.orchestrator.dispose();
+    h.releaseDecrypt();
+    await processing;
+
+    expect(h.peerFactory.create).not.toHaveBeenCalled();
+    expect(h.orchestrator.getActive()).toBeUndefined();
+    expect(h.callKeep.setup).toHaveBeenCalledOnce();
+    expect(h.callKeep.endCall).toHaveBeenCalledWith(UUIDS[2]);
   });
 });
