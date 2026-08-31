@@ -227,6 +227,7 @@ export async function routeCallFrame(
           const payload = {
             call_id: String(msg.call_id),
             call_uuid: callKitUuidForCallId(String(msg.call_id)),
+            peer_user_id: senderUserId,
             handle: senderUserId,
             caller_name: senderUserId,
             has_video: offerKind === 'video',
@@ -338,6 +339,7 @@ export async function routeCallFrame(
       // Either side hung up / caller cancelled → drop the buffered offer
       // so the callee doesn't ring on a stale offer when they reconnect.
       deps.callBuffer.clear(msg.to, msg.call_id);
+      deps.callBuffer.clear(senderUserId, msg.call_id);
       break;
   }
 

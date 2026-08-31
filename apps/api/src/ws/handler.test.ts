@@ -252,10 +252,7 @@ describe('ws auth handshake', () => {
     expect(frame.type).toBe('peer_deleted');
     expect(frame.handle).toBe('golf-hotel-india');
     // No relay row should have been written — buffer scan turns up empty.
-    const buffered = await messagesRepo.listUndeliveredFor(
-      'golf-hotel-india',
-      'any-device',
-    );
+    const buffered = await messagesRepo.listUndeliveredFor('golf-hotel-india', 'any-device');
     expect(buffered).toHaveLength(0);
   });
 
@@ -284,9 +281,7 @@ describe('ws auth handshake', () => {
 });
 
 describe('ws messaging — Phase 3', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -776,9 +771,7 @@ describe('ws messaging — Phase 3', () => {
 });
 
 describe('ws group send — accepted receipt + idempotent retransmit', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -934,9 +927,7 @@ describe('ws group send — accepted receipt + idempotent retransmit', () => {
 });
 
 describe('ws SKDM envelope — Phase 5b carry-over', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -1103,9 +1094,7 @@ describe('ws SKDM envelope — Phase 5b carry-over', () => {
  *     model and burn delivery slots needlessly)
  */
 describe('ws messaging — 1:1 direct invariants', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -1120,9 +1109,9 @@ describe('ws messaging — 1:1 direct invariants', () => {
     // to the *exact same* bytes the sender base64-encoded — no
     // re-canonicalisation, no truncation, no UTF-8 round-trip damage.
     const plaintext = new Uint8Array([
-      0x02, 0xff, 0x00, 0x7f, 0x80, 0x10, 0xa5, 0x33, 0x9c, 0x42, 0x18, 0xee, 0xb1, 0xc4,
-      0x6d, 0x57, 0x29, 0x88, 0xf1, 0x0b, 0x5e, 0xa0, 0x71, 0x3d, 0x4c, 0xfa, 0x66, 0x91,
-      0x14, 0x2b, 0xe7, 0xdc,
+      0x02, 0xff, 0x00, 0x7f, 0x80, 0x10, 0xa5, 0x33, 0x9c, 0x42, 0x18, 0xee, 0xb1, 0xc4, 0x6d,
+      0x57, 0x29, 0x88, 0xf1, 0x0b, 0x5e, 0xa0, 0x71, 0x3d, 0x4c, 0xfa, 0x66, 0x91, 0x14, 0x2b,
+      0xe7, 0xdc,
     ]);
     const wireB64 = Buffer.from(plaintext).toString('base64');
     const a = await authedSocket('alice-blue-fox');
@@ -1322,9 +1311,7 @@ describe('ws messaging — 1:1 direct invariants', () => {
 });
 
 describe('ws messaging — Phase 5d push-token integration', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -1433,9 +1420,7 @@ describe('ws messaging — Phase 5d push-token integration', () => {
 });
 
 describe('ws voice call signaling — Phase 6', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -1752,6 +1737,38 @@ describe('ws voice call signaling — Phase 6', () => {
     await expect(b.q.next(200)).rejects.toThrow(/timeout/);
   });
 
+  it('does not replay an offer after the callee rejects then reconnects', async () => {
+    const callId = 'call-01HZZZREJECTEDRECONNECTAAA';
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: callId,
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    expect(((await b.q.next()) as { type: string }).type).toBe('call_offer');
+
+    b.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'alice-blue-fox',
+        call_id: callId,
+        reason: 'decline',
+      }),
+    );
+    expect(((await a.q.next()) as { type: string }).type).toBe('call_end');
+
+    b.ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const reconnected = await authedSocket('bob-red-bear');
+
+    await expect(reconnected.q.next(200)).rejects.toThrow(/timeout/);
+  });
+
   it('rejects call to self and missing fields', async () => {
     const a = await authedSocket('alice-blue-fox');
     a.ws.send(
@@ -1779,9 +1796,7 @@ describe('ws voice call signaling — Phase 6', () => {
 });
 
 describe('ws sealed sender — Phase 5g (spec §13)', () => {
-  async function authedSocket(
-    userId: string,
-  ): Promise<{ ws: WebSocket; q: MsgQueue }> {
+  async function authedSocket(userId: string): Promise<{ ws: WebSocket; q: MsgQueue }> {
     const ws = await open();
     const q = new MsgQueue(ws);
     ws.send(JSON.stringify({ type: 'auth', token: `dvt_${userId}` }));
@@ -1817,9 +1832,7 @@ describe('ws sealed sender — Phase 5g (spec §13)', () => {
     // Internal ack flow still works — the server records senderId
     // for routing but doesn't echo it. When bob acks, alice's
     // `delivered` lands as usual.
-    b.ws.send(
-      JSON.stringify({ type: 'ack', message_id: incoming.message_id }),
-    );
+    b.ws.send(JSON.stringify({ type: 'ack', message_id: incoming.message_id }));
     const delivered = (await a.q.next()) as { type: string; message_id: string };
     expect(delivered.type).toBe('delivered');
     expect(delivered.message_id).toBe(incoming.message_id);

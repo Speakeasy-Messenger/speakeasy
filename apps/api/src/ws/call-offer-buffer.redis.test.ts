@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import type { Redis } from 'ioredis';
 // @ts-expect-error - ioredis-mock has no types but is API-compatible with ioredis
 import RedisMock from 'ioredis-mock';
@@ -8,12 +8,11 @@ import { raiseIoredisMockListenerLimit } from './redis-mock-listener-limit.test-
 /**
  * Unit tests for the Redis-backed call-offer buffer.
  *
- * Run against ioredis-mock so the WATCH/MULTI/EXEC paths the
- * production code actually executes are exercised end-to-end (no
- * substring sniffing on Lua scripts). Each `new RedisMock()` shares
- * an in-process emulated Redis with every other instance — which is
- * exactly the shared-Upstash analog we want for cross-instance
- * tests.
+ * Run against ioredis-mock so the Lua EVAL and GETDEL paths the
+ * production code actually executes are exercised end-to-end. Each
+ * `new RedisMock()` shares an in-process emulated Redis with every
+ * other instance — which is exactly the shared-Upstash analog we
+ * want for cross-instance tests.
  */
 function makeMockRedis(): Redis {
   raiseIoredisMockListenerLimit();
@@ -45,6 +44,23 @@ const ICE_B = {
 // microtasks plus the ioredis-mock command roundtrip; a small sleep
 // is more reliable than counting microtask hops.
 const settle = (): Promise<void> => new Promise((r) => setTimeout(r, 20));
+
+function blockRedisGet(redis: Redis): {
+  release: () => void;
+  restore: () => void;
+} {
+  const originalGet = redis.get.bind(redis);
+  let release = (): void => {};
+  const blocked = new Promise<void>((resolve) => {
+    release = resolve;
+  });
+  const spy = vi.spyOn(redis, 'get').mockImplementation(async (key: string) => {
+    const raw = await originalGet(key);
+    await blocked;
+    return raw;
+  });
+  return { release, restore: () => spy.mockRestore() };
+}
 
 describe('createRedisCallOfferBuffer', () => {
   it('drains a buffered offer', async () => {
@@ -110,6 +126,46 @@ describe('createRedisCallOfferBuffer', () => {
     buf.clear('bob', 'call-001');
     await settle();
     expect(await buf.drain('bob')).toEqual([]);
+  });
+
+  it('does not drain a rejected offer while clear is in flight', async () => {
+    const clearRedis = makeMockRedis();
+    const reconnectRedis = makeMockRedis();
+    const clearer = createRedisCallOfferBuffer(clearRedis);
+    const reconnecting = createRedisCallOfferBuffer(reconnectRedis);
+    clearer.put('bob', OFFER);
+    await settle();
+
+    const blockedGet = blockRedisGet(clearRedis);
+    clearer.clear('bob', OFFER.callId);
+    await settle();
+    const drained = await reconnecting.drain('bob');
+    blockedGet.release();
+    blockedGet.restore();
+    await settle();
+
+    expect(drained).toEqual([]);
+  });
+
+  it('does not delete a replacement offer while clear is in flight', async () => {
+    const clearRedis = makeMockRedis();
+    const writerRedis = makeMockRedis();
+    const clearer = createRedisCallOfferBuffer(clearRedis);
+    const writer = createRedisCallOfferBuffer(writerRedis);
+    const replacement = { ...OFFER, callId: 'call-002', ciphertext: 'bmV3' };
+    clearer.put('bob', OFFER);
+    await settle();
+
+    const blockedGet = blockRedisGet(clearRedis);
+    clearer.clear('bob', OFFER.callId);
+    await settle();
+    writer.put('bob', replacement);
+    await settle();
+    blockedGet.release();
+    blockedGet.restore();
+    await settle();
+
+    expect(await writer.drain('bob')).toEqual([replacement]);
   });
 
   it('drain returns [] when nothing is buffered', async () => {

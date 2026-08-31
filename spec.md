@@ -8,14 +8,14 @@
 
 ## Implementation status (May 2026)
 
-| Phase | Server | Mobile | Notes |
-| --- | --- | --- | --- |
-| 0 — Foundation | ✅ done | ✅ done | Turborepo, `packages/shared` (9 592 adjectives + 7 184 nouns, ID generator, ULID, types), Drizzle schema mirroring §8, Fly.io configs, GH Actions CI. 11 tests. |
-| 1 — Auth + Transport | ✅ done | ✅ JS layer, ⚠ no native shells | Vouchflow REST integration (`VouchflowValidator` + `VouchflowApiClient` against `sandbox.api.vouchflow.dev`), `MockValidator` for tests, `requireAuth` middleware (no override below medium), `POST /v1/enroll`, raw `ws` server with auth handshake + ping/pong + reconnect skeleton, `Presence` (in-mem + Redis) wired into WS lifecycle. Mobile JS: theme, brand components (`Wordmark`/`IconMark`/`Button`), `ApiClient`, `SpeakeasyWsClient`, Zustand stores, `OnboardingScreen` + `IdRevealScreen` + `ConversationsScreen`, React Navigation v7, `App.tsx`. |
-| 2 — Encryption layer | ✅ server done | ⚠ contracts only | `packages/crypto`: `SignalProtocolModule` + `ChannelKeyModule` interfaces + `SoftwareChannelKeyModule` (test fixture, AES-256-GCM). API: `GET /v1/users/:id`, `POST /v1/prekeys/bundle` (consumes OTPK), `POST /v1/prekeys/replenish`, `POST /v1/groups`, `POST /v1/groups/:id/members` (100-member ceiling enforced), `POST /v1/communities`, `POST /v1/communities/:id/members`, `POST /v1/communities/:id/envelopes`, `GET /v1/communities/:id/key`. Migration 0002 added `community_key_envelopes` and dropped the underspecified `communities.encrypted_key` column. End-to-end round-trip test: wrap-store-fetch-unwrap recovers K. **Mobile-side native crypto** (CryptoKit, Conscrypt, SQLCipher) deferred until native shells are scaffolded — `Native{SignalProtocol,ChannelKey}Module` placeholders throw `not_implemented`. |
-| 3 — Messaging | ✅ server done | ⚠ JS layer | Server: WS handler now persists-and-forwards (every send first writes the `messages` table, then routes), fans out group/community to all members minus sender (one row per recipient → independent ack-deletes), drains buffered messages on auth handshake (offline → online), `ack` triggers row delete (spec §5). Conversation IDs per spec §8 (1:1 = sha256(sortedPair) prefixed `dm-`, group/community pass through). 6 new ws-messaging tests cover ack-delete, buffered delivery on reconnect, group + community fan-out, no_recipients, deterministic conversation ids. Mobile: `useConversations` Zustand store with per-conversation TTL options + persistence opt-in (spec §5), `ChatScreen.tsx` with message list, input, send via WS client, auto-ack on receive, local TTL engine driving `DisappearingMessageBubble` through the §14 dissolve. **Real Signal-Protocol encrypt/decrypt** of message payloads + media upload deferred until native shells are scaffolded; today the bubble text equals the base64 ciphertext. |
-| 4 — Hardening | ✅ server done | ⚠ JS layer | **Rate limiting** (`InMemoryRateLimiter` + `RedisRateLimiter`, fixed-window per `ratelimit:{subject}:{endpoint}:{bucket}`) on `/v1/enroll` (5/hr), `/v1/prekeys/*` (60/min, 10/min), `/v1/communities/:id/envelopes` (100/min). 429 with `RateLimit-*` headers. **Anomaly-flag rejection** in `VouchflowValidator` (`hardAnomalyFlags` config). **PreKey low_water** signal (threshold 10) on prekey responses; mobile auto-replenishes (route in place; encrypt blocked on native module). **Cross-instance `delivered` routing** via `AckRouter` (in-memory + Redis pub/sub) — `delivered` semantics now = recipient acknowledged across the cluster. **Mobile `CachingVouchflowClient`** caches deviceToken below the server's freshness window so reconnects don't re-prompt. **Push notifications contract** — `PushProvider` interface + `NoopPushProvider` default + `MockPushProvider` for tests + `FcmApnsPushProvider` placeholder; WS handler fires notify-only push when recipient has no live socket (no content per spec). **Multi-device** — migration `0003_devices.sql`, `DevicesRepo` (in-mem + Drizzle schema), `Connections` reworked to `(userId, deviceToken)` keys with `getDevices(userId)`; WS fan-out + cross-instance ack delivery target all live devices. **Security audit** — envelope upload always sets `wrapped_by_user_id` from `auth.userId` (no spoof), logs `audit: 'envelope_upload'` structured event. **Fly.io production config** updated: `min_machines_running = 2`, tuned health checks, `restart_limit = 3`, secrets+volume-snapshot docs in `infra/fly/README.md`. **FCM/APNs delivery + mobile push-token registration + mobile multi-device pairing UX** deferred (need cloud creds + native shells). |
-| 5 — Native shells + production polish | 🚧 in progress (Android + server) | 🚧 in progress (Android), ✅ iOS .app packaged end-to-end on Xcode 26.4.1 (4-of-4 native bridges, Metro JS bundle, SQLCipher + libsignal_ffi + Vouchflow linked) | RN shells generated (5a ✅). All four Android native bridges ✅: Vouchflow, Signal Protocol (1:1), Channel Keys, Group Messaging (Sender Keys). **SQLCipher local persistence ✅ (5c)** — `SpeakeasyDb` + `SqlCipherSignalProtocolStore` (5 of 6 SignalProtocolStore interfaces SQLCipher-backed; only Kyber remains in-memory). DB key derived per spec §4c via HKDF-SHA256 from `Vouchflow.cachedDeviceToken` (requires SDK 1.0.3). 1:1 chat encrypt/decrypt + PreKey replenishment auto-trigger ✅ (Phase 5b carry-over). APK: 217 MB. **🍎 iOS counterparts authored** at `apps/mobile/ios/SpeakeasyBridges/` — same JS interfaces, same wire formats; compile-verified 2026-05-18 (Xcode 26.4.1, clean simulator build) and CI-gated via `.github/workflows/ios.yml`. Server: still ahead. Remaining: FCM (5d ✅ Android server+mobile wired; iOS APNs pending), conversations/settings/profile UX + group chat screen (5e), multi-device pairing, sealed sender, Drizzle-impl all repos, metrics endpoint, channel-key rotation policy. See §11 Phase 5 for the full breakdown. |
+| Phase                                 | Server                            | Mobile                                                                                                                                                           | Notes                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
+| ------------------------------------- | --------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 0 — Foundation                        | ✅ done                           | ✅ done                                                                                                                                                          | Turborepo, `packages/shared` (9 592 adjectives + 7 184 nouns, ID generator, ULID, types), Drizzle schema mirroring §8, Fly.io configs, GH Actions CI. 11 tests.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       |
+| 1 — Auth + Transport                  | ✅ done                           | ✅ JS layer, ⚠ no native shells                                                                                                                                  | Vouchflow REST integration (`VouchflowValidator` + `VouchflowApiClient` against `sandbox.api.vouchflow.dev`), `MockValidator` for tests, `requireAuth` middleware (no override below medium), `POST /v1/enroll`, raw `ws` server with auth handshake + ping/pong + reconnect skeleton, `Presence` (in-mem + Redis) wired into WS lifecycle. Mobile JS: theme, brand components (`Wordmark`/`IconMark`/`Button`), `ApiClient`, `SpeakeasyWsClient`, Zustand stores, `OnboardingScreen` + `IdRevealScreen` + `ConversationsScreen`, React Navigation v7, `App.tsx`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                     |
+| 2 — Encryption layer                  | ✅ server done                    | ⚠ contracts only                                                                                                                                                 | `packages/crypto`: `SignalProtocolModule` + `ChannelKeyModule` interfaces + `SoftwareChannelKeyModule` (test fixture, AES-256-GCM). API: `GET /v1/users/:id`, `POST /v1/prekeys/bundle` (consumes OTPK), `POST /v1/prekeys/replenish`, `POST /v1/groups`, `POST /v1/groups/:id/members` (100-member ceiling enforced), `POST /v1/communities`, `POST /v1/communities/:id/members`, `POST /v1/communities/:id/envelopes`, `GET /v1/communities/:id/key`. Migration 0002 added `community_key_envelopes` and dropped the underspecified `communities.encrypted_key` column. End-to-end round-trip test: wrap-store-fetch-unwrap recovers K. **Mobile-side native crypto** (CryptoKit, Conscrypt, SQLCipher) deferred until native shells are scaffolded — `Native{SignalProtocol,ChannelKey}Module` placeholders throw `not_implemented`.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                               |
+| 3 — Messaging                         | ✅ server done                    | ⚠ JS layer                                                                                                                                                       | Server: WS handler now persists-and-forwards (every send first writes the `messages` table, then routes), fans out group/community to all members minus sender (one row per recipient → independent ack-deletes), drains buffered messages on auth handshake (offline → online), `ack` triggers row delete (spec §5). Conversation IDs per spec §8 (1:1 = sha256(sortedPair) prefixed `dm-`, group/community pass through). 6 new ws-messaging tests cover ack-delete, buffered delivery on reconnect, group + community fan-out, no_recipients, deterministic conversation ids. Mobile: `useConversations` Zustand store with per-conversation TTL options + persistence opt-in (spec §5), `ChatScreen.tsx` with message list, input, send via WS client, auto-ack on receive, local TTL engine driving `DisappearingMessageBubble` through the §14 dissolve. **Real Signal-Protocol encrypt/decrypt** of message payloads + media upload deferred until native shells are scaffolded; today the bubble text equals the base64 ciphertext.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                           |
+| 4 — Hardening                         | ✅ server done                    | ⚠ JS layer                                                                                                                                                       | **Rate limiting** (`InMemoryRateLimiter` + `RedisRateLimiter`, fixed-window per `ratelimit:{subject}:{endpoint}:{bucket}`) on `/v1/enroll` (5/hr), `/v1/prekeys/*` (60/min, 10/min), `/v1/communities/:id/envelopes` (100/min). 429 with `RateLimit-*` headers. **Anomaly-flag rejection** in `VouchflowValidator` (`hardAnomalyFlags` config). **PreKey low_water** signal (threshold 10) on prekey responses; mobile auto-replenishes (route in place; encrypt blocked on native module). **Cross-instance `delivered` routing** via `AckRouter` (in-memory + Redis pub/sub) — `delivered` semantics now = recipient acknowledged across the cluster. **Mobile `CachingVouchflowClient`** caches deviceToken below the server's freshness window so reconnects don't re-prompt. **Push notifications contract** — `PushProvider` interface + `NoopPushProvider` default + `MockPushProvider` for tests + `FcmApnsPushProvider` placeholder; WS handler fires notify-only push when recipient has no live socket (no content per spec). **Multi-device** — migration `0003_devices.sql`, `DevicesRepo` (in-mem + Drizzle schema), `Connections` reworked to `(userId, deviceToken)` keys with `getDevices(userId)`; WS fan-out + cross-instance ack delivery target all live devices. **Security audit** — envelope upload always sets `wrapped_by_user_id` from `auth.userId` (no spoof), logs `audit: 'envelope_upload'` structured event. **Fly.io production config** updated: `min_machines_running = 2`, tuned health checks, `restart_limit = 3`, secrets+volume-snapshot docs in `infra/fly/README.md`. **FCM/APNs delivery + mobile push-token registration + mobile multi-device pairing UX** deferred (need cloud creds + native shells). |
+| 5 — Native shells + production polish | 🚧 in progress (Android + server) | 🚧 in progress (Android), ✅ iOS .app packaged end-to-end on Xcode 26.4.1 (4-of-4 native bridges, Metro JS bundle, SQLCipher + libsignal_ffi + Vouchflow linked) | RN shells generated (5a ✅). All four Android native bridges ✅: Vouchflow, Signal Protocol (1:1), Channel Keys, Group Messaging (Sender Keys). **SQLCipher local persistence ✅ (5c)** — `SpeakeasyDb` + `SqlCipherSignalProtocolStore` (5 of 6 SignalProtocolStore interfaces SQLCipher-backed; only Kyber remains in-memory). DB key derived per spec §4c via HKDF-SHA256 from `Vouchflow.cachedDeviceToken` (requires SDK 1.0.3). 1:1 chat encrypt/decrypt + PreKey replenishment auto-trigger ✅ (Phase 5b carry-over). APK: 217 MB. **🍎 iOS counterparts authored** at `apps/mobile/ios/SpeakeasyBridges/` — same JS interfaces, same wire formats; compile-verified 2026-05-18 (Xcode 26.4.1, clean simulator build) and CI-gated via `.github/workflows/ios.yml`. Server: still ahead. Remaining: FCM (5d ✅ Android server+mobile wired; iOS APNs pending), conversations/settings/profile UX + group chat screen (5e), multi-device pairing, sealed sender, Drizzle-impl all repos, metrics endpoint, channel-key rotation policy. See §11 Phase 5 for the full breakdown.                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                 |
 
 **Open carry-overs:**
 
@@ -67,16 +67,18 @@ Speakeasy is a private, encrypted messenger with the following core principles:
 ### Phase 6 — Voice calling (in progress)
 
 1:1 voice calls, end-to-end encrypted via DTLS-SRTP whose fingerprints
-are authenticated through the existing Signal session. Server is a pure
-signaling relay (call_offer/call_answer/call_ice/call_end frames live-
-routed only — never persisted to the relay buffer). Group calls deferred.
+are authenticated through the existing Signal session. The server relays
+signaling and keeps only a short-lived reconnect buffer for offers and ICE;
+it does not retain durable call history. Group calls deferred.
 
 - ✅ WS frame types `call_offer` / `call_answer` / `call_ice` / `call_end`
   in `packages/shared`. SDP/ICE payloads are Signal-encrypted ciphertext;
   `call_end.reason` is plaintext metadata.
-- ✅ Server live-routing in `apps/api/src/ws/handler.ts` — fans out to
-  every live device of the callee, pushes notify-only when offline (only
-  for `call_offer`), drops other frames silently when offline.
+- ✅ Server routing in `apps/api/src/ws/call-router.ts` — fans out to every
+  live device of the callee and buffers each `call_offer` plus matching
+  `call_ice` frames for up to 30 seconds so a push-woken reconnect can drain
+  them. `call_answer` and `call_end` remain live-only; either terminal frame
+  clears the matching buffered offer without deleting a newer call.
 - ✅ Mid-call WS-drop teardown (`apps/api/src/ws/call-drop-monitor.ts`):
   a swipe-away / process-kill severs the WS with no `call_end`, leaving
   the peer stranded. The client keeps its WS open for the whole call, so
@@ -87,22 +89,21 @@ routed only — never persisted to the relay buffer). Group calls deferred.
   cross-instance via `UserNotifier`; the peer's client gates on `call_id`.
 - ✅ TURN credentials route `GET /v1/turn/credentials`,
   Vouchflow-gated. `TurnProvider` interface with `CloudflareTurnProvider`
-  + `StaticTurnProvider` (STUN-only fallback). `turnProviderFromEnv()`
-  switches on `CLOUDFLARE_TURN_KEY_ID`/`CLOUDFLARE_TURN_TOKEN`.
+  - `StaticTurnProvider` (STUN-only fallback). `turnProviderFromEnv()`
+    switches on `CLOUDFLARE_TURN_KEY_ID`/`CLOUDFLARE_TURN_TOKEN`.
 - ✅ Mobile `CallOrchestrator` state machine, mockable `CallPeer`
-  interface, `useCalls` Zustand store with persisted history, message-
-  router dispatch into `handleFrame`. 7 orchestrator unit tests cover
-  dial→accept→connected→hangup, decline, cancel, busy, ring timeout,
-  mic/speaker toggles, single-call invariant.
+  interface, `useCalls` Zustand store with persisted history, and message-
+  router dispatch into `handleFrame`. Executable coverage includes the core
+  call lifecycle and the iOS handoff, replay, fallback, remount, rejection,
+  early-end, and disposal paths.
 - ✅ Mobile UI: `CallScreen`, `IncomingCallScreen`, `DialerScreen`.
   Phone-icon entry points in `ChatScreen` header (1:1) and
   `ConversationsScreen` header (opens dialer). Local call history
   persisted via AsyncStorage (debug-friendly per user ask).
-- 🚧 `react-native-webrtc` native bridge — `webrtc-peer.ts` throws
-  `webrtc_not_implemented` until the dep ships. Integration checklist
-  in the module docstring covers iOS (CallKit with `includesCallsInRecents:
-  false`), Android (ConnectionService, RECORD_AUDIO permission).
-- 🚧 CallKit (iOS) + ConnectionService (Android) — pending native shells.
+- ✅ `react-native-webrtc` and `react-native-callkeep` are integrated for
+  media and native call lifecycle. The iOS CallKit/PushKit ownership contract
+  and required physical-device verification live in
+  `apps/mobile/ios/PARITY.md`.
 - 🚧 Real-device runtime testing — same blocker as Phase 5 carry-over.
 
 ---
@@ -129,11 +130,11 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 
 ### Confidence Levels (Vouchflow)
 
-| Level | Description | Allowed |
-|---|---|---|
-| Low | New device, no history | ❌ |
-| Medium | Established device, passing attestation | ✅ |
-| High | Strong history, multiple attestations | ✅ |
+| Level  | Description                             | Allowed |
+| ------ | --------------------------------------- | ------- |
+| Low    | New device, no history                  | ❌      |
+| Medium | Established device, passing attestation | ✅      |
+| High   | Strong history, multiple attestations   | ✅      |
 
 ---
 
@@ -212,11 +213,11 @@ The server cannot read community messages. A database breach alone exposes nothi
 
 ## 6. Conversation Types
 
-| Type | Max Members | Encryption | Server Stores | ID Format |
-|---|---|---|---|---|
-| 1:1 | 2 | Signal Protocol (E2E) | Ciphertext only, deleted on delivery | n/a |
-| Group | 3–100 | Signal Protocol (E2E, Sender Keys) | Ciphertext only, deleted on delivery | `grp-[ulid]` |
-| Community | Unlimited | Channel key model | Ciphertext, 7-day TTL | `com-[ulid]` |
+| Type      | Max Members | Encryption                         | Server Stores                        | ID Format    |
+| --------- | ----------- | ---------------------------------- | ------------------------------------ | ------------ |
+| 1:1       | 2           | Signal Protocol (E2E)              | Ciphertext only, deleted on delivery | n/a          |
+| Group     | 3–100       | Signal Protocol (E2E, Sender Keys) | Ciphertext only, deleted on delivery | `grp-[ulid]` |
+| Community | Unlimited   | Channel key model                  | Ciphertext, 7-day TTL                | `com-[ulid]` |
 
 Communities are a distinct type from the data model level — separate tables, separate key model, separate ID namespace. Switching a group to a community is a one-way migration in MVP.
 
@@ -226,39 +227,39 @@ Communities are a distinct type from the data model level — separate tables, s
 
 ### Mobile
 
-| Concern | Choice | Rationale |
-|---|---|---|
-| Framework | React Native 0.76 (Hermes, new arch) | Cross-platform, JS/TS ecosystem |
-| State | Zustand | Lightweight, no boilerplate |
-| Navigation | React Navigation v7 (native-stack) | Standard RN navigation |
-| Local DB | react-native-quick-sqlite + SQLCipher | Encrypted SQLite |
-| Crypto | Native module (CryptoKit / Conscrypt + libsignal) | WebCrypto unavailable in Hermes |
-| Push | FCM + APNs (notify only, no content) | Privacy-preserving notifications |
-| WebRTC | react-native-webrtc + react-native-callkeep | Voice calls + native CallKit/ConnectionService |
-| SVG | react-native-svg 15.x | Animal avatars + RoomMark glyphs |
-| Animations | Animated (classic) + react-native-reanimated 3.x | Reanimated for SVG transform animations (signature avatar effects) |
-| Payments | RevenueCat (Phase C) — Phase B `PURCHASING_LIVE=false` refuses paid SKUs (no charge, no grant); fake purchases removed after Phase A | Wraps StoreKit / Play Billing |
+| Concern    | Choice                                                                                                                               | Rationale                                                          |
+| ---------- | ------------------------------------------------------------------------------------------------------------------------------------ | ------------------------------------------------------------------ |
+| Framework  | React Native 0.76 (Hermes, new arch)                                                                                                 | Cross-platform, JS/TS ecosystem                                    |
+| State      | Zustand                                                                                                                              | Lightweight, no boilerplate                                        |
+| Navigation | React Navigation v7 (native-stack)                                                                                                   | Standard RN navigation                                             |
+| Local DB   | react-native-quick-sqlite + SQLCipher                                                                                                | Encrypted SQLite                                                   |
+| Crypto     | Native module (CryptoKit / Conscrypt + libsignal)                                                                                    | WebCrypto unavailable in Hermes                                    |
+| Push       | FCM + APNs (notify only, no content)                                                                                                 | Privacy-preserving notifications                                   |
+| WebRTC     | react-native-webrtc + react-native-callkeep                                                                                          | Voice calls + native CallKit/ConnectionService                     |
+| SVG        | react-native-svg 15.x                                                                                                                | Animal avatars + RoomMark glyphs                                   |
+| Animations | Animated (classic) + react-native-reanimated 3.x                                                                                     | Reanimated for SVG transform animations (signature avatar effects) |
+| Payments   | RevenueCat (Phase C) — Phase B `PURCHASING_LIVE=false` refuses paid SKUs (no charge, no grant); fake purchases removed after Phase A | Wraps StoreKit / Play Billing                                      |
 
 ### Backend
 
-| Concern | Choice | Rationale |
-|---|---|---|
-| Runtime | Node.js + TypeScript | Team familiarity, ecosystem |
-| Framework | Fastify | Performance, low overhead |
-| WebSocket | `ws` (raw) | Minimal surface, no Socket.io overhead |
-| ORM | Drizzle ORM | TypeScript-native, lightweight |
-| Migrations | node-pg-migrate | Simple, SQL-first |
-| Signal Protocol | @raphaelvserafim/libsignal | Modern TS, actively maintained |
+| Concern         | Choice                     | Rationale                              |
+| --------------- | -------------------------- | -------------------------------------- |
+| Runtime         | Node.js + TypeScript       | Team familiarity, ecosystem            |
+| Framework       | Fastify                    | Performance, low overhead              |
+| WebSocket       | `ws` (raw)                 | Minimal surface, no Socket.io overhead |
+| ORM             | Drizzle ORM                | TypeScript-native, lightweight         |
+| Migrations      | node-pg-migrate            | Simple, SQL-first                      |
+| Signal Protocol | @raphaelvserafim/libsignal | Modern TS, actively maintained         |
 
 ### Infrastructure
 
-| Concern | Choice | Notes |
-|---|---|---|
-| Hosting | Fly.io | Multi-region included, migrate to AWS at scale |
-| Database | PostgreSQL (Fly managed) | Persistent store |
-| Cache / Presence | Redis (Fly managed) | Ephemeral state, WebSocket routing |
-| Object Storage | Fly Volumes (MVP) → S3-compatible (scale) | Encrypted media |
-| CI/CD | GitHub Actions | Lint, type-check, test, deploy |
+| Concern          | Choice                                    | Notes                                          |
+| ---------------- | ----------------------------------------- | ---------------------------------------------- |
+| Hosting          | Fly.io                                    | Multi-region included, migrate to AWS at scale |
+| Database         | PostgreSQL (Fly managed)                  | Persistent store                               |
+| Cache / Presence | Redis (Fly managed)                       | Ephemeral state, WebSocket routing             |
+| Object Storage   | Fly Volumes (MVP) → S3-compatible (scale) | Encrypted media                                |
+| CI/CD            | GitHub Actions                            | Lint, type-check, test, deploy                 |
 
 **AWS migration trigger:** When Fly.io Postgres tier jumps become unpredictable, or when enterprise compliance (SOC2, HIPAA) becomes a sales requirement. Docker containers from day one make migration mechanical.
 
@@ -384,6 +385,7 @@ message_delivery_tombstones (
 ```
 
 Redis keys:
+
 - `session:{user_id}` → WebSocket server instance ID (for routing)
 - `presence:{user_id}` → online/offline + last seen
 - `ratelimit:{user_id}:{endpoint}` → sliding window counter
@@ -468,6 +470,7 @@ speakeasy/
 ## 11. Build Sequence
 
 ### Phase 0 — Foundation (Week 1)
+
 - [x] Turborepo monorepo scaffold
 - [x] `packages/shared`: TypeScript types, handle validators + legacy wordlist ID generator, message envelope schema, ULID utility
 - [x] Database schema + first migration (users, prekey_bundles, groups, communities, messages)
@@ -475,6 +478,7 @@ speakeasy/
 - [x] GitHub Actions: lint, type-check, test pipeline
 
 ### Phase 1 — Auth + Transport (Weeks 2–3)
+
 - [x] `packages/vouchflow`: real SDK integration (`VouchflowApiClient` + `VouchflowValidator` against the live REST API), `MockValidator` test fixture, confidence/freshness/risk-score gates
 - [x] API: `/v1/enroll` endpoint
 - [x] API: Vouchflow auth middleware (validates every authenticated request, no override below medium)
@@ -483,6 +487,7 @@ speakeasy/
 - [x] Mobile: Enrollment screen, ID display, WebSocket connection lifecycle (JS layer; native shells deferred — see `apps/mobile/README.md`)
 
 ### Phase 2 — Encryption Layer (Weeks 3–5)
+
 - [ ] `packages/crypto`: Signal Protocol native module (CryptoKit iOS + Conscrypt Android) — placeholder `NativeSignalProtocolModule` exists; throws until shells land
 - [x] `packages/crypto`: Channel key AES-256 generation, encryption, distribution — interfaces + `SoftwareChannelKeyModule` test fixture done; native impl pending shells
 - [x] API: PreKey bundle endpoints (`/v1/prekeys/bundle` consumes OTPK; `/v1/prekeys/replenish`)
@@ -490,6 +495,7 @@ speakeasy/
 - [x] Mobile: Encrypted local SQLite setup (SQLCipher) — landed in Phase 5c. DB passphrase derived via HKDF-SHA256(`Vouchflow.cachedDeviceToken`, salt="speakeasy-db-v1", info="sqlcipher-passphrase", L=32). The token is bytewise-stable across cold starts (set once during enrollment, read back unmodified per verify) and survives reboots without biometric or network — exposed on `Vouchflow.shared` from SDK 1.0.3. Detail in §11 5c.
 
 ### Phase 3 — Messaging (Weeks 5–8)
+
 - [x] 1:1 messaging: persist-and-forward, ack-on-delete, deliver-on-reconnect (server-side); client-side encrypt/decrypt + session establishment wired to the native Signal Protocol module (Phase 5b carry-over).
 - [x] Group messaging: server-side fan-out to all members minus sender, one row per recipient. Sender Keys encrypt happens on device (blocked on native module).
 - [x] Community chats: server-side fan-out + envelope upload/fetch + ack-delete. Real channel-key encrypt/decrypt blocked on native module.
@@ -497,6 +503,7 @@ speakeasy/
 - [ ] Message types: text-only this phase (per spec). Media (client-side encrypted before upload) deferred to a later sub-phase.
 
 ### Phase 4 — Hardening (Weeks 8–10)
+
 - [x] Push notifications (notify-only) — `PushProvider` contract + Noop/Mock impls; WS triggers on offline recipient. **FCM delivery wired (Phase 5d): `FcmApnsPushProvider` + `POST /v1/devices/push-token` + mobile `PushNotificationService` + auto-registration on enrollment/startup. iOS APNs pending.**
 - [x] Rate limiting on all API surfaces — `InMemoryRateLimiter` + `RedisRateLimiter`, applied to enroll / prekeys / envelopes
 - [x] PreKey replenishment monitoring — `low_water` signal in responses; mobile `replenishPreKeys` route in `ApiClient` (real bundle generation blocked on native Signal module)
@@ -514,6 +521,7 @@ speakeasy/
 **🍎 iOS items are queued — they need a macOS host (Xcode, CocoaPods, simulator).** Marked inline so it's obvious which items can ship from a Linux dev box and which are blocked on a Mac.
 
 #### 5a. Native shell scaffolding
+
 - [ ] `npx @react-native-community/cli init Speakeasy --version 0.76.5` → move `ios/`, `android/` into `apps/mobile/`. README has the exact command.
 - [ ] Wire `metro.config.js` to the existing monorepo layout (already authored — needs a real shell to verify against).
 - [ ] Android `build.gradle` uses bundle id `xyz.speakeasyapp.app`; Inter font added to `android/app/src/main/assets/fonts/`.
@@ -522,6 +530,7 @@ speakeasy/
 - [x] 🍎 iOS — CI macOS runner: `.github/workflows/ios.yml` runs `pod install` + `xcodebuild` (simulator build gate) on every mobile/shared change. Archive-on-PR comes later, once signing is set up.
 
 #### 5b. Native module bridges
+
 - [x] **Vouchflow Android** — Kotlin module wrapping `dev.vouchflow:android-sdk:1.0.0`, bridge to JS as part of `NativeVouchflowClient`. The `CachingVouchflowClient` wrapper composes around it unchanged. Includes minSdk bump to 28, BuildConfig field plumbing for the API key + environment (`gradle.properties.example` checked in; real key stays out of git), `VouchflowError` sealed class → JS `VouchflowClientError` reason mapping, dropped `currentConfidence()` (SDK uses `minimumConfidence` arg on `verify()` instead). APK builds clean: 170MB, package `xyz.speakeasyapp.app`.
 - [x] 🍎 **Vouchflow iOS** — `VouchflowModule.{swift,m}` + `VouchflowBootstrap.swift` at `apps/mobile/ios/SpeakeasyBridges/Vouchflow/`. **Compile-verified on Xcode 26.4.1 against Vouchflow iOS SDK 1.0.5.** API surface adjustments needed during verify: SDK module name is `VouchflowSDK` (not `Vouchflow`); `Vouchflow.configure(_:)` is `throws` and takes a Swift struct, so wrapped in `SpeakeasyVouchflowBootstrap.configureWithApiKey:environment:error:` for ObjC AppDelegate consumption; `VerificationContext` has no `.transaction` case (mapped to `.sensitiveAction`); error case names are `.invalidAPIKey` / `.keychainAccessDenied` (capitalisation differs from Kotlin); signal property is `keychainPersistent` (Android side renamed to `persistentToken`, JS layer uses Android's name — remapped at the bridge). Reads `Vouchflow.plist` (gitignored — `.example` checked in) for the API key + environment.
 - [x] **Signal Protocol Android (1:1 path)** — Kotlin module wrapping `org.signal:libsignal-android:0.59.0` (AGPLv3; Speakeasy is open-source so license-compatible). Implements `generateIdentityKey`, `generatePreKeyBundle`, `initiateSession`, `encrypt`, `decrypt`. Store: was in-memory `InMemorySignalProtocolStore` in 5b; **swapped to `SqlCipherSignalProtocolStore` in 5c** so cold-start re-enrollment is no longer required. Wire format: base64 strings + 1-byte ciphertext type marker (3=PreKey, 2=Whisper) so `decrypt` can dispatch cleanly. APK builds: 217 MB after 5c (libsignal Rust .so adds ~40 MB; SQLCipher native libs add ~8 MB). Spec's earlier "Conscrypt + BouncyCastle" wording referred to the underlying primitives — libsignal uses platform crypto under the hood. Required: core library desugaring (java.time backport) + Java 17 source compatibility. **Sender Keys for groups (`encryptForGroup`/`decryptFromGroupMember`) deferred — see Phase 5b carry-over below.**
@@ -537,11 +546,12 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 - [x] **SKDM wire format end-to-end.** Server: new `skdm` WS frame in both client+server unions (extends `WsClientMsg`/`WsServerMsg`); WS handler routes `skdm` like a single-recipient direct message (persist-and-forward, ack-deletes, drains on reconnect, fires push when offline). Migration `0004_skdm.sql` adds `skdm_group_id TEXT NULL` to `messages`. 5 new server tests cover live forward, buffered drain, self-rejection, missing-field rejection, push-on-offline. Mobile: `crypto/group-orchestration.ts` orchestrates send-side fan-out (mint distributionId per (self, group), `ensureSessionWithPeer` for each peer, encrypt SKDM via 1:1, send `skdm` frame; then encrypt + send group ciphertext) and receive-side (decrypt 1:1, install via `processSenderKeyDistribution`, ack). Per-process bootstrap cache so subsequent sends to the same group skip the SKDM round; new members trigger an SKDM only for them. `store/distribution-ids.ts` allocates UUID v4 per (local-sender, group). 5 orchestrator tests + 4 distribution-id tests.
 - [x] **Wire enrollment to the real bundle.** `OnboardingScreen.handleContinue` now calls `signalProtocol.generateIdentityKey()` + `signalProtocol.generatePreKeyBundle({registrationId, signedPreKeyId: 1, oneTimePreKeyCount: 100})` from `NativeSignalProtocolModule`. Identity key flows through to the server's `users.public_key` row. `MockSignalProtocolClient` added for non-RN test hosts (`config.useMockSignalProtocol`).
 - [x] **Wire chat encrypt/decrypt.** `ChatScreen` now calls `signalProtocol.encrypt(peerUserId, plaintext)` on send and `signalProtocol.decrypt(peerUserId, ciphertext)` on receive. Session establishment via `ensureSessionWithPeer` (in `apps/mobile/src/crypto/session.ts`) — fetches bundle from `POST /v1/prekeys/bundle` (new `ApiClient.fetchPreKeyBundle` method), calls `signalProtocol.initiateSession`, caches per-process so subsequent sends to the same peer skip the OTPK consumption. Receive path decrypts off the render path; failures surface as `[decrypt failed]` / `[identity changed — verify with peer]` bubbles instead of silently dropping. Optimistic local echo on send so the bubble appears immediately while encryption + WS send happen in the background.
-- [x] **PreKey replenishment trigger.** Server: `/v1/prekeys/bundle` now pushes a `prekeys_low` WS frame to the *owner's* live sockets (via the `UserNotifier` interface). `LocalUserNotifier` covers same-instance fan-out; **`RedisUserNotifier` (Phase 5f follow-up landed)** mirrors `RedisAckRouter`'s pub/sub pattern so the signal reaches the owner regardless of which instance accepted their socket — `notify` does both local fan-out and a publish on `speakeasy:user-notify`; peer instances ignore self-publishes (instanceId stamped in envelope). Mobile: `App.tsx` subscribes to the WS client (new `subscribe()` API replacing the per-screen `_testOnMessage` hack) and triggers `makeReplenisher` — concurrent `prekeys_low` signals dedupe onto a single in-flight round, one follow-up if still low_water, then stop. Tests: 5 mobile replenisher + 2 server bundle-push trigger + 4 cross-instance RedisUserNotifier (FakeRedis pub/sub stand-in).
+- [x] **PreKey replenishment trigger.** Server: `/v1/prekeys/bundle` now pushes a `prekeys_low` WS frame to the _owner's_ live sockets (via the `UserNotifier` interface). `LocalUserNotifier` covers same-instance fan-out; **`RedisUserNotifier` (Phase 5f follow-up landed)** mirrors `RedisAckRouter`'s pub/sub pattern so the signal reaches the owner regardless of which instance accepted their socket — `notify` does both local fan-out and a publish on `speakeasy:user-notify`; peer instances ignore self-publishes (instanceId stamped in envelope). Mobile: `App.tsx` subscribes to the WS client (new `subscribe()` API replacing the per-screen `_testOnMessage` hack) and triggers `makeReplenisher` — concurrent `prekeys_low` signals dedupe onto a single in-flight round, one follow-up if still low_water, then stop. Tests: 5 mobile replenisher + 2 server bundle-push trigger + 4 cross-instance RedisUserNotifier (FakeRedis pub/sub stand-in).
 - [ ] **Real device runtime testing.** Everything ships compile-verified — actual biometric / Keystore / libsignal interop is unverified until the APK runs on hardware.
 - [ ] Conversation store moves from in-memory Zustand to SQLCipher-backed (preserving the `useConversations` API; just the persistence layer changes).
 
 #### 5c. SQLCipher-backed local persistence
+
 - [x] **SQLCipher Android dependency** — `net.zetetic:sqlcipher-android:4.14.1` (successor to the maintenance-only `android-database-sqlcipher`). Native `libsqlcipher.so` lands in the APK across all four ABIs. Required pinning kotlin-stdlib + `androidx.sqlite` back to Kotlin-1.9-compatible versions (sqlcipher's transitive `sqlite-android:2.6.x` ships Kotlin-2.1 metadata that the project's 1.9.24 compiler can't read).
 - [x] **`SpeakeasyDb`** — SQLCipher init + DB-key derivation (`apps/mobile/android/.../db/SpeakeasyDb.kt`). Schema migrations live in `db/Schema.kt`; v1 ships the five tables needed by the Signal store (`identity`, `prekeys`, `signed_prekeys`, `sessions`, `identities`).
 - [x] **DB-key derivation per spec §4c** — HKDF-SHA256(Vouchflow.cachedDeviceToken, salt=`"speakeasy-db-v1"`, info=`"sqlcipher-passphrase"`, L=32). `cachedDeviceToken` is bytewise-stable across cold starts (written once to `AccountManager` during enrollment, read back unmodified per verify) and survives reboots without biometric or network — exposed as a property on `Vouchflow.shared` from SDK 1.0.3. **Bootstrap invariant:** `SpeakeasyDb.open` throws `NotEnrolledException` if the cached token is null, enforcing "enroll before encrypt" structurally rather than implicitly. Biometric reconfig (`KEY_INVALIDATED`) or app reinstall rotate the token → local DB unreadable → triggers re-enrollment + fresh DB (server-side reputation preserved via Vouchflow's `existingDeviceToken` re-enrollment path; local data is gone, same end-state as device wipe). Salt + info are versioned so a forward `PRAGMA rekey` migration is possible if derivation ever changes. **Requires `dev.vouchflow:android-sdk:1.0.3`** (parallel SDK ship).
@@ -553,19 +563,22 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 - [x] 🍎 **iOS counterpart** — `SpeakeasyDb.swift` + `Schema.swift` at `apps/mobile/ios/SpeakeasyBridges/Db/`. **Compile-verified on Xcode 26.4.1.** SQLCipher iOS via CocoaPods (4.6.1); the pod ships sqlite3.h but no Swift modulemap, so `sqlite3_*` C symbols come in via the project's bridging header. Same HKDF derivation as Android (token via `Vouchflow.shared.cachedDeviceToken`, requires Vouchflow iOS 1.0.5), same schema + migrations (v1: identity/prekeys/signed_prekeys/sessions/identities; v2: sender_keys). Token storage moves Keystore → Keychain implicitly via the Vouchflow iOS SDK.
 
 #### 5d. Push notifications, end-to-end
+
 - [x] Android FCM registration in mobile native code.
 - [ ] 🍎 iOS APNs registration in mobile native code.
 - [x] Mobile uploads its push token to the server via a new `POST /v1/devices/push-token` endpoint (writes to `devices.push_token`). Server-side endpoint is platform-agnostic — ships independently of mobile.
 - [x] Server's `FcmApnsPushProvider` replaces `NoopPushProvider` once `FCM_SERVER_KEY` and APNs auth-key secrets are set on Fly. (Android-FCM half can ship before iOS.)
 
 #### 5e. Mobile UX completion
-- [x] Brand-design completion across remaining screens. **Conversations list ✅** rebuilt against BRANDING1.md §6.8 (`ListItem`) + §7 (workspace conversation list): hairline `text-ghost` dividers replace per-row card backgrounds; avatars dropped (the brand explicitly forbids them on the list); default timestamps dropped, long-press reveals a `meta`-style timestamp on the row for ~1.8s; trailing pill unread badge replaced with a 6×6 brass square + `caption`-sized count (square alone when count == 1). Type-scale tokens (`type.body`, `type.caption`, `type.meta`) + Bricolage weights replace the legacy `text.*` aliases. **Settings ✅** rebuilt against BRANDING1.md §7 (workspace settings): per-section `card` backgrounds dropped in favor of flat ListItem rows separated by hairline dividers; pill-radius primary/destructive buttons replaced with brand-aligned action rows (trailing accent `›` per §6.8 — none on the muted Sign Out, which leans on the Alert.alert confirmation as the danger gate per §1's "no third color" rule); native `<Switch>` themed with brass-on accent + cream thumb + soft track-off; segmented theme toggle moved inline within an Appearance ListItem with a one-line subtitle; profile avatar shrunk to 56px square + the Copy/Change-photo/Remove pill-buttons replaced with three inline text-link affordances separated by `·`. All testIDs preserved. **Manage members ✅** (group/community detail) rebuilt against §6.6 (sharp Buttons — Add is now 48×* with radius 0, accent bg, semibold body) + §6.8 (ListItem — flat rows with hairline dividers, no card backgrounds, avatars dropped following the conversation-list precedent for handle-as-identity); the prior `'#C44'` red "Remove" label replaced with `text-mute` slate per §1's no-third-color rule (Alert.alert is the danger gate); CREATOR badge moved to `meta`-style uppercase + accent-tracking; input border at hairline `divider` instead of pale-fill so it reads as frame, not surface.
+
+- [x] Brand-design completion across remaining screens. **Conversations list ✅** rebuilt against BRANDING1.md §6.8 (`ListItem`) + §7 (workspace conversation list): hairline `text-ghost` dividers replace per-row card backgrounds; avatars dropped (the brand explicitly forbids them on the list); default timestamps dropped, long-press reveals a `meta`-style timestamp on the row for ~1.8s; trailing pill unread badge replaced with a 6×6 brass square + `caption`-sized count (square alone when count == 1). Type-scale tokens (`type.body`, `type.caption`, `type.meta`) + Bricolage weights replace the legacy `text.*` aliases. **Settings ✅** rebuilt against BRANDING1.md §7 (workspace settings): per-section `card` backgrounds dropped in favor of flat ListItem rows separated by hairline dividers; pill-radius primary/destructive buttons replaced with brand-aligned action rows (trailing accent `›` per §6.8 — none on the muted Sign Out, which leans on the Alert.alert confirmation as the danger gate per §1's "no third color" rule); native `<Switch>` themed with brass-on accent + cream thumb + soft track-off; segmented theme toggle moved inline within an Appearance ListItem with a one-line subtitle; profile avatar shrunk to 56px square + the Copy/Change-photo/Remove pill-buttons replaced with three inline text-link affordances separated by `·`. All testIDs preserved. **Manage members ✅** (group/community detail) rebuilt against §6.6 (sharp Buttons — Add is now 48×\* with radius 0, accent bg, semibold body) + §6.8 (ListItem — flat rows with hairline dividers, no card backgrounds, avatars dropped following the conversation-list precedent for handle-as-identity); the prior `'#C44'` red "Remove" label replaced with `text-mute` slate per §1's no-third-color rule (Alert.alert is the danger gate); CREATOR badge moved to `meta`-style uppercase + accent-tracking; input border at hairline `divider` instead of pale-fill so it reads as frame, not surface.
 - [ ] **Multi-device pairing flow** — secondary device enrolls via Vouchflow → server links to existing user_id (currently implicit on first WS auth) → existing devices receive an in-app prompt to wrap K for the new device, fan-out envelopes upload to `/v1/communities/:id/envelopes`. UX TBD.
 - [ ] `@react-native-community/blur` integration — `DisappearingMessageBubble` swaps the `blurAmount` placeholder for a real `BlurView` driven by the same Animated value. JS-side wiring is platform-agnostic; native module ships per-platform.
 - [ ] Motion/visual polish on real Android hardware (or emulator with KVM).
 - [ ] 🍎 Same polish pass on real iOS hardware / simulator.
 
 #### 5f. Server polish
+
 - [x] **Drizzle implementations** of remaining repos — `DrizzleUserRepo`, `DrizzlePreKeyRepo`, `DrizzleGroupRepo`, `DrizzleCommunityRepo`, `DrizzleMessagesRepo`, `DrizzleDevicesRepo` all live under `apps/api/src/db/*.drizzle.ts`. `server.ts` selects between Drizzle (when DATABASE_URL is set) and `InMemory*` (test fixture / demo) per repo. `InMemory*` stays as the test-fixture default.
 - [x] **Per-device buffered-delivery tracking** (Phase 5f). `BufferedMessage` now carries `targetDevices` (snapshot of recipient's known devices at insert time, via `DevicesRepo.listForUser`) + `deliveredToDevices` (subset that have acked). `markDelivered` replaced with `markDeliveredByDevice(messageId, deviceToken)` returning `{kind: 'fully_delivered' | 'pending' | 'not_found'}`; only `fully_delivered` triggers the AckRouter announce → `delivered` to sender. `listUndeliveredFor(recipientId, deviceToken)` filters out rows the device has already acked, so a device that disconnects/reconnects doesn't redrain its own already-acked messages. Legacy shortcut: empty `targetDevices` → any single ack deletes (preserves behaviour for first-time recipients with no devices known at insert time). Migration `0005_per_device_delivery.sql` adds the two TEXT[] columns. **3 new repo unit tests** (multi-device pending → final ack delivers, idempotent re-ack, drain-filtering by deviceToken) **+ 2 new WS integration tests** (delivered fires only after every device acks; reconnecting device doesn't redrain).
 - [x] **Replay-safe message IDs** (Phase 5f follow-up, migrations `0024_message_delivery_tombstones.sql` + `0025_message_delivery_hard_gate.sql`). `MessagesRepo.insert` atomically reserves each client-supplied ID in a metadata-only tombstone before persisting the relay payload. Replays before acknowledgement skip recipient fan-out and push; replays after acknowledgement also skip delivery and re-emit `delivered` to a direct sender so its queue can settle. Group/community retries still receive `accepted` while per-recipient fan-out remains single-shot. Regression coverage exercises direct replay before and after ACK, group retry semantics, TTL expiry/reuse, and the migration backfill/trigger contract. The rolling release completed in two phases: `0024` mirrored old-instance writes without rejection; after its production rollout and `/version` SHA verification, `0025` enabled the database conflict boundary for writers that do not own a tombstone reservation.
@@ -574,6 +587,7 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 - [x] **WebSocket production tests** — `apps/api/src/ws/cross-instance.test.ts` spins up two `buildServer` instances sharing a `MessagesRepo` + `UserRepo` + `DevicesRepo` (cluster-wide state, equivalent to Postgres in prod) with their `RedisAckRouter`s wired to a single `FakeRedisChannel` pub/sub bus (single-process Redis stand-in). 2 tests: (a) buffered-then-drained + cross-instance `delivered`, (b) 30 concurrent sender/recipient pairs all receive their `delivered` correctly with no message-id collisions. Diverged from spec's "load test against a 2-instance deploy" — the in-process simulation exercises the same code paths (RedisAckRouter publish/subscribe, Connections per-instance, MessagesRepo cluster-wide) without paying the Fly bill / spinning up real infra. Real-Redis + real-network load testing remains valuable but is a separate sweep when we actually deploy.
 
 #### 5g. Spec §13 deferred decisions worth resolving in this phase
+
 - [~] **Sealed sender** for 1:1 — Phase A landed (server-side). Direct `message` frames now accept `sealed: true`; server suppresses `from` on the forwarded frame + on buffer drain + on the `audit: 'message_send'` log line. Senderid is still recorded internally on the buffer row for ack routing — full server-blind sealing (server can't re-route `delivered` to the original sender) is a v2 effort needing server-issued sender certificates. Schema: migration `0007_sealed_sender.sql` adds `sealed BOOLEAN NOT NULL DEFAULT false` to `messages`. 4 server tests cover (a) sealed live forward elides `from`, (b) sealed buffer-drain elides `from`, (c) `sealed: true` on group/community is a no-op (fan-out has no single sender to hide), (d) unsealed default preserves legacy behavior. Phase B (mobile-side envelope wrap with recipient identity key + ChatScreen opt-in) is deferred — needs a new native bridge method on the Signal Protocol module. Mobile router already gracefully handles inbound sealed frames (acks them so the buffer drains; placeholder bubble until Phase B unwrap lands).
 - [x] **Channel key rotation policy** (server side) — `DELETE /v1/communities/:id/members/:user_id` removes the target member. Authz: moderator can remove anyone; anyone can remove self. On success, every remaining member's live socket receives a `channel_key_rotation_required` WS frame (via `UserNotifier`); the leaver does NOT receive the signal. Mobile orchestration of "elect-a-wrapper, generate fresh K, fan-out new-epoch envelopes" is deferred to the mobile-side commit — server side is the rotation primitive. 7 new tests cover happy path, self-leave, non-mod blocked, not-a-member 404, missing-community surfacing (privacy: outsiders see 403, self-remove sees 404), and post-removal /key gating.
 - [x] **Username discovery (V1: show my QR + OS-camera handoff).** Invite Friends screen now renders the user's @handle as a QR code encoding `speakeasy://add?handle=<handle>`. Phone-camera apps on iOS/Android detect the URL and offer to open Speakeasy directly, which routes to NewChat with the handle prefilled. Implemented via: `apps/mobile/src/utils/handle-link.ts` (encode/parse with strict handle validation, 10 unit tests), QR rendered with `react-native-qrcode-svg`, Android intent-filter + iOS `CFBundleURLTypes` for the `speakeasy://` scheme, App.tsx Linking listener for both cold-start (`getInitialURL`) and warm (`addEventListener`) cases. **V2 deferred: in-app QR scanner** — requires a heavy native camera dep (`react-native-vision-camera`); for now, the OS camera-app handoff is the scan side. Self-handle scans are filtered out so a user can't add themselves by accident.
@@ -582,6 +596,7 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 - [x] **Swipe-to-quote-reply** (1:1 + group). The E2E `MessagePayload` gains an optional `replyTo: { id, from, preview }` — the quoted message's id, author handle, and a one-line preview snapshot, all carried INSIDE the ciphertext so the server stays blind. `replyPreviewFrom()` builds the snapshot (text, else a media noun "image"/"GIF"/"file"), clamped to `REPLY_PREVIEW_MAX`; `decodePayload` validates `replyTo` defensively across the trust boundary. Swiping a bubble right (PanResponder, no new native dep) sets a composer reply target shown as a banner with a ✕; the next send — text, photo, or file — encodes the quote and the banner clears. The bubble renders the quote as an accent-ruled block above the body (static; jump-to-original deferred). Router carries `replyTo` through both the direct and group decrypt paths into the stored `ChatMessage`; `decryptForNotification` is untouched (storage happens on WS drain). Snapshot-not-lookup so the quote survives the original being unloaded / disappeared. **Coverage:** shared round-trip + back-compat + malformed-drop + `replyPreviewFrom` cases, router direct-path carries `replyTo`. Quoted-block + swipe visuals are device-QA only (no RN render harness wired). Old clients ignore the field (back-compat).
 
 #### 5h. Stretch (post-MVP per spec §1)
+
 - [ ] Web client (no Vouchflow Web SDK yet — coming-soon at vouchflow.dev/docs).
 - [ ] Video calls with face masks / background filters / voice filters.
 - [ ] Payments (USDT/TRON or USDC/Solana — under consideration).
@@ -591,6 +606,7 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 ## 12. Security Posture
 
 ### What the server knows
+
 - A user's random ID and public key (required for session establishment)
 - That two IDs communicated (envelope metadata for 1:1) — mitigate with sealed sender in v2
 - Community membership lists
@@ -598,12 +614,14 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 - Community message ciphertext encrypted with channel key (cannot decrypt — key never on server)
 
 ### What the server never knows
+
 - Any personally identifying information
 - Message content (all types)
 - Community channel keys
 - Device private keys
 
 ### Threat model priorities (MVP)
+
 1. Passive server compromise (database breach) — mitigated by ciphertext-only storage
 2. Compelled disclosure — mitigated by minimal metadata retention and key architecture
 3. Fake device enrollment — mitigated by Vouchflow attestation (medium+ confidence required)
@@ -625,23 +643,24 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 
 ## 14. Brand System
 
-> **April 2026 revision.** The brand pivoted from gold-on-dark to purple-on-cream. The visual signature is the **dispersing signal** — the icon mark, the disappearing-message animation, and the use of soft purple all reinforce *"this signal won't be here long."* Gold and Syne are out.
+> **April 2026 revision.** The brand pivoted from gold-on-dark to purple-on-cream. The visual signature is the **dispersing signal** — the icon mark, the disappearing-message animation, and the use of soft purple all reinforce _"this signal won't be here long."_ Gold and Syne are out.
 
 The Speakeasy brand sits within the Vouchflow product family. Quiet confidence, soft warmth — not a security-product aesthetic, not a luxury-app aesthetic.
 
 ### Tagline (work in progress)
-> Placeholder: *Say it & leave.* — copy is being iterated; do not treat as final.
+
+> Placeholder: _Say it & leave._ — copy is being iterated; do not treat as final.
 
 ### Colour Palette
 
-| Token | Hex | Usage |
-|---|---|---|
-| `color-ink` | `#0F1117` | Primary text on light surfaces; never used as a background in MVP |
-| `color-cream` | `#F7F6F3` | Primary background, all surfaces |
-| `color-primary` | `#6C5CE7` | Brand accent — icon-mark disc, sent bubbles, primary CTA, intro labels |
-| `color-soft` | `#A79CFF` | Tint of primary — received bubbles, hover/pressed states, fade endpoints |
-| `color-pale` | `#E6E3F1` | Surface variant, dividers, light input fields, avatar tints |
-| `color-slate` | `#6B7280` | Secondary text, labels, metadata |
+| Token           | Hex       | Usage                                                                    |
+| --------------- | --------- | ------------------------------------------------------------------------ |
+| `color-ink`     | `#0F1117` | Primary text on light surfaces; never used as a background in MVP        |
+| `color-cream`   | `#F7F6F3` | Primary background, all surfaces                                         |
+| `color-primary` | `#6C5CE7` | Brand accent — icon-mark disc, sent bubbles, primary CTA, intro labels   |
+| `color-soft`    | `#A79CFF` | Tint of primary — received bubbles, hover/pressed states, fade endpoints |
+| `color-pale`    | `#E6E3F1` | Surface variant, dividers, light input fields, avatar tints              |
+| `color-slate`   | `#6B7280` | Secondary text, labels, metadata                                         |
 
 **Rule:** Primary purple is the brand voice — used for the mark, sent bubbles, the "active" state. Soft purple is the support — surfaces, secondary states, the trail of a disappearing message. Slate is structural metadata only. Cream is everywhere; ink is for type.
 
@@ -649,10 +668,10 @@ The Speakeasy brand sits within the Vouchflow product family. Quiet confidence, 
 
 **Inter only**, at all weights. Suisse Int'l (the original brand sketch) is paid; Inter at 600/700 covers the display role we previously used Syne for.
 
-| Role | Family / weight | Usage |
-|---|---|---|
-| Display | Inter 600 / 700 | ID reveal, hero moments, screen titles |
-| UI / Body | Inter 300 / 400 / 500 | All interface text, labels, messages |
+| Role      | Family / weight       | Usage                                  |
+| --------- | --------------------- | -------------------------------------- |
+| Display   | Inter 600 / 700       | ID reveal, hero moments, screen titles |
+| UI / Body | Inter 300 / 400 / 500 | All interface text, labels, messages   |
 
 Letter spacing: `−0.2px` to `−0.4px` for body, `1.5–2px` for caps labels.
 
@@ -666,7 +685,7 @@ Letter spacing: `−0.2px` to `−0.4px` for body, `1.5–2px` for caps labels.
 
 ### Icon Mark — the dispersing signal
 
-A solid purple disc on the left with parallel horizontal trails extending to the right, each trail shorter and fainter than the last. Reads as a signal in the act of dispersing — the visual core of *"this won't be here long."*
+A solid purple disc on the left with parallel horizontal trails extending to the right, each trail shorter and fainter than the last. Reads as a signal in the act of dispersing — the visual core of _"this won't be here long."_
 
 - **Disc:** `fill: #6C5CE7`, ~28% of canvas height
 - **Trails:** 5–7 parallel horizontal strokes from the disc's right edge, decreasing in length and opacity along the gradient `#6C5CE7 → #A79CFF → 0`. Final trail is barely visible.
@@ -676,15 +695,19 @@ A solid purple disc on the left with parallel horizontal trails extending to the
 ### Screen Design Patterns
 
 **Onboarding / Welcome**
+
 - Cream background, IconMark centred (~96px), wordmark below, four key-feature lines in Inter 400 13px slate, primary CTA at bottom in Inter 500 with `color-primary` background, cream label.
 
 **ID Reveal**
+
 - Cream background, "INTRODUCING" label in Inter 500 9px / 2px tracking primary purple, three ID words stacked in Inter 700 38px ink, primary purple `·` separators between words. Animated arrival per Motion §1.
 
 **Conversations List**
+
 - Cream background, contacts in cards with `color-pale` background, avatars as rounded squares (`border-radius: 10px`) tinted soft purple, 2-letter initials in Inter 500 ink. Disappearing-timer pill in slate, `border: 1px solid color-pale`. Communities prefixed with `#`.
 
 **Chat Screen**
+
 - Background cream
 - Received bubbles: `background: color-pale`, ink text, `border-radius: 16px 16px 16px 4px`
 - Sent bubbles: `background: color-primary`, cream text, `border-radius: 16px 16px 4px 16px`
@@ -692,10 +715,12 @@ A solid purple disc on the left with parallel horizontal trails extending to the
 - Footnote: `● Messages disappear after they're seen.` — primary-purple dot, slate text, 9px
 
 **Voice messages**
+
 - Waveform bars in primary purple, 70% opacity
 - Play button: primary purple circle, cream triangle
 
 **Input bar**
+
 - Pill-shaped input field, slate placeholder
 - `+` add button left in primary purple
 - Timer indicator right (primary purple, only when timer is active)

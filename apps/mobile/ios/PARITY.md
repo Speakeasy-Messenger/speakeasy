@@ -1,6 +1,6 @@
 # iOS ⇄ Android parity
 
-Speakeasy is one React Native 0.76.5 codebase. Almost all of
+Speakeasy is one React Native codebase. Almost all of
 `apps/mobile/src/` is shared TypeScript and reaches both platforms for
 free. This document is the **ledger of where the two platforms actually
 diverge** — so an Android-side fix can't silently fail to reach iOS.
@@ -27,14 +27,14 @@ All app logic in `src/` (stores, screens, WS, navigation, the
 
 ## 2. Native module parity
 
-| Module          | Android (Kotlin)            | iOS (Swift)                    | Status |
-| --------------- | --------------------------- | ------------------------------ | ------ |
-| SignalProtocol  | `SignalProtocolModule.kt`   | `SignalProtocolModule.swift`   | ✅ parity |
-| GroupMessaging  | `GroupMessagingModule.kt`   | `GroupMessagingModule.swift`   | ✅ parity |
-| ChannelKey      | `ChannelKeyModule.kt`       | `ChannelKeyModule.swift`       | ✅ parity |
-| Vouchflow       | `VouchflowModule.kt`        | `VouchflowModule.swift`        | ✅ parity |
-| SpeakeasyDb     | `SpeakeasyDb.kt` / `Schema` | `SpeakeasyDb.swift` / `Schema` | ✅ parity |
-| Version         | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity |
+| Module         | Android (Kotlin)            | iOS (Swift)                    | Status    |
+| -------------- | --------------------------- | ------------------------------ | --------- |
+| SignalProtocol | `SignalProtocolModule.kt`   | `SignalProtocolModule.swift`   | ✅ parity |
+| GroupMessaging | `GroupMessagingModule.kt`   | `GroupMessagingModule.swift`   | ✅ parity |
+| ChannelKey     | `ChannelKeyModule.kt`       | `ChannelKeyModule.swift`       | ✅ parity |
+| Vouchflow      | `VouchflowModule.kt`        | `VouchflowModule.swift`        | ✅ parity |
+| SpeakeasyDb    | `SpeakeasyDb.kt` / `Schema` | `SpeakeasyDb.swift` / `Schema` | ✅ parity |
+| Version        | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity |
 
 SDK versions — aligned: LibSignal `0.59.0` (both), SQLCipher `~4.6`
 iOS / `4.14.1` Android, Vouchflow `2.1.1` (both).
@@ -74,10 +74,21 @@ Audited, accepted as-is (low priority):
   Settings deep-link" path.
 - `callkeep-bridge.ts` — iOS CallKit/PushKit registration, incoming-call
   reporting, answer/end actions, and audio-session ownership are wired and
-  covered by contract tests. Diagnostics now persist native VoIP-push receipt,
-  incoming-call report completion, `didDisplayIncomingCall`, and audio-session
-  activation. A real incoming call must still confirm physical ring/vibration
-  and uninterrupted WebRTC audio on device.
+  covered by contract tests. `AppDelegate` performs the mandatory native report
+  and is the source of truth: it persists the `call_id` ↔ CallKit UUID mapping
+  before reporting, and JS adopts that mapping without displaying a second
+  CallKit call. Warm apps receive the mapping by notification; killed or
+  suspended apps drain a persisted queue capped at 20 reports, with entries
+  treated as stale after two minutes. Answer/end actions route through that
+  mapping and replay after signaling becomes active; superseded siblings are
+  ended before adoption. Only an explicit native-report failure permits JS to
+  retry `displayIncomingCall`, reusing the failed report's UUID; if that retry
+  fails, the app shows its in-app incoming-call UI. With no native report, the
+  bounded fallback uses the in-app UI instead of allocating a second iOS UUID.
+  Diagnostics persist native VoIP-push receipt, incoming-call report
+  completion, `didDisplayIncomingCall`, and audio-session activation. A real
+  incoming call must still confirm physical ring/vibration and uninterrupted
+  WebRTC audio on device.
 - `VideoCallScreen.tsx` / `native/pip.ts` — both platforms report PiP entry,
   native bubble size, close, and return lifecycle. Android remounts a compact
   `RTCView` for its resized activity; iOS deliberately keeps the original
@@ -93,6 +104,20 @@ Audited, accepted as-is (low priority):
 2. Runtime permissions — no Settings deep-link on denial. Acceptable.
 3. CallKit physical ring/vibration and WebRTC audio-session coexistence —
    instrumented and contract-tested, but not yet proven by a real incoming call.
+
+### CallKit two-call device check
+
+Use one physical iPhone and one physical Android device. From Android, call the
+iPhone and verify there is exactly one full-screen iOS prompt. Answer it once;
+both devices must reach connected media and neither side may receive an
+immediate `call_end`. Hang up and confirm the iOS CallKit timer/UI disappears.
+Then place the same call a second time and confirm the iPhone rings normally.
+
+For the first call, diagnostics should show one native `VoIP push received`, one
+`CallKit incoming-call report completion`, a `PushKit call mapped` entry whose
+UUID is used by `answerCall`, and `displayIncomingCall skipped: adopting native
+PushKit report`. They must not show `displayIncomingCall requested`, `PushKit
+call missing mapping`, or `orphan CallKit call ended` for the valid call.
 
 Resolved: first iOS build (Step 0), CI gate (`ios.yml`), Version
 module, crash handler (`AppDelegate.mm`), Vouchflow SDK alignment.

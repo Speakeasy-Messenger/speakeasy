@@ -8,6 +8,7 @@
 
 /* Begin PBXBuildFile section */
 		00E356F31AD99517003FC87E /* SpeakeasyTests.m in Sources */ = {isa = PBXBuildFile; fileRef = 00E356F21AD99517003FC87E /* SpeakeasyTests.m */; };
+		C411A77D43BE4FF68AC80F21 /* CallKitReportStoreTests.swift in Sources */ = {isa = PBXBuildFile; fileRef = 7D1DCD80DEB8435DADB8070D /* CallKitReportStoreTests.swift */; };
 		0167CE09ED535EFADAFCCFF5 /* SignalProtocolModule.swift in Sources */ = {isa = PBXBuildFile; fileRef = 337313E3F3F8D27F527D47C3 /* SignalProtocolModule.swift */; };
 		039730D28D76856A4B272F09 /* FeatureWindow.swift in Sources */ = {isa = PBXBuildFile; fileRef = DCF18248BF73728FE0759C4A /* FeatureWindow.swift */; };
 		0A37A6A614665075BDA7E7AB /* LatencyGuard.swift in Sources */ = {isa = PBXBuildFile; fileRef = 6ACA10498790E17B5D1B57AA /* LatencyGuard.swift */; };
@@ -79,6 +80,7 @@
 		00E356EE1AD99517003FC87E /* SpeakeasyTests.xctest */ = {isa = PBXFileReference; explicitFileType = wrapper.cfbundle; includeInIndex = 0; path = SpeakeasyTests.xctest; sourceTree = BUILT_PRODUCTS_DIR; };
 		00E356F11AD99517003FC87E /* Info.plist */ = {isa = PBXFileReference; lastKnownFileType = text.plist.xml; path = Info.plist; sourceTree = "<group>"; };
 		00E356F21AD99517003FC87E /* SpeakeasyTests.m */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.c.objc; path = SpeakeasyTests.m; sourceTree = "<group>"; };
+		7D1DCD80DEB8435DADB8070D /* CallKitReportStoreTests.swift */ = {isa = PBXFileReference; lastKnownFileType = sourcecode.swift; path = CallKitReportStoreTests.swift; sourceTree = "<group>"; };
 		0C198B7D44B56BBFDA5D5C37 /* SpeakeasyAudioDevice.swift */ = {isa = PBXFileReference; includeInIndex = 1; lastKnownFileType = sourcecode.swift; path = SpeakeasyAudioDevice.swift; sourceTree = "<group>"; };
 		13B07F961A680F5B00A75B9A /* Speakeasy.app */ = {isa = PBXFileReference; explicitFileType = wrapper.application; includeInIndex = 0; path = Speakeasy.app; sourceTree = BUILT_PRODUCTS_DIR; };
 		13B07FAF1A68108700A75B9A /* AppDelegate.h */ = {isa = PBXFileReference; fileEncoding = 4; lastKnownFileType = sourcecode.c.h; name = AppDelegate.h; path = Speakeasy/AppDelegate.h; sourceTree = "<group>"; };
@@ -153,6 +155,7 @@
 		00E356EF1AD99517003FC87E /* SpeakeasyTests */ = {
 			isa = PBXGroup;
 			children = (
+				7D1DCD80DEB8435DADB8070D /* CallKitReportStoreTests.swift */,
 				00E356F21AD99517003FC87E /* SpeakeasyTests.m */,
 				00E356F01AD99517003FC87E /* Supporting Files */,
 			);
@@ -598,6 +601,7 @@
 			isa = PBXSourcesBuildPhase;
 			buildActionMask = 2147483647;
 			files = (
+				C411A77D43BE4FF68AC80F21 /* CallKitReportStoreTests.swift in Sources */,
 				00E356F31AD99517003FC87E /* SpeakeasyTests.m in Sources */,
 			);
 			runOnlyForDeploymentPostprocessing = 0;
@@ -657,6 +661,10 @@
 			baseConfigurationReference = 5B7EB9410499542E8C5724F5 /* Pods-Speakeasy-SpeakeasyTests.debug.xcconfig */;
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi",
+				);
 				GCC_PREPROCESSOR_DEFINITIONS = (
 					"DEBUG=1",
 					"$(inherited)",
@@ -675,6 +683,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.speakeasyapp.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi";
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Speakeasy.app/Speakeasy";
 			};
 			name = Debug;
@@ -685,6 +695,10 @@
 			buildSettings = {
 				BUNDLE_LOADER = "$(TEST_HOST)";
 				COPY_PHASE_STRIP = NO;
+				HEADER_SEARCH_PATHS = (
+					"$(inherited)",
+					"$(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi",
+				);
 				INFOPLIST_FILE = SpeakeasyTests/Info.plist;
 				IPHONEOS_DEPLOYMENT_TARGET = 15.1;
 				LD_RUNPATH_SEARCH_PATHS = (
@@ -699,6 +713,8 @@
 				);
 				PRODUCT_BUNDLE_IDENTIFIER = xyz.speakeasyapp.app;
 				PRODUCT_NAME = "$(TARGET_NAME)";
+				SWIFT_INCLUDE_PATHS = "$(inherited) $(PODS_ROOT)/LibSignalClient/swift/Sources/SignalFfi";
+				SWIFT_VERSION = 5.0;
 				TEST_HOST = "$(BUILT_PRODUCTS_DIR)/Speakeasy.app/Speakeasy";
 			};
 			name = Release;

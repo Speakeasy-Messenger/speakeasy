@@ -34,6 +34,8 @@ export interface VoipCallPayload {
   call_id: string;
   /** RFC-4122 UUID used only by CallKit. */
   call_uuid: string;
+  /** Authenticated signaling sender id used to bind terminal frames. */
+  peer_user_id: string;
   /** Caller handle, e.g. "alice". */
   handle: string;
   /** Display name shown on the CallKit screen. */

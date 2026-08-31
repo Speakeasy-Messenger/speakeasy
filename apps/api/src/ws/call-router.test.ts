@@ -279,6 +279,7 @@ describe('routeCallFrame — always-push for call_offer (rc.58)', () => {
       expect.objectContaining({
         call_id: CALL_ID,
         call_uuid: callKitUuidForCallId(CALL_ID),
+        peer_user_id: 'alice',
         has_video: true,
       }),
     );
@@ -492,6 +493,39 @@ describe('routeCallFrame — online routing', () => {
       reason: 'cancel',
     });
     expect(await deps.callBuffer.drain('bob')).toEqual([]);
+  });
+
+  it('clears the callee buffer on rejection without clearing another call', async () => {
+    const deps = buildDeps({ presenceInstance: 'B' });
+    deps.callBuffer.put('bob', {
+      type: 'call_offer',
+      fromUserId: 'alice',
+      callId: CALL_ID,
+      ciphertext: CIPHERTEXT,
+    });
+    deps.callBuffer.put('alice', {
+      type: 'call_offer',
+      fromUserId: 'carol',
+      callId: `${CALL_ID}-other`,
+      ciphertext: 'T1RIRVI=',
+    });
+
+    await routeCallFrame(deps, 'bob', {
+      type: 'call_end',
+      to: 'alice',
+      call_id: CALL_ID,
+      reason: 'decline',
+    });
+
+    expect(await deps.callBuffer.drain('bob')).toEqual([]);
+    expect(await deps.callBuffer.drain('alice')).toEqual([
+      {
+        type: 'call_offer',
+        fromUserId: 'carol',
+        callId: `${CALL_ID}-other`,
+        ciphertext: 'T1RIRVI=',
+      },
+    ]);
   });
 });
 

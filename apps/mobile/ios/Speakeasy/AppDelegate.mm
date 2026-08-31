@@ -267,11 +267,20 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
                 withCompletionHandler:(void (^)(void))completion
 {
   NSMutableDictionary *data = [payload.dictionaryPayload mutableCopy] ?: [NSMutableDictionary dictionary];
+  NSString *callId = [data[@"call_id"] isKindOfClass:[NSString class]] ? data[@"call_id"] : nil;
+  if (callId.length == 0) { callId = nil; }
   NSString *uuid = data[@"call_uuid"];
   if (uuid.length == 0 || [[NSUUID alloc] initWithUUIDString:uuid] == nil) {
     uuid = [[NSUUID UUID] UUIDString];
     data[@"call_uuid"] = uuid;
   }
+  NSString *peerUserId = [data[@"peer_user_id"] isKindOfClass:[NSString class]]
+      ? data[@"peer_user_id"]
+      : nil;
+  if (peerUserId.length == 0 && [data[@"handle"] isKindOfClass:[NSString class]]) {
+    peerUserId = data[@"handle"];
+  }
+  if (peerUserId.length == 0) { peerUserId = nil; }
   NSString *handle = data[@"handle"] ?: @"unknown";
   NSString *callerName = data[@"caller_name"] ?: handle;
   BOOL hasVideo = [data[@"has_video"] boolValue];
@@ -283,6 +292,35 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
        hasVideo ? @"YES" : @"NO",
        [data[@"call_id"] isKindOfClass:[NSString class]] ? @"YES" : @"NO"]);
 
+  // Register the authoritative call_id <-> CallKit UUID mapping before the
+  // native report. The event is the warm-JS fast path; UserDefaults survives a
+  // killed/suspended launch until CallKeepBridge drains it. This does not rely
+  // on react-native-callkeep forwarding its nested payload (the field missing
+  // in the real-device double-call log).
+  if (callId != nil) {
+    NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+    CallKitReportStore *store = [[CallKitReportStore alloc] initWithDefaults:defaults];
+    NSNumber *reportedAt = @([[NSDate date] timeIntervalSince1970] * 1000);
+    NSArray<NSString *> *displacedUUIDs = [store registerCallId:callId
+                                                      callUUID:uuid
+                                                    peerUserId:peerUserId
+                                                            at:[reportedAt doubleValue]];
+    for (NSString *displacedUUID in displacedUUIDs) {
+      [RNCallKeep endCallWithUUID:displacedUUID reason:1];
+      SpeakeasyAppendNativeDiagnostic(@"Superseded CallKit call ended");
+    }
+    NSMutableDictionary *report = [@{
+      @"call_id": callId,
+      @"call_uuid": uuid,
+      @"at": reportedAt,
+    } mutableCopy];
+    if (peerUserId != nil) { report[@"peer_user_id"] = peerUserId; }
+    [[NSNotificationCenter defaultCenter]
+        postNotificationName:@"SpeakeasyCallKitReported"
+                      object:nil
+                    userInfo:report];
+  }
+
   // Preserve the payload for JS so it can warm the websocket and bind our
   // call_id to the native CallKit UUID. CallKit reporting itself is native and
   // happens immediately, including on a killed-app launch.
@@ -291,6 +329,34 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
   void (^loggedCompletion)(void) = ^{
     NSLog(@"Speakeasy diagnostics: CallKit incoming-call report completion");
     SpeakeasyAppendNativeDiagnostic(@"CallKit incoming-call report completion");
+    if (callId != nil) {
+      NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+      CallKitReportStore *store = [[CallKitReportStore alloc] initWithDefaults:defaults];
+      BOOL isCurrent = [store markReportedCallId:callId callUUID:uuid];
+      if (isCurrent) {
+        NSMutableDictionary *report = [@{
+          @"call_id": callId,
+          @"call_uuid": uuid,
+          @"report_completed": @YES,
+          @"at": @([[NSDate date] timeIntervalSince1970] * 1000),
+        } mutableCopy];
+        if (peerUserId != nil) { report[@"peer_user_id"] = peerUserId; }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:@"SpeakeasyCallKitReported"
+                          object:nil
+                        userInfo:report];
+      } else {
+        [RNCallKeep endCallWithUUID:uuid reason:1];
+        SpeakeasyAppendNativeDiagnostic(@"Superseded CallKit completion ignored");
+      }
+    }
+    // iOS still requires a CallKit report for a malformed VoIP push. Without a
+    // signaling call_id there is nothing JS can ever answer, so end that report
+    // immediately instead of leaving a phantom ongoing call in the system.
+    if (callId == nil) {
+      [RNCallKeep endCallWithUUID:uuid reason:1];
+      SpeakeasyAppendNativeDiagnostic(@"Unmapped CallKit call ended");
+    }
     if (completion != nil) { completion(); }
   };
   [RNCallKeep reportNewIncomingCall:uuid

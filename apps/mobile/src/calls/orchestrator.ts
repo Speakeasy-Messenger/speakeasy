@@ -169,6 +169,11 @@ export interface CallOrchestratorDeps {
   ringTimeoutMs?: number;
   /** Setter so tests can inject a deterministic connecting-stage timeout. */
   connectingTimeoutMs?: number;
+  onIncomingUiFallback?: (callId: string) => void;
+  callKeepEnabled?: boolean;
+  callKeepFactory?: (
+    orchestrator: CallOrchestrator,
+  ) => Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
 }
 
 export interface CallHistoryEntry {
@@ -205,7 +210,7 @@ export class CallOrchestrator {
    * their offer drained to us). A buffered offer for one of these drains
    * late and would otherwise ring an abandoned call. Pruned by TTL.
    */
-  private readonly recentlyCancelled = new Map<string, number>();
+  private readonly recentlyCancelled = new Map<string, { peerUserId: string; at: number }>();
   /**
    * When the call entered 'connecting' (SDP exchanged, ICE/DTLS starting).
    * Used to measure the tech-only setup latency — connecting→connected,
@@ -214,8 +219,9 @@ export class CallOrchestrator {
    */
   private connectingAt?: number;
   private peer?: CallPeer;
-  /** Lazily-started CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
-  private callKeep?: CallKeepBridge;
+  /** CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
+  private callKeep?: Pick<CallKeepBridge, 'start'> &
+    Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private connectingTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
@@ -225,6 +231,9 @@ export class CallOrchestrator {
   private latestAnimationSeq?: number;
   /** Monotonic counter the sender stamps on outbound animation frames. */
   private outboundAnimationSeq = 0;
+  private callKeepStart?: Promise<void>;
+  private disposed = false;
+  private lifecycleGeneration = 0;
 
   /**
    * Sequential queue for inbound call frames.
@@ -245,26 +254,51 @@ export class CallOrchestrator {
   private callFrameQueue: WsServerMsg[] = [];
   private callFrameDraining = false;
 
-  constructor(private readonly deps: CallOrchestratorDeps) {}
+  constructor(private readonly deps: CallOrchestratorDeps) {
+    if (this.callKeepIsEnabled()) {
+      void this.ensureCallKeepStarted().catch((err) => {
+        diag('callkeep', 'bootstrap failed (non-fatal)', { err: String(err) });
+      });
+    }
+  }
 
   /**
-   * Lazily construct + start the CallKit/ConnectionService bridge before the
-   * first call, so its store subscriber is attached in time to mirror the
-   * upcoming `setActive` into the native call UI. No-op (and never constructs
-   * the bridge) while `CALLKEEP_ENABLED` is false. Idempotent: `start()` guards
-   * on its own `setupDone`, and the native module is absent-safe (no-ops if
-   * CallKit/ConnectionService isn't registered on this build). Awaited before
-   * `setActive` so the bridge's subscriber doesn't miss the call-start diff.
+   * Construct + start the CallKit/ConnectionService bridge once. No-op while
+   * disabled; concurrent startup paths share the same promise.
    */
   private async ensureCallKeepStarted(): Promise<void> {
-    if (!CALLKEEP_ENABLED || this.callKeep) return;
-    const bridge = new CallKeepBridge({ orchestrator: this });
-    this.callKeep = bridge;
-    await bridge.start();
+    if (this.disposed || !this.callKeepIsEnabled()) return;
+    if (!this.callKeep) {
+      this.callKeep =
+        this.deps.callKeepFactory?.(this) ?? new CallKeepBridge({ orchestrator: this });
+    }
+    this.callKeepStart ??= this.callKeep.start();
+    await this.callKeepStart;
+  }
+
+  private callKeepIsEnabled(): boolean {
+    return this.deps.callKeepEnabled ?? CALLKEEP_ENABLED;
   }
 
   getActive(): ActiveCall | undefined {
     return this.active;
+  }
+
+  showIncomingCallFallback(callId: string): void {
+    if (this.active?.callId !== callId || this.active.stage !== 'incoming_ringing') return;
+    this.deps.onIncomingUiFallback?.(callId);
+  }
+
+  dispose(): void {
+    if (this.disposed) return;
+    this.disposed = true;
+    this.lifecycleGeneration += 1;
+    this.callFrameQueue = [];
+    if (this.active) this.hangup();
+    else this.cleanup();
+    this.callKeep?.stop?.();
+    this.callKeep = undefined;
+    this.callKeepStart = undefined;
   }
 
   /**
@@ -273,6 +307,8 @@ export class CallOrchestrator {
    * `'video'` to negotiate a camera track via VideoCallScreen.
    */
   async startOutgoing(peerUserId: string, kind: CallKind = 'audio'): Promise<string> {
+    if (this.disposed) throw new Error('orchestrator disposed');
+    const generation = this.lifecycleGeneration;
     if (this.active) {
       throw new Error('busy: another call is already active');
     }
@@ -283,6 +319,8 @@ export class CallOrchestrator {
     // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
     // store subscriber catches this call-start. No-op while CALLKEEP_ENABLED.
     await this.ensureCallKeepStarted();
+    if (!this.isCurrentGeneration(generation)) throw new Error('orchestrator disposed');
+    if (this.active) throw new Error('busy: another call is already active');
     this.setActive({
       callId,
       peerUserId,
@@ -299,6 +337,7 @@ export class CallOrchestrator {
 
     try {
       const iceServers = await this.fetchIceServers();
+      this.assertActiveGeneration(generation, callId);
       diag('call', 'iceServers fetched', { count: iceServers.length });
       const peer = await this.deps.peerFactory.create({
         iceServers,
@@ -306,6 +345,10 @@ export class CallOrchestrator {
         // 'private' → 'audio' at WebRTC layer (see mediaKindForCall).
         mediaKind: mediaKindForCall(kind),
       });
+      if (!this.isActiveGeneration(generation, callId)) {
+        peer.close();
+        throw new Error('orchestrator disposed');
+      }
       diag('call', 'peer created');
       this.attachPeer(peer);
       // Phase 5j Private Call — open the animation data channel
@@ -322,22 +365,33 @@ export class CallOrchestrator {
         // and starts filtering as soon as the next capture frame
         // arrives. wrapTrack returns the same track id back — the
         // filter wraps SAMPLES, not the track handle.
-        await this.installFilterOrEndCall(callId);
+        const filterResult = await this.installFilterOrEndCall(callId, generation);
+        if (filterResult === 'ended') return callId;
+        if (filterResult === 'stale') {
+          throw new Error(
+            this.isCurrentGeneration(generation)
+              ? 'call no longer active'
+              : 'orchestrator disposed',
+          );
+        }
+        this.assertActiveGeneration(generation, callId);
       }
       const peerOffer = await peer.createOffer();
+      this.assertActiveGeneration(generation, callId);
       const offer: CallOfferPayload = { ...peerOffer, kind };
       diag('call', 'offer created', { sdpLen: offer.sdp.length });
       // Plaintext `kind` hint on the WS frame lets the server fan out
       // only to peer devices whose capability set includes this kind
       // (see apps/api/src/ws/call-router.ts + connections.ts).
-      await this.sendEncrypted(peerUserId, callId, 'call_offer', offer, kind);
+      await this.sendEncrypted(peerUserId, callId, 'call_offer', offer, kind, generation);
+      this.assertActiveGeneration(generation, callId);
       diag('call', 'offer sent', { peerUserId, callId });
       this.transition('outgoing_ringing');
       this.armRingTimeout();
       return callId;
     } catch (err) {
       diag('call', 'startOutgoing FAILED', { err: String(err) });
-      this.endLocally('failed');
+      if (this.isActiveGeneration(generation, callId)) this.endLocally('failed');
       throw err;
     }
   }
@@ -353,26 +407,46 @@ export class CallOrchestrator {
       throw new Error(`cannot accept in stage=${this.active?.stage}`);
     }
     if (!this.peer) throw new Error('no peer attached');
+    const generation = this.lifecycleGeneration;
+    const active = this.active;
+    const peer = this.peer;
     try {
       // Phase 5j Private Call — install the voice filter BEFORE
       // createAnswer triggers ensureLocalStream → getUserMedia →
       // addTrack on the callee side. Symmetric with startOutgoing on
       // the caller side; both endpoints filter their own mic.
-      if (this.active.kind === 'private') {
-        await this.installFilterOrEndCall(this.active.callId);
-        if (!this.active) {
+      if (active.kind === 'private') {
+        const filterResult = await this.installFilterOrEndCall(active.callId, generation);
+        if (filterResult === 'ended') {
           // installFilterOrEndCall ended the call — bail before
           // createAnswer, the peer is already torn down.
           throw new Error('filter_failure during accept');
         }
+        if (filterResult === 'stale') {
+          throw new Error(
+            this.isCurrentGeneration(generation)
+              ? 'call no longer active'
+              : 'orchestrator disposed',
+          );
+        }
+        this.assertActivePeer(generation, active.callId, peer);
       }
-      const answer = await this.peer.createAnswer();
-      await this.sendEncrypted(this.active.peerUserId, this.active.callId, 'call_answer', answer);
+      const answer = await peer.createAnswer();
+      this.assertActivePeer(generation, active.callId, peer);
+      await this.sendEncrypted(
+        active.peerUserId,
+        active.callId,
+        'call_answer',
+        answer,
+        undefined,
+        generation,
+      );
+      this.assertActivePeer(generation, active.callId, peer);
       this.transition('connecting');
       this.clearRingTimeout();
     } catch (err) {
       diag('call', 'accept FAILED', { err: String(err) });
-      this.endLocally('failed');
+      if (this.isActivePeer(generation, active.callId, peer)) this.endLocally('failed');
       throw err;
     }
   }
@@ -490,7 +564,10 @@ export class CallOrchestrator {
    * the same id back (the filter wraps SAMPLES, not the track).
    * We pass the call id as a label so diag logs can correlate.
    */
-  private async installFilterOrEndCall(callId: string): Promise<void> {
+  private async installFilterOrEndCall(
+    callId: string,
+    generation: number,
+  ): Promise<'installed' | 'ended' | 'stale'> {
     // `voiceFilter` is optional on deps so tests of the data-channel
     // / state-machine paths don't have to wire it. When absent we
     // treat the install as a no-op success — the brand-promise
@@ -499,11 +576,12 @@ export class CallOrchestrator {
     const filter = this.deps.voiceFilter;
     if (!filter) {
       diag('call', 'voice filter dep absent — skipping install', { callId });
-      return;
+      return 'installed';
     }
     try {
       await filter.wrap(callId);
       diag('call', 'voice filter installed', { callId });
+      return 'installed';
     } catch (err) {
       if (err instanceof FilterError) {
         diag('call', 'voice filter install FAILED', {
@@ -516,7 +594,9 @@ export class CallOrchestrator {
           err: String(err),
         });
       }
+      if (!this.isActiveGeneration(generation, callId)) return 'stale';
       this.endWithFilterFailure();
+      return 'ended';
     }
   }
 
@@ -587,6 +667,7 @@ export class CallOrchestrator {
    * Non-call frames pass through immediately.
    */
   async handleFrame(frame: WsServerMsg): Promise<void> {
+    if (this.disposed) return;
     const isCallFrame =
       frame.type === 'call_offer' ||
       frame.type === 'call_answer' ||
@@ -637,7 +718,12 @@ export class CallOrchestrator {
     callId: string,
     ciphertextB64: string,
   ): Promise<void> {
-    if (this.recentlyCancelled.has(callId)) {
+    const generation = this.lifecycleGeneration;
+    let incomingPeer: CallPeer | undefined;
+    let transferredIncomingPeer: CallPeer | undefined;
+    if (!this.isCurrentGeneration(generation)) return;
+    const cancelled = this.recentlyCancelled.get(callId);
+    if (cancelled?.peerUserId === fromUserId) {
       // The caller already sent call_end for this callId (they hung up
       // before/around when the server buffered their offer). Drop the
       // late-drained offer so we don't ring an abandoned call.
@@ -646,6 +732,7 @@ export class CallOrchestrator {
         fromUserId,
         callId,
       });
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     if (this.active) {
@@ -672,6 +759,7 @@ export class CallOrchestrator {
         reason: 'busy',
       });
       diag('call', 'incoming offer rejected: busy', { fromUserId, callId });
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     // SETTINGS.md §4.1: "Allow incoming calls" toggle. When off,
@@ -689,10 +777,13 @@ export class CallOrchestrator {
         fromUserId,
         callId,
       });
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallOfferPayload;
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       // Resolve + validate the call kind. Absent ⇒ 'audio' (back-compat
       // with pre-rc.34 clients that never set the field). Unknown ⇒
       // silently abort: the brand promise hole this closes is a future
@@ -713,6 +804,7 @@ export class CallOrchestrator {
           callId,
           kind: rawKind,
         });
+        this.rejectIncomingCall(callId, fromUserId);
         return;
       }
       diag('call', 'handleIncomingOffer: decrypted', {
@@ -721,6 +813,8 @@ export class CallOrchestrator {
         kind,
       });
       const iceServers = await this.fetchIceServers();
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       const peer = await this.deps.peerFactory.create({
         iceServers,
         role: 'callee',
@@ -729,11 +823,20 @@ export class CallOrchestrator {
         // peerConnection still negotiates audio-only media.
         mediaKind: mediaKindForCall(kind),
       });
-      this.attachPeer(peer);
+      incomingPeer = peer;
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       await peer.setRemoteOffer(payload);
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       // Start CallKit/ConnectionService (if enabled) BEFORE setActive so its
       // store subscriber mirrors this incoming call into the native ring UI.
       await this.ensureCallKeepStarted();
+      if (!this.isCurrentGeneration(generation)) return;
+      if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
+      this.attachPeer(peer);
+      transferredIncomingPeer = peer;
+      incomingPeer = undefined;
       this.setActive({
         callId,
         peerUserId: fromUserId,
@@ -761,6 +864,7 @@ export class CallOrchestrator {
       // doesn't gate any wire-side work.
       void this.warmUpPermissions(kind);
     } catch (err) {
+      if (!this.isCurrentGeneration(generation)) return;
       diag('call', 'incoming offer FAILED', {
         fromUserId,
         callId,
@@ -773,7 +877,52 @@ export class CallOrchestrator {
         call_id: callId,
         reason: 'hangup',
       });
+      this.rejectIncomingCall(callId, fromUserId);
+      if (transferredIncomingPeer && this.peer === transferredIncomingPeer) {
+        this.cleanup();
+        transferredIncomingPeer = undefined;
+      }
+    } finally {
+      incomingPeer?.close();
     }
+  }
+
+  private isCurrentGeneration(generation: number): boolean {
+    return !this.disposed && generation === this.lifecycleGeneration;
+  }
+
+  private isActiveGeneration(generation: number, callId: string): boolean {
+    return this.isCurrentGeneration(generation) && this.active?.callId === callId;
+  }
+
+  private assertActiveGeneration(generation: number, callId: string): void {
+    if (!this.isActiveGeneration(generation, callId)) throw new Error('orchestrator disposed');
+  }
+
+  private isActivePeer(generation: number, callId: string, peer: CallPeer): boolean {
+    return this.isActiveGeneration(generation, callId) && this.peer === peer;
+  }
+
+  private assertActivePeer(generation: number, callId: string, peer: CallPeer): void {
+    if (!this.isActivePeer(generation, callId, peer)) throw new Error('call no longer active');
+  }
+
+  private rejectIncomingOfferIfBusy(fromUserId: string, callId: string): boolean {
+    if (!this.active) return false;
+    if (this.active.callId === callId) return true;
+    this.deps.send({
+      type: 'call_end',
+      to: fromUserId,
+      call_id: callId,
+      reason: 'busy',
+    });
+    diag('call', 'incoming offer rejected: busy', { fromUserId, callId });
+    this.rejectIncomingCall(callId, fromUserId);
+    return true;
+  }
+
+  private rejectIncomingCall(callId: string, peerUserId: string): void {
+    this.callKeep?.rejectIncomingCall?.(callId, peerUserId);
   }
 
   /** Flag `untrusted_identity` decrypt failures to the app layer — the
@@ -797,15 +946,19 @@ export class CallOrchestrator {
     ) {
       return;
     }
+    const generation = this.lifecycleGeneration;
+    const peer = this.peer;
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallAnswerPayload;
-      await this.peer.setRemoteAnswer(payload);
+      if (!this.isActivePeer(generation, callId, peer)) return;
+      await peer.setRemoteAnswer(payload);
+      if (!this.isActivePeer(generation, callId, peer)) return;
       this.transition('connecting');
       this.clearRingTimeout();
     } catch (err) {
       diag('call', 'incoming answer FAILED', { err: String(err) });
       this.notePeerIdentityChanged(fromUserId, err);
-      this.endLocally('failed');
+      if (this.isActivePeer(generation, callId, peer)) this.endLocally('failed');
     }
   }
 
@@ -814,16 +967,27 @@ export class CallOrchestrator {
     callId: string,
     ciphertextB64: string,
   ): Promise<void> {
-    if (!this.active || this.active.callId !== callId || !this.peer) return;
+    if (
+      !this.active ||
+      this.active.callId !== callId ||
+      this.active.peerUserId !== fromUserId ||
+      !this.peer
+    ) {
+      return;
+    }
+    const generation = this.lifecycleGeneration;
+    const peer = this.peer;
     try {
       const payload = (await this.decrypt(fromUserId, ciphertextB64)) as CallIcePayload;
-      await this.peer.addRemoteIce(payload);
+      if (!this.isActivePeer(generation, callId, peer)) return;
+      await peer.addRemoteIce(payload);
     } catch (err) {
       diag('call', 'incoming ice FAILED', { err: String(err) });
     }
   }
 
   private handleIncomingEnd(fromUserId: string, callId: string, reason: CallEndReason): void {
+    if (this.active?.callId === callId && this.active.peerUserId !== fromUserId) return;
     if (!this.active || this.active.callId !== callId || this.active.peerUserId !== fromUserId) {
       // No live call matches this end. Most often the caller cancelled
       // before their offer drained to us (we may still be showing the
@@ -831,7 +995,8 @@ export class CallOrchestrator {
       // for it, drained late, is dropped instead of ringing an abandoned
       // call. A call_end always means that call is over, so recording it
       // here unconditionally is safe.
-      this.rememberCancelled(callId);
+      this.rememberCancelled(callId, fromUserId);
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     diag('call', 'handleIncomingEnd', { reason, callId, fromUserId, stage: this.active.stage });
@@ -883,19 +1048,28 @@ export class CallOrchestrator {
     this.peer = peer;
     this.localIceUnsub = peer.onLocalIce((candidate) => {
       void (async () => {
-        if (!this.active) return;
+        if (!this.active || this.peer !== peer) return;
+        const generation = this.lifecycleGeneration;
+        const active = this.active;
         try {
-          await this.sendEncrypted(this.active.peerUserId, this.active.callId, 'call_ice', {
-            v: 1,
-            candidates: [candidate],
-          } satisfies CallIcePayload);
+          await this.sendEncrypted(
+            active.peerUserId,
+            active.callId,
+            'call_ice',
+            {
+              v: 1,
+              candidates: [candidate],
+            } satisfies CallIcePayload,
+            undefined,
+            generation,
+          );
         } catch (err) {
           diag('call', 'local ice send FAILED', { err: String(err) });
         }
       })();
     });
     this.connStateUnsub = peer.onConnectionStateChange((state) => {
-      if (!this.active) return;
+      if (!this.active || this.peer !== peer) return;
       // rc.50: log the call's stage when WebRTC fires a state change
       // so the next "call dropped before I could answer" report has
       // actionable data. The video-call-during-ringing-closes-on-its-
@@ -949,6 +1123,7 @@ export class CallOrchestrator {
     // (decodeAnimationFrame returns undefined for malformed/wrong-
     // version frames, which a non-Private peer would never send).
     this.animationFrameUnsub = peer.onAnimationFrame?.((payload) => {
+      if (this.peer !== peer) return;
       const frame = decodeAnimationFrame(payload);
       if (!frame) return;
       if (!isFresherSeq(this.latestAnimationSeq, frame.seq)) return;
@@ -969,18 +1144,22 @@ export class CallOrchestrator {
      * carries the same value inside `payload.kind` for the receiver.
      */
     offerKind?: CallKind,
+    generation?: number,
   ): Promise<void> {
     diag('call', 'sendEncrypted: enter', { type, peerUserId, callId });
     const deviceToken = await this.deps.getDeviceToken();
+    if (generation !== undefined) this.assertActiveGeneration(generation, callId);
     await this.deps.ensureSessionWithPeer({
       api: this.deps.api,
       signalProtocol: this.deps.signalProtocol,
       deviceToken,
       peerUserId,
     });
+    if (generation !== undefined) this.assertActiveGeneration(generation, callId);
     diag('call', 'sendEncrypted: session ensured', { type, peerUserId });
     const plaintext = utf8ToBytes(JSON.stringify(payload));
     const ciphertext = await this.deps.signalProtocol.encrypt(peerUserId, plaintext);
+    if (generation !== undefined) this.assertActiveGeneration(generation, callId);
     diag('call', 'sendEncrypted: ciphertext built', {
       type,
       peerUserId,
@@ -1277,12 +1456,12 @@ export class CallOrchestrator {
 
   /** Remember a cancelled/ended callId (TTL-pruned) so a late buffered
    *  offer for it is dropped rather than ringing an abandoned call. */
-  private rememberCancelled(callId: string): void {
+  private rememberCancelled(callId: string, peerUserId: string): void {
     const at = this.now();
-    this.recentlyCancelled.set(callId, at);
+    this.recentlyCancelled.set(callId, { peerUserId, at });
     const cutoff = at - CANCELLED_CALL_TTL_MS;
-    for (const [id, ts] of this.recentlyCancelled) {
-      if (ts < cutoff) this.recentlyCancelled.delete(id);
+    for (const [id, cancelled] of this.recentlyCancelled) {
+      if (cancelled.at < cutoff) this.recentlyCancelled.delete(id);
     }
   }
 }

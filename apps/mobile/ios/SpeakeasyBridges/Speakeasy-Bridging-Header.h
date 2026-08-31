@@ -13,6 +13,7 @@
 #import <React/RCTEventEmitter.h>
 #import <React/RCTConvert.h>
 #import <React/RCTLog.h>
+#import "RNCallKeep.h"
 
 // SQLCipher exposes its sqlite3.h via CocoaPods. Pulling it in here
 // makes every sqlite3_* C symbol visible to Swift (as Speakeasy module

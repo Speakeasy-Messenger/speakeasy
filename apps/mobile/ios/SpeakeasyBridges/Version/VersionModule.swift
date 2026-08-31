@@ -34,11 +34,126 @@ final class VersionModule: NSObject {
   }
 }
 
+@objc(CallKitReportStore)
+final class CallKitReportStore: NSObject {
+  private static let key = "SpeakeasyPendingCallKitReports"
+  private static let lock = NSLock()
+  private let defaults: UserDefaults
+
+  @objc init(defaults: UserDefaults) {
+    self.defaults = defaults
+    super.init()
+  }
+
+  @objc(registerCallId:callUUID:peerUserId:at:)
+  func register(
+    callId: String,
+    callUUID: String,
+    peerUserId: String?,
+    at: Double
+  ) -> [String] {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
+    var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
+    var removed = reports.filter { report in
+      let candidateCallId = report["call_id"] as? String
+      let candidateUUID = report["call_uuid"] as? String
+      return candidateCallId == callId ||
+        candidateUUID?.caseInsensitiveCompare(callUUID) == .orderedSame
+    }
+    reports.removeAll { report in
+      let candidateCallId = report["call_id"] as? String
+      let candidateUUID = report["call_uuid"] as? String
+      return candidateCallId == callId ||
+        candidateUUID?.caseInsensitiveCompare(callUUID) == .orderedSame
+    }
+    var report: [String: Any] = [
+      "call_id": callId,
+      "call_uuid": callUUID,
+      "report_completed": false,
+      "at": at,
+    ]
+    if let peerUserId, !peerUserId.isEmpty {
+      report["peer_user_id"] = peerUserId
+    }
+    reports.append(report)
+    if reports.count > 20 {
+      let overflow = reports.count - 20
+      removed.append(contentsOf: reports.prefix(overflow))
+      reports.removeFirst(overflow)
+    }
+    defaults.set(reports, forKey: Self.key)
+
+    var seen = Set<String>()
+    return removed.compactMap { report in
+      guard let uuid = report["call_uuid"] as? String,
+            uuid.caseInsensitiveCompare(callUUID) != .orderedSame else {
+        return nil
+      }
+      let normalized = uuid.lowercased()
+      return seen.insert(normalized).inserted ? uuid : nil
+    }
+  }
+
+  func pending(nowMs: Double, maxAgeMs: Double) -> [[String: Any]] {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
+    let reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
+    return reports.compactMap { report in
+      guard let callUUID = report["call_uuid"] as? String,
+            !callUUID.isEmpty else {
+        return nil
+      }
+      let at = report["at"] as? Double
+      let expired = at == nil || at! > nowMs || nowMs - at! > maxAgeMs
+      var result = report
+      result["expired"] = expired
+      return result
+    }
+  }
+
+  @objc(markReportedCallId:callUUID:)
+  func markReported(callId: String, callUUID: String) -> Bool {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
+    var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
+    guard let index = reports.firstIndex(where: { report in
+      guard let candidateCallId = report["call_id"] as? String,
+            let candidateUUID = report["call_uuid"] as? String else {
+        return false
+      }
+      return candidateCallId == callId &&
+        candidateUUID.caseInsensitiveCompare(callUUID) == .orderedSame
+    }) else {
+      return false
+    }
+    reports[index]["report_completed"] = true
+    defaults.set(reports, forKey: Self.key)
+    return true
+  }
+
+  func acknowledge(callUUID: String) {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
+    var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
+    reports.removeAll { report in
+      guard let candidateUUID = report["call_uuid"] as? String else { return false }
+      return candidateUUID.caseInsensitiveCompare(callUUID) == .orderedSame
+    }
+    if reports.isEmpty {
+      defaults.removeObject(forKey: Self.key)
+    } else {
+      defaults.set(reports, forKey: Self.key)
+    }
+  }
+}
+
 /// Bridgeless-safe handoff for native lifecycle breadcrumbs that can happen
 /// while JavaScript is suspended (PushKit, CallKit, and PiP close).
 @objc(NativeDiagnosticsModule)
 final class NativeDiagnosticsModule: RCTEventEmitter {
   private let defaults = UserDefaults.standard
+  private lazy var callKitReports = CallKitReportStore(defaults: defaults)
   private var hasListeners = false
 
   override init() {
@@ -49,6 +164,12 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
       name: NSNotification.Name("SpeakeasyPictureInPictureClosed"),
       object: nil
     )
+    NotificationCenter.default.addObserver(
+      self,
+      selector: #selector(callKitReported(_:)),
+      name: NSNotification.Name("SpeakeasyCallKitReported"),
+      object: nil
+    )
   }
 
   deinit {
@@ -57,7 +178,9 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
 
   override static func requiresMainQueueSetup() -> Bool { false }
 
-  override func supportedEvents() -> [String] { ["SpeakeasyPipClosed"] }
+  override func supportedEvents() -> [String] {
+    ["SpeakeasyPipClosed", "SpeakeasyCallKitReported"]
+  }
 
   override func startObserving() { hasListeners = true }
 
@@ -77,6 +200,27 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
     ])
     defaults.set(Array(entries.suffix(50)), forKey: "SpeakeasyPendingNativeDiagnostics")
     if hasListeners { sendEvent(withName: "SpeakeasyPipClosed", body: true) }
+  }
+
+  @objc private func callKitReported(_ notification: Notification) {
+    guard hasListeners, let report = notification.userInfo else { return }
+    sendEvent(withName: "SpeakeasyCallKitReported", body: report)
+  }
+
+  @objc func consumePendingCallKitReports(
+    _ resolve: RCTPromiseResolveBlock,
+    rejecter reject: RCTPromiseRejectBlock
+  ) {
+    let nowMs = Date().timeIntervalSince1970 * 1000
+    resolve(callKitReports.pending(nowMs: nowMs, maxAgeMs: 120_000))
+  }
+
+  @objc func acknowledgePendingCallKitReport(_ callUUID: String) {
+    callKitReports.acknowledge(callUUID: callUUID)
+  }
+
+  @objc func endPendingCallKitReport(_ callUUID: String) {
+    RNCallKeep.endCall(withUUID: callUUID, reason: 1)
   }
 
   @objc func consumePendingPipClose(
