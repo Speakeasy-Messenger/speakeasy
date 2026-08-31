@@ -19,12 +19,7 @@ vi.mock('../diag/upload.js', () => ({ uploadDiag: vi.fn(async () => undefined) }
 import { uploadDiag } from '../diag/upload.js';
 const mockUploadDiag = vi.mocked(uploadDiag);
 
-type ConnState =
-  | 'connecting'
-  | 'connected'
-  | 'failed'
-  | 'closed'
-  | 'disconnected';
+type ConnState = 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected';
 
 class MockPeer implements CallPeer {
   private iceListeners = new Set<(c: CallIceCandidate) => void>();
@@ -305,9 +300,9 @@ describe('CallOrchestrator', () => {
 
   it('drops a buffered offer that drains after the caller already cancelled', async () => {
     const h = makeOrchHarness();
-    const fakeOffer = Buffer.from(
-      JSON.stringify({ v: 1, sdp: 'x', candidates: [] }),
-    ).toString('base64');
+    const fakeOffer = Buffer.from(JSON.stringify({ v: 1, sdp: 'x', candidates: [] })).toString(
+      'base64',
+    );
     // Pre-offer cancel: the caller hung up before their offer drained to
     // us, so only the call_end arrives first — no active call on our side.
     await h.callee.handleFrame({
@@ -339,9 +334,9 @@ describe('CallOrchestrator', () => {
     expect(h.callee.getActive()?.stage).toBe('connected');
 
     // Synthesize a third party (carol) calling bob.
-    const fakeOffer = Buffer.from(
-      JSON.stringify({ v: 1, sdp: 'x', candidates: [] }),
-    ).toString('base64');
+    const fakeOffer = Buffer.from(JSON.stringify({ v: 1, sdp: 'x', candidates: [] })).toString(
+      'base64',
+    );
     await h.callee.handleFrame({
       type: 'call_offer',
       from: 'carol',
@@ -454,9 +449,7 @@ describe('CallOrchestrator', () => {
       expect(h.finishedCaller[0]?.reason).toBe('filter_failure');
       // Wire frame went to bob with reason 'filter_failure'.
       const callEnd = h.callerOut.find((f) => f.type === 'call_end');
-      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe(
-        'filter_failure',
-      );
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('filter_failure');
     });
 
     it('disconnected ICE flap flags reconnecting (cosmetic) and recovers on connected', async () => {
@@ -625,13 +618,9 @@ describe('CallOrchestrator', () => {
       const cid = await h.caller.startOutgoing('bob', 'private');
       expect(h.finishedCaller[0]?.reason).toBe('filter_failure');
       const callEnd = h.callerOut.find((f) => f.type === 'call_end');
-      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe(
-        'filter_failure',
-      );
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('filter_failure');
       // Wire frame is targeted at the right peer + call.
-      expect(
-        callEnd && callEnd.type === 'call_end' && callEnd.call_id,
-      ).toBe(cid);
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.call_id).toBe(cid);
     });
 
     it('cleanup invokes voiceFilter.dispose so the next call starts fresh', async () => {

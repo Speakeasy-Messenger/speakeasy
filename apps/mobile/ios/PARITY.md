@@ -27,14 +27,14 @@ All app logic in `src/` (stores, screens, WS, navigation, the
 
 ## 2. Native module parity
 
-| Module          | Android (Kotlin)            | iOS (Swift)                    | Status |
-| --------------- | --------------------------- | ------------------------------ | ------ |
-| SignalProtocol  | `SignalProtocolModule.kt`   | `SignalProtocolModule.swift`   | ✅ parity |
-| GroupMessaging  | `GroupMessagingModule.kt`   | `GroupMessagingModule.swift`   | ✅ parity |
-| ChannelKey      | `ChannelKeyModule.kt`       | `ChannelKeyModule.swift`       | ✅ parity |
-| Vouchflow       | `VouchflowModule.kt`        | `VouchflowModule.swift`        | ✅ parity |
-| SpeakeasyDb     | `SpeakeasyDb.kt` / `Schema` | `SpeakeasyDb.swift` / `Schema` | ✅ parity |
-| Version         | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity |
+| Module         | Android (Kotlin)            | iOS (Swift)                    | Status    |
+| -------------- | --------------------------- | ------------------------------ | --------- |
+| SignalProtocol | `SignalProtocolModule.kt`   | `SignalProtocolModule.swift`   | ✅ parity |
+| GroupMessaging | `GroupMessagingModule.kt`   | `GroupMessagingModule.swift`   | ✅ parity |
+| ChannelKey     | `ChannelKeyModule.kt`       | `ChannelKeyModule.swift`       | ✅ parity |
+| Vouchflow      | `VouchflowModule.kt`        | `VouchflowModule.swift`        | ✅ parity |
+| SpeakeasyDb    | `SpeakeasyDb.kt` / `Schema` | `SpeakeasyDb.swift` / `Schema` | ✅ parity |
+| Version        | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity |
 
 SDK versions — aligned: LibSignal `0.59.0` (both), SQLCipher `~4.6`
 iOS / `4.14.1` Android, Vouchflow `2.1.1` (both).
@@ -74,13 +74,15 @@ Audited, accepted as-is (low priority):
   Settings deep-link" path.
 - `callkeep-bridge.ts` — iOS CallKit/PushKit registration, incoming-call
   reporting, answer/end actions, and audio-session ownership are wired and
-  covered by contract tests. `AppDelegate` is the sole incoming-call reporter:
-  it persists the `call_id` ↔ CallKit UUID mapping before reporting, and JS
-  adopts that mapping without calling `displayIncomingCall` on iOS. Diagnostics
-  persist native VoIP-push receipt, incoming-call report completion,
-  `didDisplayIncomingCall`, and audio-session activation. A real incoming call
-  must still confirm physical ring/vibration and uninterrupted WebRTC audio on
-  device.
+  covered by contract tests. `AppDelegate` performs the mandatory native report
+  and is the source of truth: it persists the `call_id` ↔ CallKit UUID mapping
+  before reporting, and JS adopts that mapping without displaying a second
+  CallKit call. Only an explicit native-report failure permits JS to retry
+  `displayIncomingCall`, reusing the failed report's UUID; if that retry fails,
+  the app shows its in-app incoming-call UI. Diagnostics persist native
+  VoIP-push receipt, incoming-call report completion, `didDisplayIncomingCall`,
+  and audio-session activation. A real incoming call must still confirm
+  physical ring/vibration and uninterrupted WebRTC audio on device.
 - `VideoCallScreen.tsx` / `native/pip.ts` — both platforms report PiP entry,
   native bubble size, close, and return lifecycle. Android remounts a compact
   `RTCView` for its resized activity; iOS deliberately keeps the original

@@ -33,10 +33,10 @@ export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | 
     at?: unknown;
   };
   if (typeof raw.call_uuid !== 'string' || raw.call_uuid.length === 0) return undefined;
-  const callId = typeof raw.call_id === 'string' && raw.call_id.length > 0 ? raw.call_id : undefined;
+  const callId =
+    typeof raw.call_id === 'string' && raw.call_id.length > 0 ? raw.call_id : undefined;
   const expired = raw.expired === true;
-  const reportedAtMs =
-    typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : undefined;
+  const reportedAtMs = typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : undefined;
   if (!callId && !expired) return undefined;
   return {
     ...(callId ? { callId } : {}),

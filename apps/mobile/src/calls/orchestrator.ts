@@ -173,8 +173,7 @@ export interface CallOrchestratorDeps {
   callKeepEnabled?: boolean;
   callKeepFactory?: (
     orchestrator: CallOrchestrator,
-  ) => Pick<CallKeepBridge, 'start'> &
-    Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
+  ) => Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
 }
 
 export interface CallHistoryEntry {

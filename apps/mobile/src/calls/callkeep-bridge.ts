@@ -606,20 +606,24 @@ export class CallKeepBridge {
       return;
     }
     const maxDelay = this.deps.orphanCleanupDelayMs ?? IOS_ORPHAN_CLEANUP_MS;
-    const age = report.reportedAtMs === undefined ? 0 : Math.max(0, Date.now() - report.reportedAtMs);
-    const timer = setTimeout(() => {
-      this.orphanCleanupTimers.delete(uuid);
-      const callId = this.uuidToId.get(uuid) ?? this.failedNativeUuids.get(uuid);
-      if (callId && this.deps.orchestrator.getActive()?.callId === callId) {
-        this.acknowledgeNativeReport(uuid);
-      } else if (this.failedNativeUuids.has(uuid)) {
-        this.acknowledgeNativeReport(uuid);
-        this.failedNativeUuids.delete(uuid);
-        this.nativeHandoffUuids.delete(uuid);
-      } else {
-        this.endOrphan(uuid, 'native CallKit report never matched signaling');
-      }
-    }, Math.max(0, maxDelay - age));
+    const age =
+      report.reportedAtMs === undefined ? 0 : Math.max(0, Date.now() - report.reportedAtMs);
+    const timer = setTimeout(
+      () => {
+        this.orphanCleanupTimers.delete(uuid);
+        const callId = this.uuidToId.get(uuid) ?? this.failedNativeUuids.get(uuid);
+        if (callId && this.deps.orchestrator.getActive()?.callId === callId) {
+          this.acknowledgeNativeReport(uuid);
+        } else if (this.failedNativeUuids.has(uuid)) {
+          this.acknowledgeNativeReport(uuid);
+          this.failedNativeUuids.delete(uuid);
+          this.nativeHandoffUuids.delete(uuid);
+        } else {
+          this.endOrphan(uuid, 'native CallKit report never matched signaling');
+        }
+      },
+      Math.max(0, maxDelay - age),
+    );
     this.orphanCleanupTimers.set(uuid, timer);
   }
 
@@ -651,11 +655,7 @@ export class CallKeepBridge {
     const timer = setTimeout(() => {
       this.incomingFallbackTimers.delete(call.callId);
       const active = this.deps.orchestrator.getActive();
-      if (
-        !active ||
-        active.callId !== call.callId ||
-        active.stage !== 'incoming_ringing'
-      ) {
+      if (!active || active.callId !== call.callId || active.stage !== 'incoming_ringing') {
         return;
       }
       const failedUuid = [...this.failedNativeUuids].find(([, id]) => id === call.callId)?.[0];
@@ -790,8 +790,7 @@ export class CallKeepBridge {
         this.cancelIncomingFallback(prev.callId);
         const uuid = this.idToUuid.get(prev.callId);
         if (uuid) {
-          const nativeOwned =
-            this.nativeHandoffUuids.has(uuid) || this.failedNativeUuids.has(uuid);
+          const nativeOwned = this.nativeHandoffUuids.has(uuid) || this.failedNativeUuids.has(uuid);
           try {
             RNCallKeep.reportEndCallWithUUID(uuid, 2);
             diag('callkeep', 'CallKit end reported', { callUUID: uuid });
