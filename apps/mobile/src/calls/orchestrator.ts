@@ -364,7 +364,8 @@ export class CallOrchestrator {
         // and starts filtering as soon as the next capture frame
         // arrives. wrapTrack returns the same track id back — the
         // filter wraps SAMPLES, not the track handle.
-        await this.installFilterOrEndCall(callId);
+        const filterInstalled = await this.installFilterOrEndCall(callId);
+        if (!filterInstalled && this.isCurrentGeneration(generation)) return callId;
         this.assertActiveGeneration(generation, callId);
       }
       const peerOffer = await peer.createOffer();
@@ -404,8 +405,8 @@ export class CallOrchestrator {
       // addTrack on the callee side. Symmetric with startOutgoing on
       // the caller side; both endpoints filter their own mic.
       if (this.active.kind === 'private') {
-        await this.installFilterOrEndCall(this.active.callId);
-        if (!this.active) {
+        const filterInstalled = await this.installFilterOrEndCall(this.active.callId);
+        if (!filterInstalled) {
           // installFilterOrEndCall ended the call — bail before
           // createAnswer, the peer is already torn down.
           throw new Error('filter_failure during accept');
@@ -535,7 +536,7 @@ export class CallOrchestrator {
    * the same id back (the filter wraps SAMPLES, not the track).
    * We pass the call id as a label so diag logs can correlate.
    */
-  private async installFilterOrEndCall(callId: string): Promise<void> {
+  private async installFilterOrEndCall(callId: string): Promise<boolean> {
     // `voiceFilter` is optional on deps so tests of the data-channel
     // / state-machine paths don't have to wire it. When absent we
     // treat the install as a no-op success — the brand-promise
@@ -544,11 +545,12 @@ export class CallOrchestrator {
     const filter = this.deps.voiceFilter;
     if (!filter) {
       diag('call', 'voice filter dep absent — skipping install', { callId });
-      return;
+      return true;
     }
     try {
       await filter.wrap(callId);
       diag('call', 'voice filter installed', { callId });
+      return true;
     } catch (err) {
       if (err instanceof FilterError) {
         diag('call', 'voice filter install FAILED', {
@@ -562,6 +564,7 @@ export class CallOrchestrator {
         });
       }
       this.endWithFilterFailure();
+      return false;
     }
   }
 

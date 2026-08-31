@@ -621,6 +621,7 @@ describe('CallOrchestrator', () => {
       expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('filter_failure');
       // Wire frame is targeted at the right peer + call.
       expect(callEnd && callEnd.type === 'call_end' && callEnd.call_id).toBe(cid);
+      expect(h.callerOut.filter((frame) => frame.type === 'call_offer')).toHaveLength(0);
     });
 
     it('cleanup invokes voiceFilter.dispose so the next call starts fresh', async () => {
