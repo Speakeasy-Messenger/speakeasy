@@ -169,6 +169,8 @@ export interface CallOrchestratorDeps {
   ringTimeoutMs?: number;
   /** Setter so tests can inject a deterministic connecting-stage timeout. */
   connectingTimeoutMs?: number;
+  callKeepEnabled?: boolean;
+  callKeepFactory?: (orchestrator: CallOrchestrator) => Pick<CallKeepBridge, 'start'>;
 }
 
 export interface CallHistoryEntry {
@@ -214,8 +216,8 @@ export class CallOrchestrator {
    */
   private connectingAt?: number;
   private peer?: CallPeer;
-  /** Lazily-started CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
-  private callKeep?: CallKeepBridge;
+  /** CallKit/ConnectionService bridge (see CALLKEEP_ENABLED). */
+  private callKeep?: Pick<CallKeepBridge, 'start'>;
   private ringTimer?: ReturnType<typeof setTimeout>;
   private connectingTimer?: ReturnType<typeof setTimeout>;
   private localIceUnsub?: () => void;
@@ -225,6 +227,7 @@ export class CallOrchestrator {
   private latestAnimationSeq?: number;
   /** Monotonic counter the sender stamps on outbound animation frames. */
   private outboundAnimationSeq = 0;
+  private callKeepStart?: Promise<void>;
 
   /**
    * Sequential queue for inbound call frames.
@@ -245,22 +248,30 @@ export class CallOrchestrator {
   private callFrameQueue: WsServerMsg[] = [];
   private callFrameDraining = false;
 
-  constructor(private readonly deps: CallOrchestratorDeps) {}
+  constructor(private readonly deps: CallOrchestratorDeps) {
+    if (this.callKeepIsEnabled()) {
+      void this.ensureCallKeepStarted().catch((err) => {
+        diag('callkeep', 'bootstrap failed (non-fatal)', { err: String(err) });
+      });
+    }
+  }
 
   /**
-   * Lazily construct + start the CallKit/ConnectionService bridge before the
-   * first call, so its store subscriber is attached in time to mirror the
-   * upcoming `setActive` into the native call UI. No-op (and never constructs
-   * the bridge) while `CALLKEEP_ENABLED` is false. Idempotent: `start()` guards
-   * on its own `setupDone`, and the native module is absent-safe (no-ops if
-   * CallKit/ConnectionService isn't registered on this build). Awaited before
-   * `setActive` so the bridge's subscriber doesn't miss the call-start diff.
+   * Construct + start the CallKit/ConnectionService bridge once. No-op while
+   * disabled; concurrent startup paths share the same promise.
    */
   private async ensureCallKeepStarted(): Promise<void> {
-    if (!CALLKEEP_ENABLED || this.callKeep) return;
-    const bridge = new CallKeepBridge({ orchestrator: this });
-    this.callKeep = bridge;
-    await bridge.start();
+    if (!this.callKeepIsEnabled()) return;
+    if (!this.callKeep) {
+      this.callKeep =
+        this.deps.callKeepFactory?.(this) ?? new CallKeepBridge({ orchestrator: this });
+    }
+    this.callKeepStart ??= this.callKeep.start();
+    await this.callKeepStart;
+  }
+
+  private callKeepIsEnabled(): boolean {
+    return this.deps.callKeepEnabled ?? CALLKEEP_ENABLED;
   }
 
   getActive(): ActiveCall | undefined {

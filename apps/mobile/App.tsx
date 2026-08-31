@@ -928,26 +928,10 @@ export default function App({ videoCallHarness = false }: AppProps) {
       });
     }
 
-    // CallKeep — DEFERRED at app launch. `RNCallKeep.setup()` calls
-    // `telecomManager.registerPhoneAccount()` on Android, which the OS
-    // responds to with a system "Calling accounts" Settings dialog
-    // immediately after enrollment (Tier B run 25514218352 caught
-    // this — emptied AlertDialog covered the conversations screen,
-    // tapping OK redirected to system Settings → Calling accounts,
-    // never returning to our app).
-    //
-    // Auto-starting the bridge at app launch means every fresh-install
-    // user gets that dialog seconds after enrollment, before they've
-    // placed or received a single call. That's terrible UX.
-    //
-    // Defer: orchestrator/screen calls `bridge.start()` lazily right
-    // before the first call (CallScreen mount or call_offer arrival).
-    // Then the system dialog only appears in a call context where the
-    // permission ask makes sense, and Tier B flows that don't touch
-    // the dialer never see the dialog at all. The in-app
-    // IncomingCallScreen / CallScreen continue to handle every call
-    // exactly as they did pre-0.4.35; CallKit/ConnectionService is
-    // additive when present, not required.
+    // The orchestrator starts CallKit immediately on iOS so persisted PushKit
+    // reports are recovered before signaling can reject an offer. Android
+    // remains lazy because ConnectionService setup can open the system
+    // "Calling accounts" screen during enrollment.
 
     // Single ws.subscribe wired to the unified router. Every screen
     // (ChatScreen, GroupChatScreen, future CommunityScreen) reads from
