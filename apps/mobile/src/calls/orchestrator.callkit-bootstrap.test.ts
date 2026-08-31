@@ -26,6 +26,7 @@ function harness(opts: {
   allowIncoming?: boolean;
   decryptFailure?: boolean;
   deferDecrypt?: boolean;
+  deferPeer?: boolean;
 }) {
   const sent: WsClientMsg[] = [];
   const signalProtocol = new MockSignalProtocolClient();
@@ -68,12 +69,24 @@ function harness(opts: {
     acknowledge: vi.fn(),
   };
   const peer = {
+    createOffer: vi.fn(async () => ({ v: 1, sdp: 'offer', candidates: [] })),
     setRemoteOffer: vi.fn(async () => undefined),
     onLocalIce: vi.fn(() => () => undefined),
     onConnectionStateChange: vi.fn(() => () => undefined),
     close: vi.fn(),
   };
-  const peerFactory = { create: vi.fn(async () => peer) };
+  let releasePeer: (() => void) | undefined;
+  const peerGate = opts.deferPeer
+    ? new Promise<void>((resolve) => {
+        releasePeer = resolve;
+      })
+    : undefined;
+  const peerFactory = {
+    create: vi.fn(async () => {
+      await peerGate;
+      return peer;
+    }),
+  };
   let bridge: CallKeepBridge | undefined;
   let startup: Promise<void> | undefined;
   const orchestrator = new CallOrchestrator({
@@ -115,6 +128,7 @@ function harness(opts: {
     peer,
     peerFactory,
     releaseDecrypt: () => releaseDecrypt?.(),
+    releasePeer: () => releasePeer?.(),
     emitNativeReport: (callId: string, callUUID: string) =>
       nativeReportListener?.({ callId, callUUID }),
     bridge: () => bridge!,
@@ -214,7 +228,7 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
 
     expect(h.orchestrator.getActive()).toBeUndefined();
     expect(h.peer.close).toHaveBeenCalled();
-    expect(h.callKeep.endCall).toHaveBeenCalledWith(UUIDS[1]);
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[1], 2);
   });
 
   it('invalidates an in-flight offer when its orchestrator is disposed', async () => {
@@ -239,6 +253,68 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
     expect(h.peerFactory.create).not.toHaveBeenCalled();
     expect(h.orchestrator.getActive()).toBeUndefined();
     expect(h.callKeep.setup).toHaveBeenCalledOnce();
-    expect(h.callKeep.endCall).toHaveBeenCalledWith(UUIDS[2]);
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[2], 2);
+  });
+
+  it('ends an unmatched native call as soon as its peer sends call_end', async () => {
+    const h = harness({
+      callId: 'call-ended-before-offer',
+      callUUID: UUIDS[0]!,
+    });
+    await h.startup();
+
+    await h.orchestrator.handleFrame({
+      type: 'call_end',
+      from: 'android-peer',
+      call_id: 'call-ended-before-offer',
+      reason: 'cancel',
+    });
+
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[0], 1);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(UUIDS[0]);
+    h.orchestrator.dispose();
+  });
+
+  it('ignores a same-call end from an unexpected peer', async () => {
+    const h = harness({
+      callId: 'call-peer-guard',
+      callUUID: UUIDS[1]!,
+    });
+    await h.startup();
+    await h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'android-peer',
+      call_id: 'call-peer-guard',
+      ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
+    });
+
+    await h.orchestrator.handleFrame({
+      type: 'call_end',
+      from: 'unexpected-peer',
+      call_id: 'call-peer-guard',
+      reason: 'cancel',
+    });
+
+    expect(h.orchestrator.getActive()?.callId).toBe('call-peer-guard');
+    expect(h.callKeep.reportEndCallWithUUID).not.toHaveBeenCalledWith(UUIDS[1], 1);
+    h.orchestrator.dispose();
+  });
+
+  it('does not emit an outgoing offer after disposal during peer creation', async () => {
+    const h = harness({
+      callId: 'call-outgoing-remount',
+      callUUID: UUIDS[2]!,
+      deferPeer: true,
+    });
+    await h.startup();
+    const dialing = h.orchestrator.startOutgoing('android-peer');
+    await vi.waitFor(() => expect(h.peerFactory.create).toHaveBeenCalled());
+
+    h.orchestrator.dispose();
+    h.releasePeer();
+
+    await expect(dialing).rejects.toThrow('orchestrator disposed');
+    expect(h.peer.close).toHaveBeenCalled();
+    expect(h.sent.filter((frame) => frame.type === 'call_offer')).toHaveLength(0);
   });
 });

@@ -116,7 +116,7 @@ describe('CallKeepBridge native PushKit adoption', () => {
     expect(h.orchestrator.accept).toHaveBeenCalledOnce();
 
     useCalls.getState().setActive(undefined);
-    expect(h.callKeep.endCall).toHaveBeenCalledWith(NATIVE_UUID);
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 2);
     h.bridge.stop();
   });
 
@@ -140,7 +140,7 @@ describe('CallKeepBridge native PushKit adoption', () => {
     h.bridge.stop();
   });
 
-  it('displays one bounded fallback when no native report arrives', async () => {
+  it('releases one bounded in-app fallback when no native report arrives', async () => {
     vi.useFakeTimers();
     const h = harness();
     await h.bridge.start();
@@ -150,14 +150,22 @@ describe('CallKeepBridge native PushKit adoption', () => {
 
     await vi.advanceTimersByTimeAsync(1_500);
 
-    expect(h.callKeep.displayIncomingCall).toHaveBeenCalledOnce();
-    expect(h.callKeep.displayIncomingCall).toHaveBeenCalledWith(
-      expect.any(String),
-      'android-peer',
-      '@android-peer',
-      'generic',
-      false,
-    );
+    expect(h.callKeep.displayIncomingCall).not.toHaveBeenCalled();
+    expect(h.orchestrator.showIncomingCallFallback).toHaveBeenCalledWith(CALL_ID);
+    h.bridge.stop();
+  });
+
+  it('does not create a second CallKit UUID when native confirmation is delayed', async () => {
+    vi.useFakeTimers();
+    const h = harness([{ callId: CALL_ID, callUUID: NATIVE_UUID }]);
+    await h.bridge.start();
+    useCalls.getState().setActive(incoming());
+
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(h.callKeep.displayIncomingCall).not.toHaveBeenCalled();
+    expect(h.callKeep.reportEndCallWithUUID).not.toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(h.orchestrator.showIncomingCallFallback).toHaveBeenCalledWith(CALL_ID);
     h.bridge.stop();
   });
 
@@ -185,10 +193,9 @@ describe('CallKeepBridge native PushKit adoption', () => {
     useCalls.getState().setActive(incoming());
 
     useCalls.getState().setActive(undefined);
-    h.emitCallKeep('endCall', { callUUID: NATIVE_UUID });
-    await Promise.resolve();
 
-    expect(h.callKeep.endCall).toHaveBeenCalledWith(NATIVE_UUID);
+    expect(h.callKeep.endCall).not.toHaveBeenCalled();
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 2);
     expect(h.callKeep.reportEndCallWithUUID).not.toHaveBeenCalledWith(NATIVE_UUID, 1);
     expect(h.orchestrator.decline).not.toHaveBeenCalled();
     expect(h.orchestrator.hangup).not.toHaveBeenCalled();
@@ -261,7 +268,7 @@ describe('CallKeepBridge native PushKit adoption', () => {
     await vi.advanceTimersByTimeAsync(1_500);
 
     expect(h.callKeep.displayIncomingCall).toHaveBeenCalledOnce();
-    expect(h.callKeep.displayIncomingCall.mock.calls[0]?.[0]).not.toBe(NATIVE_UUID);
+    expect(h.callKeep.displayIncomingCall.mock.calls[0]?.[0]).toBe(NATIVE_UUID);
     expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(NATIVE_UUID);
     h.bridge.stop();
   });
@@ -329,6 +336,22 @@ describe('CallKeepBridge native PushKit adoption', () => {
 
     expect(stale.callKeep.reportEndCallWithUUID).not.toHaveBeenCalled();
     expect(replacement.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 1);
+    replacement.bridge.stop();
+  });
+
+  it('transfers a rejection across bridge replacement until native handoff arrives', async () => {
+    const feed = nativeReportFeed();
+    const stale = harness([], [], 1_500, 30_000, feed);
+    await stale.bridge.start();
+    stale.bridge.rejectIncomingCall(CALL_ID);
+    stale.bridge.stop();
+    const replacement = harness([], [], 1_500, 30_000, feed);
+    await replacement.bridge.start();
+
+    feed.emit({ callId: CALL_ID, callUUID: NATIVE_UUID });
+
+    expect(replacement.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(replacement.nativeReports.acknowledge).toHaveBeenCalledWith(NATIVE_UUID);
     replacement.bridge.stop();
   });
 

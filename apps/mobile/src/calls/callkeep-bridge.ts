@@ -122,6 +122,22 @@ interface BridgeDeps {
 
 const IOS_NATIVE_REPORT_GRACE_MS = 1_500;
 const IOS_ORPHAN_CLEANUP_MS = 30_000;
+const CALL_LIFECYCLE_TOMBSTONE_MS = 60_000;
+const rejectedCallTombstones = new Map<string, number>();
+
+function markRejectedCall(callId: string): void {
+  const now = Date.now();
+  rejectedCallTombstones.set(callId, now + CALL_LIFECYCLE_TOMBSTONE_MS);
+  for (const [id, expiresAt] of rejectedCallTombstones) {
+    if (expiresAt <= now) rejectedCallTombstones.delete(id);
+  }
+}
+
+function consumeRejectedCall(callId: string): boolean {
+  const expiresAt = rejectedCallTombstones.get(callId);
+  rejectedCallTombstones.delete(callId);
+  return expiresAt !== undefined && expiresAt > Date.now();
+}
 
 export class CallKeepBridge {
   private setupDone = false;
@@ -142,8 +158,6 @@ export class CallKeepBridge {
   private readonly fallbackCallIds = new Map<string, string>();
   private readonly releasedFallbackCallIds = new Set<string>();
   private readonly acknowledgedNativeUuids = new Set<string>();
-  private readonly rejectedCallIds = new Set<string>();
-  private readonly locallyEndedUuids = new Set<string>();
   /** CallKit actions can arrive before the encrypted offer has reached JS. */
   private readonly pendingActions = new Map<string, 'answer' | 'end'>();
   /** Resolved on first start(); `undefined` when the native module
@@ -252,12 +266,11 @@ export class CallKeepBridge {
     const ownedUuids = new Map([...this.idToUuid].map(([callId, uuid]) => [uuid, callId]));
     for (const [uuid, callId] of this.failedNativeUuids) ownedUuids.set(uuid, callId);
     for (const [uuid, callId] of ownedUuids) {
-      this.locallyEndedUuids.add(uuid);
       try {
-        this.rnCallKeep?.endCall(uuid);
-        diag('callkeep', 'endCall requested', { callUUID: uuid });
+        this.rnCallKeep?.reportEndCallWithUUID(uuid, 2);
+        diag('callkeep', 'CallKit end reported', { callUUID: uuid });
       } catch (err) {
-        diag('callkeep', 'endCall failed', { err: String(err) });
+        diag('callkeep', 'CallKit end report failed', { err: String(err) });
       }
       if (this.nativeHandoffUuids.has(uuid) || this.failedNativeUuids.has(uuid)) {
         this.acknowledgeNativeReport(uuid);
@@ -293,19 +306,17 @@ export class CallKeepBridge {
     this.nativeRecoveryInFlight.clear();
     this.fallbackCallIds.clear();
     this.releasedFallbackCallIds.clear();
-    this.rejectedCallIds.clear();
-    this.locallyEndedUuids.clear();
     this.setupDone = false;
   }
 
   rejectIncomingCall(callId: string): void {
-    this.rejectedCallIds.add(callId);
+    markRejectedCall(callId);
     this.cancelIncomingFallback(callId);
     const mappedUuid = this.idToUuid.get(callId);
     const failedUuid = [...this.failedNativeUuids].find(([, id]) => id === callId)?.[0];
     const uuids = new Set([mappedUuid, failedUuid].filter((uuid): uuid is string => !!uuid));
     if (uuids.size === 0) return;
-    this.rejectedCallIds.delete(callId);
+    consumeRejectedCall(callId);
     for (const uuid of uuids) this.endOrphan(uuid, 'signaling rejected incoming call');
   }
 
@@ -460,7 +471,7 @@ export class CallKeepBridge {
     this.uuidToId.set(uuid, callId);
     this.nativeHandoffUuids.add(uuid);
     diag('callkeep', 'PushKit call mapped', { callId, callUUID: uuid });
-    if (this.rejectedCallIds.delete(callId)) {
+    if (consumeRejectedCall(callId)) {
       this.endOrphan(uuid, 'signaling rejected incoming call');
       return;
     }
@@ -490,7 +501,7 @@ export class CallKeepBridge {
       this.idToUuid.delete(callId);
       this.uuidToId.delete(uuid);
       diag('callkeep', 'native CallKit report failed', { callId, callUUID: uuid, error });
-      this.acknowledgeActiveNativeReports(callId);
+      this.acknowledgeNativeReport(uuid);
       const active = this.deps.orchestrator.getActive();
       if (active?.callId === callId && active.stage === 'incoming_ringing') {
         this.scheduleIncomingFallback(active);
@@ -533,7 +544,6 @@ export class CallKeepBridge {
     const callId = uuid ? this.uuidToId.get(uuid) : undefined;
     diag('callkeep', `${action}Call`, { callUUID: uuid, callId });
     if (!uuid) return;
-    if (action === 'end' && this.locallyEndedUuids.delete(uuid)) return;
     if (!callId) {
       this.pendingActions.set(uuid, action);
       this.recoverMappingOrEnd(uuid, `${action} action missing call_id mapping`);
@@ -678,7 +688,6 @@ export class CallKeepBridge {
     for (const [uuid, failedCallId] of this.failedNativeUuids) {
       if (failedCallId === callId) {
         this.acknowledgeNativeReport(uuid);
-        this.failedNativeUuids.delete(uuid);
       }
     }
   }
@@ -713,10 +722,14 @@ export class CallKeepBridge {
       }
       const tentativeUuid = this.idToUuid.get(call.callId);
       if (tentativeUuid && this.nativeReportedUuids.has(tentativeUuid)) return;
-      if (tentativeUuid) {
-        this.endOrphan(tentativeUuid, 'native CallKit report confirmation timed out');
+      const failedUuid = [...this.failedNativeUuids].find(([, id]) => id === call.callId)?.[0];
+      if (!failedUuid) {
+        this.releaseIncomingFallback(call.callId, 'native CallKit report not confirmed');
+        return;
       }
-      const uuid = this.allocUuid(call.callId);
+      const uuid = failedUuid;
+      this.idToUuid.set(call.callId, uuid);
+      this.uuidToId.set(uuid, call.callId);
       this.fallbackCallIds.set(uuid, call.callId);
       try {
         this.rnCallKeep?.displayIncomingCall(
@@ -847,12 +860,11 @@ export class CallKeepBridge {
         if (uuid) {
           const nativeOwned =
             this.nativeHandoffUuids.has(uuid) || this.failedNativeUuids.has(uuid);
-          this.locallyEndedUuids.add(uuid);
           try {
-            RNCallKeep.endCall(uuid);
-            diag('callkeep', 'endCall requested', { callUUID: uuid });
+            RNCallKeep.reportEndCallWithUUID(uuid, 2);
+            diag('callkeep', 'CallKit end reported', { callUUID: uuid });
           } catch (err) {
-            diag('callkeep', 'endCall failed', { err: String(err) });
+            diag('callkeep', 'CallKit end report failed', { err: String(err) });
           }
           this.idToUuid.delete(prev.callId);
           this.uuidToId.delete(uuid);
