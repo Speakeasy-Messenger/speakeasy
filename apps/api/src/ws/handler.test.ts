@@ -1752,6 +1752,38 @@ describe('ws voice call signaling — Phase 6', () => {
     await expect(b.q.next(200)).rejects.toThrow(/timeout/);
   });
 
+  it('does not replay an offer after the callee rejects then reconnects', async () => {
+    const callId = 'call-01HZZZREJECTEDRECONNECTAAA';
+    const a = await authedSocket('alice-blue-fox');
+    const b = await authedSocket('bob-red-bear');
+
+    a.ws.send(
+      JSON.stringify({
+        type: 'call_offer',
+        to: 'bob-red-bear',
+        call_id: callId,
+        ciphertext: 'T0ZGRVI=',
+      }),
+    );
+    expect(((await b.q.next()) as { type: string }).type).toBe('call_offer');
+
+    b.ws.send(
+      JSON.stringify({
+        type: 'call_end',
+        to: 'alice-blue-fox',
+        call_id: callId,
+        reason: 'decline',
+      }),
+    );
+    expect(((await a.q.next()) as { type: string }).type).toBe('call_end');
+
+    b.ws.close();
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    const reconnected = await authedSocket('bob-red-bear');
+
+    await expect(reconnected.q.next(200)).rejects.toThrow(/timeout/);
+  });
+
   it('rejects call to self and missing fields', async () => {
     const a = await authedSocket('alice-blue-fox');
     a.ws.send(

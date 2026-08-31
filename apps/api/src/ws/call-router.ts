@@ -339,6 +339,7 @@ export async function routeCallFrame(
       // Either side hung up / caller cancelled → drop the buffered offer
       // so the callee doesn't ring on a stale offer when they reconnect.
       deps.callBuffer.clear(msg.to, msg.call_id);
+      deps.callBuffer.clear(senderUserId, msg.call_id);
       break;
   }
 
