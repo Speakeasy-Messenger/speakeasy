@@ -7,10 +7,12 @@ describe('parseNativeCallKitReport', () => {
       parseNativeCallKitReport({
         call_id: 'call-01M1AJ1HXE7A4GPFDF0B9QNWG9',
         call_uuid: 'F5DCB01E-2619-54B4-BFC4-9F9DB17EFB32',
+        peer_user_id: 'android-peer',
       }),
     ).toEqual({
       callId: 'call-01M1AJ1HXE7A4GPFDF0B9QNWG9',
       callUUID: 'f5dcb01e-2619-54b4-bfc4-9f9db17efb32',
+      peerUserId: 'android-peer',
     });
   });
 

@@ -124,6 +124,7 @@ const IOS_NATIVE_REPORT_GRACE_MS = 1_500;
 const IOS_ORPHAN_CLEANUP_MS = 30_000;
 const CALL_LIFECYCLE_TOMBSTONE_MS = 60_000;
 const rejectedCallTombstones = new Map<string, number>();
+const rejectedPeerTombstones = new Map<string, Map<string, number>>();
 
 function markRejectedCall(callId: string): void {
   const now = Date.now();
@@ -143,6 +144,31 @@ function isRejectedCall(callId: string): boolean {
   return true;
 }
 
+function markRejectedPeer(callId: string, peerUserId: string): void {
+  const now = Date.now();
+  const peers = rejectedPeerTombstones.get(callId) ?? new Map<string, number>();
+  peers.set(peerUserId, now + CALL_LIFECYCLE_TOMBSTONE_MS);
+  rejectedPeerTombstones.set(callId, peers);
+  for (const [id, candidates] of rejectedPeerTombstones) {
+    for (const [peer, expiresAt] of candidates) {
+      if (expiresAt <= now) candidates.delete(peer);
+    }
+    if (candidates.size === 0) rejectedPeerTombstones.delete(id);
+  }
+}
+
+function isRejectedPeer(callId: string, peerUserId: string): boolean {
+  const peers = rejectedPeerTombstones.get(callId);
+  const expiresAt = peers?.get(peerUserId);
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    peers?.delete(peerUserId);
+    if (peers?.size === 0) rejectedPeerTombstones.delete(callId);
+    return false;
+  }
+  return true;
+}
+
 export class CallKeepBridge {
   private setupDone = false;
   private lifecycleGeneration = 0;
@@ -155,6 +181,7 @@ export class CallKeepBridge {
   /** Map our internal `call-{ulid}` ids ↔ CallKit's UUID-shaped ids. */
   private readonly idToUuid = new Map<string, string>();
   private readonly uuidToId = new Map<string, string>();
+  private readonly nativePeerUserIds = new Map<string, string>();
   /** UUIDs already reported natively by AppDelegate's PushKit callback. */
   private readonly nativeReportedUuids = new Set<string>();
   private readonly nativeHandoffUuids = new Set<string>();
@@ -302,6 +329,7 @@ export class CallKeepBridge {
     }
     this.idToUuid.clear();
     this.uuidToId.clear();
+    this.nativePeerUserIds.clear();
     this.nativeReportedUuids.clear();
     this.nativeHandoffUuids.clear();
     this.failedNativeUuids.clear();
@@ -329,7 +357,12 @@ export class CallKeepBridge {
     this.setupDone = false;
   }
 
-  rejectIncomingCall(callId: string): void {
+  rejectIncomingCall(callId: string, peerUserId?: string): void {
+    if (peerUserId && this.platform() === 'ios') {
+      markRejectedPeer(callId, peerUserId);
+      const authoritativePeer = this.nativePeerUserIds.get(callId);
+      if (!authoritativePeer || authoritativePeer !== peerUserId) return;
+    }
     markRejectedCall(callId);
     this.cancelIncomingFallback(callId);
     const mappedUuid = this.idToUuid.get(callId);
@@ -549,12 +582,19 @@ export class CallKeepBridge {
     const siblingCallId = this.uuidToId.get(uuid);
     if (siblingCallId && siblingCallId !== callId) {
       this.idToUuid.delete(siblingCallId);
+      this.nativePeerUserIds.delete(siblingCallId);
     }
 
     this.idToUuid.set(callId, uuid);
     this.uuidToId.set(uuid, callId);
+    if (report.peerUserId && (!report.reportCompleted || !this.nativePeerUserIds.has(callId))) {
+      this.nativePeerUserIds.set(callId, report.peerUserId);
+    }
     this.nativeHandoffUuids.add(uuid);
     diag('callkeep', 'PushKit call mapped', { callId, callUUID: uuid });
+    if (report.peerUserId && isRejectedPeer(callId, report.peerUserId)) {
+      markRejectedCall(callId);
+    }
     if (isRejectedCall(callId)) {
       this.endOrphan(uuid, 'signaling rejected incoming call');
       return;
@@ -586,6 +626,7 @@ export class CallKeepBridge {
       this.nativeHandoffUuids.delete(uuid);
       this.idToUuid.delete(callId);
       this.uuidToId.delete(uuid);
+      this.nativePeerUserIds.delete(callId);
       diag('callkeep', 'native CallKit report failed', { callId, callUUID: uuid, error });
       this.acknowledgeNativeReport(uuid);
       const active = this.deps.orchestrator.getActive();
@@ -689,7 +730,10 @@ export class CallKeepBridge {
     }
     this.acknowledgeNativeReport(uuid);
     const callId = this.uuidToId.get(uuid);
-    if (callId && this.idToUuid.get(callId) === uuid) this.idToUuid.delete(callId);
+    if (callId && this.idToUuid.get(callId) === uuid) {
+      this.idToUuid.delete(callId);
+      this.nativePeerUserIds.delete(callId);
+    }
     this.uuidToId.delete(uuid);
     this.fallbackCallIds.delete(uuid);
     if (callId) this.releasedFallbackCallIds.delete(callId);
@@ -962,6 +1006,7 @@ export class CallKeepBridge {
           }
           this.idToUuid.delete(prev.callId);
           this.uuidToId.delete(uuid);
+          this.nativePeerUserIds.delete(prev.callId);
           this.fallbackCallIds.delete(uuid);
           this.releasedFallbackCallIds.delete(prev.callId);
           this.nativeReportedUuids.delete(uuid);

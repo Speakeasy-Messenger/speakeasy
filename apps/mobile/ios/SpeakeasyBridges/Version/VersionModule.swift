@@ -45,8 +45,13 @@ final class CallKitReportStore: NSObject {
     super.init()
   }
 
-  @objc(registerCallId:callUUID:at:)
-  func register(callId: String, callUUID: String, at: Double) -> [String] {
+  @objc(registerCallId:callUUID:peerUserId:at:)
+  func register(
+    callId: String,
+    callUUID: String,
+    peerUserId: String?,
+    at: Double
+  ) -> [String] {
     Self.lock.lock()
     defer { Self.lock.unlock() }
     var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
@@ -62,12 +67,16 @@ final class CallKitReportStore: NSObject {
       return candidateCallId == callId ||
         candidateUUID?.caseInsensitiveCompare(callUUID) == .orderedSame
     }
-    reports.append([
+    var report: [String: Any] = [
       "call_id": callId,
       "call_uuid": callUUID,
       "report_completed": false,
       "at": at,
-    ])
+    ]
+    if let peerUserId, !peerUserId.isEmpty {
+      report["peer_user_id"] = peerUserId
+    }
+    reports.append(report)
     if reports.count > 20 {
       let overflow = reports.count - 20
       removed.append(contentsOf: reports.prefix(overflow))
@@ -103,19 +112,24 @@ final class CallKitReportStore: NSObject {
     }
   }
 
-  @objc(markReportedCallUUID:)
-  func markReported(callUUID: String) {
+  @objc(markReportedCallId:callUUID:)
+  func markReported(callId: String, callUUID: String) -> Bool {
     Self.lock.lock()
     defer { Self.lock.unlock() }
     var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
     guard let index = reports.firstIndex(where: { report in
-      guard let candidateUUID = report["call_uuid"] as? String else { return false }
-      return candidateUUID.caseInsensitiveCompare(callUUID) == .orderedSame
+      guard let candidateCallId = report["call_id"] as? String,
+            let candidateUUID = report["call_uuid"] as? String else {
+        return false
+      }
+      return candidateCallId == callId &&
+        candidateUUID.caseInsensitiveCompare(callUUID) == .orderedSame
     }) else {
-      return
+      return false
     }
     reports[index]["report_completed"] = true
     defaults.set(reports, forKey: Self.key)
+    return true
   }
 
   func acknowledge(callUUID: String) {

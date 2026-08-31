@@ -26,11 +26,21 @@ final class CallKitReportStoreTests: XCTestCase {
     let secondUUID = "f5dcb01e-2619-54b4-bfc4-9f9db17efb32"
 
     XCTAssertEqual(
-      store.register(callId: "call-1", callUUID: firstUUID, at: 1_000),
+      store.register(
+        callId: "call-1",
+        callUUID: firstUUID,
+        peerUserId: "android-peer",
+        at: 1_000
+      ),
       []
     )
     XCTAssertEqual(
-      store.register(callId: "call-1", callUUID: secondUUID, at: 2_000),
+      store.register(
+        callId: "call-1",
+        callUUID: secondUUID,
+        peerUserId: "android-peer",
+        at: 2_000
+      ),
       [firstUUID]
     )
 
@@ -38,6 +48,7 @@ final class CallKitReportStoreTests: XCTestCase {
     XCTAssertEqual(reports.count, 1)
     XCTAssertEqual(reports[0]["call_id"] as? String, "call-1")
     XCTAssertEqual(reports[0]["call_uuid"] as? String, secondUUID)
+    XCTAssertEqual(reports[0]["peer_user_id"] as? String, "android-peer")
     XCTAssertEqual(reports[0]["expired"] as? Bool, false)
     XCTAssertEqual(store.pending(nowMs: 2_000, maxAgeMs: 120_000).count, 1)
     store.acknowledge(callUUID: secondUUID)
@@ -46,7 +57,12 @@ final class CallKitReportStoreTests: XCTestCase {
 
   func testPendingReturnsStaleMappingUntilExplicitCleanupAcknowledgement() {
     let staleUUID = "90a63483-79f1-4dda-b0b0-63a4ba62f642"
-    _ = store.register(callId: "call-stale", callUUID: staleUUID, at: 1_000)
+    _ = store.register(
+      callId: "call-stale",
+      callUUID: staleUUID,
+      peerUserId: nil,
+      at: 1_000
+    )
 
     let reports = store.pending(nowMs: 121_001, maxAgeMs: 120_000)
 
@@ -63,7 +79,12 @@ final class CallKitReportStoreTests: XCTestCase {
     let oldUUIDs = (0..<10).map { String(format: "00000000-0000-0000-0000-%012d", $0) }
     let newUUIDs = (10..<20).map { String(format: "00000000-0000-0000-0000-%012d", $0) }
     for (index, uuid) in oldUUIDs.enumerated() {
-      _ = store.register(callId: "old-\(index)", callUUID: uuid, at: 1_000)
+      _ = store.register(
+        callId: "old-\(index)",
+        callUUID: uuid,
+        peerUserId: nil,
+        at: 1_000
+      )
     }
 
     DispatchQueue.concurrentPerform(iterations: 20) { index in
@@ -74,6 +95,7 @@ final class CallKitReportStoreTests: XCTestCase {
         _ = secondStore.register(
           callId: "new-\(newIndex)",
           callUUID: newUUIDs[newIndex],
+          peerUserId: nil,
           at: 2_000
         )
       }
@@ -82,5 +104,29 @@ final class CallKitReportStoreTests: XCTestCase {
     let pending = store.pending(nowMs: 2_000, maxAgeMs: 120_000)
     let pendingUUIDs = Set(pending.compactMap { $0["call_uuid"] as? String })
     XCTAssertEqual(pendingUUIDs, Set(newUUIDs))
+  }
+
+  func testReportCompletionCannotMarkSupersededMappingCurrent() {
+    let firstUUID = "90a63483-79f1-4dda-b0b0-63a4ba62f642"
+    let secondUUID = "f5dcb01e-2619-54b4-bfc4-9f9db17efb32"
+    _ = store.register(
+      callId: "call-1",
+      callUUID: firstUUID,
+      peerUserId: "android-peer",
+      at: 1_000
+    )
+    _ = store.register(
+      callId: "call-1",
+      callUUID: secondUUID,
+      peerUserId: "android-peer",
+      at: 2_000
+    )
+
+    XCTAssertFalse(store.markReported(callId: "call-1", callUUID: firstUUID))
+    XCTAssertTrue(store.markReported(callId: "call-1", callUUID: secondUUID))
+    let reports = store.pending(nowMs: 2_000, maxAgeMs: 120_000)
+    XCTAssertEqual(reports.count, 1)
+    XCTAssertEqual(reports[0]["call_uuid"] as? String, secondUUID)
+    XCTAssertEqual(reports[0]["report_completed"] as? Bool, true)
   }
 }

@@ -24,6 +24,7 @@ function offer(payload: unknown): string {
 function harness(opts: {
   callId: string;
   callUUID: string;
+  peerUserId?: string;
   allowIncoming?: boolean;
   decryptFailure?: boolean;
   deferDecrypt?: boolean;
@@ -63,7 +64,13 @@ function harness(opts: {
   };
   let nativeReportListener: ((report: NativeCallKitReport) => void) | undefined;
   const nativeReports = {
-    drain: vi.fn(async () => [{ callId: opts.callId, callUUID: opts.callUUID }]),
+    drain: vi.fn(async () => [
+      {
+        callId: opts.callId,
+        callUUID: opts.callUUID,
+        peerUserId: opts.peerUserId ?? 'android-peer',
+      },
+    ]),
     subscribe: vi.fn((listener) => {
       nativeReportListener = listener;
       return () => {
@@ -162,7 +169,8 @@ function harness(opts: {
           return startup;
         },
         stop: () => bridge!.stop(),
-        rejectIncomingCall: (callId) => bridge!.rejectIncomingCall(callId),
+        rejectIncomingCall: (callId, peerUserId) =>
+          bridge!.rejectIncomingCall(callId, peerUserId),
       };
     },
   });
@@ -181,8 +189,8 @@ function harness(opts: {
     releaseFilter: () => releaseFilter?.(),
     filterEvents,
     voiceFilter,
-    emitNativeReport: (callId: string, callUUID: string) =>
-      nativeReportListener?.({ callId, callUUID }),
+    emitNativeReport: (callId: string, callUUID: string, peerUserId = 'android-peer') =>
+      nativeReportListener?.({ callId, callUUID, peerUserId }),
     bridge: () => bridge!,
     startup: () => startup!,
   };
@@ -249,7 +257,7 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
       call_id: 'call-active',
       ciphertext: offer({ v: 1, sdp: 'offer', candidates: [], kind: 'audio' }),
     });
-    h.emitNativeReport('call-busy', UUIDS[3]!);
+    h.emitNativeReport('call-busy', UUIDS[3]!, 'second-peer');
 
     await h.orchestrator.handleFrame({
       type: 'call_offer',
@@ -350,6 +358,35 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
     h.orchestrator.dispose();
   });
 
+  it('does not end an unmatched native call for another peer', async () => {
+    const h = harness({
+      callId: 'call-ended-by-wrong-peer',
+      callUUID: UUIDS[0]!,
+    });
+    await h.startup();
+
+    await h.orchestrator.handleFrame({
+      type: 'call_end',
+      from: 'unexpected-peer',
+      call_id: 'call-ended-by-wrong-peer',
+      reason: 'cancel',
+    });
+
+    expect(h.callKeep.reportEndCallWithUUID).not.toHaveBeenCalledWith(UUIDS[0], 1);
+    expect(h.nativeReports.acknowledge).not.toHaveBeenCalledWith(UUIDS[0]);
+
+    await h.orchestrator.handleFrame({
+      type: 'call_end',
+      from: 'android-peer',
+      call_id: 'call-ended-by-wrong-peer',
+      reason: 'cancel',
+    });
+
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[0], 1);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(UUIDS[0]);
+    h.orchestrator.dispose();
+  });
+
   it('ignores a same-call end from an unexpected peer', async () => {
     const h = harness({
       callId: 'call-peer-guard',
@@ -422,6 +459,7 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
     const h = harness({
       callId: incomingCallId,
       callUUID: UUIDS[3]!,
+      peerUserId: 'incoming-peer',
       deferDecrypt: true,
     });
     await h.startup();

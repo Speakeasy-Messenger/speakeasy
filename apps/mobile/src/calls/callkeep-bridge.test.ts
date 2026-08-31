@@ -351,6 +351,45 @@ describe('CallKeepBridge native PushKit adoption', () => {
     h.bridge.stop();
   });
 
+  it('ends only the native call whose persisted peer rejected it', async () => {
+    const callId = 'call-peer-bound-rejection';
+    const h = harness();
+    await h.bridge.start();
+
+    h.bridge.rejectIncomingCall(callId, 'unexpected-peer');
+    h.emitNativeReport({
+      callId,
+      callUUID: NATIVE_UUID,
+      peerUserId: 'android-peer',
+    });
+
+    expect(h.callKeep.reportEndCallWithUUID).not.toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(h.nativeReports.acknowledge).not.toHaveBeenCalledWith(NATIVE_UUID);
+
+    h.bridge.rejectIncomingCall(callId, 'android-peer');
+
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(NATIVE_UUID);
+    h.bridge.stop();
+  });
+
+  it('replays a peer-bound rejection when its native handoff arrives', async () => {
+    const callId = 'call-peer-rejected-before-handoff';
+    const h = harness();
+    await h.bridge.start();
+
+    h.bridge.rejectIncomingCall(callId, 'android-peer');
+    h.emitNativeReport({
+      callId,
+      callUUID: NATIVE_UUID,
+      peerUserId: 'android-peer',
+    });
+
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(NATIVE_UUID, 1);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(NATIVE_UUID);
+    h.bridge.stop();
+  });
+
   it('reports an unmapped PushKit CallKit call ended instead of leaving a phantom', async () => {
     const h = harness();
     await h.bridge.start();

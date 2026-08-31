@@ -279,6 +279,7 @@ describe('routeCallFrame — always-push for call_offer (rc.58)', () => {
       expect.objectContaining({
         call_id: CALL_ID,
         call_uuid: callKitUuidForCallId(CALL_ID),
+        peer_user_id: 'alice',
         has_video: true,
       }),
     );

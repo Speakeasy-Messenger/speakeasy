@@ -227,6 +227,7 @@ export async function routeCallFrame(
           const payload = {
             call_id: String(msg.call_id),
             call_uuid: callKitUuidForCallId(String(msg.call_id)),
+            peer_user_id: senderUserId,
             handle: senderUserId,
             caller_name: senderUserId,
             has_video: offerKind === 'video',

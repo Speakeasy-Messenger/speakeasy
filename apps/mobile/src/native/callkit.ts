@@ -3,6 +3,7 @@ import { NativeEventEmitter, NativeModules, Platform } from 'react-native';
 export interface NativeCallKitReport {
   callId?: string;
   callUUID: string;
+  peerUserId?: string;
   expired?: boolean;
   reportCompleted?: boolean;
   reportedAtMs?: number;
@@ -32,6 +33,7 @@ export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | 
   const raw = value as {
     call_id?: unknown;
     call_uuid?: unknown;
+    peer_user_id?: unknown;
     expired?: unknown;
     report_completed?: unknown;
     at?: unknown;
@@ -39,6 +41,10 @@ export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | 
   if (typeof raw.call_uuid !== 'string' || raw.call_uuid.length === 0) return undefined;
   const callId =
     typeof raw.call_id === 'string' && raw.call_id.length > 0 ? raw.call_id : undefined;
+  const peerUserId =
+    typeof raw.peer_user_id === 'string' && raw.peer_user_id.length > 0
+      ? raw.peer_user_id
+      : undefined;
   const expired = raw.expired === true;
   const reportCompleted = raw.report_completed === true;
   const reportedAtMs = typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : undefined;
@@ -46,6 +52,7 @@ export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | 
   return {
     ...(callId ? { callId } : {}),
     callUUID: raw.call_uuid.toLowerCase(),
+    ...(peerUserId ? { peerUserId } : {}),
     ...(expired ? { expired: true } : {}),
     ...(reportCompleted ? { reportCompleted: true } : {}),
     ...(reportedAtMs !== undefined ? { reportedAtMs } : {}),

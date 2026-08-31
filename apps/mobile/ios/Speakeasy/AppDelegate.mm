@@ -274,6 +274,13 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
     uuid = [[NSUUID UUID] UUIDString];
     data[@"call_uuid"] = uuid;
   }
+  NSString *peerUserId = [data[@"peer_user_id"] isKindOfClass:[NSString class]]
+      ? data[@"peer_user_id"]
+      : nil;
+  if (peerUserId.length == 0 && [data[@"handle"] isKindOfClass:[NSString class]]) {
+    peerUserId = data[@"handle"];
+  }
+  if (peerUserId.length == 0) { peerUserId = nil; }
   NSString *handle = data[@"handle"] ?: @"unknown";
   NSString *callerName = data[@"caller_name"] ?: handle;
   BOOL hasVideo = [data[@"has_video"] boolValue];
@@ -296,16 +303,18 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
     NSNumber *reportedAt = @([[NSDate date] timeIntervalSince1970] * 1000);
     NSArray<NSString *> *displacedUUIDs = [store registerCallId:callId
                                                       callUUID:uuid
+                                                    peerUserId:peerUserId
                                                             at:[reportedAt doubleValue]];
     for (NSString *displacedUUID in displacedUUIDs) {
       [RNCallKeep endCallWithUUID:displacedUUID reason:1];
       SpeakeasyAppendNativeDiagnostic(@"Superseded CallKit call ended");
     }
-    NSDictionary *report = @{
+    NSMutableDictionary *report = [@{
       @"call_id": callId,
       @"call_uuid": uuid,
       @"at": reportedAt,
-    };
+    } mutableCopy];
+    if (peerUserId != nil) { report[@"peer_user_id"] = peerUserId; }
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"SpeakeasyCallKitReported"
                       object:nil
@@ -323,17 +332,23 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
     if (callId != nil) {
       NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
       CallKitReportStore *store = [[CallKitReportStore alloc] initWithDefaults:defaults];
-      [store markReportedCallUUID:uuid];
-      NSDictionary *report = @{
-        @"call_id": callId,
-        @"call_uuid": uuid,
-        @"report_completed": @YES,
-        @"at": @([[NSDate date] timeIntervalSince1970] * 1000),
-      };
-      [[NSNotificationCenter defaultCenter]
-          postNotificationName:@"SpeakeasyCallKitReported"
-                        object:nil
-                      userInfo:report];
+      BOOL isCurrent = [store markReportedCallId:callId callUUID:uuid];
+      if (isCurrent) {
+        NSMutableDictionary *report = [@{
+          @"call_id": callId,
+          @"call_uuid": uuid,
+          @"report_completed": @YES,
+          @"at": @([[NSDate date] timeIntervalSince1970] * 1000),
+        } mutableCopy];
+        if (peerUserId != nil) { report[@"peer_user_id"] = peerUserId; }
+        [[NSNotificationCenter defaultCenter]
+            postNotificationName:@"SpeakeasyCallKitReported"
+                          object:nil
+                        userInfo:report];
+      } else {
+        [RNCallKeep endCallWithUUID:uuid reason:1];
+        SpeakeasyAppendNativeDiagnostic(@"Superseded CallKit completion ignored");
+      }
     }
     // iOS still requires a CallKit report for a malformed VoIP push. Without a
     // signaling call_id there is nothing JS can ever answer, so end that report

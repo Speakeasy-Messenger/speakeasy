@@ -728,7 +728,7 @@ export class CallOrchestrator {
         fromUserId,
         callId,
       });
-      this.rejectIncomingCall(callId);
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     if (this.active) {
@@ -755,7 +755,7 @@ export class CallOrchestrator {
         reason: 'busy',
       });
       diag('call', 'incoming offer rejected: busy', { fromUserId, callId });
-      this.rejectIncomingCall(callId);
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     // SETTINGS.md §4.1: "Allow incoming calls" toggle. When off,
@@ -773,7 +773,7 @@ export class CallOrchestrator {
         fromUserId,
         callId,
       });
-      this.rejectIncomingCall(callId);
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     try {
@@ -800,7 +800,7 @@ export class CallOrchestrator {
           callId,
           kind: rawKind,
         });
-        this.rejectIncomingCall(callId);
+        this.rejectIncomingCall(callId, fromUserId);
         return;
       }
       diag('call', 'handleIncomingOffer: decrypted', {
@@ -873,7 +873,7 @@ export class CallOrchestrator {
         call_id: callId,
         reason: 'hangup',
       });
-      this.rejectIncomingCall(callId);
+      this.rejectIncomingCall(callId, fromUserId);
       if (transferredIncomingPeer && this.peer === transferredIncomingPeer) {
         this.cleanup();
         transferredIncomingPeer = undefined;
@@ -913,12 +913,12 @@ export class CallOrchestrator {
       reason: 'busy',
     });
     diag('call', 'incoming offer rejected: busy', { fromUserId, callId });
-    this.rejectIncomingCall(callId);
+    this.rejectIncomingCall(callId, fromUserId);
     return true;
   }
 
-  private rejectIncomingCall(callId: string): void {
-    this.callKeep?.rejectIncomingCall?.(callId);
+  private rejectIncomingCall(callId: string, peerUserId: string): void {
+    this.callKeep?.rejectIncomingCall?.(callId, peerUserId);
   }
 
   /** Flag `untrusted_identity` decrypt failures to the app layer — the
@@ -992,7 +992,7 @@ export class CallOrchestrator {
       // call. A call_end always means that call is over, so recording it
       // here unconditionally is safe.
       this.rememberCancelled(callId, fromUserId);
-      this.rejectIncomingCall(callId);
+      this.rejectIncomingCall(callId, fromUserId);
       return;
     }
     diag('call', 'handleIncomingEnd', { reason, callId, fromUserId, stage: this.active.stage });
