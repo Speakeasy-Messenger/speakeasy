@@ -15,17 +15,9 @@ import type { BufferedCallFrame, CallOfferBuffer } from './call-offer-buffer.js'
  *   speakeasy:call-buf:{userId}  →  JSON {callId, offer, ices: [...]}
  *   PEXPIRE 30000  (matches the ringing window)
  *
- * Atomicity: SET (offer) and GETDEL (drain) are atomic single-op
- * commands. ICE-append and call-end-clear are read-modify-write —
- * we do the check + write in JS without a transaction, which races
- * with a concurrent offer for a different callId in the millisecond
- * window between GET and SET/DEL. The race is rare (two callers
- * calling the same Bob simultaneously) and the consequence is
- * bounded (one ICE lost, or a buffer cleared that a newer offer
- * just re-populated — same as the existing fire-and-forget put
- * failure mode). Lua EVAL would close the window, but using only
- * single-op Redis commands keeps the path portable across both
- * full Redis (Upstash 7.x) and ioredis-mock-backed Tier B tests.
+ * Atomicity: SET (offer), GETDEL (drain), and Lua-backed conditional
+ * DEL (clear) are atomic Redis operations. ICE append remains a
+ * read-modify-write operation; a concurrent offer can supersede it.
  *
  * Failure mode: Redis-down or transient network error on put/clear
  * = best-effort drop. The caller's ringing-window timeout produces
@@ -39,6 +31,20 @@ import type { BufferedCallFrame, CallOfferBuffer } from './call-offer-buffer.js'
 const TTL_MS = 30_000;
 const keyFor = (userId: string): string => `speakeasy:call-buf:${userId}`;
 
+const CLEAR_IF_MATCHING_LUA = `
+local raw = redis.call('GET', KEYS[1])
+if not raw then
+  return 0
+end
+if string.sub(raw, 1, string.len(ARGV[1])) ~= ARGV[1] then
+  return 0
+end
+return redis.call('DEL', KEYS[1])
+`;
+
+const callIdPrefix = (callId: string): string =>
+  `{"callId":${JSON.stringify(callId)},`;
+
 interface StoredEntry {
   callId: string;
   offer: { fromUserId: string; ciphertext: string };
@@ -46,8 +52,8 @@ interface StoredEntry {
 }
 
 /**
- * Non-atomic conditional read-modify-write. Reads the buffer key,
- * passes the parsed entry to `mutate`, and writes back the result.
+ * Non-atomic conditional read-modify-write for ICE append. Reads the
+ * buffer key, passes the parsed entry to `mutate`, and writes back the result.
  * `mutate` returns:
  *   - a new entry → SET it (with PX ttl)
  *   - `null`      → DEL the key
@@ -122,10 +128,11 @@ export function createRedisCallOfferBuffer(
 
     clear(toUserId, callId) {
       const key = keyFor(toUserId);
-      void modifyBuffer(redis, key, ttlMs, (entry) => {
-        if (entry.callId !== callId) return undefined; // no-op
-        return null; // DEL
-      });
+      void redis
+        .eval(CLEAR_IF_MATCHING_LUA, 1, key, callIdPrefix(callId))
+        .catch(() => {
+          /* silent — see file header */
+        });
     },
 
     async drain(toUserId) {
