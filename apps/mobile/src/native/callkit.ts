@@ -10,11 +10,13 @@ export interface NativeCallKitReport {
 export interface NativeCallKitReportSource {
   drain(): Promise<NativeCallKitReport[]>;
   subscribe(listener: (report: NativeCallKitReport) => void): () => void;
+  end(callUUID: string): boolean;
   acknowledge(callUUID: string): void;
 }
 
 interface NativeCallKitHandoff {
   consumePendingCallKitReports(): Promise<unknown>;
+  endPendingCallKitReport(callUUID: string): void;
   acknowledgePendingCallKitReport(callUUID: string): void;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
@@ -71,6 +73,12 @@ export const nativeCallKitReports: NativeCallKitReportSource = {
       if (report) listener(report);
     });
     return () => subscription.remove();
+  },
+
+  end(callUUID: string): boolean {
+    if (Platform.OS !== 'ios' || !native?.endPendingCallKitReport) return false;
+    native.endPendingCallKitReport(callUUID);
+    return true;
   },
 
   acknowledge(callUUID: string): void {

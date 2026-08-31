@@ -365,8 +365,13 @@ export class CallOrchestrator {
         // and starts filtering as soon as the next capture frame
         // arrives. wrapTrack returns the same track id back — the
         // filter wraps SAMPLES, not the track handle.
-        const filterInstalled = await this.installFilterOrEndCall(callId, generation);
-        if (!filterInstalled && this.isCurrentGeneration(generation)) return callId;
+        const filterResult = await this.installFilterOrEndCall(callId, generation);
+        if (filterResult === 'ended') return callId;
+        if (filterResult === 'stale') {
+          throw new Error(
+            this.isCurrentGeneration(generation) ? 'call no longer active' : 'orchestrator disposed',
+          );
+        }
         this.assertActiveGeneration(generation, callId);
       }
       const peerOffer = await peer.createOffer();
@@ -409,11 +414,16 @@ export class CallOrchestrator {
       // addTrack on the callee side. Symmetric with startOutgoing on
       // the caller side; both endpoints filter their own mic.
       if (active.kind === 'private') {
-        const filterInstalled = await this.installFilterOrEndCall(active.callId, generation);
-        if (!filterInstalled) {
+        const filterResult = await this.installFilterOrEndCall(active.callId, generation);
+        if (filterResult === 'ended') {
           // installFilterOrEndCall ended the call — bail before
           // createAnswer, the peer is already torn down.
           throw new Error('filter_failure during accept');
+        }
+        if (filterResult === 'stale') {
+          throw new Error(
+            this.isCurrentGeneration(generation) ? 'call no longer active' : 'orchestrator disposed',
+          );
         }
         this.assertActivePeer(generation, active.callId, peer);
       }
@@ -550,7 +560,10 @@ export class CallOrchestrator {
    * the same id back (the filter wraps SAMPLES, not the track).
    * We pass the call id as a label so diag logs can correlate.
    */
-  private async installFilterOrEndCall(callId: string, generation: number): Promise<boolean> {
+  private async installFilterOrEndCall(
+    callId: string,
+    generation: number,
+  ): Promise<'installed' | 'ended' | 'stale'> {
     // `voiceFilter` is optional on deps so tests of the data-channel
     // / state-machine paths don't have to wire it. When absent we
     // treat the install as a no-op success — the brand-promise
@@ -559,12 +572,12 @@ export class CallOrchestrator {
     const filter = this.deps.voiceFilter;
     if (!filter) {
       diag('call', 'voice filter dep absent — skipping install', { callId });
-      return true;
+      return 'installed';
     }
     try {
       await filter.wrap(callId);
       diag('call', 'voice filter installed', { callId });
-      return true;
+      return 'installed';
     } catch (err) {
       if (err instanceof FilterError) {
         diag('call', 'voice filter install FAILED', {
@@ -577,8 +590,9 @@ export class CallOrchestrator {
           err: String(err),
         });
       }
-      if (this.isActiveGeneration(generation, callId)) this.endWithFilterFailure();
-      return false;
+      if (!this.isActiveGeneration(generation, callId)) return 'stale';
+      this.endWithFilterFailure();
+      return 'ended';
     }
   }
 

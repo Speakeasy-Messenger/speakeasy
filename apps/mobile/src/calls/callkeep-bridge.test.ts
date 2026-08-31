@@ -16,6 +16,7 @@ function nativeReportFeed(initialReports: NativeCallKitReport[] = []) {
       listeners.add(listener);
       return () => listeners.delete(listener);
     }),
+    end: vi.fn(() => true),
     acknowledge: vi.fn(),
   };
   return {
@@ -168,17 +169,38 @@ describe('CallKeepBridge native PushKit adoption', () => {
     h.bridge.stop();
   });
 
-  it('releases the in-app fallback when CallKeep setup fails', async () => {
+  it('ends an authoritative native call before fallback when CallKeep setup fails', async () => {
     vi.useFakeTimers();
-    const h = harness();
+    const h = harness([{ callId: CALL_ID, callUUID: NATIVE_UUID }]);
+    h.callKeep.setup.mockRejectedValueOnce(new Error('CallKeep setup unavailable'));
+    await h.bridge.start();
+
+    expect(h.nativeReports.end).toHaveBeenCalledWith(NATIVE_UUID);
+    expect(h.nativeReports.acknowledge).toHaveBeenCalledWith(NATIVE_UUID);
+    expect(vi.mocked(h.nativeReports.end).mock.invocationCallOrder[0]).toBeLessThan(
+      vi.mocked(h.nativeReports.acknowledge).mock.invocationCallOrder[0]!,
+    );
+    useCalls.getState().setActive(incoming());
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    expect(h.callKeep.displayIncomingCall).not.toHaveBeenCalled();
+    expect(h.orchestrator.showIncomingCallFallback).toHaveBeenCalledWith(CALL_ID);
+    h.bridge.stop();
+  });
+
+  it('withholds fallback when authoritative native cleanup is unavailable', async () => {
+    vi.useFakeTimers();
+    const feed = nativeReportFeed([{ callId: CALL_ID, callUUID: NATIVE_UUID }]);
+    vi.mocked(feed.source.end).mockReturnValue(false);
+    const h = harness([], [], 1_500, 30_000, feed);
     h.callKeep.setup.mockRejectedValueOnce(new Error('CallKeep setup unavailable'));
     await h.bridge.start();
 
     useCalls.getState().setActive(incoming());
     await vi.advanceTimersByTimeAsync(1_500);
 
-    expect(h.callKeep.displayIncomingCall).not.toHaveBeenCalled();
-    expect(h.orchestrator.showIncomingCallFallback).toHaveBeenCalledWith(CALL_ID);
+    expect(h.nativeReports.acknowledge).not.toHaveBeenCalled();
+    expect(h.orchestrator.showIncomingCallFallback).not.toHaveBeenCalled();
     h.bridge.stop();
   });
 

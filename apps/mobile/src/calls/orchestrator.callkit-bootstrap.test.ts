@@ -70,6 +70,7 @@ function harness(opts: {
         nativeReportListener = undefined;
       };
     }),
+    end: vi.fn(() => true),
     acknowledge: vi.fn(),
   };
   let releaseAnswer: (() => void) | undefined;

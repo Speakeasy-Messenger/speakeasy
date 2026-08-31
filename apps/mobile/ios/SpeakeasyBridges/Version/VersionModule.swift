@@ -189,6 +189,10 @@ final class NativeDiagnosticsModule: RCTEventEmitter {
     callKitReports.acknowledge(callUUID: callUUID)
   }
 
+  @objc func endPendingCallKitReport(_ callUUID: String) {
+    RNCallKeep.endCall(withUUID: callUUID, reason: 1)
+  }
+
   @objc func consumePendingPipClose(
     _ sessionId: String,
     resolver resolve: RCTPromiseResolveBlock,

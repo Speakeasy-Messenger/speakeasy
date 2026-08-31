@@ -619,6 +619,31 @@ describe('CallOrchestrator', () => {
       expect(h.callerOut.filter((frame) => frame.type === 'call_offer')).toHaveLength(0);
     });
 
+    it('rejects a stale filter continuation after a second call starts', async () => {
+      let rejectWrap: ((reason: Error) => void) | undefined;
+      const h = makeOrchHarness({
+        voiceFilter: {
+          wrap: () =>
+            new Promise((_, reject) => {
+              rejectWrap = reject;
+            }),
+          dispose: async () => {},
+        },
+      });
+      const firstDial = h.caller.startOutgoing('bob', 'private');
+      await vi.waitFor(() => expect(rejectWrap).toBeDefined());
+      const firstCallId = h.caller.getActive()!.callId;
+
+      h.caller.hangup();
+      const secondCallId = await h.caller.startOutgoing('carol', 'audio');
+      rejectWrap!(new Error('runtime_unavailable'));
+
+      await expect(firstDial).rejects.toThrow('call no longer active');
+      expect(h.caller.getActive()?.callId).toBe(secondCallId);
+      expect(h.callerOut.filter((frame) => frame.type === 'call_offer' && frame.call_id === firstCallId))
+        .toHaveLength(0);
+    });
+
     it('cleanup invokes voiceFilter.dispose so the next call starts fresh', async () => {
       let disposeCount = 0;
       const h = makeOrchHarness({

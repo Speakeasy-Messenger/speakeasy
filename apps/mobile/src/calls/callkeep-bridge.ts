@@ -177,7 +177,9 @@ export class CallKeepBridge {
     const RNCallKeep = this.deps.callKeep ?? tryLoadCallKeep();
     if (!RNCallKeep) {
       diag('callkeep', 'native module unavailable — bridge no-ops');
-      if (generation === this.lifecycleGeneration) this.attachStoreSubscriber();
+      const fallbackReady = await this.prepareNativeFallback(generation);
+      if (generation !== this.lifecycleGeneration) return;
+      if (fallbackReady) this.attachStoreSubscriber();
       this.setupDone = true;
       return;
     }
@@ -265,7 +267,9 @@ export class CallKeepBridge {
       diag('callkeep', 'setup failed (non-fatal)', { err: String(err) });
       if (generation !== this.lifecycleGeneration) return;
       this.rnCallKeep = undefined;
-      this.attachStoreSubscriber();
+      const fallbackReady = await this.prepareNativeFallback(generation);
+      if (generation !== this.lifecycleGeneration) return;
+      if (fallbackReady) this.attachStoreSubscriber();
       this.setupDone = true;
     }
   }
@@ -341,6 +345,49 @@ export class CallKeepBridge {
     } catch (err) {
       diag('callkeep', 'native CallKit handoff drain failed', { err: String(err) });
     }
+  }
+
+  private async prepareNativeFallback(generation: number): Promise<boolean> {
+    if (this.platform() !== 'ios') return true;
+    const source = this.deps.nativeReports ?? nativeCallKitReports;
+    this.nativeReportSource = source;
+    this.unsubscribeNativeReports?.();
+    let fallbackReady = true;
+    const release = (report: NativeCallKitReport) => {
+      if (generation !== this.lifecycleGeneration) return;
+      if (!this.releaseNativeReportForFallback(source, report)) fallbackReady = false;
+    };
+    this.unsubscribeNativeReports = source.subscribe(release);
+    try {
+      const reports = await source.drain();
+      if (generation !== this.lifecycleGeneration) return false;
+      for (const report of reports) release(report);
+      return fallbackReady;
+    } catch (err) {
+      diag('callkeep', 'native CallKit fallback drain failed', { err: String(err) });
+      return false;
+    }
+  }
+
+  private releaseNativeReportForFallback(
+    source: NativeCallKitReportSource,
+    report: NativeCallKitReport,
+  ): boolean {
+    const uuid = normalizeUuid(report.callUUID);
+    if (!uuid) return false;
+    try {
+      if (!source.end(uuid)) return false;
+      diag('callkeep', 'native CallKit call ended before in-app fallback', { callUUID: uuid });
+    } catch (err) {
+      diag('callkeep', 'native CallKit fallback cleanup failed', {
+        callUUID: uuid,
+        err: String(err),
+      });
+      return false;
+    }
+    this.acknowledgedNativeUuids.delete(uuid);
+    this.acknowledgeNativeReport(uuid);
+    return true;
   }
 
   private attachListeners(): void {
