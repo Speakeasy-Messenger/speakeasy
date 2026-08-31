@@ -293,9 +293,10 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
   if (callId != nil) {
     NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
     CallKitReportStore *store = [[CallKitReportStore alloc] initWithDefaults:defaults];
+    NSNumber *reportedAt = @([[NSDate date] timeIntervalSince1970] * 1000);
     NSArray<NSString *> *displacedUUIDs = [store registerCallId:callId
                                                       callUUID:uuid
-                                                            at:[[NSDate date] timeIntervalSince1970] * 1000];
+                                                            at:[reportedAt doubleValue]];
     for (NSString *displacedUUID in displacedUUIDs) {
       [RNCallKeep endCallWithUUID:displacedUUID reason:1];
       SpeakeasyAppendNativeDiagnostic(@"Superseded CallKit call ended");
@@ -303,7 +304,7 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
     NSDictionary *report = @{
       @"call_id": callId,
       @"call_uuid": uuid,
-      @"at": @([[NSDate date] timeIntervalSince1970] * 1000),
+      @"at": reportedAt,
     };
     [[NSNotificationCenter defaultCenter]
         postNotificationName:@"SpeakeasyCallKitReported"
@@ -319,6 +320,21 @@ static void SpeakeasyAppendNativeDiagnostic(NSString *message)
   void (^loggedCompletion)(void) = ^{
     NSLog(@"Speakeasy diagnostics: CallKit incoming-call report completion");
     SpeakeasyAppendNativeDiagnostic(@"CallKit incoming-call report completion");
+    if (callId != nil) {
+      NSUserDefaults *defaults = [NSUserDefaults standardUserDefaults];
+      CallKitReportStore *store = [[CallKitReportStore alloc] initWithDefaults:defaults];
+      [store markReportedCallUUID:uuid];
+      NSDictionary *report = @{
+        @"call_id": callId,
+        @"call_uuid": uuid,
+        @"report_completed": @YES,
+        @"at": @([[NSDate date] timeIntervalSince1970] * 1000),
+      };
+      [[NSNotificationCenter defaultCenter]
+          postNotificationName:@"SpeakeasyCallKitReported"
+                        object:nil
+                      userInfo:report];
+    }
     // iOS still requires a CallKit report for a malformed VoIP push. Without a
     // signaling call_id there is nothing JS can ever answer, so end that report
     // immediately instead of leaving a phantom ongoing call in the system.

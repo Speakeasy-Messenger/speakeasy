@@ -4,6 +4,7 @@ export interface NativeCallKitReport {
   callId?: string;
   callUUID: string;
   expired?: boolean;
+  reportCompleted?: boolean;
   reportedAtMs?: number;
 }
 
@@ -32,18 +33,21 @@ export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | 
     call_id?: unknown;
     call_uuid?: unknown;
     expired?: unknown;
+    report_completed?: unknown;
     at?: unknown;
   };
   if (typeof raw.call_uuid !== 'string' || raw.call_uuid.length === 0) return undefined;
   const callId =
     typeof raw.call_id === 'string' && raw.call_id.length > 0 ? raw.call_id : undefined;
   const expired = raw.expired === true;
+  const reportCompleted = raw.report_completed === true;
   const reportedAtMs = typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : undefined;
   if (!callId && !expired) return undefined;
   return {
     ...(callId ? { callId } : {}),
     callUUID: raw.call_uuid.toLowerCase(),
     ...(expired ? { expired: true } : {}),
+    ...(reportCompleted ? { reportCompleted: true } : {}),
     ...(reportedAtMs !== undefined ? { reportedAtMs } : {}),
   };
 }

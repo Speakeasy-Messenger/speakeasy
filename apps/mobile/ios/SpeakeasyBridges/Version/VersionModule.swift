@@ -65,6 +65,7 @@ final class CallKitReportStore: NSObject {
     reports.append([
       "call_id": callId,
       "call_uuid": callUUID,
+      "report_completed": false,
       "at": at,
     ])
     if reports.count > 20 {
@@ -100,6 +101,21 @@ final class CallKitReportStore: NSObject {
       result["expired"] = expired
       return result
     }
+  }
+
+  @objc(markReportedCallUUID:)
+  func markReported(callUUID: String) {
+    Self.lock.lock()
+    defer { Self.lock.unlock() }
+    var reports = defaults.array(forKey: Self.key) as? [[String: Any]] ?? []
+    guard let index = reports.firstIndex(where: { report in
+      guard let candidateUUID = report["call_uuid"] as? String else { return false }
+      return candidateUUID.caseInsensitiveCompare(callUUID) == .orderedSame
+    }) else {
+      return
+    }
+    reports[index]["report_completed"] = true
+    defaults.set(reports, forKey: Self.key)
   }
 
   func acknowledge(callUUID: String) {

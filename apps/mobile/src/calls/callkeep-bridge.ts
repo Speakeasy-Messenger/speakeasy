@@ -161,6 +161,11 @@ export class CallKeepBridge {
   private readonly failedNativeUuids = new Map<string, string>();
   private readonly fallbackCallIds = new Map<string, string>();
   private readonly releasedFallbackCallIds = new Set<string>();
+  private readonly blockedNativeFallbackCallIds = new Set<string>();
+  private readonly nativeFallbackReportStates = new Map<
+    string,
+    { reportedAtMs: number; completed: boolean }
+  >();
   private readonly acknowledgedNativeUuids = new Set<string>();
   /** CallKit actions can arrive before the encrypted offer has reached JS. */
   private readonly pendingActions = new Map<string, 'answer' | 'end'>();
@@ -319,6 +324,8 @@ export class CallKeepBridge {
     this.nativeRecoveryInFlight.clear();
     this.fallbackCallIds.clear();
     this.releasedFallbackCallIds.clear();
+    this.blockedNativeFallbackCallIds.clear();
+    this.nativeFallbackReportStates.clear();
     this.setupDone = false;
   }
 
@@ -374,7 +381,24 @@ export class CallKeepBridge {
     report: NativeCallKitReport,
   ): boolean {
     const uuid = normalizeUuid(report.callUUID);
-    if (!uuid) return false;
+    const callId = report.callId;
+    if (!uuid || !callId) return false;
+    const reportedAtMs = report.reportedAtMs ?? 0;
+    const previous = this.nativeFallbackReportStates.get(uuid);
+    if (
+      previous &&
+      (reportedAtMs < previous.reportedAtMs ||
+        (reportedAtMs === previous.reportedAtMs && previous.completed && !report.reportCompleted))
+    ) {
+      return true;
+    }
+    this.nativeFallbackReportStates.set(uuid, {
+      reportedAtMs,
+      completed: report.reportCompleted === true || report.expired === true,
+    });
+    this.blockedNativeFallbackCallIds.add(callId);
+    this.cancelIncomingFallback(callId);
+    if (!report.reportCompleted && !report.expired) return true;
     try {
       if (!source.end(uuid)) return false;
       diag('callkeep', 'native CallKit call ended before in-app fallback', { callUUID: uuid });
@@ -387,6 +411,11 @@ export class CallKeepBridge {
     }
     this.acknowledgedNativeUuids.delete(uuid);
     this.acknowledgeNativeReport(uuid);
+    this.blockedNativeFallbackCallIds.delete(callId);
+    const active = this.deps.orchestrator.getActive();
+    if (active?.callId === callId && active.stage === 'incoming_ringing') {
+      this.scheduleIncomingFallback(active);
+    }
     return true;
   }
 
@@ -531,7 +560,9 @@ export class CallKeepBridge {
       return;
     }
     this.scheduleOrphanCleanup(report);
-    this.acknowledgeActiveNativeReports(callId);
+    if (this.deps.orchestrator.getActive()?.callId === callId) {
+      this.cancelOrphanCleanup(uuid);
+    }
     this.applyPendingAction(callId, uuid);
   }
 
@@ -608,8 +639,11 @@ export class CallKeepBridge {
       this.pendingActions.set(uuid, action);
       return;
     }
-    if (this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid)) {
+    const nativeOwned =
+      this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid);
+    if (nativeOwned) {
       this.settleNativeDisplay(callId, uuid, undefined, undefined);
+      this.acknowledgeNativeReport(uuid);
     }
     this.performCallAction(action);
   }
@@ -619,8 +653,11 @@ export class CallKeepBridge {
     const action = this.pendingActions.get(uuid);
     if (!action) return;
     this.pendingActions.delete(uuid);
-    if (this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid)) {
+    const nativeOwned =
+      this.nativeHandoffUuids.has(uuid) && !this.failedNativeUuids.has(uuid);
+    if (nativeOwned) {
       this.settleNativeDisplay(callId, uuid, undefined, undefined);
+      this.acknowledgeNativeReport(uuid);
     }
     this.performCallAction(action);
   }
@@ -724,7 +761,7 @@ export class CallKeepBridge {
         this.orphanCleanupTimers.delete(uuid);
         const callId = this.uuidToId.get(uuid) ?? this.failedNativeUuids.get(uuid);
         if (callId && this.deps.orchestrator.getActive()?.callId === callId) {
-          this.acknowledgeNativeReport(uuid);
+          return;
         } else if (this.failedNativeUuids.has(uuid)) {
           this.acknowledgeNativeReport(uuid);
           this.failedNativeUuids.delete(uuid);
@@ -738,30 +775,22 @@ export class CallKeepBridge {
     this.orphanCleanupTimers.set(uuid, timer);
   }
 
-  private acknowledgeActiveNativeReports(callId: string): void {
-    if (this.deps.orchestrator.getActive()?.callId !== callId) return;
-    const mappedUuid = this.idToUuid.get(callId);
-    if (mappedUuid && this.nativeHandoffUuids.has(mappedUuid)) {
-      this.acknowledgeNativeReport(mappedUuid);
-    }
-    for (const [uuid, failedCallId] of this.failedNativeUuids) {
-      if (failedCallId === callId) {
-        this.acknowledgeNativeReport(uuid);
-      }
-    }
+  private cancelOrphanCleanup(uuid: string): void {
+    const timer = this.orphanCleanupTimers.get(uuid);
+    if (timer) clearTimeout(timer);
+    this.orphanCleanupTimers.delete(uuid);
   }
 
   private acknowledgeNativeReport(uuid: string): void {
     if (this.acknowledgedNativeUuids.has(uuid)) return;
     this.acknowledgedNativeUuids.add(uuid);
-    const timer = this.orphanCleanupTimers.get(uuid);
-    if (timer) clearTimeout(timer);
-    this.orphanCleanupTimers.delete(uuid);
+    this.cancelOrphanCleanup(uuid);
     const source = this.nativeReportSource ?? this.deps.nativeReports ?? nativeCallKitReports;
     source.acknowledge(uuid);
   }
 
   private scheduleIncomingFallback(call: ActiveCall): void {
+    if (this.blockedNativeFallbackCallIds.has(call.callId)) return;
     const mappedUuid = this.idToUuid.get(call.callId);
     if (
       this.incomingFallbackTimers.has(call.callId) ||
@@ -862,7 +891,10 @@ export class CallKeepBridge {
     }
     if (!prev && next) {
       if (!next.isCaller && this.platform() === 'ios') {
-        this.acknowledgeActiveNativeReports(next.callId);
+        const mappedUuid = this.idToUuid.get(next.callId);
+        if (mappedUuid && this.nativeHandoffUuids.has(mappedUuid)) {
+          this.cancelOrphanCleanup(mappedUuid);
+        }
       }
       const uuid =
         !next.isCaller && this.platform() === 'ios'
