@@ -133,10 +133,14 @@ function markRejectedCall(callId: string): void {
   }
 }
 
-function consumeRejectedCall(callId: string): boolean {
+function isRejectedCall(callId: string): boolean {
   const expiresAt = rejectedCallTombstones.get(callId);
-  rejectedCallTombstones.delete(callId);
-  return expiresAt !== undefined && expiresAt > Date.now();
+  if (expiresAt === undefined) return false;
+  if (expiresAt <= Date.now()) {
+    rejectedCallTombstones.delete(callId);
+    return false;
+  }
+  return true;
 }
 
 export class CallKeepBridge {
@@ -173,7 +177,8 @@ export class CallKeepBridge {
     const RNCallKeep = this.deps.callKeep ?? tryLoadCallKeep();
     if (!RNCallKeep) {
       diag('callkeep', 'native module unavailable — bridge no-ops');
-      this.setupDone = true; // mark so we don't retry every call
+      if (generation === this.lifecycleGeneration) this.attachStoreSubscriber();
+      this.setupDone = true;
       return;
     }
     this.rnCallKeep = RNCallKeep;
@@ -258,6 +263,10 @@ export class CallKeepBridge {
       diag('callkeep', 'setup ok');
     } catch (err) {
       diag('callkeep', 'setup failed (non-fatal)', { err: String(err) });
+      if (generation !== this.lifecycleGeneration) return;
+      this.rnCallKeep = undefined;
+      this.attachStoreSubscriber();
+      this.setupDone = true;
     }
   }
 
@@ -316,7 +325,6 @@ export class CallKeepBridge {
     const failedUuid = [...this.failedNativeUuids].find(([, id]) => id === callId)?.[0];
     const uuids = new Set([mappedUuid, failedUuid].filter((uuid): uuid is string => !!uuid));
     if (uuids.size === 0) return;
-    consumeRejectedCall(callId);
     for (const uuid of uuids) this.endOrphan(uuid, 'signaling rejected incoming call');
   }
 
@@ -471,7 +479,7 @@ export class CallKeepBridge {
     this.uuidToId.set(uuid, callId);
     this.nativeHandoffUuids.add(uuid);
     diag('callkeep', 'PushKit call mapped', { callId, callUUID: uuid });
-    if (consumeRejectedCall(callId)) {
+    if (isRejectedCall(callId)) {
       this.endOrphan(uuid, 'signaling rejected incoming call');
       return;
     }
@@ -796,7 +804,14 @@ export class CallKeepBridge {
 
   private diff(prev: ActiveCall | undefined, next: ActiveCall | undefined): void {
     const RNCallKeep = this.rnCallKeep;
-    if (!RNCallKeep) return;
+    if (!RNCallKeep) {
+      if (!prev && next?.stage === 'incoming_ringing' && !next.isCaller) {
+        this.scheduleIncomingFallback(next);
+      } else if (!next && prev) {
+        this.cancelIncomingFallback(prev.callId);
+      }
+      return;
+    }
     if (!prev && next) {
       if (!next.isCaller && this.platform() === 'ios') {
         this.acknowledgeActiveNativeReports(next.callId);

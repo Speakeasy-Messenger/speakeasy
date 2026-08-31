@@ -27,6 +27,7 @@ function harness(opts: {
   decryptFailure?: boolean;
   deferDecrypt?: boolean;
   deferPeer?: boolean;
+  deferAnswer?: boolean;
 }) {
   const sent: WsClientMsg[] = [];
   const signalProtocol = new MockSignalProtocolClient();
@@ -68,9 +69,21 @@ function harness(opts: {
     }),
     acknowledge: vi.fn(),
   };
+  let releaseAnswer: (() => void) | undefined;
+  const answerGate = opts.deferAnswer
+    ? new Promise<void>((resolve) => {
+        releaseAnswer = resolve;
+      })
+    : undefined;
   const peer = {
     createOffer: vi.fn(async () => ({ v: 1, sdp: 'offer', candidates: [] })),
+    createAnswer: vi.fn(async () => {
+      await answerGate;
+      return { v: 1, sdp: 'answer', candidates: [] };
+    }),
     setRemoteOffer: vi.fn(async () => undefined),
+    setRemoteAnswer: vi.fn(async () => undefined),
+    addRemoteIce: vi.fn(async () => undefined),
     onLocalIce: vi.fn(() => () => undefined),
     onConnectionStateChange: vi.fn(() => () => undefined),
     close: vi.fn(),
@@ -129,6 +142,7 @@ function harness(opts: {
     peerFactory,
     releaseDecrypt: () => releaseDecrypt?.(),
     releasePeer: () => releasePeer?.(),
+    releaseAnswer: () => releaseAnswer?.(),
     emitNativeReport: (callId: string, callUUID: string) =>
       nativeReportListener?.({ callId, callUUID }),
     bridge: () => bridge!,
@@ -316,5 +330,70 @@ describe('CallOrchestrator iOS CallKit bootstrap', () => {
     await expect(dialing).rejects.toThrow('orchestrator disposed');
     expect(h.peer.close).toHaveBeenCalled();
     expect(h.sent.filter((frame) => frame.type === 'call_offer')).toHaveLength(0);
+  });
+
+  it('keeps a concurrent outgoing call when an incoming decrypt resumes', async () => {
+    const incomingCallId = 'call-concurrent-incoming';
+    const h = harness({
+      callId: incomingCallId,
+      callUUID: UUIDS[3]!,
+      deferDecrypt: true,
+    });
+    await h.startup();
+    const processing = h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'incoming-peer',
+      call_id: incomingCallId,
+      ciphertext: offer({ v: 1, sdp: 'incoming', candidates: [], kind: 'audio' }),
+    });
+    await vi.waitFor(() => expect(h.signalProtocol.decrypt).toHaveBeenCalled());
+
+    const outgoingCallId = await h.orchestrator.startOutgoing('outgoing-peer');
+    h.releaseDecrypt();
+    await processing;
+
+    expect(h.orchestrator.getActive()?.callId).toBe(outgoingCallId);
+    expect(h.orchestrator.getActive()?.stage).toBe('outgoing_ringing');
+    expect(h.sent).toContainEqual({
+      type: 'call_end',
+      to: 'incoming-peer',
+      call_id: incomingCallId,
+      reason: 'busy',
+    });
+    expect(h.callKeep.reportEndCallWithUUID).toHaveBeenCalledWith(UUIDS[3], 1);
+    h.orchestrator.dispose();
+  });
+
+  it('does not let a stale answer continuation mutate the next call', async () => {
+    const firstCallId = 'call-stale-answer';
+    const h = harness({
+      callId: firstCallId,
+      callUUID: UUIDS[0]!,
+      deferAnswer: true,
+    });
+    await h.startup();
+    await h.orchestrator.handleFrame({
+      type: 'call_offer',
+      from: 'first-peer',
+      call_id: firstCallId,
+      ciphertext: offer({ v: 1, sdp: 'first-offer', candidates: [], kind: 'audio' }),
+    });
+    const accepting = h.orchestrator.accept();
+    await vi.waitFor(() => expect(h.peer.createAnswer).toHaveBeenCalled());
+
+    await h.orchestrator.handleFrame({
+      type: 'call_end',
+      from: 'first-peer',
+      call_id: firstCallId,
+      reason: 'hangup',
+    });
+    const secondCallId = await h.orchestrator.startOutgoing('second-peer');
+    h.releaseAnswer();
+    await expect(accepting).rejects.toThrow('call no longer active');
+
+    expect(h.orchestrator.getActive()?.callId).toBe(secondCallId);
+    expect(h.orchestrator.getActive()?.stage).toBe('outgoing_ringing');
+    expect(h.sent.filter((frame) => frame.type === 'call_answer')).toHaveLength(0);
+    h.orchestrator.dispose();
   });
 });
