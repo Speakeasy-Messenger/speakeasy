@@ -26,20 +26,27 @@ confirm. It cannot be reached while link 3 is broken.
 
 `POST /v1/verify/{session}/fallback` returns `200` with
 `{"method": "email_otp", ...}` and a five-minute expiry, and no mail
-arrives. Four attempts, two independent inboxes, both API keys:
+arrives. Five attempts, two independent inboxes, both API keys:
 
-| Key | Inbox | Result |
-|-----|-------|--------|
-| sandbox (public, from the SDK repo) | `lunchboxfortwo+vfotp1@gmail.com` | no mail |
-| production (vaulted `vouchflow/prod-write`) | `lunchboxfortwo+vfotp2@gmail.com` | no mail |
-| production | `lunchboxfortwo@gmail.com` (no plus tag) | no mail |
-| sandbox | `…@uberip.com` (mail.tm, no filtering) | no mail |
+| # | Key | Inbox | Result |
+|---|-----|-------|--------|
+| 1 | sandbox (public, from the SDK repo) | `lunchboxfortwo+vfotp1@gmail.com` | no mail |
+| 2 | production (vaulted `vouchflow/prod-write`) | `lunchboxfortwo+vfotp2@gmail.com` | no mail |
+| 3 | production | `lunchboxfortwo@gmail.com` (no plus tag) | no mail |
+| 4 | production | `sxfbmtn39p6g@uberip.com` (mail.tm, no filtering) | no mail |
+| 5 | sandbox | `sxfbmtn3iyac@uberip.com` | no mail |
 
 The Gmail searches used `in:anywhere`, so spam was covered, and the same
 inbox received unrelated mail throughout the window. Submitting a guessed
 code returns `422 invalid_otp` with `attempts_remaining`, then
 `423 fallback_locked` — so a code does exist server-side; it just never
 reaches anyone.
+
+A sixth attempt was refused with `429 … retry in 1 day`, on a device
+enrolled seconds earlier under a different key. The initiation limiter is
+therefore keyed to something wider than the device — plan on roughly
+three initiations per source per day when re-testing, and expect a device
+farm to have its own quota because it has its own address.
 
 Reproduce with `scripts/vouchflow-fallback-probe.mjs`, which drives the
 REST API exactly as the SDK does for an un-attestable device and stops
