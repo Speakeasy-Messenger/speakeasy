@@ -56,8 +56,12 @@ env:
   FALLBACK_EMAIL: qa@speakeasyapp.xyz
   FALLBACK_OTP: SKIP
 ---
-- clearState
+# clearKeychain matters as much as clearState here: the Vouchflow device
+# token lives in the iOS keychain with kSecAttrAccessibleAfterFirstUnlock
+# and survives reinstall, so without it a second run would skip enrollment
+# and read a token the first run left behind.
 - launchApp:
+    clearState: true
     clearKeychain: true
 
 # ─── Step 01: Door ───
@@ -117,7 +121,9 @@ env:
     visible:
       id: 'onboarding-fallback-otp'
     timeout: 45000
-- assertVisible: 'We sent a code to ${FALLBACK_EMAIL}'
+# Static prefix only — assertVisible matches as a regex, and an address
+# with a "+" tag would otherwise be read as a quantifier.
+- assertVisible: 'We sent a code to'
 - takeScreenshot: 03-otp-requested
 
 # ─── Waypoint C: OTP → device token → api.enroll (the inferred step) ───
