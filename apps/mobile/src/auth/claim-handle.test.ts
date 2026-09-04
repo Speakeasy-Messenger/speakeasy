@@ -391,6 +391,28 @@ describe('completeEmailFallbackVerification', () => {
     expect(result).toEqual({ deviceToken: 'dvt_new' });
   });
 
+  it('surfaces no_device_token when recovery verification times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const deps = makeDeps();
+      (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise<VerifyResult>(() => {}),
+      );
+
+      const completion = completeEmailFallbackVerification(deps, {
+        sessionId: 'fbs_1',
+        otp: '123456',
+        context: 'login',
+      });
+      const settled = expect(completion).rejects.toMatchObject({ reason: 'no_device_token' });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('rejects a wrong code', async () => {
     const deps = makeDeps();
     (deps.vouchflow.submitFallbackOtp as ReturnType<typeof vi.fn>).mockResolvedValueOnce({

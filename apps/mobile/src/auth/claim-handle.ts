@@ -305,7 +305,7 @@ export async function completeEmailFallbackVerification(
   let deviceToken = await deps.vouchflow.getCachedDeviceToken();
   if (!deviceToken) {
     try {
-      const verified = await deps.vouchflow.verify({
+      const verified = await verifyWithTimeout(deps.vouchflow, {
         context: args.context,
         minimumConfidence: 'low',
       });
