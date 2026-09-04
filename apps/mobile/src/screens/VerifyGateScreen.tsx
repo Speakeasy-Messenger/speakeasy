@@ -2,6 +2,8 @@ import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
+  KeyboardAvoidingView,
+  Platform,
   Pressable,
   StyleSheet,
   Text,
@@ -128,82 +130,87 @@ export function VerifyGateScreen(): React.ReactElement {
 
   return (
     <SafeAreaView testID="verify-gate-screen" style={styles.root}>
-      <View style={styles.body}>
-        <Animated.View
-          style={[
-            styles.stack,
-            { opacity: reveal, transform: [{ translateY }] },
-          ]}
-        >
-          <Text style={styles.eyebrow}>WELCOME BACK</Text>
-
-          <View style={styles.portraitTile}>
-            <AvatarRenderer animalId={animalId} size={Math.round(96 * 0.78)} />
-          </View>
-
-          {userId ? (
-            <Text style={styles.copy}>
-              You are{' '}
-              <Text style={styles.copyEm}>
-                <Text style={styles.brass}>@</Text>
-                {userId}
-              </Text>
-              .
-            </Text>
-          ) : null}
-          <Text style={styles.copy}>
-            Confirm this is your device to unlock messages and calls.
-          </Text>
-          <Text style={styles.copyHint}>
-            Speakeasy verifies once a month to keep your identity yours.
-          </Text>
-
-          {errorCopy ? (
-            <Text style={styles.error} testID="verify-gate-error">
-              {errorCopy}
-            </Text>
-          ) : null}
-
-          {fallbackReason !== undefined ? (
-            <View style={styles.fallbackBlock}>
-              <EmailVerifyFallback
-                reason={fallbackReason}
-                vouchflow={vouchflow}
-                onSubmit={handleEmailVerified}
-                colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
-                testIDPrefix="verify-gate-fallback"
-                renderButton={(btn) => (
-                  <Pressable
-                    onPress={btn.onPress}
-                    disabled={btn.disabled}
-                    style={[styles.btnPrimary, btn.disabled && styles.btnPrimaryDisabled]}
-                    testID={btn.testID}
-                  >
-                    <Text style={styles.btnPrimaryText}>
-                      {btn.loading ? 'Verifying…' : btn.label}
-                    </Text>
-                  </Pressable>
-                )}
-              />
-            </View>
-          ) : null}
-        </Animated.View>
-      </View>
-
-      {fallbackReason === undefined ? (
-        <View style={styles.actions}>
-          <Pressable
-            onPress={onVerify}
-            disabled={verifying}
-            style={[styles.btnPrimary, verifying && styles.btnPrimaryDisabled]}
-            testID="verify-gate-continue"
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.flex}
+      >
+        <View style={styles.body}>
+          <Animated.View
+            style={[
+              styles.stack,
+              { opacity: reveal, transform: [{ translateY }] },
+            ]}
           >
-            <Text style={styles.btnPrimaryText}>
-              {verifying ? 'Verifying…' : 'Verify this device'}
+            <Text style={styles.eyebrow}>WELCOME BACK</Text>
+
+            <View style={styles.portraitTile}>
+              <AvatarRenderer animalId={animalId} size={Math.round(96 * 0.78)} />
+            </View>
+
+            {userId ? (
+              <Text style={styles.copy}>
+                You are{' '}
+                <Text style={styles.copyEm}>
+                  <Text style={styles.brass}>@</Text>
+                  {userId}
+                </Text>
+                .
+              </Text>
+            ) : null}
+            <Text style={styles.copy}>
+              Confirm this is your device to unlock messages and calls.
             </Text>
-          </Pressable>
+            <Text style={styles.copyHint}>
+              Speakeasy verifies once a month to keep your identity yours.
+            </Text>
+
+            {errorCopy ? (
+              <Text style={styles.error} testID="verify-gate-error">
+                {errorCopy}
+              </Text>
+            ) : null}
+
+            {fallbackReason !== undefined ? (
+              <View style={styles.fallbackBlock}>
+                <EmailVerifyFallback
+                  reason={fallbackReason}
+                  vouchflow={vouchflow}
+                  onSubmit={handleEmailVerified}
+                  colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
+                  testIDPrefix="verify-gate-fallback"
+                  renderButton={(btn) => (
+                    <Pressable
+                      onPress={btn.onPress}
+                      disabled={btn.disabled}
+                      style={[styles.btnPrimary, btn.disabled && styles.btnPrimaryDisabled]}
+                      testID={btn.testID}
+                    >
+                      <Text style={styles.btnPrimaryText}>
+                        {btn.loading ? 'Verifying…' : btn.label}
+                      </Text>
+                    </Pressable>
+                  )}
+                />
+              </View>
+            ) : null}
+          </Animated.View>
         </View>
-      ) : null}
+
+        {fallbackReason === undefined ? (
+          <View style={styles.actions}>
+            <Pressable
+              onPress={onVerify}
+              disabled={verifying}
+              style={[styles.btnPrimary, verifying && styles.btnPrimaryDisabled]}
+              testID="verify-gate-continue"
+            >
+              <Text style={styles.btnPrimaryText}>
+                {verifying ? 'Verifying…' : 'Verify this device'}
+              </Text>
+            </Pressable>
+          </View>
+        ) : null}
+      </KeyboardAvoidingView>
     </SafeAreaView>
   );
 }
@@ -217,6 +224,7 @@ const TEXT_MUTE = workspace.dark.textMute;
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: brand.canvas },
+  flex: { flex: 1 },
   body: {
     flex: 1,
     alignItems: 'center',

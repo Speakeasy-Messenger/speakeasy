@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
@@ -73,7 +73,13 @@ export function VerifyDeviceSheet(): React.ReactElement {
         style={[styles.scrim, { backgroundColor: scrim.modal }]}
         onPress={cancel}
       />
-      <View style={styles.wrap} pointerEvents="box-none">
+      {/* The fallback's email/OTP inputs need the sheet to rise above
+          the keyboard — the confirm-only sheet never needed this. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.wrap}
+        pointerEvents="box-none"
+      >
         <View
           style={[
             styles.sheet,
@@ -164,7 +170,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
             </>
           )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
