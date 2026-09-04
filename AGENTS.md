@@ -9,7 +9,7 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   stay in agreement, or onboarding dead-ends: the vouchflow.dev dashboard, the
   client's `minimumConfidence` (`apps/mobile/src/auth/claim-handle.ts`),
   `MIN_CONFIDENCE` in `packages/vouchflow/src/types.ts`, and the server default
-  + guard in `apps/api/src/{server,production-guard}.ts`.
+  - guard in `apps/api/src/{server,production-guard}.ts`.
 
 ## Maintaining this file
 

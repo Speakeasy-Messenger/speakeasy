@@ -53,9 +53,7 @@ export function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
  * Collect every production-config violation in the given environment.
  * Pure — takes the env explicitly so it is trivially unit-testable.
  */
-export function collectProductionConfigErrors(
-  env: NodeJS.ProcessEnv = process.env,
-): string[] {
+export function collectProductionConfigErrors(env: NodeJS.ProcessEnv = process.env): string[] {
   const errors: string[] = [];
 
   if (env.VOUCHFLOW_USE_MOCK === '1') {
@@ -108,10 +106,7 @@ export function collectProductionConfigErrors(
   // would reject every one of them. ALLOW_VOUCHFLOW_SANDBOX=1 is the
   // explicit operator opt-in acknowledging that deliberate config; the
   // check still fires for anyone who lands on sandbox by accident.
-  if (
-    baseUrl.toLowerCase().includes('sandbox') &&
-    env.ALLOW_VOUCHFLOW_SANDBOX !== '1'
-  ) {
+  if (baseUrl.toLowerCase().includes('sandbox') && env.ALLOW_VOUCHFLOW_SANDBOX !== '1') {
     errors.push(
       `VOUCHFLOW_BASE_URL points at sandbox (${baseUrl}) — sandbox is a ` +
         'separate device-reputation universe from production and its ' +
@@ -164,9 +159,7 @@ export function collectProductionConfigErrors(
  * Throw `ProductionConfigError` if the process is a production deployment
  * with any unsafe fallback configuration. No-op outside production.
  */
-export function assertProductionConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): void {
+export function assertProductionConfig(env: NodeJS.ProcessEnv = process.env): void {
   if (!isProductionEnv(env)) return;
   const errors = collectProductionConfigErrors(env);
   if (errors.length > 0) {

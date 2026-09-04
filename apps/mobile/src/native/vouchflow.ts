@@ -111,7 +111,10 @@ export type VouchflowErrorReason =
   | 'unknown_error';
 
 export class VouchflowClientError extends Error {
-  constructor(public readonly reason: VouchflowErrorReason, message?: string) {
+  constructor(
+    public readonly reason: VouchflowErrorReason,
+    message?: string,
+  ) {
     super(message ?? reason);
     this.name = 'VouchflowClientError';
   }

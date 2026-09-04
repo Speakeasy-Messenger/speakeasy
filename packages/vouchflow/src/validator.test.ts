@@ -1,11 +1,7 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { VouchflowApiClient } from './api-client.js';
 import { VouchflowValidator } from './validator.js';
-import {
-  VouchflowValidationError,
-  type Confidence,
-  type DeviceReputation,
-} from './types.js';
+import { VouchflowValidationError, type Confidence, type DeviceReputation } from './types.js';
 
 function rep(overrides: Partial<DeviceReputation> = {}): DeviceReputation {
   const base: DeviceReputation = {

@@ -38,7 +38,9 @@
 
 Speakeasy is a private, encrypted messenger with the following core principles:
 
-- **Zero personal information collected.** No phone number, no email, no name.
+- **Anonymous by default.** No phone number or real name is collected. A
+  device that cannot attest may provide an email address to Vouchflow solely
+  to receive a one-time verification code; it is not attached to the handle.
 - **Device-native identity.** Authentication is handled entirely by Vouchflow (vouchflow.dev) — a device-native verification API using Secure Enclave (iOS) and Keystore (Android) cryptography.
 - **Ephemeral by default.** Messages disappear after 7 days locally. Persistence must be explicitly opted into per conversation.
 - **Human-readable anonymous IDs.** Every user is identified by a handle they pick (or generate) at enrollment — any single-token name matching `HANDLE_REGEX` (e.g. `@alice`, `@midnight_traveler`, `@quiet_fox`). This is their only identifier. No display name layer exists on top.
@@ -123,7 +125,7 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 
 ### Rules
 
-- **Vouchflow is the only authentication method.** There is no phone number fallback and no recovery code flow. The one exception is Vouchflow's own **email-OTP fallback tier** (SDK 2.0.0 `requestFallback` / `submitFallbackOtp`), offered during onboarding *only* to a device that cannot attest at all — no screen lock, or no Secure Enclave / Play Integrity (an App Store review iPad). Email is never required, never requested from a device that can attest, and is not attached to the handle: Speakeasy stays anonymous by default.
+- **Vouchflow is the only authentication method.** There is no phone number fallback and no recovery code flow. The one exception is Vouchflow's own **email-OTP fallback tier** (SDK 2.0.0 `requestFallback` / `submitFallbackOtp`), offered during onboarding _only_ to a device that cannot attest at all — no screen lock, or no Secure Enclave / Play Integrity (an App Store review iPad). Email is never required, never requested from a device that can attest, and is not attached to the handle: Speakeasy stays anonymous by default.
 - **Minimum device confidence: low.** Below-`low` is impossible — a device that cannot attest produces no token at all, and takes the email fallback instead. The freshness, risk-score and anomaly gates still apply to every token.
 - **Vouchflow identity does not need to pre-exist.** A new Vouchflow identity is created during Speakeasy enrollment if one does not already exist on the device.
 - Enrollment flow: Vouchflow device attestation → random ID generated and issued → Signal Protocol PreKey bundle generated and uploaded → user enters the app.
@@ -627,7 +629,7 @@ Items deliberately scoped out of this sweep so the 1:1 path could ship as one co
 
 1. Passive server compromise (database breach) — mitigated by ciphertext-only storage
 2. Compelled disclosure — mitigated by minimal metadata retention and key architecture
-3. Fake device enrollment — mitigated by Vouchflow attestation (medium+ confidence required)
+3. Fake device enrollment — mitigated by Vouchflow attestation (low+ confidence required)
 4. Abuse via anonymous accounts — rate limiting + Vouchflow device reputation as signal
 
 ---

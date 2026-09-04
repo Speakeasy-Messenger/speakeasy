@@ -1,11 +1,7 @@
 import type { ApiClient } from '../api/client.js';
 import { ApiError } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
-import type {
-  FallbackReason,
-  VouchflowClient,
-  VouchflowErrorReason,
-} from '../native/vouchflow.js';
+import type { FallbackReason, VouchflowClient, VouchflowErrorReason } from '../native/vouchflow.js';
 import { VouchflowClientError } from '../native/vouchflow.js';
 import { diag } from '../diag/log.js';
 
@@ -143,13 +139,7 @@ export async function claimWithDeviceAttestation(
     const verifyResult = await Promise.race([
       deps.vouchflow.verify({ context: 'signup', minimumConfidence: 'low' }),
       new Promise<never>((_, reject) =>
-        setTimeout(
-          () =>
-            reject(
-              new VerificationTimeoutError(),
-            ),
-          VERIFY_TIMEOUT_MS,
-        ),
+        setTimeout(() => reject(new VerificationTimeoutError()), VERIFY_TIMEOUT_MS),
       ),
     ]);
     deviceToken = verifyResult.deviceToken;

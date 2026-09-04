@@ -10,13 +10,13 @@
  * opaque handle the Vouchflow API resolves.
  *
  * Confidence levels per spec §2:
- *   low    — new device, no history, or a device that cannot attest
- *            (no Secure Enclave / Play Integrity, e.g. a review iPad)
+ *   low    — new device with little or no attestation history
  *   medium — established device, attestation OK
  *   high   — strong history, multi-attestation
  *
  * `low` is the floor, matching the vouchflow.dev dashboard's
- * device-confidence floor. Devices that can't clear even `low` are
+ * device-confidence floor. Devices that cannot attest and therefore cannot
+ * produce even a `low` verification are
  * offered the SDK's email-OTP fallback client-side; the remaining
  * gates here (freshness, risk score, anomaly flags) still apply to
  * every token.

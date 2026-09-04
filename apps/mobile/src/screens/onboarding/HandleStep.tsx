@@ -1,19 +1,16 @@
 import React, { useEffect, useRef, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Platform,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../../components/Button.js';
 import { isDeviceSecure, openSecuritySettings } from '../../native/lock-screen.js';
 import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
-import { VouchflowClientError, type FallbackReason, type VouchflowErrorReason } from '../../native/vouchflow.js';
+import {
+  VouchflowClientError,
+  type FallbackReason,
+  type VouchflowErrorReason,
+} from '../../native/vouchflow.js';
 import {
   claimWithDeviceAttestation,
   completeEmailFallbackClaim,
@@ -283,7 +280,12 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
               onChangeText={(t) =>
                 // Spec §2.3.2: lowercase + restrict to allowed set
                 // (a-z 0-9 . - _) on every keystroke.
-                setHandle(t.toLowerCase().replace(/[^a-z0-9._-]/g, '').slice(0, 20))
+                setHandle(
+                  t
+                    .toLowerCase()
+                    .replace(/[^a-z0-9._-]/g, '')
+                    .slice(0, 20),
+                )
               }
               autoFocus
               autoCapitalize="none"
