@@ -53,9 +53,7 @@ export function isProductionEnv(env: NodeJS.ProcessEnv = process.env): boolean {
  * Collect every production-config violation in the given environment.
  * Pure — takes the env explicitly so it is trivially unit-testable.
  */
-export function collectProductionConfigErrors(
-  env: NodeJS.ProcessEnv = process.env,
-): string[] {
+export function collectProductionConfigErrors(env: NodeJS.ProcessEnv = process.env): string[] {
   const errors: string[] = [];
 
   if (env.VOUCHFLOW_USE_MOCK === '1') {
@@ -108,39 +106,27 @@ export function collectProductionConfigErrors(
   // would reject every one of them. ALLOW_VOUCHFLOW_SANDBOX=1 is the
   // explicit operator opt-in acknowledging that deliberate config; the
   // check still fires for anyone who lands on sandbox by accident.
-  if (
-    baseUrl.toLowerCase().includes('sandbox') &&
-    env.ALLOW_VOUCHFLOW_SANDBOX !== '1'
-  ) {
+  if (baseUrl.toLowerCase().includes('sandbox') && env.ALLOW_VOUCHFLOW_SANDBOX !== '1') {
     errors.push(
-      `VOUCHFLOW_BASE_URL points at sandbox (${baseUrl}) — the sandbox ` +
-        'endpoint relaxes the attestation confidence floor to "low". ' +
-        'Use the production Vouchflow endpoint, or set ' +
-        'ALLOW_VOUCHFLOW_SANDBOX=1 to acknowledge a deliberate alpha config.',
+      `VOUCHFLOW_BASE_URL points at sandbox (${baseUrl}) — sandbox is a ` +
+        'separate device-reputation universe from production and its ' +
+        'tokens do not resolve there. Use the production Vouchflow ' +
+        'endpoint, or set ALLOW_VOUCHFLOW_SANDBOX=1 to acknowledge a ' +
+        'deliberate alpha config.',
     );
   }
 
   const minConfidence = env.VOUCHFLOW_MIN_CONFIDENCE;
-  // ALLOW_LOW_CONFIDENCE_TEST=1 is an explicit, operator-acknowledged
-  // exception that permits a `low` floor in production for a bounded
-  // integration test (e.g. enrolling an iOS Simulator, which has no Secure
-  // Enclave and so can never produce App Attest → Vouchflow scores it `low`;
-  // see vouchflow-server#8 for the durable device-scoped fix). It is inert
-  // unless explicitly set, and the runtime logs a loud warning whenever the
-  // floor is non-default. Real (attested) devices are unaffected — they
-  // still score medium/high. Unset it (and VOUCHFLOW_MIN_CONFIDENCE) to
-  // restore the strict floor.
-  const allowLowConfidenceTest = env.ALLOW_LOW_CONFIDENCE_TEST === '1';
-  if (
-    minConfidence &&
-    minConfidence !== 'medium' &&
-    minConfidence !== 'high' &&
-    !(minConfidence === 'low' && allowLowConfidenceTest)
-  ) {
+  // `low` is the product floor (spec §2), matching the vouchflow.dev
+  // dashboard: a device that attests weakly still enrols, and a device
+  // that cannot attest at all takes the email-OTP fallback rather than
+  // dead-ending. Only a value that isn't a confidence level at all is a
+  // config error — a typo would otherwise silently fall through to the
+  // library default.
+  if (minConfidence && !['low', 'medium', 'high'].includes(minConfidence)) {
     errors.push(
-      `VOUCHFLOW_MIN_CONFIDENCE=${minConfidence} is below the production ` +
-        'floor of "medium". Set ALLOW_LOW_CONFIDENCE_TEST=1 to acknowledge ' +
-        'a deliberate, bounded test exception.',
+      `VOUCHFLOW_MIN_CONFIDENCE=${minConfidence} is not a confidence ` +
+        'level. Use "low" (default), "medium", or "high".',
     );
   }
 
@@ -173,9 +159,7 @@ export function collectProductionConfigErrors(
  * Throw `ProductionConfigError` if the process is a production deployment
  * with any unsafe fallback configuration. No-op outside production.
  */
-export function assertProductionConfig(
-  env: NodeJS.ProcessEnv = process.env,
-): void {
+export function assertProductionConfig(env: NodeJS.ProcessEnv = process.env): void {
   if (!isProductionEnv(env)) return;
   const errors = collectProductionConfigErrors(env);
   if (errors.length > 0) {

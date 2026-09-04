@@ -1,6 +1,6 @@
 # App Store listing — App Store Connect answers
 
-The listing *copy* lives in `fastlane/metadata/en-US/` (name, subtitle,
+The listing _copy_ lives in `fastlane/metadata/en-US/` (name, subtitle,
 description, keywords, promo text, URLs, release notes) and is pushed by
 `fastlane ios listing` / `.github/workflows/listing-ios.yml` — the iOS analog
 of the Android `play-listing` flow. Screenshots live in
@@ -43,13 +43,18 @@ prefer to file an annual self-classification report instead, flip the key to
 
 ## App Privacy ("nutrition label") — App Store Connect → App Privacy
 
-Speakeasy is built to collect as little as possible; the privacy policy
-(https://speakeasyapp.xyz/privacy/) states no personal information is
-collected. Recommended answers:
+Speakeasy is built to collect as little as possible. Recommended answers:
 
-- **Data Not Collected** for: Contact Info, Health, Financial, Location,
-  Browsing History, Search History, Contacts, Identifiers→User ID, Purchases,
-  Sensitive Info, and Messages content (E2E — the server only sees ciphertext).
+- **Data Not Collected** for: Health, Financial, Location, Browsing History,
+  Search History, Contacts, Identifiers→User ID, Purchases, Sensitive Info,
+  and Messages content (E2E — the server only sees ciphertext).
+- **Contact Info → Email Address:** declare **App Functionality**, not linked
+  to the user and not used for tracking. It is entered only if device
+  attestation is unavailable, then passed to Vouchflow to deliver a one-time
+  code; Speakeasy does not store it with the handle.
+- **Before resubmission:** update the App Store Connect App Privacy answers to
+  match this declaration. The repository privacy manifest alone is not
+  sufficient.
 - **One nuance to confirm:** the FCM **push token** (a device identifier) is
   sent to the server to route notifications. If you count that as "collected,"
   declare **Identifiers → Device ID**, purpose **App Functionality**, **not**
@@ -92,13 +97,13 @@ seeded test conversations). High-impact set, mirroring the Android shots:
 ## Submission gating (App Store, NOT TestFlight)
 
 - [ ] Screenshots (≥1 at 6.9")
-- [ ] Description / keywords / subtitle / promo  ← `fastlane ios listing`
-- [ ] Privacy policy URL  ← set (`fastlane ios listing`)
-- [ ] App Privacy nutrition label  ← UI (above)
-- [ ] Age rating  ← UI (above)
-- [ ] Export compliance  ← Info.plist (above)
-- [ ] Category  ← `fastlane ios listing`
-- [ ] Pricing  ← UI
+- [ ] Description / keywords / subtitle / promo ← `fastlane ios listing`
+- [ ] Privacy policy URL ← set (`fastlane ios listing`)
+- [ ] App Privacy nutrition label ← UI (above)
+- [ ] Age rating ← UI (above)
+- [ ] Export compliance ← Info.plist (above)
+- [ ] Category ← `fastlane ios listing`
+- [ ] Pricing ← UI
 
 ## Translations
 

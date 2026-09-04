@@ -2,6 +2,7 @@ import type { VouchflowApiClient } from './api-client.js';
 import {
   Confidence,
   meetsMinimumConfidence,
+  MIN_CONFIDENCE,
   Validator,
   ValidatedAttestation,
   VouchflowValidationError,
@@ -14,10 +15,10 @@ export interface VouchflowValidatorOptions {
   /** Reject above this. Default 70. Set to 100 to disable. */
   maxRiskScore?: number;
   /**
-   * Lowest acceptable confidence level. Defaults to `medium` (spec §2).
-   * Set to `low` for sandbox / debug environments where sideloaded APKs
-   * fail Play Integrity / App Attest and only get recorded at `low`.
-   * Production servers must keep the default.
+   * Lowest acceptable confidence level. Defaults to `MIN_CONFIDENCE`
+   * (`low`, spec §2) — the same floor the vouchflow.dev dashboard is
+   * configured with, so a device that attested weakly still enrolls
+   * rather than dead-ending. Raise it per-deployment to tighten.
    */
   minConfidence?: Confidence;
   /**
@@ -42,7 +43,7 @@ const DEFAULT_MAX_RISK = 70;
 
 /**
  * Validates a deviceToken by calling Vouchflow and applying spec §2 gates:
- *   - confidence ≥ medium  (no override)
+ *   - confidence ≥ `minConfidence` (default `low`)
  *   - last verification within `maxVerificationAgeMs`
  *   - risk_score ≤ `maxRiskScore`
  * Anomaly flags are NOT auto-rejecting in Phase 1 — they're surfaced on
@@ -59,7 +60,7 @@ export class VouchflowValidator implements Validator {
   constructor(private readonly opts: VouchflowValidatorOptions) {
     this.maxAgeMs = opts.maxVerificationAgeMs ?? DEFAULT_MAX_AGE_MS;
     this.maxRisk = opts.maxRiskScore ?? DEFAULT_MAX_RISK;
-    this.minConfidence = opts.minConfidence ?? 'medium';
+    this.minConfidence = opts.minConfidence ?? MIN_CONFIDENCE;
     this.hardAnomalyFlags = new Set(opts.hardAnomalyFlags ?? []);
     this.now = opts.now ?? Date.now;
   }

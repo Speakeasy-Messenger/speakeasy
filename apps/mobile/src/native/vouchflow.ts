@@ -99,6 +99,7 @@ export type VouchflowErrorReason =
   | 'biometric_cancelled'
   | 'biometric_failed'
   | 'biometric_unavailable'
+  | 'attestation_unavailable'
   | 'minimum_confidence_unmet'
   | 'network_unavailable'
   | 'enrollment_failed'
@@ -110,7 +111,10 @@ export type VouchflowErrorReason =
   | 'unknown_error';
 
 export class VouchflowClientError extends Error {
-  constructor(public readonly reason: VouchflowErrorReason, message?: string) {
+  constructor(
+    public readonly reason: VouchflowErrorReason,
+    message?: string,
+  ) {
     super(message ?? reason);
     this.name = 'VouchflowClientError';
   }

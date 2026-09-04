@@ -1,5 +1,6 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import {
+  MIN_CONFIDENCE,
   Validator,
   VouchflowApiClient,
   VouchflowValidator,
@@ -46,11 +47,7 @@ import type { GroupRepo } from './db/groups.js';
 import type { CommunityRepo } from './db/communities.js';
 import { attachWebsocket } from './ws/server.js';
 import { InMemoryConnections, type Connections } from './ws/connections.js';
-import {
-  LocalUserNotifier,
-  NoopUserNotifier,
-  type UserNotifier,
-} from './ws/user-notifier.js';
+import { LocalUserNotifier, NoopUserNotifier, type UserNotifier } from './ws/user-notifier.js';
 import { InMemoryPresence } from './presence/memory.js';
 import { RedisPresence } from './presence/redis.js';
 import type { Presence } from './presence/presence.js';
@@ -66,18 +63,12 @@ import { rateLimit } from './ratelimit/middleware.js';
 import { InMemoryAckRouter, type AckRouter } from './ws/ack-router.js';
 import { RedisAckRouter } from './ws/ack-router.redis.js';
 import { RedisUserNotifier } from './ws/user-notifier.redis.js';
-import {
-  createCallOfferBuffer,
-  type CallOfferBuffer,
-} from './ws/call-offer-buffer.js';
+import { createCallOfferBuffer, type CallOfferBuffer } from './ws/call-offer-buffer.js';
 import { createRedisCallOfferBuffer } from './ws/call-offer-buffer.redis.js';
 import { createAckBuffer, type AckBuffer } from './ws/ack-buffer.js';
 import { createRedisAckBuffer } from './ws/ack-buffer.redis.js';
 import { NoopPushProvider, type PushProvider } from './push/push.js';
-import {
-  createMessageRetryQueue,
-  type MessageRetryQueue,
-} from './push/message-retry-queue.js';
+import { createMessageRetryQueue, type MessageRetryQueue } from './push/message-retry-queue.js';
 import { createRedisMessageRetryQueue } from './push/message-retry-queue.redis.js';
 import { startMessageRetryWorker } from './push/message-retry-worker.js';
 import { registerDeliveredRoute } from './routes/delivered.js';
@@ -90,11 +81,7 @@ import { registerFeedbackRoute } from './routes/feedback.js';
 import { registerDiagRoute } from './routes/diag.js';
 import { registerBroadcastRoute } from './routes/broadcast.js';
 import { registerAdminRoutes } from './routes/admin.js';
-import {
-  registerTurnRoutes,
-  turnProviderFromEnv,
-  type TurnProvider,
-} from './routes/turn.js';
+import { registerTurnRoutes, turnProviderFromEnv, type TurnProvider } from './routes/turn.js';
 
 const PORT = Number(process.env.PORT ?? 8080);
 const HOST = process.env.HOST ?? '0.0.0.0';
@@ -158,25 +145,25 @@ function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
   const baseUrl = process.env.VOUCHFLOW_BASE_URL;
   if (!readKey || !baseUrl) {
     throw new Error(
-      'VOUCHFLOW_READ_KEY and VOUCHFLOW_BASE_URL are required. ' +
-        'See apps/api/.env.local.',
+      'VOUCHFLOW_READ_KEY and VOUCHFLOW_BASE_URL are required. ' + 'See apps/api/.env.local.',
     );
   }
   const apiClient = new VouchflowApiClient({ baseUrl, readKey });
   const maxAge = Number(process.env.VOUCHFLOW_MAX_VERIFICATION_AGE_MS) || undefined;
   const maxRisk = Number(process.env.VOUCHFLOW_MAX_RISK_SCORE) || undefined;
-  // Sandbox env relaxes the confidence floor to `low`. Sideloaded debug-
-  // signed APKs fail Play Integrity / App Attest, which makes Vouchflow
-  // record their verifies at `low`. Production must keep the default
-  // `medium` floor — set VOUCHFLOW_MIN_CONFIDENCE explicitly only on
-  // sandbox boxes.
-  const isSandbox = baseUrl.includes('sandbox');
+  // The floor is `low`, matching the vouchflow.dev dashboard's
+  // device-confidence floor. Devices that cannot attest at all (no
+  // Secure Enclave / Play Integrity — an App Store review iPad, a
+  // sideloaded debug-signed APK) never reach even `low` and take the
+  // client-side email-OTP fallback instead; rejecting `low` here only
+  // dead-ended devices that DID attest, just weakly.
+  // VOUCHFLOW_MIN_CONFIDENCE raises the floor per-deployment.
   const envOverride = process.env.VOUCHFLOW_MIN_CONFIDENCE as 'low' | 'medium' | 'high' | undefined;
-  const minConfidence = envOverride ?? (isSandbox ? 'low' : 'medium');
-  if (minConfidence !== 'medium') {
+  const minConfidence = envOverride ?? MIN_CONFIDENCE;
+  if (minConfidence !== MIN_CONFIDENCE) {
     log.warn(
       { minConfidence, baseUrl },
-      'vouchflow validator using non-default minimum confidence — sandbox / debug only',
+      'vouchflow validator using non-default minimum confidence',
     );
   }
   return new VouchflowValidator({
@@ -201,9 +188,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   // can resolve deviceToken→userId when the validator doesn't carry it
   // (real Vouchflow doesn't track our internal id).
   const hasDb = !!process.env.DATABASE_URL;
-  const repo =
-    opts.userRepo ??
-    (hasDb ? new DrizzleUserRepo() : new InMemoryUserRepo());
+  const repo = opts.userRepo ?? (hasDb ? new DrizzleUserRepo() : new InMemoryUserRepo());
   await app.register(vouchflowPlugin, { validator, userRepo: repo });
 
   const limiter = opts.rateLimiter ?? defaultRateLimiter();
@@ -270,7 +255,8 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     users: repo,
   });
   const groups = opts.groupRepo ?? (hasDb ? new DrizzleGroupRepo() : new InMemoryGroupRepo());
-  const communities = opts.communityRepo ?? (hasDb ? new DrizzleCommunityRepo() : new InMemoryCommunityRepo());
+  const communities =
+    opts.communityRepo ?? (hasDb ? new DrizzleCommunityRepo() : new InMemoryCommunityRepo());
   await registerGroupRoutes(app, { repo: groups });
   await registerCommunityRoutes(app, {
     repo: communities,
@@ -279,24 +265,30 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
   });
   // Devices repo is needed for both the push-token route and the WS handler.
   // Resolve it once so both paths share the same instance.
-  const devices = opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
-  const eventLog: EventLogRepo = opts.eventLog ?? (hasDb ? new DrizzleEventLogRepo() : new InMemoryEventLogRepo());
+  const devices =
+    opts.devicesRepo ?? (hasDb ? new DrizzleDevicesRepo() : new InMemoryDevicesRepo());
+  const eventLog: EventLogRepo =
+    opts.eventLog ?? (hasDb ? new DrizzleEventLogRepo() : new InMemoryEventLogRepo());
   // messages + push are resolved here (not only in the WS block) so the
   // @speaker broadcast route can deliver through the same relay + push.
-  const messages = opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
+  const messages =
+    opts.messagesRepo ?? (hasDb ? new DrizzleMessagesRepo() : new InMemoryMessagesRepo());
   const push = opts.push ?? defaultPushProvider(devices, eventLog, app.log);
   // iOS CallKit: direct-APNs VoIP push sender (undefined when the APNs .p8
   // env isn't configured — calls still ring via the regular push + live WS).
   const apnsVoip = apnsVoipFromEnv();
   app.log.info(
-    apnsVoip ? 'APNs VoIP configured — CallKit incoming-call pushes enabled' : 'APNs VoIP not configured — CallKit incoming-call pushes disabled',
+    apnsVoip
+      ? 'APNs VoIP configured — CallKit incoming-call pushes enabled'
+      : 'APNs VoIP not configured — CallKit incoming-call pushes disabled',
   );
   // Deferred from above so we can pass devices + connections for
   // Private Call's `supported_call_kinds` UNION aggregation.
   await registerUserRoutes(app, { repo, devices, connections, deletedHandles });
   await registerDeviceRoutes(app, { devices });
   const abuseReports =
-    opts.abuseReports ?? (hasDb ? new DrizzleAbuseReportsRepo(getDb()) : new InMemoryAbuseReportsRepo());
+    opts.abuseReports ??
+    (hasDb ? new DrizzleAbuseReportsRepo(getDb()) : new InMemoryAbuseReportsRepo());
   await registerAbuseRoutes(app, {
     abuseReports,
     userRepo: repo,
@@ -375,8 +367,7 @@ export async function buildServer(opts: BuildServerOptions = {}): Promise<Fastif
     // on only once v1.0.60+ adoption is high — a fly secret + restart, no
     // redeploy. Injected queue (tests) forces it on regardless of the env.
     const retryEnabled =
-      opts.messageRetryQueue !== undefined ||
-      process.env.PUSH_RETRY_ENABLED === 'true';
+      opts.messageRetryQueue !== undefined || process.env.PUSH_RETRY_ENABLED === 'true';
     const messageRetryQueue = !retryEnabled
       ? undefined
       : (opts.messageRetryQueue ??

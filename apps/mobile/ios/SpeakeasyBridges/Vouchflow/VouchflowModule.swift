@@ -249,7 +249,7 @@ class VouchflowModule: NSObject {
         case .notConfigured:            return ("unknown_error",             "Vouchflow.configure not called")
         case .pinningFailure:           return ("network_unavailable",       "tls pinning failure")
         case .serverError:              return ("unknown_error",             "vouchflow server error")
-        case .attestationUnavailable:   return ("unknown_error",             "device attestation unavailable")
+        case .attestationUnavailable:   return ("attestation_unavailable",   "device attestation unavailable")
         case .keychainAccessDenied:     return ("account_store_access_denied", "keychain access denied")
         case .sessionExpiredRepeatedly: return ("unknown_error",             "session expired")
         // Added in VouchflowSDK 2.3.0. Map explicitly (rather than letting

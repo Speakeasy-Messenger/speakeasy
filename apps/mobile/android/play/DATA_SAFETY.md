@@ -17,10 +17,11 @@ optimistic and wrong.
 
 ### Does your app collect or share any of the required user data types?
 
-**Yes** — Speakeasy collects audio (for calls) and messages (for
-relay between users). Both are end-to-end encrypted; the server
-holds only ciphertext, but Google's definition of "collect" includes
-"transmits off the device for any duration," so we declare it.
+**Yes** — Speakeasy collects audio (for calls), messages (for relay
+between users), and, only when a device cannot attest and the user
+chooses the fallback, an email address for Vouchflow to send a one-time
+code. Google's definition of "collect" includes "transmits off the
+device for any duration," so we declare each of these.
 
 ### Is all of the user data collected by your app encrypted in transit?
 
@@ -34,6 +35,8 @@ holds only ciphertext, but Google's definition of "collect" includes
 - Account metadata (handle, prekey bundles, push tokens): TLS to our
   API. No application-layer encryption because these are public-by-
   definition or device-authentication artifacts.
+- Email address (optional Vouchflow fallback): TLS to Vouchflow solely
+  to deliver a one-time code; it is not stored with the handle.
 
 ### Do you provide a way for users to request that their data be deleted?
 
@@ -58,17 +61,17 @@ Walk the form's data-type checklist. For each category, mark
 
 ### Personal info
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
-| Name | NOT collected | — | Handle is not a real name. |
-| Email address | NOT collected | — | No email at signup. |
-| User IDs | **Collected** (required) | NOT shared | The user-chosen handle (a short lowercase string, 3–20 chars) and the Vouchflow device token. Both are app-internal — neither links to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
-| Address | NOT collected | — | |
-| Phone number | NOT collected | — | Famously not asked. |
-| Race and ethnicity | NOT collected | — | |
-| Political or religious beliefs | NOT collected | — | |
-| Sexual orientation | NOT collected | — | |
-| Other info | NOT collected | — | |
+| Sub-type                       | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                |
+| ------------------------------ | ------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Name                           | NOT collected            | —          | Handle is not a real name.                                                                                                                                                                                                                           |
+| Email address                  | **Collected** (optional) | NOT shared | Entered only when a device cannot attest, then sent to Vouchflow to deliver a one-time code. It is not stored with the handle. **Why collected: account functionality.** Encrypted in transit.                                                       |
+| User IDs                       | **Collected** (required) | NOT shared | The user-chosen handle (a short lowercase string, 3–20 chars) and the Vouchflow device token. Both are app-internal — neither links to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
+| Address                        | NOT collected            | —          |                                                                                                                                                                                                                                                      |
+| Phone number                   | NOT collected            | —          | Famously not asked.                                                                                                                                                                                                                                  |
+| Race and ethnicity             | NOT collected            | —          |                                                                                                                                                                                                                                                      |
+| Political or religious beliefs | NOT collected            | —          |                                                                                                                                                                                                                                                      |
+| Sexual orientation             | NOT collected            | —          |                                                                                                                                                                                                                                                      |
+| Other info                     | NOT collected            | —          |                                                                                                                                                                                                                                                      |
 
 ### Financial info
 
@@ -80,10 +83,10 @@ All sub-types: **NOT collected**.
 
 ### Messages
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
-| Emails | NOT collected | — | |
-| SMS or MMS | NOT collected | — | |
+| Sub-type              | Collected?               | Shared?    | Notes                                                                                                                                                                                                                   |
+| --------------------- | ------------------------ | ---------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Emails                | NOT collected            | —          |                                                                                                                                                                                                                         |
+| SMS or MMS            | NOT collected            | —          |                                                                                                                                                                                                                         |
 | Other in-app messages | **Collected** (required) | NOT shared | Encrypted ciphertext only. The server cannot decrypt. **Why collected: app functionality (message relay between users).** Encrypted in transit AND at rest in the relay buffer. Cleared from the buffer once delivered. |
 
 **Important Data Safety nuance**: Google treats "collected" loosely
@@ -94,23 +97,23 @@ the privacy policy) — that's where the E2E story is told.
 
 ### Photos and videos
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
-| Photos | **Collected** (optional) | NOT shared | When the user attaches a photo to a message. End-to-end encrypted before upload. The server stores only ciphertext blobs and cannot view them. **Why collected: app functionality.** |
-| Videos | **Collected** (optional) | NOT shared | Same as photos. |
+| Sub-type | Collected?               | Shared?    | Notes                                                                                                                                                                                |
+| -------- | ------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------ |
+| Photos   | **Collected** (optional) | NOT shared | When the user attaches a photo to a message. End-to-end encrypted before upload. The server stores only ciphertext blobs and cannot view them. **Why collected: app functionality.** |
+| Videos   | **Collected** (optional) | NOT shared | Same as photos.                                                                                                                                                                      |
 
 ### Audio files
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
-| Voice or sound recordings | **Collected** (optional) | NOT shared | When the user attaches a voice note. E2E encrypted, same as photos. **Why collected: app functionality.** |
-| Music files | NOT collected | — | |
-| Other audio | **Collected** (required for calls) | NOT shared | Live call audio. WebRTC peer-to-peer where possible, TURN-relayed otherwise. SRTP-encrypted end-to-end in both cases. **Why collected: app functionality (Private Calls).** |
+| Sub-type                  | Collected?                         | Shared?    | Notes                                                                                                                                                                       |
+| ------------------------- | ---------------------------------- | ---------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Voice or sound recordings | **Collected** (optional)           | NOT shared | When the user attaches a voice note. E2E encrypted, same as photos. **Why collected: app functionality.**                                                                   |
+| Music files               | NOT collected                      | —          |                                                                                                                                                                             |
+| Other audio               | **Collected** (required for calls) | NOT shared | Live call audio. WebRTC peer-to-peer where possible, TURN-relayed otherwise. SRTP-encrypted end-to-end in both cases. **Why collected: app functionality (Private Calls).** |
 
 ### Files and docs
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
+| Sub-type       | Collected?               | Shared?    | Notes                                                        |
+| -------------- | ------------------------ | ---------- | ------------------------------------------------------------ |
 | Files and docs | **Collected** (optional) | NOT shared | When the user attaches a file. Same E2E treatment as photos. |
 
 ### Calendar
@@ -125,13 +128,13 @@ share sheet, manual entry) — we never ingest the phone's address book.
 
 ### App activity
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
-| App interactions | NOT collected | — | No telemetry on what screens you visit or what features you use. |
-| In-app search history | NOT collected | — | |
-| Installed apps | NOT collected | — | |
-| Other user-generated content | **Already covered** under Messages / Photos / Files. | — | |
-| Other actions | NOT collected | — | |
+| Sub-type                     | Collected?                                           | Shared? | Notes                                                            |
+| ---------------------------- | ---------------------------------------------------- | ------- | ---------------------------------------------------------------- |
+| App interactions             | NOT collected                                        | —       | No telemetry on what screens you visit or what features you use. |
+| In-app search history        | NOT collected                                        | —       |                                                                  |
+| Installed apps               | NOT collected                                        | —       |                                                                  |
+| Other user-generated content | **Already covered** under Messages / Photos / Files. | —       |                                                                  |
+| Other actions                | NOT collected                                        | —       |                                                                  |
 
 ### Web browsing
 
@@ -139,16 +142,16 @@ All sub-types: **NOT collected**.
 
 ### App info and performance
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
-| Crash logs | **Collected** (optional) | NOT shared | Diagnostic crashes when the app crashes — sent to our error reporting (no third-party crash analytics yet). Does NOT include message contents. **Why collected: app functionality (debugging crashes).** |
-| Diagnostics | **Collected** (optional) | NOT shared | The in-app diagnostics buffer (Diagnostics screen) is local-only. Nothing is auto-sent; the user can choose to share it from the screen if they hit an issue. |
-| Other app performance data | NOT collected | — | |
+| Sub-type                   | Collected?               | Shared?    | Notes                                                                                                                                                                                                    |
+| -------------------------- | ------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Crash logs                 | **Collected** (optional) | NOT shared | Diagnostic crashes when the app crashes — sent to our error reporting (no third-party crash analytics yet). Does NOT include message contents. **Why collected: app functionality (debugging crashes).** |
+| Diagnostics                | **Collected** (optional) | NOT shared | The in-app diagnostics buffer (Diagnostics screen) is local-only. Nothing is auto-sent; the user can choose to share it from the screen if they hit an issue.                                            |
+| Other app performance data | NOT collected            | —          |                                                                                                                                                                                                          |
 
 ### Device or other IDs
 
-| Sub-type | Collected? | Shared? | Notes |
-|---|---|---|---|
+| Sub-type            | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                                                 |
+| ------------------- | ------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token — a per-install cryptographic identifier. Required so the server knows which device is connecting; without it, end-to-end encryption setup would have no anchor. **Why collected: account management (authentication).** Encrypted in transit. |
 
 ---
@@ -181,9 +184,11 @@ any future issue if Play tightens URL validation).
 - "Messages and call audio are end-to-end encrypted with the Signal
   Protocol. The server transmits only ciphertext and does not have the
   keys to decrypt user content."
-- "No personal identifiers are collected: no phone number, no email,
-  no real name. The user-chosen handle and the per-device attestation
-  token are the only persistent IDs."
+- "No phone number or real name is collected. If a device cannot
+  attest, an optional email address is sent to Vouchflow solely to
+  deliver a one-time code; it is not stored with the handle. The
+  user-chosen handle and per-device attestation token are the only
+  persistent IDs."
 - "Contacts are not accessed. Users add peers by exchanging handles
   manually, not by ingesting the device address book."
 
