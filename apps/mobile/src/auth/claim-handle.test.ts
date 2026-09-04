@@ -112,6 +112,9 @@ describe('claimWithDeviceAttestation', () => {
     });
     // The lockless device must never reach the biometric prompt.
     expect(deps.vouchflow.verify).not.toHaveBeenCalled();
+    if (result.kind !== 'needs_email_fallback') {
+      throw new Error('Expected email fallback for a device without a lock');
+    }
     await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
     expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
       'reviewer@example.com',
@@ -139,6 +142,9 @@ describe('claimWithDeviceAttestation', () => {
         noLock: false,
       });
       expect(deps.api.enroll).not.toHaveBeenCalled();
+      if (result.kind !== 'needs_email_fallback') {
+        throw new Error('Expected email fallback for an unattestable device');
+      }
       await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
       expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
         'reviewer@example.com',
@@ -203,6 +209,9 @@ describe('claimWithDeviceAttestation', () => {
       reason: 'attestation_unavailable',
       noLock: false,
     });
+    if (result.kind !== 'needs_email_fallback') {
+      throw new Error('Expected email fallback for low server confidence');
+    }
     await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
     expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
       'reviewer@example.com',
