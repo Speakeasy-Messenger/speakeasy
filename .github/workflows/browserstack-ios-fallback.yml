@@ -15,11 +15,6 @@ name: BrowserStack iOS email-fallback harness
 
 on:
   workflow_dispatch:
-  # TEMPORARY bootstrap: workflow_dispatch only works once this file is on
-  # the default branch, and the proving run has to happen before the PR.
-  # Removed before review.
-  push:
-    branches: [fm/ts-speakeasy-fallback-proof]
 
 concurrency:
   group: browserstack-ios-fallback-harness

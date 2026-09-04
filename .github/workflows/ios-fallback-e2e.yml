@@ -129,21 +129,39 @@ jobs:
         id: sim
         run: |
           set -euo pipefail
-          # Closest available stand-in for the review hardware; fall back to
-          # any iPad rather than failing on an image-specific device name.
-          name=$(xcrun simctl list devicetypes -j \
-            | python3 -c 'import json,sys; ts=json.load(sys.stdin)["devicetypes"];
-          ipads=[t for t in ts if "iPad" in t["name"]];
-          air=[t for t in ipads if "Air" in t["name"]];
-          print((air or ipads)[-1]["identifier"])')
-          runtime=$(xcrun simctl list runtimes -j \
-            | python3 -c 'import json,sys; rs=[r for r in json.load(sys.stdin)["runtimes"]
-          if r["isAvailable"] and "iOS" in r["name"]]; print(rs[-1]["identifier"])')
-          udid=$(xcrun simctl create fallback-ipad "$name" "$runtime")
+          # Try pairings until one is accepted. Picking the newest iPad and
+          # the newest runtime independently is what produced "Incompatible
+          # device" (SimError 403) — not every runtime offers every device
+          # type, so the valid pairing has to be discovered, not assumed.
+          # iPad Air first: closest to the review hardware.
+          devicetypes=$(xcrun simctl list devicetypes \
+            | grep -oE 'com\.apple\.CoreSimulator\.SimDeviceType\.iPad[A-Za-z0-9-]*' \
+            | tac)
+          # `|| true` on both: under `set -e` an empty grep result would
+          # abort the substitution rather than just contribute no lines.
+          devicetypes=$(printf '%s\n' "$devicetypes" | grep -i air || true; \
+                        printf '%s\n' "$devicetypes" | grep -iv air || true)
+          runtimes=$(xcrun simctl list runtimes \
+            | grep -oE 'com\.apple\.CoreSimulator\.SimRuntime\.iOS-[0-9-]+' | tac)
+          udid=''
+          for dt in $devicetypes; do
+            for rt in $runtimes; do
+              if udid=$(xcrun simctl create fallback-ipad "$dt" "$rt" 2>/dev/null); then
+                echo "paired ${dt##*.} with ${rt##*.}"
+                break 2
+              fi
+              udid=''
+            done
+          done
+          if [ -z "$udid" ]; then
+            echo "::error::no bootable iPad device-type/runtime pairing on this image"
+            xcrun simctl list devicetypes | grep -i ipad || true
+            xcrun simctl list runtimes || true
+            exit 1
+          fi
           xcrun simctl boot "$udid"
           xcrun simctl bootstatus "$udid" -b
           echo "udid=$udid" >> "$GITHUB_OUTPUT"
-          xcrun simctl list devices | grep "$udid"
 
       - name: Install the app
         run: |
