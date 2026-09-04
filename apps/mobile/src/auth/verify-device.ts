@@ -1,8 +1,4 @@
-import {
-  fallbackReasonFor,
-  VerificationTimeoutError,
-  verifyWithTimeout,
-} from './claim-handle.js';
+import { fallbackReasonFor, VerificationTimeoutError, verifyWithTimeout } from './claim-handle.js';
 import { VouchflowClientError, type VouchflowClient } from '../native/vouchflow.js';
 import { useIdentity } from '../store/identity.js';
 import { useVerifySheet } from '../store/verify-sheet.js';

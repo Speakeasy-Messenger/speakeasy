@@ -204,8 +204,8 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
   /**
    * Request an OTP fallback verification via email.
    *
-   * Maps `reasonStr` to `FallbackReason` enum, falling back to
-   * `BIOMETRIC_FAILED` if null/unrecognised.
+   * Maps `reasonStr` to `FallbackReason`; a missing value defaults to
+   * `BIOMETRIC_FAILED`, while an unrecognised value rejects the request.
    */
   @ReactMethod
   fun requestFallback(email: String, reasonStr: String?, promise: Promise) {

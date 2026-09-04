@@ -127,9 +127,9 @@ Google's reviewer sees:
 **What is NOT collected** (and where competitors often get this wrong):
 phone number, real name, location (precise or coarse), contacts, calendar,
 web browsing, in-app interactions, installed apps, advertising ID. Email is
-collected only when the user chooses the Vouchflow fallback for a device that
-cannot attest; it is used to deliver the one-time code and is not stored with
-the handle.
+collected only when the user chooses the Vouchflow fallback after a
+device-verification flow cannot complete; it is used to deliver the one-time
+code and is not stored with the handle.
 
 **Nothing is shared** — every "Shared?" column is "No."
 

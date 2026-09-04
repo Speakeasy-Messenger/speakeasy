@@ -18,10 +18,11 @@ optimistic and wrong.
 ### Does your app collect or share any of the required user data types?
 
 **Yes** — Speakeasy collects audio (for calls), messages (for relay
-between users), and, only when a device cannot attest and the user
-chooses the fallback, an email address for Vouchflow to send a one-time
-code. Google's definition of "collect" includes "transmits off the
-device for any duration," so we declare each of these.
+between users), and, only when a device-verification flow cannot
+complete and the user chooses the fallback, an email address for
+Vouchflow to send a one-time code. Google's definition of "collect"
+includes "transmits off the device for any duration," so we declare
+each of these.
 
 ### Is all of the user data collected by your app encrypted in transit?
 
@@ -64,7 +65,7 @@ Walk the form's data-type checklist. For each category, mark
 | Sub-type                       | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                |
 | ------------------------------ | ------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name                           | NOT collected            | —          | Handle is not a real name.                                                                                                                                                                                                                           |
-| Email address                  | **Collected** (optional) | NOT shared | Entered only when a device cannot attest, then sent to Vouchflow to deliver a one-time code. It is not stored with the handle. **Why collected: account functionality.** Encrypted in transit.                                                       |
+| Email address                  | **Collected** (optional) | NOT shared | Entered only when a device-verification flow cannot complete, then sent to Vouchflow to deliver a one-time code. It is not stored with the handle. **Why collected: account functionality.** Encrypted in transit.                                   |
 | User IDs                       | **Collected** (required) | NOT shared | The user-chosen handle (a short lowercase string, 3–20 chars) and the Vouchflow device token. Both are app-internal — neither links to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
 | Address                        | NOT collected            | —          |                                                                                                                                                                                                                                                      |
 | Phone number                   | NOT collected            | —          | Famously not asked.                                                                                                                                                                                                                                  |

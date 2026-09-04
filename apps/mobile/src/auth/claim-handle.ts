@@ -21,11 +21,12 @@ import { diag } from '../diag/log.js';
  *      `low` confidence floor (matching the vouchflow.dev dashboard
  *      floor and the server's validator) mints the deviceToken.
  *   2. Email OTP fallback — Vouchflow SDK 2.0.0's own fallback tier
- *      (`requestFallback` / `submitFallbackOtp`). Only offered when the
- *      device cannot attest at all: no secure lock, or a verify() that
- *      failed even at `low` (the un-attestable review iPad). Email is
- *      never required for a device that can attest — Speakeasy stays
- *      anonymous by default.
+ *      (`requestFallback` / `submitFallbackOtp`). Offered when the
+ *      normal device-verification or enrollment path cannot complete:
+ *      no secure lock, a verify() failure even at `low` (the
+ *      un-attestable review iPad), or a non-handle enrollment failure.
+ *      Email is never required and is not attached to the handle, so
+ *      Speakeasy stays anonymous by default.
  */
 
 const PREKEY_BATCH_SIZE = 100;
@@ -76,10 +77,11 @@ export interface ClaimedIdentity {
 export type ClaimResult =
   | ({ kind: 'claimed' } & ClaimedIdentity)
   /**
-   * This device can't attest. The caller offers the email fallback
-   * instead of dead-ending; `reason` is forwarded to `requestFallback`
-   * so Vouchflow records why the fallback was used, and `noLock` says
-   * whether a "Set up screen lock" affordance is also worth showing.
+   * The normal device-verification path cannot complete. The caller
+   * offers the email fallback instead of dead-ending; `reason` is
+   * forwarded to `requestFallback` so Vouchflow records why the
+   * fallback was used, and `noLock` says whether a "Set up screen lock"
+   * affordance is also worth showing.
    */
   | { kind: 'needs_email_fallback'; reason: FallbackReason; noLock: boolean };
 
@@ -162,11 +164,11 @@ export async function enrollHandle(
 /**
  * The default path: attest the device, then enroll.
  *
- * Returns `needs_email_fallback` — never throws — for the two ways a
- * device can turn out to be un-attestable: no secure lock at all, or a
- * verify()/enroll that failed even at the `low` floor. Every other
- * failure (taken handle, cancelled prompt, network, identity-key gen)
- * throws so the caller can keep its existing error mapping.
+ * Returns `needs_email_fallback` — never throws — when the normal
+ * device-verification or enrollment path cannot complete: no secure
+ * lock, or a verify()/enroll failure even at the `low` floor. Every
+ * other failure (taken handle, cancelled prompt, network, identity-key
+ * gen) throws so the caller can keep its existing error mapping.
  */
 export async function claimWithDeviceAttestation(
   deps: ClaimDeps,
@@ -210,7 +212,11 @@ export async function claimWithDeviceAttestation(
         diag('onboarding', 'unmapped attestation error — offering email fallback', {
           reason: err.reason,
         });
-        return { kind: 'needs_email_fallback', reason: fallbackReasonFor(err.reason), noLock: false };
+        return {
+          kind: 'needs_email_fallback',
+          reason: fallbackReasonFor(err.reason),
+          noLock: false,
+        };
       }
     }
     throw err;
@@ -227,7 +233,11 @@ export async function claimWithDeviceAttestation(
     // enroll failure — means this device+token pair can't complete
     // enrollment, so offer the fallback rather than a retry-only dead
     // end.
-    if (err instanceof ApiError && err.status === 409 && (err.code === 'taken' || err.code === 'reserved')) {
+    if (
+      err instanceof ApiError &&
+      err.status === 409 &&
+      (err.code === 'taken' || err.code === 'reserved')
+    ) {
       throw err;
     }
     if (err instanceof ApiError) {

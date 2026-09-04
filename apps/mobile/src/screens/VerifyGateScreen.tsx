@@ -23,14 +23,7 @@ import {
 } from '../auth/claim-handle.js';
 import { EmailVerifyFallback } from '../components/EmailVerifyFallback.js';
 import { VouchflowClientError, type FallbackReason } from '../native/vouchflow.js';
-import {
-  accent,
-  brand,
-  font,
-  motion,
-  type as typeScale,
-  workspace,
-} from '../theme/tokens.js';
+import { accent, brand, font, motion, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 import { diag } from '../diag/log.js';
 
@@ -72,8 +65,7 @@ import { diag } from '../diag/log.js';
 export function VerifyGateScreen(): React.ReactElement {
   const userId = useIdentity((s) => s.userId);
   const profile = useProfiles((s) => s.byUserId[userId ?? '']);
-  const animalId =
-    profile?.selectedAvatarId ?? defaultAnimalForUser(userId ?? '');
+  const animalId = profile?.selectedAvatarId ?? defaultAnimalForUser(userId ?? '');
 
   const [verifying, setVerifying] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | undefined>(undefined);
@@ -146,12 +138,7 @@ export function VerifyGateScreen(): React.ReactElement {
         style={styles.flex}
       >
         <View style={styles.body}>
-          <Animated.View
-            style={[
-              styles.stack,
-              { opacity: reveal, transform: [{ translateY }] },
-            ]}
-          >
+          <Animated.View style={[styles.stack, { opacity: reveal, transform: [{ translateY }] }]}>
             <Text style={styles.eyebrow}>WELCOME BACK</Text>
 
             <View style={styles.portraitTile}>

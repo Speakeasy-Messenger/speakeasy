@@ -24,8 +24,7 @@ import { font, space, type as typeScale } from '../theme/tokens.js';
  */
 
 export type EmailVerifyFallbackStep =
-  | { kind: 'email' }
-  | { kind: 'otp'; sessionId: string; email: string };
+  { kind: 'email' } | { kind: 'otp'; sessionId: string; email: string };
 
 export interface EmailVerifyFallbackButtonProps {
   step: 'email' | 'otp';

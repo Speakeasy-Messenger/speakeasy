@@ -1,5 +1,13 @@
 import React, { useEffect, useState } from 'react';
-import { KeyboardAvoidingView, Modal, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
@@ -69,10 +77,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
       onRequestClose={cancel}
       statusBarTranslucent
     >
-      <Pressable
-        style={[styles.scrim, { backgroundColor: scrim.modal }]}
-        onPress={cancel}
-      />
+      <Pressable style={[styles.scrim, { backgroundColor: scrim.modal }]} onPress={cancel} />
       {/* The fallback's email/OTP inputs need the sheet to rise above
           the keyboard — the confirm-only sheet never needed this. */}
       <KeyboardAvoidingView
@@ -148,9 +153,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
                   ]}
                   testID="verify-device-cancel"
                 >
-                  <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>
-                    Not now
-                  </Text>
+                  <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>Not now</Text>
                 </Pressable>
                 <Pressable
                   onPress={onContinue}

@@ -7,7 +7,11 @@ import { EmailVerifyFallback } from '../../components/EmailVerifyFallback.js';
 import { isDeviceSecure, openSecuritySettings } from '../../native/lock-screen.js';
 import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
-import { VouchflowClientError, type FallbackReason, type VouchflowErrorReason } from '../../native/vouchflow.js';
+import {
+  VouchflowClientError,
+  type FallbackReason,
+  type VouchflowErrorReason,
+} from '../../native/vouchflow.js';
 import {
   claimWithDeviceAttestation,
   completeEmailFallbackClaim,
@@ -29,10 +33,11 @@ import { diag } from '../../diag/log.js';
  *
  * On accept: vouchflow.verify (biometric) → api.enroll → returns the
  * server-assigned userId + deviceToken to the parent for step 04.
- * Devices that cannot attest at all (no screen lock, or an
- * un-attestable device) are offered Vouchflow's email-OTP fallback
- * instead of an error — see `auth/claim-handle.ts`, which owns both
- * paths so they stay testable outside a React renderer.
+ * Devices that cannot complete the normal verification path (no screen
+ * lock, an un-attestable device, or an enrollment failure) are offered
+ * Vouchflow's email-OTP fallback instead of an error — see
+ * `auth/claim-handle.ts`, which owns both paths so they stay testable
+ * outside a React renderer.
  */
 
 const deps: ClaimDeps = { api, signalProtocol, vouchflow, isDeviceSecure };
@@ -62,9 +67,9 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
   // device is otherwise capable. Shown alongside the email fallback,
   // never instead of it.
   const [needsLock, setNeedsLock] = useState(false);
-  // Set once `claimWithDeviceAttestation` reports the device can't
-  // attest — the email fallback (`EmailVerifyFallback`) takes over from
-  // there; see `handleEmailVerified`.
+  // Set once the normal verification path cannot complete — the email
+  // fallback (`EmailVerifyFallback`) takes over from there; see
+  // `handleEmailVerified`.
   const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>();
 
   const tokenRef = useRef(0);
@@ -136,9 +141,10 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     try {
       const result = await claimWithDeviceAttestation(deps, handle);
       if (result.kind === 'needs_email_fallback') {
-        // Not a dead end: this device can't attest, so offer the email
-        // code instead. A lockless device also gets the "Set up screen
-        // lock" deep link, which is the better fix when it applies.
+        // Not a dead end: the normal verification path could not
+        // complete, so offer the email code instead. A lockless device
+        // also gets the "Set up screen lock" deep link, which is the
+        // better fix when it applies.
         setNeedsLock(result.noLock);
         setError(result.noLock ? VERIFY_SETUP_HELP : VERIFY_DEVICE_HELP);
         setFallbackReason(result.reason);

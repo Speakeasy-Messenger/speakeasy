@@ -387,7 +387,10 @@ describe('completeEmailFallbackVerification', () => {
       otp: '123456',
       context: 'login',
     });
-    expect(deps.vouchflow.verify).toHaveBeenCalledWith({ context: 'login', minimumConfidence: 'low' });
+    expect(deps.vouchflow.verify).toHaveBeenCalledWith({
+      context: 'login',
+      minimumConfidence: 'low',
+    });
     expect(result).toEqual({ deviceToken: 'dvt_new' });
   });
 
@@ -429,7 +432,11 @@ describe('completeEmailFallbackVerification', () => {
       },
     });
     await expect(
-      completeEmailFallbackVerification(deps, { sessionId: 'fbs_1', otp: '000000', context: 'login' }),
+      completeEmailFallbackVerification(deps, {
+        sessionId: 'fbs_1',
+        otp: '000000',
+        context: 'login',
+      }),
     ).rejects.toBeInstanceOf(EmailFallbackError);
   });
 });
