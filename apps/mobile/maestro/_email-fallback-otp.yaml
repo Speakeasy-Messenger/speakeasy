@@ -1,0 +1,46 @@
+# Shared sub-flow: submit the emailed code and assert the enrollment it
+# unlocks. Split out of `13-email-fallback-enroll-ios.yaml` so the
+# unattended part of that flow can run without a code, and so any future
+# harness that CAN read an inbox reuses the same assertions.
+#
+# This sub-flow is the actual proof obligation. `submitFallbackOtp`
+# returns no device token of its own — `completeEmailFallbackClaim`
+# (src/auth/claim-handle.ts) reads the SDK's cached token, and only falls
+# back to a second `verify()` if there is none. Landing on the face step
+# is what proves that read produced a token the Speakeasy API accepted:
+# `api.enroll` is the only thing between the code screen and step 04.
+#
+# Pre-conditions:
+#   - onboarding-fallback-otp is on screen (waypoint B passed).
+#   - FALLBACK_OTP holds a code that is still inside its 5-minute window.
+
+appId: xyz.speakeasyapp.app
+---
+- tapOn:
+    id: 'onboarding-fallback-otp'
+- inputText: ${FALLBACK_OTP}
+- hideKeyboard
+- tapOn:
+    id: 'onboarding-fallback-verify'
+
+# Step 04 (Face) is the next onboarding screen. Reaching it means
+# api.enroll returned a user id — the server resolved the device token
+# through GET /v1/device/{token}/reputation and it passed the confidence,
+# freshness and risk gates in packages/vouchflow/src/validator.ts.
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-face-fox'
+    timeout: 60000
+- takeScreenshot: 04-enrolled-face-step
+
+# Carry it one screen further so the evidence shows a usable session
+# rather than a single lucky frame.
+- tapOn:
+    id: 'onboarding-face-fox'
+- tapOn:
+    id: 'onboarding-face-confirm'
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-permissions-continue'
+    timeout: 30000
+- takeScreenshot: 05-past-face-step
