@@ -14,6 +14,12 @@ import { vouchflow } from '../services.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
 import {
+  completeEmailFallbackVerification,
+  fallbackReasonFor,
+} from '../auth/claim-handle.js';
+import { EmailVerifyFallback } from '../components/EmailVerifyFallback.js';
+import { VouchflowClientError, type FallbackReason } from '../native/vouchflow.js';
+import {
   accent,
   brand,
   font,
@@ -51,7 +57,13 @@ import { diag } from '../diag/log.js';
  * "welcome back" rather than "authenticate." Single primary action.
  * Tap → vouchflow.verify directly (no sheet — the screen itself is
  * the explanation). On success, setDeviceToken flips the router
- * condition and the gate unmounts. On failure, retry inline.
+ * condition and the gate unmounts.
+ *
+ * On failure — including a passkey-less device, which is the whole
+ * point of this fix — offers the same email-send + code-entry fallback
+ * onboarding uses (`EmailVerifyFallback`) instead of a retry-only dead
+ * end. Completing it sets the device token exactly as the passkey path
+ * does, so the gate unmounts the same way.
  */
 export function VerifyGateScreen(): React.ReactElement {
   const userId = useIdentity((s) => s.userId);
@@ -61,6 +73,10 @@ export function VerifyGateScreen(): React.ReactElement {
 
   const [verifying, setVerifying] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | undefined>(undefined);
+  // Set once the passkey attempt fails — offers the email fallback
+  // instead of a retry-only dead end. `undefined` means "still on the
+  // passkey step."
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>(undefined);
 
   const reveal = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -81,20 +97,34 @@ export function VerifyGateScreen(): React.ReactElement {
     setErrorCopy(undefined);
     setVerifying(true);
     try {
-      const r = await vouchflow.verify({ context: 'login' });
+      // `low` matches the floor onboarding and the server's validator
+      // already accept — see `auth/claim-handle.ts`.
+      const r = await vouchflow.verify({ context: 'login', minimumConfidence: 'low' });
       // setDeviceToken flips the router condition; the gate unmounts
       // on the next render. No explicit navigation needed.
       useIdentity.getState().setDeviceToken(r.deviceToken);
       diag('app', 'verify gate: success', { userId });
     } catch (err) {
       diag('app', 'verify gate: failed', { userId, err: String(err) });
-      setErrorCopy(
-        "Couldn't verify. Try again — make sure your screen lock is set up.",
-      );
+      // No-passkey or any other failed verify: never dead-end into a
+      // retry-only screen — offer the email fallback instead.
+      setErrorCopy("Couldn't verify with a passkey. Verify by email instead.");
+      setFallbackReason(err instanceof VouchflowClientError ? fallbackReasonFor(err.reason) : 'sdk_error');
     } finally {
       setVerifying(false);
     }
   };
+
+  /** The fallback's final step — resolves the token exactly as the
+   * passkey path does, no `enroll` (the account already exists). */
+  async function handleEmailVerified(args: { sessionId: string; otp: string }): Promise<void> {
+    const { deviceToken } = await completeEmailFallbackVerification(
+      { vouchflow },
+      { sessionId: args.sessionId, otp: args.otp, context: 'login' },
+    );
+    useIdentity.getState().setDeviceToken(deviceToken);
+    diag('app', 'verify gate: success via email fallback', { userId });
+  }
 
   return (
     <SafeAreaView testID="verify-gate-screen" style={styles.root}>
@@ -133,21 +163,47 @@ export function VerifyGateScreen(): React.ReactElement {
               {errorCopy}
             </Text>
           ) : null}
+
+          {fallbackReason !== undefined ? (
+            <View style={styles.fallbackBlock}>
+              <EmailVerifyFallback
+                reason={fallbackReason}
+                vouchflow={vouchflow}
+                onSubmit={handleEmailVerified}
+                colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
+                testIDPrefix="verify-gate-fallback"
+                renderButton={(btn) => (
+                  <Pressable
+                    onPress={btn.onPress}
+                    disabled={btn.disabled}
+                    style={[styles.btnPrimary, btn.disabled && styles.btnPrimaryDisabled]}
+                    testID={btn.testID}
+                  >
+                    <Text style={styles.btnPrimaryText}>
+                      {btn.loading ? 'Verifying…' : btn.label}
+                    </Text>
+                  </Pressable>
+                )}
+              />
+            </View>
+          ) : null}
         </Animated.View>
       </View>
 
-      <View style={styles.actions}>
-        <Pressable
-          onPress={onVerify}
-          disabled={verifying}
-          style={[styles.btnPrimary, verifying && styles.btnPrimaryDisabled]}
-          testID="verify-gate-continue"
-        >
-          <Text style={styles.btnPrimaryText}>
-            {verifying ? 'Verifying…' : 'Verify this device'}
-          </Text>
-        </Pressable>
-      </View>
+      {fallbackReason === undefined ? (
+        <View style={styles.actions}>
+          <Pressable
+            onPress={onVerify}
+            disabled={verifying}
+            style={[styles.btnPrimary, verifying && styles.btnPrimaryDisabled]}
+            testID="verify-gate-continue"
+          >
+            <Text style={styles.btnPrimaryText}>
+              {verifying ? 'Verifying…' : 'Verify this device'}
+            </Text>
+          </Pressable>
+        </View>
+      ) : null}
     </SafeAreaView>
   );
 }
@@ -199,6 +255,10 @@ const styles = StyleSheet.create({
     fontFamily: font.medium,
     color: BONE,
   },
+  // `stack` centers its children, so a plain child would shrink-wrap
+  // its TextInput instead of filling the available width — stretch
+  // opts this block back into the default column-fill behavior.
+  fallbackBlock: { alignSelf: 'stretch', marginTop: space.md },
   copyHint: {
     fontFamily: font.regular,
     fontSize: 13,

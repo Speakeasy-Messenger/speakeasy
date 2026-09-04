@@ -1,6 +1,7 @@
 import type { ApiClient } from '../api/client.js';
 import { ApiError } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
+import type { VerificationContext } from '@speakeasy/vouchflow';
 import type { FallbackReason, VouchflowClient, VouchflowErrorReason } from '../native/vouchflow.js';
 import { VouchflowClientError } from '../native/vouchflow.js';
 import { diag } from '../diag/log.js';
@@ -8,7 +9,11 @@ import { diag } from '../diag/log.js';
 /**
  * Onboarding claim orchestration, split out of `HandleStep.tsx` so the
  * attestation path, the email fallback, and the enroll they share are
- * unit-testable without a React renderer.
+ * unit-testable without a React renderer. `fallbackReasonFor` and
+ * `completeEmailFallbackVerification` are also reused by the returning-
+ * user surfaces (`VerifyGateScreen`, `VerifyDeviceSheet` via
+ * `auth/verify-device.ts`) — every device-verification surface offers
+ * the same email path rather than dead-ending.
  *
  * Two ways to reach `api.enroll`:
  *
@@ -80,6 +85,31 @@ const FALLBACK_ELIGIBLE: Partial<Record<VouchflowErrorReason, FallbackReason>> =
 };
 
 /**
+ * Retryable on the same device — never routes to the email fallback.
+ * A cancelled or failed biometric prompt can be re-shown, and a flaky
+ * network is a retry, not an un-attestable device. Every OTHER
+ * `VouchflowErrorReason` (including ones Vouchflow adds later) is
+ * "unmapped" and falls through to the email fallback via
+ * `fallbackReasonFor` rather than dead-ending.
+ */
+const RETRY_ONLY: ReadonlySet<VouchflowErrorReason> = new Set([
+  'biometric_cancelled',
+  'biometric_failed',
+  'network_unavailable',
+]);
+
+/**
+ * Maps any Vouchflow SDK failure reason to the `FallbackReason`
+ * forwarded to `requestFallback()`. Total (unlike `FALLBACK_ELIGIBLE`):
+ * reasons with no dedicated mapping still resolve to `'sdk_error'` so
+ * an unrecognized/unmapped SDK error can still offer the email path
+ * instead of a retry-only dead end.
+ */
+export function fallbackReasonFor(reason: VouchflowErrorReason): FallbackReason {
+  return FALLBACK_ELIGIBLE[reason] ?? 'sdk_error';
+}
+
+/**
  * Generate the Signal identity + prekey bundle and enroll `handle`
  * against `deviceToken`. Shared by both claim paths.
  *
@@ -145,9 +175,14 @@ export async function claimWithDeviceAttestation(
     deviceToken = verifyResult.deviceToken;
   } catch (err) {
     if (err instanceof VerificationTimeoutError) {
-      diag('onboarding', 'attestation timed out — retry required', {
+      // A wedged biometric sheet is exactly as un-attestable as an
+      // explicit SDK error from the device's perspective — offer the
+      // fallback instead of a retry-only dead end (the likely App
+      // Store reviewer failure on a lock-less test device).
+      diag('onboarding', 'attestation timed out — offering email fallback', {
         timeoutMs: VERIFY_TIMEOUT_MS,
       });
+      return { kind: 'needs_email_fallback', reason: 'attestation_timeout', noLock: false };
     }
     if (err instanceof VouchflowClientError) {
       const reason = FALLBACK_ELIGIBLE[err.reason];
@@ -157,6 +192,12 @@ export async function claimWithDeviceAttestation(
         });
         return { kind: 'needs_email_fallback', reason, noLock: false };
       }
+      if (!RETRY_ONLY.has(err.reason)) {
+        diag('onboarding', 'unmapped attestation error — offering email fallback', {
+          reason: err.reason,
+        });
+        return { kind: 'needs_email_fallback', reason: fallbackReasonFor(err.reason), noLock: false };
+      }
     }
     throw err;
   }
@@ -165,16 +206,19 @@ export async function claimWithDeviceAttestation(
     const claimed = await enrollHandle(deps, { handle, deviceToken });
     return { kind: 'claimed', ...claimed };
   } catch (err) {
-    // The server validates the deviceToken itself. `low_confidence`
-    // should no longer fire (the floor is `low` on both sides), but a
-    // device the server can't resolve at all is un-attestable in exactly
-    // the same way — offer the fallback rather than dead-ending.
-    if (
-      err instanceof ApiError &&
-      err.status === 401 &&
-      (err.code === 'low_confidence' || err.code === 'device_not_found')
-    ) {
-      diag('onboarding', 'server rejected attestation — offering email fallback', {
+    // Handle conflicts are the one enroll failure the user can fix
+    // themselves (pick another handle) — never switch to email for
+    // those. Everything else — the server rejecting the token as
+    // `low_confidence`/`device_not_found`, or any other unmapped
+    // enroll failure — means this device+token pair can't complete
+    // enrollment, so offer the fallback rather than a retry-only dead
+    // end.
+    if (err instanceof ApiError && err.status === 409 && (err.code === 'taken' || err.code === 'reserved')) {
+      throw err;
+    }
+    if (err instanceof ApiError) {
+      diag('onboarding', 'enroll failed — offering email fallback', {
+        status: err.status,
         code: err.code,
       });
       return {
@@ -222,19 +266,23 @@ export async function startEmailFallback(
 }
 
 /**
- * Submit the emailed code and enroll `handle` with the device token the
- * verified fallback session unlocks.
+ * Submit the emailed code and resolve the device token the verified
+ * fallback session unlocks — the piece shared by every surface that
+ * offers the email path (onboarding claims a handle with it; the
+ * returning-user verify-gate and monthly re-verify sheet just need the
+ * token itself).
  *
  * `FallbackVerificationResult` carries no deviceToken — the session it
  * verifies is what mints one. Read the SDK's cached token first (no
  * biometric, no attestation, which is the whole point of the fallback);
  * if the SDK hasn't cached one yet, ask verify() for it now that the
- * session is fallback-verified.
+ * session is fallback-verified, at the same `low` floor the fallback
+ * itself satisfies.
  */
-export async function completeEmailFallbackClaim(
-  deps: ClaimDeps,
-  args: { handle: string; sessionId: string; otp: string },
-): Promise<ClaimedIdentity> {
+export async function completeEmailFallbackVerification(
+  deps: Pick<ClaimDeps, 'vouchflow'>,
+  args: { sessionId: string; otp: string; context: VerificationContext },
+): Promise<{ deviceToken: string }> {
   const result = await deps.vouchflow.submitFallbackOtp(args.sessionId, args.otp.trim());
   if (!result.verified) {
     throw new EmailFallbackError('otp_rejected');
@@ -244,7 +292,7 @@ export async function completeEmailFallbackClaim(
   if (!deviceToken) {
     try {
       const verified = await deps.vouchflow.verify({
-        context: 'signup',
+        context: args.context,
         minimumConfidence: 'low',
       });
       deviceToken = verified.deviceToken;
@@ -259,5 +307,21 @@ export async function completeEmailFallbackClaim(
     }
   }
 
+  return { deviceToken };
+}
+
+/**
+ * Onboarding's flavor of the above: also enrolls `handle` with the
+ * resolved token, exactly as the attestation path does.
+ */
+export async function completeEmailFallbackClaim(
+  deps: ClaimDeps,
+  args: { handle: string; sessionId: string; otp: string },
+): Promise<ClaimedIdentity> {
+  const { deviceToken } = await completeEmailFallbackVerification(deps, {
+    sessionId: args.sessionId,
+    otp: args.otp,
+    context: 'signup',
+  });
   return enrollHandle(deps, { handle: args.handle, deviceToken });
 }

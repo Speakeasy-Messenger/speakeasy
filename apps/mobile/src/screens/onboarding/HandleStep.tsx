@@ -3,21 +3,16 @@ import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } fro
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../../components/Button.js';
+import { EmailVerifyFallback } from '../../components/EmailVerifyFallback.js';
 import { isDeviceSecure, openSecuritySettings } from '../../native/lock-screen.js';
 import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
-import {
-  VouchflowClientError,
-  type FallbackReason,
-  type VouchflowErrorReason,
-} from '../../native/vouchflow.js';
+import { VouchflowClientError, type FallbackReason, type VouchflowErrorReason } from '../../native/vouchflow.js';
 import {
   claimWithDeviceAttestation,
   completeEmailFallbackClaim,
   EmailFallbackError,
-  startEmailFallback,
   type ClaimDeps,
-  VerificationTimeoutError,
 } from '../../auth/claim-handle.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
@@ -41,12 +36,6 @@ import { diag } from '../../diag/log.js';
  */
 
 const deps: ClaimDeps = { api, signalProtocol, vouchflow, isDeviceSecure };
-
-/** Where the email fallback is in its two-step (address → code) flow. */
-type FallbackState =
-  | { kind: 'none' }
-  | { kind: 'email'; reason: FallbackReason }
-  | { kind: 'otp'; sessionId: string; email: string };
 
 export type AvailabilityState =
   | { kind: 'idle' }
@@ -73,9 +62,10 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
   // device is otherwise capable. Shown alongside the email fallback,
   // never instead of it.
   const [needsLock, setNeedsLock] = useState(false);
-  const [fallback, setFallback] = useState<FallbackState>({ kind: 'none' });
-  const [email, setEmail] = useState('');
-  const [otp, setOtp] = useState('');
+  // Set once `claimWithDeviceAttestation` reports the device can't
+  // attest — the email fallback (`EmailVerifyFallback`) takes over from
+  // there; see `handleEmailVerified`.
+  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>();
 
   const tokenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -142,7 +132,7 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     setBusy(true);
     setError(undefined);
     setNeedsLock(false);
-    setFallback({ kind: 'none' });
+    setFallbackReason(undefined);
     try {
       const result = await claimWithDeviceAttestation(deps, handle);
       if (result.kind === 'needs_email_fallback') {
@@ -151,7 +141,7 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
         // lock" deep link, which is the better fix when it applies.
         setNeedsLock(result.noLock);
         setError(result.noLock ? VERIFY_SETUP_HELP : VERIFY_DEVICE_HELP);
-        setFallback({ kind: 'email', reason: result.reason });
+        setFallbackReason(result.reason);
         return;
       }
       // Push token registration is intentionally NOT done here.
@@ -177,54 +167,24 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     }
   }
 
-  /** Step 1 of the fallback: ask Vouchflow to email a one-time code. */
-  async function handleRequestCode() {
-    if (fallback.kind !== 'email') return;
-    setBusy(true);
-    setError(undefined);
-    try {
-      const { sessionId } = await startEmailFallback(deps, {
-        email,
-        reason: fallback.reason,
-      });
-      setOtp('');
-      setFallback({ kind: 'otp', sessionId, email: email.trim() });
-    } catch (err: unknown) {
-      if (err instanceof EmailFallbackError && err.reason === 'invalid_email') {
-        setError('That does not look like an email address.');
-      } else {
-        reportClaimFailure(err);
-      }
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  /** Step 2 of the fallback: submit the code, then enroll exactly as the
-   * attestation path does. */
-  async function handleSubmitCode() {
-    if (fallback.kind !== 'otp') return;
-    setBusy(true);
-    setError(undefined);
+  /** The fallback's final step: submit the code, then enroll exactly as
+   * the attestation path does. `EmailFallbackError` is rethrown so
+   * `EmailVerifyFallback` shows its own inline retry message; anything
+   * else also goes through `reportClaimFailure` for the screen's usual
+   * error handling (e.g. a `taken` handle race). */
+  async function handleEmailVerified(args: { sessionId: string; otp: string }) {
     try {
       const claimed = await completeEmailFallbackClaim(deps, {
         handle,
-        sessionId: fallback.sessionId,
-        otp,
+        sessionId: args.sessionId,
+        otp: args.otp,
       });
       onClaimed(claimed);
     } catch (err: unknown) {
-      if (err instanceof EmailFallbackError) {
-        setError(
-          err.reason === 'otp_rejected'
-            ? 'That code did not match. Check the email and try again.'
-            : VERIFY_DEVICE_HELP,
-        );
-      } else {
+      if (!(err instanceof EmailFallbackError)) {
         reportClaimFailure(err);
       }
-    } finally {
-      setBusy(false);
+      throw err;
     }
   }
 
@@ -236,9 +196,7 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     });
     const msg = err instanceof Error ? err.message : String(err);
     const name = err instanceof Error ? err.name : 'Error';
-    if (err instanceof VerificationTimeoutError) {
-      setError('Device verification took too long. Tap "This one\'s mine" to try again.');
-    } else if (err instanceof VouchflowClientError) {
+    if (err instanceof VouchflowClientError) {
       const detail = err.message && err.message !== err.reason ? ` — ${err.message}` : '';
       setError(`${messageForVouchflowError(err.reason)} [${err.reason}]${detail}`);
     } else if (err instanceof SignalClientError) {
@@ -250,7 +208,7 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
       // empty + reset focus so the user types again.
       setAvailability({ kind: 'idle' });
       setHandle('');
-      setFallback({ kind: 'none' });
+      setFallbackReason(undefined);
       setError('Someone else just took that one.');
       inputRef.current?.focus();
     } else if (err instanceof ApiError && err.status === 409 && err.code === 'reserved') {
@@ -324,40 +282,25 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
               {error}
             </Text>
           ) : null}
-          {fallback.kind !== 'none' ? (
+          {fallbackReason !== undefined ? (
             <View style={styles.fallbackBlock}>
-              <Text style={styles.fallbackHelp}>
-                {fallback.kind === 'email'
-                  ? 'Or verify by email instead. We only use it to send this one code — it is not attached to your handle.'
-                  : `We sent a code to ${fallback.email}. Enter it to finish.`}
-              </Text>
-              {fallback.kind === 'email' ? (
-                <TextInput
-                  value={email}
-                  onChangeText={setEmail}
-                  placeholder="you@example.com"
-                  placeholderTextColor={TEXT_FAINT}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="email-address"
-                  editable={!busy}
-                  style={styles.fallbackInput}
-                  testID="onboarding-fallback-email"
-                />
-              ) : (
-                <TextInput
-                  value={otp}
-                  onChangeText={(t) => setOtp(t.replace(/[^0-9a-zA-Z]/g, '').slice(0, 8))}
-                  placeholder="123456"
-                  placeholderTextColor={TEXT_FAINT}
-                  autoCapitalize="none"
-                  autoCorrect={false}
-                  keyboardType="number-pad"
-                  editable={!busy}
-                  style={styles.fallbackInput}
-                  testID="onboarding-fallback-otp"
-                />
-              )}
+              <EmailVerifyFallback
+                reason={fallbackReason}
+                vouchflow={vouchflow}
+                onSubmit={handleEmailVerified}
+                onBusyChange={setBusy}
+                colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
+                testIDPrefix="onboarding-fallback"
+                renderButton={(btn) => (
+                  <Button
+                    label={btn.label}
+                    onPress={btn.onPress}
+                    loading={btn.loading}
+                    disabled={btn.disabled}
+                    testID={btn.testID}
+                  />
+                )}
+              />
             </View>
           ) : null}
           <View style={styles.buttonStack}>
@@ -370,23 +313,6 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
                 testID="onboarding-setup-lock"
               />
             ) : null}
-            {fallback.kind === 'email' ? (
-              <Button
-                label="Email me a code"
-                onPress={() => void handleRequestCode()}
-                loading={busy}
-                disabled={email.trim().length === 0 || busy}
-                testID="onboarding-fallback-request"
-              />
-            ) : fallback.kind === 'otp' ? (
-              <Button
-                label="Verify code"
-                onPress={() => void handleSubmitCode()}
-                loading={busy}
-                disabled={otp.trim().length === 0 || busy}
-                testID="onboarding-fallback-verify"
-              />
-            ) : null}
             <Button
               label="Generate one for me"
               onPress={handleGenerate}
@@ -395,10 +321,10 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
               testID="onboarding-generate"
             />
             <Button
-              label={fallback.kind === 'none' ? "This one's mine" : 'Try this device again'}
+              label={fallbackReason === undefined ? "This one's mine" : 'Try this device again'}
               onPress={() => void handleClaim()}
-              loading={busy && fallback.kind === 'none'}
-              variant={fallback.kind === 'none' ? 'primary' : 'secondary'}
+              loading={busy && fallbackReason === undefined}
+              variant={fallbackReason === undefined ? 'primary' : 'secondary'}
               disabled={availability.kind !== 'available' || busy}
               testID="onboarding-continue"
             />
@@ -567,21 +493,6 @@ const styles = StyleSheet.create({
   },
   bottom: { paddingHorizontal: 24, paddingBottom: 24, gap: 8 },
   fallbackBlock: { gap: 8 },
-  fallbackHelp: {
-    fontFamily: font.regular,
-    fontSize: typeScale.caption.size,
-    color: TEXT_MUTE,
-    lineHeight: 1.5 * typeScale.caption.size,
-  },
-  fallbackInput: {
-    fontFamily: font.regular,
-    fontSize: 18,
-    color: BONE,
-    borderBottomWidth: 1,
-    borderColor: TEXT_FAINT,
-    paddingVertical: space.s,
-    padding: 0,
-  },
   error: {
     fontFamily: font.regular,
     fontSize: typeScale.caption.size,
