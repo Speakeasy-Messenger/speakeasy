@@ -55,6 +55,13 @@ tested here, and whether that account has email delivery configured in
 the vouchflow.dev dashboard (no dashboard credentials were available for
 this run).
 
+A second thing only a human with deploy access can confirm: a fallback
+verification is always `confidence: low`, so if the deployed API sets
+`VOUCHFLOW_MIN_CONFIDENCE=medium` the server rejects the token with
+`low_confidence` even once link 3 works. `server.ts` defaults to
+`MIN_CONFIDENCE` (`low`) and the env var is the only thing that raises
+it; its value in production was not visible from here.
+
 ## The `no_session` dead ends
 
 `Vouchflow.requestFallback` needs a live verification session:
