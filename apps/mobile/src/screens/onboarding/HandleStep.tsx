@@ -20,6 +20,7 @@ import {
   EmailFallbackError,
   startEmailFallback,
   type ClaimDeps,
+  VerificationTimeoutError,
 } from '../../auth/claim-handle.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
@@ -238,7 +239,9 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     });
     const msg = err instanceof Error ? err.message : String(err);
     const name = err instanceof Error ? err.name : 'Error';
-    if (err instanceof VouchflowClientError) {
+    if (err instanceof VerificationTimeoutError) {
+      setError('Device verification took too long. Tap "This one\'s mine" to try again.');
+    } else if (err instanceof VouchflowClientError) {
       const detail = err.message && err.message !== err.reason ? ` — ${err.message}` : '';
       setError(`${messageForVouchflowError(err.reason)} [${err.reason}]${detail}`);
     } else if (err instanceof SignalClientError) {

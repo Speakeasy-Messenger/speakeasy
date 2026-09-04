@@ -32,6 +32,13 @@ const PREKEY_BATCH_SIZE = 100;
 /** verify() has no timeout of its own; a wedged biometric sheet would hang forever. */
 const VERIFY_TIMEOUT_MS = 60_000;
 
+export class VerificationTimeoutError extends Error {
+  constructor() {
+    super(`Timeout: verify did not complete in ${VERIFY_TIMEOUT_MS / 1000}s`);
+    this.name = 'VerificationTimeoutError';
+  }
+}
+
 function randomRegistrationId(): number {
   return 1 + Math.floor(Math.random() * 16380);
 }
@@ -138,10 +145,7 @@ export async function claimWithDeviceAttestation(
         setTimeout(
           () =>
             reject(
-              new VouchflowClientError(
-                'biometric_unavailable',
-                `Timeout: verify did not complete in ${VERIFY_TIMEOUT_MS / 1000}s`,
-              ),
+              new VerificationTimeoutError(),
             ),
           VERIFY_TIMEOUT_MS,
         ),
@@ -149,6 +153,11 @@ export async function claimWithDeviceAttestation(
     ]);
     deviceToken = verifyResult.deviceToken;
   } catch (err) {
+    if (err instanceof VerificationTimeoutError) {
+      diag('onboarding', 'attestation timed out — retry required', {
+        timeoutMs: VERIFY_TIMEOUT_MS,
+      });
+    }
     if (err instanceof VouchflowClientError) {
       const reason = FALLBACK_ELIGIBLE[err.reason];
       if (reason) {

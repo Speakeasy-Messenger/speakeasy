@@ -8,6 +8,7 @@ import {
   isLikelyEmail,
   startEmailFallback,
   type ClaimDeps,
+  VerificationTimeoutError,
 } from './claim-handle.js';
 
 function verifyResult(token = 'dvt_new', confidence: VerifyResult['confidence'] = 'low'): VerifyResult {
@@ -157,6 +158,21 @@ describe('claimWithDeviceAttestation', () => {
     await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
       reason: 'biometric_failed',
     });
+  });
+
+  it('rejects a stalled verification instead of offering the fallback', async () => {
+    vi.useFakeTimers();
+    const deps = makeDeps();
+    (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
+      () => new Promise<VerifyResult>(() => {}),
+    );
+
+    const claim = claimWithDeviceAttestation(deps, 'reviewer');
+    const rejected = expect(claim).rejects.toBeInstanceOf(VerificationTimeoutError);
+    await vi.advanceTimersByTimeAsync(60_000);
+
+    await rejected;
+    expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
   it('offers the email fallback when the server rejects the token as low confidence', async () => {
