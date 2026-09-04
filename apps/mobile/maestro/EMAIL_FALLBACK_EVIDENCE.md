@@ -100,7 +100,20 @@ session, are deliberately excluded from `FALLBACK_ELIGIBLE`.
 
 ## Device run
 
-<!-- filled in by the BrowserStack run; see below -->
+None. Neither a real device nor a simulator got as far as running the
+flow, so waypoints A and B are unobserved and everything in "The
+`no_session` dead ends" below is source reading, not a captured run.
+
+- Real device: the signed IPA builds, but the BrowserStack account lives
+  in Trusty Squire and its egress proxy forwards JSON only, so a 53MB
+  multipart upload returns `415`. The IPA cannot be published to reach the
+  farm another way — it embeds the production Vouchflow write key and this
+  repo is public. Unblocked by putting `BROWSERSTACK_USER` /
+  `BROWSERSTACK_KEY` in Actions secrets.
+- Simulator (`ios-fallback-e2e.yml`): first attempt failed booting, on a
+  device-type/runtime pairing bug since fixed; second failed in the
+  simulator build step, and its log could not be retrieved. The workflow
+  needs one more debugging pass.
 
 ## Running it again
 
