@@ -1,0 +1,208 @@
+name: iOS email-fallback onboarding e2e
+
+# Runs 13-email-fallback-enroll-ios.yaml against an iPad simulator and keeps
+# the screenshots, the Maestro log and the simulator's own log as artifacts.
+#
+# WHY A SIMULATOR, GIVEN THE FLOW ASKS FOR A REAL DEVICE
+#   The real-device path (BrowserStack App Automate, see
+#   browserstack-ios-fallback.yml + maestro/scripts) needs the signed IPA
+#   pushed to the farm, and this repo keeps the BrowserStack account in
+#   Trusty Squire rather than in Actions secrets. Until those credentials
+#   are available to CI, the simulator is what can run unattended.
+#
+#   What carries over: the simulator has no passcode and no enrolled
+#   biometric, so `LAContext.canEvaluatePolicy(.deviceOwnerAuthentication)`
+#   is false and `verify()` throws `biometricUnavailable` after the
+#   verification session exists — the same un-attestable branch a review
+#   iPad takes, reached the same way.
+#
+#   What does NOT carry over: App Attest needs real hardware, so the
+#   simulator enrolls unattested and its confidence ceiling is `medium`
+#   rather than `high`. That changes the attestation path, not the
+#   fallback path this flow exercises. Anything about attestation quality
+#   still needs the device run.
+#
+# The flow stops at the code screen unless FALLBACK_OTP is supplied —
+# Vouchflow has no deterministic test OTP. See the flow header.
+
+on:
+  # TEMPORARY bootstrap, removed before review: workflow_dispatch cannot
+  # reach a workflow that is not yet on the default branch.
+  push:
+    branches: [fm/ts-speakeasy-fallback-proof]
+  workflow_dispatch:
+    inputs:
+      fallback_email:
+        description: 'Inbox that should receive the Vouchflow code'
+        required: false
+        default: 'qa@speakeasyapp.xyz'
+      fallback_otp:
+        description: 'A code inside its 5-minute window, or SKIP'
+        required: false
+        default: 'SKIP'
+
+concurrency:
+  group: ios-fallback-e2e
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  e2e:
+    runs-on: macos-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Select compatible Xcode
+        run: |
+          sudo xcode-select -s /Applications/Xcode_26.4.1.app
+          xcodebuild -version
+
+      - name: Cache libsignal prebuilt FFI
+        uses: actions/cache@v5
+        with:
+          path: ~/Library/Caches/org.signal.libsignal
+          key: libsignal-${{ runner.os }}-v0.59.0
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build workspace
+        run: npm run build
+
+      - name: Write Vouchflow.plist
+        # Production key on purpose: the point is to exercise the fallback
+        # against the same Vouchflow app the shipped binary talks to.
+        env:
+          VOUCHFLOW_WRITE_KEY: ${{ secrets.VOUCHFLOW_WRITE_KEY }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          test -n "$VOUCHFLOW_WRITE_KEY"
+          sed -e "s|vsk_sandbox_replace_with_real_key|${VOUCHFLOW_WRITE_KEY}|" \
+              -e "s|<string>sandbox</string>|<string>production</string>|" \
+              Vouchflow.plist.example > Vouchflow.plist
+          plutil -lint Vouchflow.plist
+
+      - name: Write GoogleService-Info.plist
+        env:
+          FIREBASE_IOS_PLIST_B64: ${{ secrets.FIREBASE_IOS_PLIST_B64 }}
+        working-directory: apps/mobile/ios/Speakeasy
+        run: |
+          test -n "$FIREBASE_IOS_PLIST_B64"
+          echo "$FIREBASE_IOS_PLIST_B64" | base64 --decode > GoogleService-Info.plist
+          plutil -lint GoogleService-Info.plist
+
+      - name: Wire iOS project
+        working-directory: apps/mobile/ios
+        run: |
+          gem install xcodeproj --no-document
+          ruby tools/wire-ios-project.rb
+
+      - name: pod install
+        working-directory: apps/mobile/ios
+        run: USE_FRAMEWORKS=static pod install
+
+      - name: Build for the simulator
+        # Release, not Debug: Release runs the bundle build phase, so the JS
+        # ships inside the .app. A Debug build would sit on a red screen
+        # waiting for a Metro server that no unattended run provides.
+        working-directory: apps/mobile/ios
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -workspace Speakeasy.xcworkspace \
+            -scheme Speakeasy \
+            -configuration Release \
+            -sdk iphonesimulator \
+            -derivedDataPath build/sim \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+
+      - name: Boot an iPad simulator
+        id: sim
+        run: |
+          set -euo pipefail
+          # Closest available stand-in for the review hardware; fall back to
+          # any iPad rather than failing on an image-specific device name.
+          name=$(xcrun simctl list devicetypes -j \
+            | python3 -c 'import json,sys; ts=json.load(sys.stdin)["devicetypes"];
+          ipads=[t for t in ts if "iPad" in t["name"]];
+          air=[t for t in ipads if "Air" in t["name"]];
+          print((air or ipads)[-1]["identifier"])')
+          runtime=$(xcrun simctl list runtimes -j \
+            | python3 -c 'import json,sys; rs=[r for r in json.load(sys.stdin)["runtimes"]
+          if r["isAvailable"] and "iOS" in r["name"]]; print(rs[-1]["identifier"])')
+          udid=$(xcrun simctl create fallback-ipad "$name" "$runtime")
+          xcrun simctl boot "$udid"
+          xcrun simctl bootstatus "$udid" -b
+          echo "udid=$udid" >> "$GITHUB_OUTPUT"
+          xcrun simctl list devices | grep "$udid"
+
+      - name: Install the app
+        run: |
+          app=$(find apps/mobile/ios/build/sim/Build/Products -name 'Speakeasy.app' -maxdepth 3 | head -1)
+          test -n "$app"
+          xcrun simctl install "${{ steps.sim.outputs.udid }}" "$app"
+
+      - name: Install Maestro
+        run: |
+          curl -Ls https://get.maestro.mobile.dev | bash
+          echo "$HOME/.maestro/bin" >> "$GITHUB_PATH"
+
+      - name: Run the fallback flow
+        id: flow
+        continue-on-error: true
+        working-directory: apps/mobile/maestro
+        env:
+          MAESTRO_DRIVER_STARTUP_TIMEOUT: '180000'
+          DEFAULT_EMAIL: 'qa@speakeasyapp.xyz'
+        run: |
+          set -o pipefail
+          # A unique handle per run: the flow talks to the production API,
+          # where a handle claimed by an earlier run stays claimed.
+          maestro --udid "${{ steps.sim.outputs.udid }}" test \
+            -e HANDLE="fbqa$(date +%s | tail -c 7)" \
+            -e FALLBACK_EMAIL="${{ inputs.fallback_email || env.DEFAULT_EMAIL }}" \
+            -e FALLBACK_OTP="${{ inputs.fallback_otp || 'SKIP' }}" \
+            --format junit --output "$RUNNER_TEMP/maestro-report.xml" \
+            13-email-fallback-enroll-ios.yaml 2>&1 | tee "$RUNNER_TEMP/maestro.log"
+
+      - name: Collect evidence
+        if: always()
+        run: |
+          mkdir -p "$RUNNER_TEMP/evidence"
+          cp "$RUNNER_TEMP"/maestro*.{log,xml} "$RUNNER_TEMP/evidence/" 2>/dev/null || true
+          # Maestro drops screenshots next to the flow and keeps per-run
+          # command output under ~/.maestro/tests.
+          find apps/mobile/maestro -maxdepth 1 -name '*.png' \
+            -exec cp {} "$RUNNER_TEMP/evidence/" \; 2>/dev/null || true
+          latest=$(ls -1dt "$HOME"/.maestro/tests/* 2>/dev/null | head -1 || true)
+          if [ -n "$latest" ]; then cp -R "$latest" "$RUNNER_TEMP/evidence/maestro-run"; fi
+          xcrun simctl spawn "${{ steps.sim.outputs.udid }}" log collect \
+            --output "$RUNNER_TEMP/evidence/simulator.logarchive" 2>/dev/null || true
+          ls -R "$RUNNER_TEMP/evidence" | head -50
+
+      - uses: actions/upload-artifact@v6
+        if: always()
+        with:
+          name: ios-fallback-e2e-evidence-${{ github.run_number }}
+          path: ${{ runner.temp }}/evidence
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Fail the job if the flow failed
+        if: steps.flow.outcome == 'failure'
+        run: |
+          echo "::error::The email-fallback flow did not reach its last waypoint."
+          echo "Read the screenshots in the evidence artifact before triaging:"
+          echo "  no 02-fallback-offered → the device attested, or verify() timed out"
+          echo "  no 03-otp-requested    → requestFallback failed (look for [no_session])"
+          echo "  no 04-enrolled-face-step → the post-OTP enroll is the problem"
+          exit 1
