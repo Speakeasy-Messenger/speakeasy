@@ -52,6 +52,9 @@ Speakeasy is built to collect as little as possible. Recommended answers:
   to the user and not used for tracking. It is entered only if device
   attestation is unavailable, then passed to Vouchflow to deliver a one-time
   code; Speakeasy does not store it with the handle.
+- **Before resubmission:** update the App Store Connect App Privacy answers to
+  match this declaration. The repository privacy manifest alone is not
+  sufficient.
 - **One nuance to confirm:** the FCM **push token** (a device identifier) is
   sent to the server to route notifications. If you count that as "collected,"
   declare **Identifiers → Device ID**, purpose **App Functionality**, **not**

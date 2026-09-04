@@ -6,7 +6,7 @@ WHAT YOU GET
 
 • End-to-end encryption on every message and call, using the Signal Protocol. The server only ever sees ciphertext — even the team that runs Speakeasy cannot read your messages.
 
-• A handle instead of a phone number. No number to look up, no email to compromise, no real name to leak in a breach. Your handle is a stable identity your contacts recognize.
+• A handle instead of a phone number. No number to look up, no email attached to your handle, no real name to leak in a breach. Your handle is a stable identity your contacts recognize.
 
 • Group rooms with the same end-to-end guarantees as 1:1 chats. Up to 50 members per room.
 
@@ -18,7 +18,7 @@ Speakeasy has zero tolerance for abuse and objectionable content. Every chat has
 
 YOUR DATA STAYS YOURS
 
-Speakeasy does not collect personal information. Read the full privacy policy at https://speakeasyapp.xyz/privacy/.
+Speakeasy collects only what it needs to work. Read the full privacy policy at https://speakeasyapp.xyz/privacy/.
 
 If you delete your account, we delete your handle, your prekey bundle, and your encrypted message-relay buffer. Messages already delivered to your peers stay on their devices.
 

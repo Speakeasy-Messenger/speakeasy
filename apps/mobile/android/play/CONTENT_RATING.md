@@ -125,12 +125,12 @@ can see the messaging flow.
 - **Username/Handle**: Provide a pre-enrolled test handle (e.g.
   `@reviewer_speakeasy` — sign up once, save the handle and a backup
   of the keystore).
-- **Password**: N/A — Speakeasy uses device attestation (Vouchflow),
-  not passwords. Note this in the "Notes" field of the App access
-  form: "Speakeasy uses passwordless biometric attestation via
-  Vouchflow. To test, install the APK and sign up with the
-  reviewer handle — biometric prompt on the reviewer's device
-  device-binds the install."
+- **Password**: N/A — Speakeasy uses Vouchflow device attestation, not
+  passwords. If the review device cannot attest, the handle screen offers a
+  one-time email-code fallback. Note this in the "Notes" field of the App
+  access form: "Speakeasy uses Vouchflow device attestation. To test, install
+  the APK and sign up with the reviewer handle; if the review device cannot
+  complete attestation, choose the email-code fallback on the handle screen."
 - **Other instructions**: Mention that some features require a peer
   to interact with. Provide a second test handle if Google's
   reviewer flow is single-tester.
