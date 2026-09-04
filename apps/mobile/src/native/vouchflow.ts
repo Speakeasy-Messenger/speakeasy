@@ -99,6 +99,7 @@ export type VouchflowErrorReason =
   | 'biometric_cancelled'
   | 'biometric_failed'
   | 'biometric_unavailable'
+  | 'attestation_unavailable'
   | 'minimum_confidence_unmet'
   | 'network_unavailable'
   | 'enrollment_failed'

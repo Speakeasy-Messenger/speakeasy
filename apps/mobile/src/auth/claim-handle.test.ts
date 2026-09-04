@@ -118,6 +118,7 @@ describe('claimWithDeviceAttestation', () => {
 
   it.each([
     ['biometric_unavailable', 'biometric_unavailable'],
+    ['attestation_unavailable', 'attestation_unavailable'],
     ['minimum_confidence_unmet', 'attestation_unavailable'],
     ['enrollment_failed', 'attestation_unavailable'],
     ['account_store_access_denied', 'attestation_unavailable'],
@@ -157,6 +158,16 @@ describe('claimWithDeviceAttestation', () => {
     );
     await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
       reason: 'biometric_failed',
+    });
+  });
+
+  it('rethrows an unknown SDK error instead of offering the fallback', async () => {
+    const deps = makeDeps();
+    (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new VouchflowClientError('unknown_error'),
+    );
+    await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
+      reason: 'unknown_error',
     });
   });
 

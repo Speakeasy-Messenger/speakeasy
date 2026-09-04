@@ -77,6 +77,7 @@ export type ClaimResult =
  */
 const FALLBACK_ELIGIBLE: Partial<Record<VouchflowErrorReason, FallbackReason>> = {
   biometric_unavailable: 'biometric_unavailable',
+  attestation_unavailable: 'attestation_unavailable',
   minimum_confidence_unmet: 'attestation_unavailable',
   enrollment_failed: 'attestation_unavailable',
   account_store_access_denied: 'attestation_unavailable',

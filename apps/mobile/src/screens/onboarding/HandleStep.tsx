@@ -479,6 +479,7 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
     case 'biometric_failed':
       return 'Biometric check failed. Try again, or use another sign-in method.';
     case 'biometric_unavailable':
+    case 'attestation_unavailable':
     case 'minimum_confidence_unmet':
       // No-lock is caught proactively before verify(), so reaching here
       // means a lock is present but the device still couldn't attest.
