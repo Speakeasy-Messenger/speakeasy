@@ -4,7 +4,9 @@ import { VouchflowClientError, type VerifyResult } from '../native/vouchflow.js'
 import {
   claimWithDeviceAttestation,
   completeEmailFallbackClaim,
+  completeEmailFallbackVerification,
   EmailFallbackError,
+  fallbackReasonFor,
   isLikelyEmail,
   startEmailFallback,
   type ClaimDeps,
@@ -173,17 +175,21 @@ describe('claimWithDeviceAttestation', () => {
     });
   });
 
-  it('rethrows an unknown SDK error instead of offering the fallback', async () => {
+  it('offers the email fallback for an unmapped SDK error instead of a retry-only dead end', async () => {
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new VouchflowClientError('unknown_error'),
     );
-    await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
-      reason: 'unknown_error',
+    const result = await claimWithDeviceAttestation(deps, 'reviewer');
+    expect(result).toEqual({
+      kind: 'needs_email_fallback',
+      reason: 'sdk_error',
+      noLock: false,
     });
+    expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
-  it('rejects a stalled verification instead of offering the fallback', async () => {
+  it('offers the email fallback instead of a retry-only dead end when verification stalls', async () => {
     vi.useFakeTimers();
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
@@ -191,10 +197,14 @@ describe('claimWithDeviceAttestation', () => {
     );
 
     const claim = claimWithDeviceAttestation(deps, 'reviewer');
-    const rejected = expect(claim).rejects.toBeInstanceOf(VerificationTimeoutError);
+    const settled = expect(claim).resolves.toEqual({
+      kind: 'needs_email_fallback',
+      reason: 'attestation_timeout',
+      noLock: false,
+    });
     await vi.advanceTimersByTimeAsync(60_000);
 
-    await rejected;
+    await settled;
     expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
@@ -226,6 +236,37 @@ describe('claimWithDeviceAttestation', () => {
       status: 409,
       code: 'taken',
     });
+  });
+
+  it('rethrows a reserved handle so the caller can reset the input', async () => {
+    const deps = makeDeps();
+    (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError(409, 'reserved'),
+    );
+    await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
+      status: 409,
+      code: 'reserved',
+    });
+  });
+
+  it('offers the email fallback for an unmapped enroll failure instead of a retry-only dead end', async () => {
+    const deps = makeDeps();
+    (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ApiError(500));
+    const result = await claimWithDeviceAttestation(deps, 'reviewer');
+    expect(result).toEqual({
+      kind: 'needs_email_fallback',
+      reason: 'attestation_unavailable',
+      noLock: false,
+    });
+  });
+});
+
+describe('fallbackReasonFor', () => {
+  it('maps known reasons and falls back to sdk_error for the rest', () => {
+    expect(fallbackReasonFor('biometric_unavailable')).toBe('biometric_unavailable');
+    expect(fallbackReasonFor('minimum_confidence_unmet')).toBe('attestation_unavailable');
+    expect(fallbackReasonFor('no_session')).toBe('sdk_error');
+    expect(fallbackReasonFor('unknown_error')).toBe('sdk_error');
   });
 });
 
@@ -321,5 +362,81 @@ describe('completeEmailFallbackClaim', () => {
     await expect(
       completeEmailFallbackClaim(deps, { handle: 'reviewer', sessionId: 'fbs_1', otp: '123456' }),
     ).rejects.toMatchObject({ reason: 'no_device_token' });
+  });
+});
+
+describe('completeEmailFallbackVerification', () => {
+  it('resolves the cached token without enrolling — used by the returning-user surfaces', async () => {
+    const deps = makeDeps();
+    (deps.vouchflow.getCachedDeviceToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
+      'dvt_fallback',
+    );
+    const result = await completeEmailFallbackVerification(deps, {
+      sessionId: 'fbs_1',
+      otp: '123456',
+      context: 'login',
+    });
+    expect(result).toEqual({ deviceToken: 'dvt_fallback' });
+    expect(deps.api.enroll).not.toHaveBeenCalled();
+  });
+
+  it('asks verify() at the `login` context + `low` floor when nothing is cached', async () => {
+    const deps = makeDeps();
+    const result = await completeEmailFallbackVerification(deps, {
+      sessionId: 'fbs_1',
+      otp: '123456',
+      context: 'login',
+    });
+    expect(deps.vouchflow.verify).toHaveBeenCalledWith({
+      context: 'login',
+      minimumConfidence: 'low',
+    });
+    expect(result).toEqual({ deviceToken: 'dvt_new' });
+  });
+
+  it('surfaces no_device_token when recovery verification times out', async () => {
+    vi.useFakeTimers();
+    try {
+      const deps = makeDeps();
+      (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise<VerifyResult>(() => {}),
+      );
+
+      const completion = completeEmailFallbackVerification(deps, {
+        sessionId: 'fbs_1',
+        otp: '123456',
+        context: 'login',
+      });
+      const settled = expect(completion).rejects.toMatchObject({ reason: 'no_device_token' });
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await settled;
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('rejects a wrong code', async () => {
+    const deps = makeDeps();
+    (deps.vouchflow.submitFallbackOtp as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
+      verified: false,
+      confidence: 'low',
+      sessionState: 'otp_pending',
+      fallbackSignals: {
+        ipConsistent: true,
+        disposableEmailDomain: false,
+        deviceHasPriorVerifications: false,
+        emailDomainAgeDays: null,
+        otpAttempts: 2,
+        timeToCompleteSeconds: 30,
+      },
+    });
+    await expect(
+      completeEmailFallbackVerification(deps, {
+        sessionId: 'fbs_1',
+        otp: '000000',
+        context: 'login',
+      }),
+    ).rejects.toBeInstanceOf(EmailFallbackError);
   });
 });

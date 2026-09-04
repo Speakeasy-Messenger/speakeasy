@@ -1,16 +1,33 @@
-import React from 'react';
-import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import {
+  KeyboardAvoidingView,
+  Modal,
+  Platform,
+  Pressable,
+  StyleSheet,
+  Text,
+  View,
+} from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
 import type { VerificationReason } from '../auth/verify-device-types.js';
+import { completeEmailFallbackVerification } from '../auth/claim-handle.js';
+import { vouchflow } from '../services.js';
+import { EmailVerifyFallback } from './EmailVerifyFallback.js';
 
 /**
  * Branded bottom-sheet replacement for the system Alert that used to
  * gate `vouchflow.verify()`. Same imperative contract — the
  * verify-sheet store's `request(reason)` returns a Promise that
  * resolves on Continue and rejects on Not-now / scrim / back.
+ *
+ * `verify-device.ts` drives the actual passkey attempt; when it fails,
+ * it calls `requestFallback(reason)` and the store's `fallback` field
+ * flips this sheet — without ever closing (`pending` stays set) — into
+ * the same email-send + code-entry flow onboarding uses, so the
+ * monthly re-verify can complete without a passkey.
  *
  * Visual rules: workspace canvas, slide-up sheet, brass primary.
  * Mirrors BurnConfirmSheet so the user sees the same confirmation
@@ -21,8 +38,36 @@ export function VerifyDeviceSheet(): React.ReactElement {
   // Edge-to-edge: clear the nav bar so the buttons aren't behind it.
   const insets = useSafeAreaInsets();
   const pending = useVerifySheet((s) => s.pending);
+  const fallback = useVerifySheet((s) => s.fallback);
+  const nonce = useVerifySheet((s) => s.nonce);
   const confirm = useVerifySheet((s) => s.confirm);
   const cancel = useVerifySheet((s) => s.cancel);
+  const resolveFallback = useVerifySheet((s) => s.resolveFallback);
+
+  // Local — purely "has Continue been tapped for this prompt yet",
+  // which the store doesn't track (see verify-device.ts: `pending`
+  // stays set from Continue all the way through success/fallback so
+  // the sheet never flickers closed). Resets whenever a new prompt
+  // (or a re-prompt of the same reason) opens.
+  const [confirmed, setConfirmed] = useState(false);
+  useEffect(() => {
+    setConfirmed(false);
+  }, [nonce]);
+
+  function onContinue() {
+    setConfirmed(true);
+    confirm();
+  }
+
+  async function handleEmailVerified(args: { sessionId: string; otp: string }): Promise<void> {
+    const { deviceToken } = await completeEmailFallbackVerification(
+      { vouchflow },
+      { sessionId: args.sessionId, otp: args.otp, context: 'login' },
+    );
+    resolveFallback(deviceToken);
+  }
+
+  const verifying = confirmed && !fallback;
 
   return (
     <Modal
@@ -32,11 +77,14 @@ export function VerifyDeviceSheet(): React.ReactElement {
       onRequestClose={cancel}
       statusBarTranslucent
     >
-      <Pressable
-        style={[styles.scrim, { backgroundColor: scrim.modal }]}
-        onPress={cancel}
-      />
-      <View style={styles.wrap} pointerEvents="box-none">
+      <Pressable style={[styles.scrim, { backgroundColor: scrim.modal }]} onPress={cancel} />
+      {/* The fallback's email/OTP inputs need the sheet to rise above
+          the keyboard — the confirm-only sheet never needed this. */}
+      <KeyboardAvoidingView
+        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+        style={styles.wrap}
+        pointerEvents="box-none"
+      >
         <View
           style={[
             styles.sheet,
@@ -53,35 +101,79 @@ export function VerifyDeviceSheet(): React.ReactElement {
             Verify this device
             <Text style={{ color: themed.primary }}>.</Text>
           </Text>
-          <Text style={[styles.body, { color: themed.slate }]}>
-            {pending ? lineForReason(pending.reason) : ''}
-          </Text>
-          <Text style={[styles.hint, { color: themed.slate }]}>
-            Tap Continue to confirm with your passkey.
-          </Text>
 
-          <View style={styles.actions}>
-            <Pressable
-              onPress={cancel}
-              style={[styles.btnSecondary, { borderColor: themed.divider }]}
-              testID="verify-device-cancel"
-            >
-              <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>
-                Not now
+          {fallback ? (
+            <>
+              <Text style={[styles.body, { color: themed.slate }]}>
+                Couldn’t verify with a passkey.
               </Text>
-            </Pressable>
-            <Pressable
-              onPress={confirm}
-              style={[styles.btnPrimary, { backgroundColor: themed.primary }]}
-              testID="verify-device-continue"
-            >
-              <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
-                Continue
+              <View style={styles.fallbackBlock}>
+                <EmailVerifyFallback
+                  reason={fallback.reason}
+                  vouchflow={vouchflow}
+                  onSubmit={handleEmailVerified}
+                  colors={{ text: themed.ink, muted: themed.slate, faint: themed.divider }}
+                  testIDPrefix="verify-device-fallback"
+                  renderButton={(btn) => (
+                    <Pressable
+                      onPress={btn.onPress}
+                      disabled={btn.disabled}
+                      style={[
+                        styles.btnPrimary,
+                        { backgroundColor: themed.primary },
+                        btn.disabled && styles.btnDisabled,
+                      ]}
+                      testID={btn.testID}
+                    >
+                      <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
+                        {btn.loading ? 'Verifying…' : btn.label}
+                      </Text>
+                    </Pressable>
+                  )}
+                />
+              </View>
+            </>
+          ) : (
+            <>
+              <Text style={[styles.body, { color: themed.slate }]}>
+                {pending ? lineForReason(pending.reason) : ''}
               </Text>
-            </Pressable>
-          </View>
+              <Text style={[styles.hint, { color: themed.slate }]}>
+                Tap Continue to confirm with your passkey.
+              </Text>
+
+              <View style={styles.actions}>
+                <Pressable
+                  onPress={cancel}
+                  disabled={verifying}
+                  style={[
+                    styles.btnSecondary,
+                    { borderColor: themed.divider },
+                    verifying && styles.btnDisabled,
+                  ]}
+                  testID="verify-device-cancel"
+                >
+                  <Text style={[styles.btnSecondaryText, { color: themed.ink }]}>Not now</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onContinue}
+                  disabled={verifying}
+                  style={[
+                    styles.btnPrimary,
+                    { backgroundColor: themed.primary },
+                    verifying && styles.btnDisabled,
+                  ]}
+                  testID="verify-device-continue"
+                >
+                  <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
+                    {verifying ? 'Verifying…' : 'Continue'}
+                  </Text>
+                </Pressable>
+              </View>
+            </>
+          )}
         </View>
-      </View>
+      </KeyboardAvoidingView>
     </Modal>
   );
 }
@@ -134,11 +226,13 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: space.xl,
   },
+  fallbackBlock: { marginTop: space.s },
   actions: { gap: space.s },
   btnPrimary: {
     paddingVertical: space.base,
     alignItems: 'center',
   },
+  btnDisabled: { opacity: 0.5 },
   btnPrimaryText: {
     fontFamily: font.medium,
     fontSize: 14,
