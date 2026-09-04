@@ -108,21 +108,35 @@ describe('claimWithDeviceAttestation', () => {
     });
     // The lockless device must never reach the biometric prompt.
     expect(deps.vouchflow.verify).not.toHaveBeenCalled();
+    await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
+    expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
+      'reviewer@example.com',
+      'biometric_unavailable',
+    );
   });
 
   it.each([
-    'biometric_unavailable',
-    'minimum_confidence_unmet',
-    'enrollment_failed',
-    'account_store_access_denied',
-  ] as const)('offers the email fallback when verify fails with %s', async (reason) => {
+    ['biometric_unavailable', 'biometric_unavailable'],
+    ['minimum_confidence_unmet', 'attestation_unavailable'],
+    ['enrollment_failed', 'attestation_unavailable'],
+    ['account_store_access_denied', 'attestation_unavailable'],
+  ] as const)('offers the email fallback when verify fails with %s', async (reason, fallbackReason) => {
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new VouchflowClientError(reason),
     );
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
-    expect(result).toMatchObject({ kind: 'needs_email_fallback', noLock: false });
+    expect(result).toEqual({
+      kind: 'needs_email_fallback',
+      reason: fallbackReason,
+      noLock: false,
+    });
     expect(deps.api.enroll).not.toHaveBeenCalled();
+    await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
+    expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
+      'reviewer@example.com',
+      fallbackReason,
+    );
   });
 
   it('rethrows a cancelled prompt instead of offering the fallback', async () => {
@@ -135,13 +149,32 @@ describe('claimWithDeviceAttestation', () => {
     });
   });
 
+  it('rethrows a failed biometric prompt instead of offering the fallback', async () => {
+    const deps = makeDeps();
+    (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new VouchflowClientError('biometric_failed'),
+    );
+    await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
+      reason: 'biometric_failed',
+    });
+  });
+
   it('offers the email fallback when the server rejects the token as low confidence', async () => {
     const deps = makeDeps();
     (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new ApiError(401, 'low_confidence'),
     );
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
-    expect(result).toMatchObject({ kind: 'needs_email_fallback' });
+    expect(result).toEqual({
+      kind: 'needs_email_fallback',
+      reason: 'attestation_unavailable',
+      noLock: false,
+    });
+    await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
+    expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
+      'reviewer@example.com',
+      'attestation_unavailable',
+    );
   });
 
   it('rethrows a taken handle so the caller can reset the input', async () => {

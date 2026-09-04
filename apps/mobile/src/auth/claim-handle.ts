@@ -63,15 +63,15 @@ export type ClaimResult =
  * Vouchflow failures that mean "this device cannot produce an
  * attestation" — the email fallback is the only way forward.
  *
- * `biometric_cancelled` and `network_unavailable` are deliberately
- * absent: the user cancelling, or a flaky network, is a retry, not an
- * un-attestable device.
+ * `biometric_failed`, `biometric_cancelled`, and `network_unavailable`
+ * are deliberately absent: a failed or cancelled biometric prompt can
+ * be retried on a capable device, and a flaky network is also a retry,
+ * not an un-attestable device.
  */
 const FALLBACK_ELIGIBLE: Partial<Record<VouchflowErrorReason, FallbackReason>> = {
   biometric_unavailable: 'biometric_unavailable',
-  biometric_failed: 'biometric_failed',
-  minimum_confidence_unmet: 'minimum_confidence_unmet',
-  enrollment_failed: 'enrollment_failed',
+  minimum_confidence_unmet: 'attestation_unavailable',
+  enrollment_failed: 'attestation_unavailable',
   account_store_access_denied: 'attestation_unavailable',
 };
 
@@ -179,7 +179,7 @@ export async function claimWithDeviceAttestation(
       });
       return {
         kind: 'needs_email_fallback',
-        reason: 'minimum_confidence_unmet',
+        reason: 'attestation_unavailable',
         noLock: !(await deps.isDeviceSecure()),
       };
     }
