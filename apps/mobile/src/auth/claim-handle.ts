@@ -31,12 +31,28 @@ import { diag } from '../diag/log.js';
 const PREKEY_BATCH_SIZE = 100;
 
 /** verify() has no timeout of its own; a wedged biometric sheet would hang forever. */
-const VERIFY_TIMEOUT_MS = 60_000;
+export const VERIFY_TIMEOUT_MS = 60_000;
 
 export class VerificationTimeoutError extends Error {
   constructor() {
     super(`Timeout: verify did not complete in ${VERIFY_TIMEOUT_MS / 1000}s`);
     this.name = 'VerificationTimeoutError';
+  }
+}
+
+export async function verifyWithTimeout(
+  vouchflow: VouchflowClient,
+  options: Parameters<VouchflowClient['verify']>[0],
+): Promise<Awaited<ReturnType<VouchflowClient['verify']>>> {
+  let timeoutId: ReturnType<typeof setTimeout> | undefined;
+  const timeout = new Promise<never>((_, reject) => {
+    timeoutId = setTimeout(() => reject(new VerificationTimeoutError()), VERIFY_TIMEOUT_MS);
+  });
+
+  try {
+    return await Promise.race([vouchflow.verify(options), timeout]);
+  } finally {
+    if (timeoutId !== undefined) clearTimeout(timeoutId);
   }
 }
 
@@ -166,12 +182,10 @@ export async function claimWithDeviceAttestation(
 
   let deviceToken: string;
   try {
-    const verifyResult = await Promise.race([
-      deps.vouchflow.verify({ context: 'signup', minimumConfidence: 'low' }),
-      new Promise<never>((_, reject) =>
-        setTimeout(() => reject(new VerificationTimeoutError()), VERIFY_TIMEOUT_MS),
-      ),
-    ]);
+    const verifyResult = await verifyWithTimeout(deps.vouchflow, {
+      context: 'signup',
+      minimumConfidence: 'low',
+    });
     deviceToken = verifyResult.deviceToken;
   } catch (err) {
     if (err instanceof VerificationTimeoutError) {

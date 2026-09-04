@@ -26,6 +26,7 @@ interface VerifySheetState {
    * time so the sheet never flickers closed between the two steps.
    */
   fallback: PendingFallback | undefined;
+  verificationInFlight: boolean;
   /** Bumped on each request so re-prompting the same reason re-runs the animation. */
   nonce: number;
   request: (reason: VerificationReason) => Promise<void>;
@@ -60,49 +61,53 @@ interface VerifySheetState {
 export const useVerifySheet = create<VerifySheetState>((set, get) => ({
   pending: undefined,
   fallback: undefined,
+  verificationInFlight: false,
   nonce: 0,
   request(reason) {
     return new Promise<void>((resolve, reject) => {
       set((s) => ({
         pending: { reason, resolve, reject },
         fallback: undefined,
+        verificationInFlight: false,
         nonce: s.nonce + 1,
       }));
     });
   },
   confirm() {
     const p = get().pending;
-    if (!p) return;
+    if (!p || get().verificationInFlight || get().fallback) return;
     // Deliberately does NOT clear `pending` — the sheet stays visible
     // (in a "verifying" state) until `finish()` or `resolveFallback()`
     // says the whole thing is done.
+    set({ verificationInFlight: true });
     p.resolve();
   },
   cancel() {
     const f = get().fallback;
     if (f) {
-      set({ pending: undefined, fallback: undefined });
+      set({ pending: undefined, fallback: undefined, verificationInFlight: false });
       f.reject(new DeviceVerificationCancelledError());
       return;
     }
+    if (get().verificationInFlight) return;
     const p = get().pending;
     if (p) {
-      set({ pending: undefined, fallback: undefined });
+      set({ pending: undefined, fallback: undefined, verificationInFlight: false });
       p.reject(new DeviceVerificationCancelledError());
     }
   },
   requestFallback(reason) {
     return new Promise<string>((resolve, reject) => {
-      set({ fallback: { reason, resolve, reject } });
+      set({ fallback: { reason, resolve, reject }, verificationInFlight: false });
     });
   },
   resolveFallback(deviceToken) {
     const f = get().fallback;
     if (!f) return;
-    set({ pending: undefined, fallback: undefined });
+    set({ pending: undefined, fallback: undefined, verificationInFlight: false });
     f.resolve(deviceToken);
   },
   finish() {
-    set({ pending: undefined, fallback: undefined });
+    set({ pending: undefined, fallback: undefined, verificationInFlight: false });
   },
 }));

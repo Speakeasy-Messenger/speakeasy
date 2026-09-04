@@ -18,6 +18,8 @@ import { useProfiles } from '../store/profiles.js';
 import {
   completeEmailFallbackVerification,
   fallbackReasonFor,
+  VerificationTimeoutError,
+  verifyWithTimeout,
 } from '../auth/claim-handle.js';
 import { EmailVerifyFallback } from '../components/EmailVerifyFallback.js';
 import { VouchflowClientError, type FallbackReason } from '../native/vouchflow.js';
@@ -101,7 +103,10 @@ export function VerifyGateScreen(): React.ReactElement {
     try {
       // `low` matches the floor onboarding and the server's validator
       // already accept — see `auth/claim-handle.ts`.
-      const r = await vouchflow.verify({ context: 'login', minimumConfidence: 'low' });
+      const r = await verifyWithTimeout(vouchflow, {
+        context: 'login',
+        minimumConfidence: 'low',
+      });
       // setDeviceToken flips the router condition; the gate unmounts
       // on the next render. No explicit navigation needed.
       useIdentity.getState().setDeviceToken(r.deviceToken);
@@ -111,7 +116,13 @@ export function VerifyGateScreen(): React.ReactElement {
       // No-passkey or any other failed verify: never dead-end into a
       // retry-only screen — offer the email fallback instead.
       setErrorCopy("Couldn't verify with a passkey. Verify by email instead.");
-      setFallbackReason(err instanceof VouchflowClientError ? fallbackReasonFor(err.reason) : 'sdk_error');
+      setFallbackReason(
+        err instanceof VerificationTimeoutError
+          ? 'attestation_timeout'
+          : err instanceof VouchflowClientError
+            ? fallbackReasonFor(err.reason)
+            : 'sdk_error',
+      );
     } finally {
       setVerifying(false);
     }

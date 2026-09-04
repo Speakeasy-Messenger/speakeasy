@@ -58,7 +58,12 @@ describe('verifyDeviceWithExplanation', () => {
       deviceTokenIssuedAt: undefined,
       hydrated: true,
     });
-    useVerifySheet.setState({ pending: undefined, fallback: undefined, nonce: 0 });
+    useVerifySheet.setState({
+      pending: undefined,
+      fallback: undefined,
+      verificationInFlight: false,
+      nonce: 0,
+    });
   });
 
   it('opens the verify sheet, calls Vouchflow verify at the `low` floor, and dismisses on success', async () => {
@@ -121,6 +126,35 @@ describe('verifyDeviceWithExplanation', () => {
     await pending;
   });
 
+  it('keeps the sheet open through a stalled passkey attempt and offers the timeout fallback', async () => {
+    vi.useFakeTimers();
+    try {
+      const vouchflow = client();
+      (vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
+        () => new Promise<VerifyResult>(() => {}),
+      );
+      const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
+
+      await Promise.resolve();
+      useVerifySheet.getState().confirm();
+      await flush();
+      expect(useVerifySheet.getState().verificationInFlight).toBe(true);
+
+      useVerifySheet.getState().cancel();
+      expect(useVerifySheet.getState().pending).toBeDefined();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      await flush();
+      expect(useVerifySheet.getState().fallback?.reason).toBe('attestation_timeout');
+      expect(useVerifySheet.getState().verificationInFlight).toBe(false);
+
+      useVerifySheet.getState().resolveFallback('dvt_fallback');
+      await expect(pending).resolves.toMatchObject({ deviceToken: 'dvt_fallback' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   // The two cancel-triggering tests below run last: `verify-device.ts`
   // tracks `lastCancelledAt` at module scope (a real 60s cooldown so a
   // "Not now" tap can't be immediately re-prompted), so any test after
@@ -168,7 +202,12 @@ describe('verifyDeviceWithExplanation', () => {
 
 describe('getDeviceTokenOrVerify', () => {
   beforeEach(() => {
-    useVerifySheet.setState({ pending: undefined, fallback: undefined, nonce: 0 });
+    useVerifySheet.setState({
+      pending: undefined,
+      fallback: undefined,
+      verificationInFlight: false,
+      nonce: 0,
+    });
   });
 
   it('returns the cached token without prompting', async () => {

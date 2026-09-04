@@ -1,4 +1,8 @@
-import { fallbackReasonFor } from './claim-handle.js';
+import {
+  fallbackReasonFor,
+  VerificationTimeoutError,
+  verifyWithTimeout,
+} from './claim-handle.js';
 import { VouchflowClientError, type VouchflowClient } from '../native/vouchflow.js';
 import { useIdentity } from '../store/identity.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
@@ -41,12 +45,19 @@ export async function verifyDeviceWithExplanation(
     await useVerifySheet.getState().request(reason);
     let deviceToken: string;
     try {
-      const result = await vouchflow.verify({ context: 'login', minimumConfidence: 'low' });
+      const result = await verifyWithTimeout(vouchflow, {
+        context: 'login',
+        minimumConfidence: 'low',
+      });
       deviceToken = result.deviceToken;
       useVerifySheet.getState().finish();
     } catch (err) {
       const fallbackReason =
-        err instanceof VouchflowClientError ? fallbackReasonFor(err.reason) : 'sdk_error';
+        err instanceof VerificationTimeoutError
+          ? 'attestation_timeout'
+          : err instanceof VouchflowClientError
+            ? fallbackReasonFor(err.reason)
+            : 'sdk_error';
       diag('auth', 'monthly verify failed — offering email fallback', { reason: fallbackReason });
       // The sheet component drives the email round trip from here and
       // resolves this once it has a token — see `VerifyDeviceSheet.tsx`.
