@@ -1,5 +1,6 @@
 import Fastify, { FastifyInstance } from 'fastify';
 import {
+  MIN_CONFIDENCE,
   Validator,
   VouchflowApiClient,
   VouchflowValidator,
@@ -165,18 +166,19 @@ function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
   const apiClient = new VouchflowApiClient({ baseUrl, readKey });
   const maxAge = Number(process.env.VOUCHFLOW_MAX_VERIFICATION_AGE_MS) || undefined;
   const maxRisk = Number(process.env.VOUCHFLOW_MAX_RISK_SCORE) || undefined;
-  // Sandbox env relaxes the confidence floor to `low`. Sideloaded debug-
-  // signed APKs fail Play Integrity / App Attest, which makes Vouchflow
-  // record their verifies at `low`. Production must keep the default
-  // `medium` floor — set VOUCHFLOW_MIN_CONFIDENCE explicitly only on
-  // sandbox boxes.
-  const isSandbox = baseUrl.includes('sandbox');
+  // The floor is `low`, matching the vouchflow.dev dashboard's
+  // device-confidence floor. Devices that cannot attest at all (no
+  // Secure Enclave / Play Integrity — an App Store review iPad, a
+  // sideloaded debug-signed APK) never reach even `low` and take the
+  // client-side email-OTP fallback instead; rejecting `low` here only
+  // dead-ended devices that DID attest, just weakly.
+  // VOUCHFLOW_MIN_CONFIDENCE raises the floor per-deployment.
   const envOverride = process.env.VOUCHFLOW_MIN_CONFIDENCE as 'low' | 'medium' | 'high' | undefined;
-  const minConfidence = envOverride ?? (isSandbox ? 'low' : 'medium');
-  if (minConfidence !== 'medium') {
+  const minConfidence = envOverride ?? MIN_CONFIDENCE;
+  if (minConfidence !== MIN_CONFIDENCE) {
     log.warn(
       { minConfidence, baseUrl },
-      'vouchflow validator using non-default minimum confidence — sandbox / debug only',
+      'vouchflow validator using non-default minimum confidence',
     );
   }
   return new VouchflowValidator({

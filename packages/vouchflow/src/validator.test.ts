@@ -61,23 +61,28 @@ describe('VouchflowValidator', () => {
     await expect(v.validate('dvt_x')).rejects.toMatchObject({ reason: 'no_verification' });
   });
 
-  it('rejects low confidence (no override)', async () => {
-    for (const c of ['low'] as Confidence[]) {
-      const r = rep();
-      r.last_verification!.confidence = c;
-      const v = new VouchflowValidator({ apiClient: fakeClient(r), now: () => NOW });
-      await expect(v.validate('dvt_x')).rejects.toMatchObject({ reason: 'low_confidence' });
-    }
-  });
-
-  it('accepts medium and high confidence', async () => {
-    for (const c of ['medium', 'high'] as Confidence[]) {
+  it('accepts low, medium and high confidence by default', async () => {
+    // The floor is `low` (spec §2) — a device that attested weakly still
+    // enrolls. Devices that cannot attest at all never produce a token
+    // here; they take the client-side email-OTP fallback instead.
+    for (const c of ['low', 'medium', 'high'] as Confidence[]) {
       const r = rep();
       r.last_verification!.confidence = c;
       const v = new VouchflowValidator({ apiClient: fakeClient(r), now: () => NOW });
       const out = await v.validate('dvt_x');
       expect(out.confidence).toBe(c);
     }
+  });
+
+  it('still rejects below an explicitly raised minConfidence', async () => {
+    const r = rep();
+    r.last_verification!.confidence = 'low';
+    const v = new VouchflowValidator({
+      apiClient: fakeClient(r),
+      minConfidence: 'medium',
+      now: () => NOW,
+    });
+    await expect(v.validate('dvt_x')).rejects.toMatchObject({ reason: 'low_confidence' });
   });
 
   it('rejects stale verifications past the freshness window', async () => {

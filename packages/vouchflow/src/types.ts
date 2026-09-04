@@ -10,11 +10,16 @@
  * opaque handle the Vouchflow API resolves.
  *
  * Confidence levels per spec §2:
- *   low    — new device, no history          (REJECTED)
- *   medium — established device, attestation OK (allowed)
- *   high   — strong history, multi-attestation (allowed)
+ *   low    — new device, no history, or a device that cannot attest
+ *            (no Secure Enclave / Play Integrity, e.g. a review iPad)
+ *   medium — established device, attestation OK
+ *   high   — strong history, multi-attestation
  *
- * `medium` is the floor. There is no override.
+ * `low` is the floor, matching the vouchflow.dev dashboard's
+ * device-confidence floor. Devices that can't clear even `low` are
+ * offered the SDK's email-OTP fallback client-side; the remaining
+ * gates here (freshness, risk score, anomaly flags) still apply to
+ * every token.
  */
 
 export type Confidence = 'low' | 'medium' | 'high';
@@ -26,7 +31,7 @@ export const CONFIDENCE_RANK: Record<Confidence, number> = {
 };
 
 /** Floor for any authenticated request — spec §2. */
-export const MIN_CONFIDENCE: Confidence = 'medium';
+export const MIN_CONFIDENCE: Confidence = 'low';
 
 export function meetsMinimumConfidence(c: Confidence, floor: Confidence = MIN_CONFIDENCE): boolean {
   return CONFIDENCE_RANK[c] >= CONFIDENCE_RANK[floor];

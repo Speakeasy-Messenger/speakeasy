@@ -79,31 +79,25 @@ describe('collectProductionConfigErrors', () => {
     expect(collectProductionConfigErrors(env)).toEqual([]);
   });
 
-  it('flags a sub-medium confidence floor but allows medium / high', () => {
-    expect(
-      collectProductionConfigErrors({ ...validProdEnv(), VOUCHFLOW_MIN_CONFIDENCE: 'low' }).join('\n'),
-    ).toMatch(/VOUCHFLOW_MIN_CONFIDENCE/);
-    expect(
-      collectProductionConfigErrors({ ...validProdEnv(), VOUCHFLOW_MIN_CONFIDENCE: 'high' }),
-    ).toEqual([]);
+  it('allows every real confidence floor, including the `low` default', () => {
+    // `low` is the product floor (spec §2): a device that attested weakly
+    // still enrolls, and one that cannot attest at all takes the email
+    // fallback rather than dead-ending on the first onboarding screen.
+    for (const level of ['low', 'medium', 'high']) {
+      expect(
+        collectProductionConfigErrors({
+          ...validProdEnv(),
+          VOUCHFLOW_MIN_CONFIDENCE: level,
+        }),
+      ).toEqual([]);
+    }
   });
 
-  it('allows a low floor only with the explicit ALLOW_LOW_CONFIDENCE_TEST ack', () => {
-    // Bounded integration-test exception (e.g. enrolling an iOS Simulator,
-    // which can never produce App Attest). Inert unless explicitly set.
-    expect(
-      collectProductionConfigErrors({
-        ...validProdEnv(),
-        VOUCHFLOW_MIN_CONFIDENCE: 'low',
-        ALLOW_LOW_CONFIDENCE_TEST: '1',
-      }),
-    ).toEqual([]);
-    // The ack only covers `low`; a bogus value still fails.
+  it('flags a VOUCHFLOW_MIN_CONFIDENCE that is not a confidence level', () => {
     expect(
       collectProductionConfigErrors({
         ...validProdEnv(),
         VOUCHFLOW_MIN_CONFIDENCE: 'bogus',
-        ALLOW_LOW_CONFIDENCE_TEST: '1',
       }).join('\n'),
     ).toMatch(/VOUCHFLOW_MIN_CONFIDENCE/);
   });

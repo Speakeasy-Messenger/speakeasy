@@ -114,7 +114,7 @@ Vouchflow (vouchflow.dev) is a device-native verification API (sibling product t
 
 **Integration shape (server side):** the mobile SDK does enrollment + challenge + sign + verify-with-Vouchflow internally and returns an opaque `deviceToken` to the app. The app forwards the deviceToken to Speakeasy, which validates by calling `GET /v1/device/{deviceToken}/reputation` with a read-scoped key (`vsk_{sandbox,live}_read_…`) and asserting:
 
-- `last_verification.confidence` ≥ `medium` (no override)
+- `last_verification.confidence` ≥ `low` (the vouchflow.dev dashboard's device-confidence floor; raise per-deployment with `VOUCHFLOW_MIN_CONFIDENCE`)
 - `last_verification.completed_at` within the freshness window (default 5 min, `VOUCHFLOW_MAX_VERIFICATION_AGE_MS`)
 - `risk_score` ≤ ceiling (default 70, `VOUCHFLOW_MAX_RISK_SCORE`)
 - `anomaly_flags` are surfaced but not auto-rejecting in MVP — Phase 4 hardens this.
@@ -123,8 +123,8 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 
 ### Rules
 
-- **Vouchflow is the only authentication method.** There is no email fallback, no phone number fallback, no recovery code flow.
-- **Minimum device confidence: medium.** Devices below medium confidence are rejected at enrollment and at every authenticated request. There is no override.
+- **Vouchflow is the only authentication method.** There is no phone number fallback and no recovery code flow. The one exception is Vouchflow's own **email-OTP fallback tier** (SDK 2.0.0 `requestFallback` / `submitFallbackOtp`), offered during onboarding *only* to a device that cannot attest at all — no screen lock, or no Secure Enclave / Play Integrity (an App Store review iPad). Email is never required, never requested from a device that can attest, and is not attached to the handle: Speakeasy stays anonymous by default.
+- **Minimum device confidence: low.** Below-`low` is impossible — a device that cannot attest produces no token at all, and takes the email fallback instead. The freshness, risk-score and anomaly gates still apply to every token.
 - **Vouchflow identity does not need to pre-exist.** A new Vouchflow identity is created during Speakeasy enrollment if one does not already exist on the device.
 - Enrollment flow: Vouchflow device attestation → random ID generated and issued → Signal Protocol PreKey bundle generated and uploaded → user enters the app.
 
@@ -132,9 +132,12 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 
 | Level  | Description                             | Allowed |
 | ------ | --------------------------------------- | ------- |
-| Low    | New device, no history                  | ❌      |
+| Low    | New device, no history                  | ✅      |
 | Medium | Established device, passing attestation | ✅      |
 | High   | Strong history, multiple attestations   | ✅      |
+
+A device that cannot attest at all never reaches this table — it has no
+`last_verification` to score. That is the case the email-OTP fallback covers.
 
 ---
 
