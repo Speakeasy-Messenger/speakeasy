@@ -15,14 +15,26 @@ a reviewer gets through.
 |---|------|--------|
 | 1 | Un-attestable device is offered the fallback instead of dead-ending | see "Device run" |
 | 2 | `requestFallback` returns a session id | see "Device run" |
-| 3 | Vouchflow emails a 6-digit code | **NOT WORKING** — see below |
-| 4 | `submitFallbackOtp` → device token → `api.enroll` | **UNPROVEN** — blocked by 3 |
+| 3 | Vouchflow emails a 6-digit code | **UNPROVEN** — last observed failing, before the 2026-09-04 server fix |
+| 4 | `submitFallbackOtp` → device token → `api.enroll` | **UNPROVEN** — now reachable; the harness runs it |
 
 Link 4 is the step #206 inferred from the SDK surface rather than
-documented behaviour, and it is the one that still needs a human to
-confirm. It cannot be reached while link 3 is broken.
+documented behaviour, and it is the one this evidence exists to settle.
+It is no longer gated on a human: `browserstack-ios-fallback.sh` drives
+links 3 and 4 together in one unattended run (see "Running it again").
 
-## Link 3: the OTP is never delivered
+## Link 3: delivery, and the 2026-09-04 server fix
+
+**vouchflow-server v2.13.3 (2026-09-04) is live.** It fixed
+`last_verification` ignoring a `FALLBACK_COMPLETE` event — the
+server-side defect that would have rejected the device token in link 4
+even once a code arrived. That removes the known blocker on link 4.
+
+It does not, on its own, settle the delivery failure recorded below, and
+nothing in this repo can: "no mail leaves" and "a completed fallback is
+not scored" are different symptoms, and no attempt has been observed from
+here since the release. **Read the table as the last known state, not as
+the current one** — every row in it predates the fix.
 
 `POST /v1/verify/{session}/fallback` returns `200` with
 `{"method": "email_otp", ...}` and a five-minute expiry, and no mail
@@ -52,11 +64,14 @@ Reproduce with `scripts/vouchflow-fallback-probe.mjs`, which drives the
 REST API exactly as the SDK does for an un-attestable device and stops
 before OTP submission.
 
-**Consequence:** the fallback offers a code entry screen that no user can
-ever satisfy. A reviewer reaches a different dead end than before, not a
-working path.
+**Consequence, if delivery is still failing:** the fallback offers a code
+entry screen that no user can satisfy, and a reviewer reaches a different
+dead end than before rather than a working path. That is the outcome a
+run has to rule out, and it is now cheap to check — a run whose relay
+never sees a code fails at an explicit assert, with a video, instead of
+stopping quietly at waypoint B.
 
-**For a human to check:** whether the app's shipped `VOUCHFLOW_WRITE_KEY`
+**Still worth a human's eye:** whether the app's shipped `VOUCHFLOW_WRITE_KEY`
 belongs to the same Vouchflow account as the vaulted `prod-write` key
 tested here, and whether that account has email delivery configured in
 the vouchflow.dev dashboard (no dashboard credentials were available for
@@ -65,7 +80,9 @@ this run).
 A second thing only a human with deploy access can confirm: a fallback
 verification is always `confidence: low`, so if the deployed API sets
 `VOUCHFLOW_MIN_CONFIDENCE=medium` the server rejects the token with
-`low_confidence` even once link 3 works. `server.ts` defaults to
+`low_confidence` even once link 3 works. This is independent of the
+v2.13.3 fix — that changed whether the fallback is *recorded*, not the
+floor it is measured against. `server.ts` defaults to
 `MIN_CONFIDENCE` (`low`) and the env var is the only thing that raises
 it; its value in production was not visible from here.
 
@@ -122,14 +139,32 @@ flow, so waypoints A and B are unobserved and everything in "The
 #    It uses fastlane's build_beta lane, i.e. the ordinary App Store
 #    binary — the browserstack lane's SPEAKEASY_VIDEO_CALL_HARNESS build
 #    flag skips onboarding entirely.
-# 2. Run:
+# 2. Run — one unattended pass, all three waypoints:
 IPA=Speakeasy.ipa SUITE=speakeasy-ios-fallback.zip \
-FALLBACK_EMAIL=<an inbox you can read> \
+FALLBACK_EMAIL=<the inbox Vouchflow should mail> \
+RESEND_API_KEY=re_... \
   ./scripts/browserstack-ios-fallback.sh
 ```
 
-Vouchflow has no deterministic test OTP, so waypoint C is gated on a
-supplied `FALLBACK_OTP` that is still inside its five-minute window.
-Automating it end-to-end needs the flow to read the code itself — an
-`evalScript` step against an inbox API would do it — but that is not
-worth building until link 3 delivers a code at all.
+The script prints the build id, the BrowserStack video/log URL and a
+PASS/FAIL verdict, and exits non-zero on FAIL.
+
+Vouchflow has no deterministic test OTP: the code is minted only once the
+device reaches the code screen and expires five minutes later, so it
+cannot be patched into the flow before upload. With `RESEND_API_KEY` set,
+`scripts/otp-relay.py` watches the inbox through Vouchflow's sender and
+serves the code behind a throwaway `cloudflared` tunnel; the flow fetches
+it from the device mid-run. Nothing is persisted — the tunnel carries one
+single-use code for one build and dies with the script.
+
+Two other ways to run it, both still supported:
+
+- `FALLBACK_OTP=123456` — a code read out of the inbox by hand. Use this
+  to re-drive waypoint C without a Resend key.
+- Neither variable — proves waypoints A and B only and stops at the code
+  screen. This is what the harness could do before, and it is now the
+  fallback rather than the ceiling.
+
+Budget the rate limit: initiation is capped near three per source per day
+(above), so an unattended run is worth spending on a build you expect to
+reach waypoint B.
