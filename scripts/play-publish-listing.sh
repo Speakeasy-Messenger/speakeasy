@@ -28,6 +28,16 @@
 # automatically. Please set the query parameter changesNotSentForReview
 # to true." Keep the flag on every `:commit` call here.
 #
+# There is deliberately NO `:validate` call before the commit. Google
+# documents `changesNotSentForReview` on `edits.commit` ONLY —
+# `edits.validate` takes no query parameters at all — so on a reviewed
+# track `:validate` fails with the exact same HTTP 400 INVALID_ARGUMENT
+# no matter how well-formed the edit is, and there is no flag that can
+# quiet it. `:validate` is optional; the commit rejects a bad edit on
+# its own and an edit is atomic, so nothing partially applies. Do not
+# reintroduce it — the guard in
+# apps/mobile/src/integration/release-pipeline.test.ts fails if you do.
+#
 # Required environment:
 #   ACCESS_TOKEN     — OAuth access token with androidpublisher scope
 #   PACKAGE_NAME     — e.g. xyz.speakeasyapp.app
@@ -153,12 +163,8 @@ for shot in $(ls "$IMAGES_DIR/phoneScreenshots"/* 2>/dev/null | sort); do
 done
 
 # ───────────────────────────────────────────────────────────────────────
-# 4. Validate, then commit the edit
+# 4. Commit the edit
 # ───────────────────────────────────────────────────────────────────────
-echo "▸ Validating edit"
-api POST "$API/edits/$EDIT_ID:validate" >/dev/null
-echo "  ok"
-
 echo "▸ Committing edit"
 api POST "$API/edits/$EDIT_ID:commit?changesNotSentForReview=true" >/dev/null
 echo "  Listing updates are live in Play Console."
