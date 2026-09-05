@@ -79,8 +79,17 @@ def log(msg: str) -> None:
 
 
 def api(path: str):
+    # The User-Agent is not optional. Resend rejects urllib's default
+    # ("Python-urllib/3.x") with 403 -- the same key and URL answer 200
+    # under curl -- and a 403 here looks exactly like "no mail yet", so
+    # the relay would serve an empty body for the whole window and the
+    # flow would blame Vouchflow delivery for an HTTP client detail.
     req = urllib.request.Request(
-        RESEND_API + path, headers={"Authorization": f"Bearer {KEY}"}
+        RESEND_API + path,
+        headers={
+            "Authorization": f"Bearer {KEY}",
+            "User-Agent": "speakeasy-otp-relay/1",
+        },
     )
     with urllib.request.urlopen(req, timeout=15) as res:
         return json.load(res)

@@ -149,8 +149,22 @@ elif [ -n "${RESEND_API_KEY:-}" ]; then
   fi
   OTP_URL="$base/$token/otp"
   # Prove the device-facing path works before spending a build on it.
-  if ! curl -sS --max-time 20 -o /dev/null -w '' "$OTP_URL"; then
-    echo "!! relay is not reachable through the tunnel" >&2
+  # Retried, because a just-created trycloudflare.com hostname takes a few
+  # seconds to resolve: probing once and immediately reports "not
+  # reachable" and exits before the upload, for a tunnel that is about to
+  # come up. A probe that does resolve blocks ~5s in the relay's own wait,
+  # so this settles quickly once DNS has caught up.
+  reachable=0
+  for _ in $(seq 1 18); do
+    if curl -sS --max-time 20 -o /dev/null "$OTP_URL" 2>/dev/null; then
+      reachable=1
+      break
+    fi
+    sleep 5
+  done
+  if [ "$reachable" -ne 1 ]; then
+    echo "!! relay is not reachable through the tunnel after ~90s" >&2
+    tail -20 "$work/tunnel.log" >&2
     exit 1
   fi
   # The token is not echoed: it guards the endpoint serving the code.

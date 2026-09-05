@@ -160,6 +160,22 @@ Two harness bugs it exposed, both fixed:
   flow now settles after `hideKeyboard` and asserts the handle both after
   typing it and at waypoint B.
 
+### Run 2 — first with the relay armed
+
+Two bugs in the new runtime-OTP path, both found only once a run actually
+carried a code, both fixed:
+
+- **Resend answered `403` to the relay.** It rejects urllib's default
+  `Python-urllib/3.x` User-Agent; the same key and URL return `200` under
+  curl. The relay now sends `speakeasy-otp-relay/1`. This one was worth
+  the trouble it caused: a 403 is indistinguishable from "no mail yet"
+  inside the poll loop, so the symptom was a silent four-minute wait and
+  an assert blaming Vouchflow delivery for an HTTP client detail.
+- **The tunnel probe was too eager.** A just-created
+  `trycloudflare.com` hostname takes a few seconds to resolve, and the
+  runner probed it once, immediately, then exited "not reachable" before
+  uploading anything. Now a bounded retry (18 x 5s).
+
 ### Earlier attempts
 
 The two BrowserStack rejections before run 1, both harness bugs:
