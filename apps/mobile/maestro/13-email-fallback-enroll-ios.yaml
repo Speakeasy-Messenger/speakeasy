@@ -37,17 +37,27 @@
 #      C is the inferred step. Nothing before C proves it.
 #
 # OTP DELIVERY
-#   Vouchflow has no test/deterministic OTP: the code is emailed and the
-#   only way to read it is the recipient inbox. So waypoint C runs only
-#   when a real code is supplied:
-#       maestro test -e FALLBACK_OTP=123456 13-email-fallback-enroll-ios.yaml
-#   With no FALLBACK_OTP the flow still asserts A and B unattended, and
-#   stops at the code screen. See `_email-fallback-otp.yaml`.
+#   Vouchflow has no test/deterministic OTP: the code is emailed, minted
+#   only once the device reaches the code screen, and dead in five
+#   minutes — so it cannot be baked into this file before upload. Two
+#   ways to satisfy waypoint C:
+#
+#     OTP_URL   — unattended. `scripts/otp-relay.py` watches the inbox
+#                 and serves the code; the sub-flow polls that URL from
+#                 the device. This is what the runner script wires up,
+#                 and it is what makes one unattended run prove the whole
+#                 chain rather than stopping at B.
+#     FALLBACK_OTP — manual. A code read out of the inbox by hand:
+#                 maestro test -e FALLBACK_OTP=123456 13-email-fallback-enroll-ios.yaml
+#
+#   With neither, the flow still asserts A and B unattended and stops at
+#   the code screen. See `_email-fallback-otp.yaml`.
 #
 # Args (env):
 #   HANDLE         — handle to claim. Must be free on the target API.
 #   FALLBACK_EMAIL — inbox that receives the Vouchflow code.
-#   FALLBACK_OTP   — the 6-digit code, or "SKIP" to stop at waypoint B.
+#   FALLBACK_OTP   — a 6-digit code, or "SKIP" to defer to OTP_URL.
+#   OTP_URL        — otp-relay endpoint, or "" for no runtime fetch.
 
 appId: xyz.speakeasyapp.app
 name: iOS email-fallback onboarding (Tier C, real device)
@@ -55,6 +65,7 @@ env:
   HANDLE: fallbackqa
   FALLBACK_EMAIL: qa@speakeasyapp.xyz
   FALLBACK_OTP: SKIP
+  OTP_URL: ''
 ---
 # clearKeychain matters as much as clearState here: the Vouchflow device
 # token lives in the iOS keychain with kSecAttrAccessibleAfterFirstUnlock
@@ -129,5 +140,5 @@ env:
 # ─── Waypoint C: OTP → device token → api.enroll (the inferred step) ───
 - runFlow:
     when:
-      true: ${FALLBACK_OTP !== 'SKIP'}
+      true: ${FALLBACK_OTP !== 'SKIP' || OTP_URL !== ''}
     file: _email-fallback-otp.yaml

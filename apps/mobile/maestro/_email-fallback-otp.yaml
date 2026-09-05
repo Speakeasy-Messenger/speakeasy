@@ -12,13 +12,58 @@
 #
 # Pre-conditions:
 #   - onboarding-fallback-otp is on screen (waypoint B passed).
-#   - FALLBACK_OTP holds a code that is still inside its 5-minute window.
+#   - Either FALLBACK_OTP holds a code still inside its 5-minute window,
+#     or OTP_URL points at a running `scripts/otp-relay.py`.
 
 appId: xyz.speakeasyapp.app
+env:
+  FALLBACK_OTP: SKIP
+  OTP_URL: ''
 ---
+# Where the code comes from. A statically supplied FALLBACK_OTP wins (that
+# is the manual path, and the one a human uses to re-run a single build);
+# otherwise this starts empty and the poll below fills it in.
+#
+# `.replace('SKIP', '')` rather than a ternary on purpose: a YAML plain
+# scalar treats the ternary's " : " as a mapping separator and the flow
+# fails to parse. Every expression in this file is written to avoid ": ".
+- evalScript: ${output.otp = FALLBACK_OTP.replace('SKIP', '')}
+
+# ─── Fetch the code the device cannot have been given in advance ───
+# Vouchflow mints the code when `requestFallback` fires (waypoint B, one
+# screen back) and expires it five minutes later, so it cannot be patched
+# into this flow before upload. `scripts/otp-relay.py` watches the inbox
+# and serves the six digits at OTP_URL.
+#
+# There is no sleep here because Maestro has no dependable one: the relay
+# BLOCKS each GET for ~5s while it waits, so this loop is paced by the
+# server and each request still returns well inside Maestro's 10s HTTP
+# read timeout. 48 attempts is therefore a ~4 minute budget, comfortably
+# inside the code's five-minute life.
+#
+# The relay only ever serves a validated six-digit code or an empty body,
+# so "non-empty" is the whole client-side check.
+- repeat:
+    times: 48
+    while:
+      true: ${output.otp === '' && OTP_URL !== ''}
+    commands:
+      # `optional` so one refused connection costs a single 5s tick
+      # rather than the whole run — the relay sits behind a throwaway
+      # tunnel, and a 4-minute poll should ride out a blip. A window that
+      # never yields a code still fails loudly, at the assert below.
+      - evalScript:
+          script: ${output.otp = String(http.get(OTP_URL).body).trim()}
+          label: 'poll otp-relay for the emailed code'
+          optional: true
+
+# Fail here, not at the tap below, so an exhausted poll is legible as "no
+# code arrived" instead of "the verify button did nothing".
+- assertTrue: ${output.otp !== ''}
+
 - tapOn:
     id: 'onboarding-fallback-otp'
-- inputText: ${FALLBACK_OTP}
+- inputText: ${output.otp}
 - hideKeyboard
 - tapOn:
     id: 'onboarding-fallback-verify'

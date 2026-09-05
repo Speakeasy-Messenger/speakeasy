@@ -26,10 +26,6 @@ name: iOS email-fallback onboarding e2e
 # Vouchflow has no deterministic test OTP. See the flow header.
 
 on:
-  # TEMPORARY bootstrap, removed before review: workflow_dispatch cannot
-  # reach a workflow that is not yet on the default branch.
-  push:
-    branches: [fm/ts-speakeasy-fallback-proof]
   workflow_dispatch:
     inputs:
       fallback_email:
