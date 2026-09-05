@@ -27,10 +27,7 @@ const androidPath = resolve(
   mobileRoot,
   'android/app/src/main/java/xyz/speakeasyapp/app/MainApplication.kt',
 );
-const iosPath = resolve(
-  mobileRoot,
-  'ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift',
-);
+const iosPath = resolve(mobileRoot, 'ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift');
 const android = readFileSync(androidPath, 'utf8');
 const ios = readFileSync(iosPath, 'utf8');
 
@@ -53,19 +50,15 @@ const SPKI_BASE64 = '[A-Za-z0-9+/]{43}=';
 /** Pins declared by `private const val …_PIN = "…"` in MainApplication.kt. */
 function androidPins(): string[] {
   return [
-    ...android.matchAll(
-      new RegExp(`private const val \\w+ =\\s*"(${SPKI_BASE64})"`, 'g'),
-    ),
+    ...android.matchAll(new RegExp(`private const val \\w+ =\\s*"(${SPKI_BASE64})"`, 'g')),
   ].map((m) => m[1]);
 }
 
 /** Pins declared by `private static let …Pin = "…"` in VouchflowBootstrap.swift. */
 function iosPins(): string[] {
-  return [
-    ...ios.matchAll(
-      new RegExp(`private static let \\w+ = "(${SPKI_BASE64})"`, 'g'),
-    ),
-  ].map((m) => m[1]);
+  return [...ios.matchAll(new RegExp(`private static let \\w+ = "(${SPKI_BASE64})"`, 'g'))].map(
+    (m) => m[1],
+  );
 }
 
 describe('Vouchflow certificate pins — committed sources', () => {
@@ -96,12 +89,8 @@ describe('Vouchflow certificate pins — committed sources', () => {
   });
 
   it('passes the intermediate constants into both Android SDK pin slots', () => {
-    expect(android).toMatch(
-      /leafCertificatePin\s*=\s*VOUCHFLOW_LETS_ENCRYPT_YE2_PIN/,
-    );
-    expect(android).toMatch(
-      /intermediateCertificatePin\s*=\s*VOUCHFLOW_LETS_ENCRYPT_YE1_PIN/,
-    );
+    expect(android).toMatch(/leafCertificatePin\s*=\s*VOUCHFLOW_LETS_ENCRYPT_YE2_PIN/);
+    expect(android).toMatch(/intermediateCertificatePin\s*=\s*VOUCHFLOW_LETS_ENCRYPT_YE1_PIN/);
   });
 
   it('passes the intermediate constants into both iOS SDK pin slots', () => {

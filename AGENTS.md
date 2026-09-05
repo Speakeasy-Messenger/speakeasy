@@ -37,7 +37,8 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   intermediates — `apps/mobile/ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift`
   (read its header comment before touching the pins; it records the SDK's real
   matching semantics and the accepted residual risk) and
-  `MainApplication.kt`. `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts`
+  `apps/mobile/android/app/src/main/java/xyz/speakeasyapp/app/MainApplication.kt`.
+  `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts`
   enforces iOS/Android pin parity offline in CI, and
   `.github/workflows/vouchflow-pin-check.yml` re-checks the live chain weekly.
 

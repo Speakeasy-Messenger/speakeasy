@@ -32,8 +32,8 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     // a session, and the user is parked in an unrecoverable "Verify this
     // device" loop that no retry and no email fallback can clear. That has
     // already fired once — PR #204 (`352ba1a`, 2026-08-14) was the reactive
-    // patch for the 2026-08-10 rotation. The intermediates are valid until
-    // 2028-09-02, so pinning them decouples app availability from the leaf.
+    // patch for the 2026-08-10 rotation. Pinning the intermediates decouples
+    // app availability from the routine leaf rotation.
     //
     // ## What the SDK actually compares these against
     //
