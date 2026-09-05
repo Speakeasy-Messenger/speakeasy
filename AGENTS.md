@@ -22,6 +22,19 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `store/verify-sheet.ts`'s `fallback` field rather than closing and reopening
   the sheet — see that file's comments before changing its resolve/reject
   contract.
+- Nothing may sit between the app and the Vouchflow native SDK that can
+  answer `verify()` on its own. A `CachingVouchflowClient` used to, and it
+  permanently locked out every device whose verification aged past the
+  server's freshness window: the forced re-verification was served from
+  cache, no new Vouchflow row was ever created, and the rejected credential
+  was re-presented forever. `apps/mobile/src/native/vouchflow-wiring.test.ts`
+  pins the wiring; `apps/mobile/src/auth/stale-verification-recovery.test.ts`
+  pins the recovery loop end to end.
+- Automatic re-verification (`launch_refresh`, `websocket_auth_failed`,
+  `missing_token`) is rate-limited with an escalating cooldown in
+  `apps/mobile/src/auth/verify-device.ts`; verifications the user asked for
+  are never throttled. Without that brake the WS reconnect ladder (30s cap)
+  re-opens the verify sheet indefinitely.
 
 ## Maintaining this file
 

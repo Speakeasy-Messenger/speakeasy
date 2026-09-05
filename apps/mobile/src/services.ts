@@ -1,7 +1,6 @@
 import { ApiClient } from './api/client.js';
 import { config } from './config.js';
 import { NativeVouchflowClient, type VouchflowClient } from './native/vouchflow.js';
-import { CachingVouchflowClient } from './native/caching-vouchflow.js';
 import {
   NativeGroupMessagingModule,
   NativeSignalProtocolModule,
@@ -27,13 +26,23 @@ export const api = new ApiClient({ baseUrl: config.apiBaseUrl });
  * Vouchflow client (SDK 2.0.0). Always uses the real native bridge.
  * Tier B builds use sandbox keys + sandbox endpoint, where the SDK
  * supports emulators and records `confidence: medium` verifies without
- * hardware attestation. Wrapped in `CachingVouchflowClient` so
- * back-to-back WS reconnects don't trigger a fresh biometric prompt
- * every time.
+ * hardware attestation.
+ *
+ * Deliberately unwrapped. This used to be a `CachingVouchflowClient`
+ * that replayed the last successful `VerifyResult` for 30 days, which
+ * locked `lake-late-trout` out in September 2026: once the server
+ * rejected the credential as `stale_verification`, every forced
+ * re-verification was answered from that cache, no verification ever
+ * reached the SDK, and the same rejected credential was re-presented
+ * forever. Nothing may sit between the app and the SDK that can answer
+ * `verify()` on its own — `native/vouchflow-wiring.test.ts` pins this.
+ *
+ * Removing it costs nothing: a reconnect reuses the stored device
+ * token without verifying at all, every `verify()` call site is a
+ * deliberate re-attestation behind an explicit user gesture, and
+ * `auth/verify-device.ts` already single-flights concurrent callers.
  */
-export const vouchflow: VouchflowClient = new CachingVouchflowClient(
-  new NativeVouchflowClient(),
-);
+export const vouchflow: VouchflowClient = new NativeVouchflowClient();
 
 /**
  * Signal Protocol client. Always uses the real native bridge.

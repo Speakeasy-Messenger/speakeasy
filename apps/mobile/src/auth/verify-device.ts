@@ -21,6 +21,28 @@ let lastCancelledAt = 0;
 const CANCEL_COOLDOWN_MS = 60_000;
 
 /**
+ * Reasons the app raises by itself, with no user gesture behind them.
+ * Only these are throttled: they are the ones that can re-fire on a
+ * timer (the WS reconnect ladder caps its backoff at 30s), so without a
+ * brake a device that never satisfies the server is re-prompted every
+ * 30 seconds forever — the modal loop reported in September 2026. A
+ * verification the user asked for (sending a message, a group action)
+ * cannot loop without them and is always honoured, so the app degrades
+ * into a usable one with a working retry rather than a dead end.
+ */
+const AUTOMATIC_REASONS: ReadonlySet<VerificationReason> = new Set([
+  'launch_refresh',
+  'websocket_auth_failed',
+  'missing_token',
+]);
+
+const AUTO_COOLDOWN_BASE_MS = 60_000;
+const AUTO_COOLDOWN_MAX_MS = 15 * 60_000;
+
+let autoCooldownUntil = 0;
+let autoStreak = 0;
+
+/**
  * Opens the branded verify sheet, attempts the passkey verify at the
  * `low` floor, and — never dead-ending a passkey-less device — falls
  * back to Vouchflow's email OTP path when that attempt fails. The sheet
@@ -35,6 +57,20 @@ export async function verifyDeviceWithExplanation(
   if (promptInFlight) return promptInFlight;
   if (Date.now() - lastCancelledAt < CANCEL_COOLDOWN_MS) {
     throw new DeviceVerificationCancelledError();
+  }
+  const automatic = AUTOMATIC_REASONS.has(reason);
+  if (automatic) {
+    const now = Date.now();
+    if (now < autoCooldownUntil) {
+      diag('auth', 'automatic re-verification throttled', {
+        reason,
+        retryInMs: autoCooldownUntil - now,
+      });
+      throw new DeviceVerificationCancelledError();
+    }
+    // A gap longer than the longest cooldown means the previous loop
+    // ended on its own — this is a new incident, not a continuation.
+    if (now - autoCooldownUntil > AUTO_COOLDOWN_MAX_MS) autoStreak = 0;
   }
 
   promptInFlight = (async () => {
@@ -72,6 +108,15 @@ export async function verifyDeviceWithExplanation(
     throw err;
   } finally {
     promptInFlight = undefined;
+    // Arm on every completed automatic attempt, success included: a
+    // re-verification that "succeeds" and is then rejected again is
+    // exactly what looped. Re-attesting a seconds-old attestation
+    // cannot help either way, so back off before prompting again.
+    if (automatic) {
+      autoStreak++;
+      autoCooldownUntil =
+        Date.now() + Math.min(AUTO_COOLDOWN_MAX_MS, AUTO_COOLDOWN_BASE_MS * 2 ** (autoStreak - 1));
+    }
   }
 }
 
