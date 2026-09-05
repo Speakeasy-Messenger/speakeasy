@@ -11,8 +11,8 @@ vi.mock('./vouchflow.js', () => ({
       native.instance = this;
     }
 
-    verify(...args: unknown[]) {
-      return native.verify(...args);
+    verify() {
+      return native.verify();
     }
 
     requestFallback = vi.fn();
