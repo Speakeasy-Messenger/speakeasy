@@ -107,6 +107,13 @@ env:
 - tapOn:
     id: 'onboarding-handle'
 - inputText: ${HANDLE}
+# Both matchers, so this fails on "text went somewhere else" rather than
+# only on "nothing is available". The handle in this field at OTP-verify
+# time is the one that actually gets claimed, so it has to be the one
+# this run was told to claim.
+- assertVisible:
+    id: 'onboarding-handle'
+    text: ${HANDLE}
 - extendedWaitUntil:
     visible:
       text: 'available'
@@ -129,6 +136,14 @@ env:
     id: 'onboarding-fallback-email'
 - inputText: ${FALLBACK_EMAIL}
 - hideKeyboard
+# `KeyboardAvoidingView behavior="padding"` reflows this screen when the
+# keyboard goes, and Maestro resolves an element's coordinates before it
+# taps them. Without a settle the next tap can land on whatever slid into
+# that spot — "Generate one for me" sits in the same stack, and a stray
+# hit on it silently replaces the handle (run 1: the screen reached the
+# code step showing an auto-picked `sable-high-pier`).
+- waitForAnimationToEnd:
+    timeout: 3000
 - tapOn:
     id: 'onboarding-fallback-request'
 
@@ -140,9 +155,19 @@ env:
     visible:
       id: 'onboarding-fallback-otp'
     timeout: 45000
-# Static prefix only — assertVisible matches as a regex, and an address
-# with a "+" tag would otherwise be read as a quantifier.
-- assertVisible: 'We sent a code to'
+# Maestro text matchers are regexes that must match the element's FULL
+# text, so the bare prefix fails against "We sent a code to <addr>. Enter
+# it to finish." — that is what failed run 1, with the code screen
+# correctly on display behind it. `.*` covers the rest of the sentence.
+# The address itself stays out of the pattern: a "+" tag in it would be
+# read as a quantifier.
+- assertVisible: 'We sent a code to.*'
+
+# The handle can only have drifted via a stray tap since it was typed
+# (see the settle above). Catch it here, before the sub-flow claims it.
+- assertVisible:
+    id: 'onboarding-handle'
+    text: ${HANDLE}
 - takeScreenshot: 03-otp-requested
 
 # ─── Waypoint C: OTP → device token → api.enroll (the inferred step) ───

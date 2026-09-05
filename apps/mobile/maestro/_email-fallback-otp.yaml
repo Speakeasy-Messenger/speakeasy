@@ -65,6 +65,11 @@ env:
     id: 'onboarding-fallback-otp'
 - inputText: ${output.otp}
 - hideKeyboard
+# Same reflow hazard as the email step in the parent flow: settle before
+# tapping, so this cannot land on "Generate one for me" and swap the
+# handle out from under the claim this very tap performs.
+- waitForAnimationToEnd:
+    timeout: 3000
 - tapOn:
     id: 'onboarding-fallback-verify'
 

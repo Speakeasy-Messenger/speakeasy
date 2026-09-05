@@ -13,28 +13,35 @@ a reviewer gets through.
 
 | # | Link | Status |
 |---|------|--------|
-| 1 | Un-attestable device is offered the fallback instead of dead-ending | see "Device run" |
-| 2 | `requestFallback` returns a session id | see "Device run" |
-| 3 | Vouchflow emails a 6-digit code | **UNPROVEN** — last observed failing, before the 2026-09-04 server fix |
-| 4 | `submitFallbackOtp` → device token → `api.enroll` | **UNPROVEN** — now reachable; the harness runs it |
+| 1 | Un-attestable device is offered the fallback instead of dead-ending | **OBSERVED** — run 1, waypoint A |
+| 2 | `requestFallback` returns a session id | **OBSERVED** — run 1, waypoint B |
+| 3 | Vouchflow emails a 6-digit code | **OBSERVED** — run 1, delivered in ~1s |
+| 4 | `submitFallbackOtp` → device token → `api.enroll` | **UNPROVEN** — run 1 stopped here by design |
 
 Link 4 is the step #206 inferred from the SDK surface rather than
-documented behaviour, and it is the one this evidence exists to settle.
-It is no longer gated on a human: `browserstack-ios-fallback.sh` drives
-links 3 and 4 together in one unattended run (see "Running it again").
+documented behaviour, and it is the only one left. Run 1 was deliberately
+`FALLBACK_OTP=SKIP`, so it stopped at the code screen; the runtime OTP
+fetch added in PR #210 is what carries a run through it.
 
-## Link 3: delivery, and the 2026-09-04 server fix
+## Link 3: delivery works
 
-**vouchflow-server v2.13.3 (2026-09-04) is live.** It fixed
-`last_verification` ignoring a `FALLBACK_COMPLETE` event — the
-server-side defect that would have rejected the device token in link 4
-even once a code arrived. That removes the known blocker on link 4.
+**Settled by run 1.** The device asked for a code at 16:06:04 and Resend
+delivered `Your Speakeasy verification code: 740170` at 16:06:05 — about
+a second, to `lunchboxfortwo@gmail.com`, the plain inbox that had
+previously received nothing. The code screen rendered it back as "We sent
+a code to lunchboxfortwo@gmail.com. Enter it to finish."
 
-It does not, on its own, settle the delivery failure recorded below, and
-nothing in this repo can: "no mail leaves" and "a completed fallback is
-not scored" are different symptoms, and no attempt has been observed from
-here since the release. **Read the table as the last known state, not as
-the current one** — every row in it predates the fix.
+Two things changed between the failures below and that run:
+vouchflow-server **v2.13.3** (2026-09-04) fixed `last_verification`
+ignoring a `FALLBACK_COMPLETE` event, and the run used the app's own
+shipped `VOUCHFLOW_WRITE_KEY` rather than a vaulted key. Which of those
+mattered is not established, and no longer needs to be.
+
+### Superseded: the earlier delivery failures
+
+Kept because it explains why this document exists, and what to look at if
+delivery regresses. **Every row predates v2.13.3 and none of it reflects
+current behaviour.**
 
 `POST /v1/verify/{session}/fallback` returns `200` with
 `{"method": "email_otp", ...}` and a five-minute expiry, and no mail
@@ -64,11 +71,10 @@ Reproduce with `scripts/vouchflow-fallback-probe.mjs`, which drives the
 REST API exactly as the SDK does for an un-attestable device and stops
 before OTP submission.
 
-**Consequence, if delivery is still failing:** the fallback offers a code
-entry screen that no user can satisfy, and a reviewer reaches a different
-dead end than before rather than a working path. That is the outcome a
-run has to rule out, and it is now cheap to check — a run whose relay
-never sees a code fails at an explicit assert, with a video, instead of
+**What it would have meant:** a code entry screen no user could satisfy,
+i.e. a different dead end rather than a working path. Run 1 rules that
+out. A future regression is now cheap to catch — a run whose relay never
+sees a code fails at an explicit assert, with a video, instead of
 stopping quietly at waypoint B.
 
 **Still worth a human's eye:** whether the app's shipped `VOUCHFLOW_WRITE_KEY`
@@ -117,13 +123,46 @@ session, are deliberately excluded from `FALLBACK_ELIGIBLE`.
 
 ## Device run
 
-Still none end-to-end: no run has yet driven the app, so waypoints A and B
-remain unobserved and everything in "The `no_session` dead ends" is source
-reading rather than a captured run.
+### Run 1 — 2026-09-05 16:05 UTC, waypoints A and B observed
 
-What has changed is that the harness now reaches BrowserStack. The first
-real run got far enough to be rejected twice, and both rejections were
-harness bugs rather than app or Vouchflow behaviour. Both are fixed:
+BrowserStack iPhone 15 / iOS 26.6, signed IPA, `FALLBACK_OTP=SKIP`.
+Build `1b1385ca9deacdf9c178671ee4894582affeffbb` —
+[video and logs](https://app-automate.browserstack.com/builds/1b1385ca9deacdf9c178671ee4894582affeffbb).
+
+| Time | What |
+|------|------|
+| 16:05:49 | `LAContext` found no device-owner auth → `verify()` failed fallback-eligibly. The farm-wipe premise holds on an iPhone. |
+| 16:05:49 | Vouchflow verification `36eb47a3…` created: state `FALLBACK`, context `signup`, `fallbackUsed=true`. |
+| 16:05:50 | **Waypoint A** — `onboarding-fallback-email` visible. |
+| 16:06:04 | "Email me a code" → one request → `200` in 245 ms. |
+| 16:06:05 | Resend `4571eacd…` "Your Speakeasy verification code: 740170" delivered. |
+| 16:06:06 | **Waypoint B** — `onboarding-fallback-otp` visible, code screen rendered. |
+| 16:06:24 | Flow failed on a harness bug (below), not on app behaviour. |
+
+So links 1, 2 and 3 are observed, and the `biometric_unavailable` branch
+described under "The `no_session` dead ends" is now a captured run rather
+than source reading. Link 4 was not exercised: run 1 was `SKIP`.
+
+Two harness bugs it exposed, both fixed:
+
+- **`assertVisible: 'We sent a code to'` failed while the code screen was
+  correctly on display.** Maestro text matchers are regexes that must
+  match an element's FULL text, and the element read "We sent a code to
+  lunchboxfortwo@gmail.com. Enter it to finish." Now `'We sent a code
+  to.*'`. Worth remembering for any assert added later: a prefix is not
+  enough.
+- **The handle drifted.** `fallbackqa15870` was typed and confirmed
+  available at waypoint A, but the code screen showed an auto-picked
+  `sable-high-pier` — "Generate one for me" sits in the same button stack,
+  and `KeyboardAvoidingView` reflows the screen when the keyboard goes, so
+  a tap resolved before the reflow can land on it. This matters because
+  the handle in that field at verify time is the one actually claimed. The
+  flow now settles after `hideKeyboard` and asserts the handle both after
+  typing it and at waypoint B.
+
+### Earlier attempts
+
+The two BrowserStack rejections before run 1, both harness bugs:
 
 - **`POST /maestro/v2/build` → HTML 404.** The Maestro build *trigger* is
   platform-scoped; the correct path is `/maestro/v2/ios/build`
