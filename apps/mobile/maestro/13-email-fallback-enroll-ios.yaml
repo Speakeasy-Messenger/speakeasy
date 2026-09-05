@@ -10,13 +10,21 @@
 # WHY A REAL DEVICE, AND HOW THE UN-ATTESTABLE CASE IS FORCED
 #   No app-side "force fallback" switch is used on purpose — faking the
 #   trigger would prove nothing about the branch a reviewer actually hits.
-#   Instead this runs on a device-farm iPad, which is wiped between
+#   Instead this runs on a device-farm iPhone, which is wiped between
 #   sessions and therefore has NO passcode and NO enrolled biometric. The
 #   SDK's `VerificationManager.signChallenge` pre-checks
 #   `LAContext.canEvaluatePolicy(.deviceOwnerAuthentication)`, which is
 #   false on such a device, so `verify()` throws `biometricUnavailable`
 #   AFTER `POST /v1/verify` has already created the session that
-#   `requestFallback` needs. That is exactly the App Store reviewer's iPad.
+#   `requestFallback` needs.
+#
+#   An iPhone, not the iPad the reviewer used, because the app is built
+#   iPhone-only (`UIDeviceFamily`) and BrowserStack refuses to install it
+#   on an iPad — `422 BROWSERSTACK_APP_BUILT_FOR_IPHONE`. Nothing is lost:
+#   the un-attestable condition comes from the farm wipe, not the form
+#   factor, and farm iPhones are wiped exactly the same way. Proving this
+#   on an iPad would mean shipping iPad support, which is a product
+#   decision and not one this harness should force.
 #
 #   If the farm device DOES have a passcode, `verify()` instead presents
 #   the system passcode sheet, nothing dismisses it, and the flow fails at

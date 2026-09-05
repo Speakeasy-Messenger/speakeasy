@@ -1,5 +1,5 @@
 #!/bin/bash
-# Run 13-email-fallback-enroll-ios.yaml on a real iPad via BrowserStack
+# Run 13-email-fallback-enroll-ios.yaml on a real iPhone via BrowserStack
 # App Automate (Maestro runner), then print a PASS/FAIL verdict and where
 # the video and log live.
 #
@@ -36,8 +36,17 @@
 #   [FALLBACK_OTP=123456] [HANDLE=fallbackqa] \
 #   ./browserstack-ios-fallback.sh
 #
-# Devices: an iPad Air is closest to the review hardware. Override with
-#   DEVICES='["iPad Air 6-17"]'
+# Devices: an iPhone, because the app is built iPhone-only
+# (`UIDeviceFamily`) and BrowserStack rejects the IPA on any iPad with
+# `422 BROWSERSTACK_APP_BUILT_FOR_IPHONE`. The reviewer's hardware was an
+# iPad, but the un-attestable condition this flow needs comes from the
+# farm wipe rather than the form factor, and farm iPhones are wiped the
+# same way — no passcode, no enrolled biometric. Running this on an iPad
+# would first require the app to declare iPad support, which is a product
+# decision, not a harness one.
+#
+# Override with a current non-beta pair from /app-automate/devices.json:
+#   DEVICES='["iPhone 14-18"]'
 
 set -euo pipefail
 
@@ -50,7 +59,7 @@ HANDLE="${HANDLE:-fallbackqa$RANDOM}"
 FALLBACK_EMAIL="${FALLBACK_EMAIL:?set FALLBACK_EMAIL to an inbox you can read}"
 FALLBACK_OTP="${FALLBACK_OTP:-SKIP}"
 # Exported: the payload heredoc below reads this out of the environment.
-export DEVICES="${DEVICES:-[\"iPad Air 5-26\"]}"
+export DEVICES="${DEVICES:-[\"iPhone 15-17\"]}"
 
 if [ -z "${BROWSERSTACK_BASIC:-}" ]; then
   BROWSERSTACK_BASIC=$(printf '%s:%s' \
@@ -67,6 +76,45 @@ cleanup() {
   rm -rf "$work"
 }
 trap cleanup EXIT
+
+# Call the BrowserStack API and pull one field out of the JSON reply.
+# Fails with the HTTP status and the raw body when the answer is not JSON.
+# Worth the few lines: a wrong path answers with an HTML 404, and feeding
+# that straight into a JSON parser reports a decode error at column 1
+# rather than "404" -- which is how the build endpoint's platform scoping
+# (/maestro/v2/ios/build, not /maestro/v2/build) survived to a real run.
+bs_api() {
+  local echo_body=0
+  if [ "$1" = "--echo" ]; then
+    echo_body=1
+    shift
+  fi
+  local field=$1
+  shift
+  local body="$work/api-response" code
+  code=$(curl -sS -o "$body" -w '%{http_code}' "${AUTH[@]}" "$@")
+  if [ "$echo_body" -eq 1 ]; then
+    echo "  response (HTTP $code):" >&2
+    sed -e 's/^/    /' "$body" >&2
+    # Responses are not newline-terminated; without this the next line
+    # runs onto the end of the body.
+    echo >&2
+  fi
+  FIELD="$field" CODE="$code" python3 - "$body" <<'PY'
+import json, os, sys
+
+raw = open(sys.argv[1]).read()
+field, code = os.environ["FIELD"], os.environ["CODE"]
+try:
+    data = json.loads(raw)
+except ValueError:
+    sys.exit(f"!! BrowserStack answered HTTP {code} with non-JSON:\n{raw[:400]}")
+if field not in data:
+    sys.exit(f"!! BrowserStack answered HTTP {code} without {field!r}:\n"
+             f"{json.dumps(data)[:400]}")
+print(data[field])
+PY
+}
 
 # ─── OTP source ───────────────────────────────────────────────────────
 OTP_URL=""
@@ -131,13 +179,11 @@ patched="$work/suite.zip"
 (cd "$work/suite" && zip -qr "$patched" .)
 
 echo "→ uploading app: $IPA"
-app_url=$(curl -sS "${AUTH[@]}" -F "file=@${IPA}" "$API/upload" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["app_url"])')
+app_url=$(bs_api app_url -F "file=@${IPA}" "$API/upload")
 echo "  $app_url"
 
 echo "→ uploading flows"
-suite_url=$(curl -sS "${AUTH[@]}" -F "file=@${patched}" "$API/maestro/v2/test-suite" \
-  | python3 -c 'import json,sys; print(json.load(sys.stdin)["test_suite_url"])')
+suite_url=$(bs_api test_suite_url -F "file=@${patched}" "$API/maestro/v2/test-suite")
 echo "  $suite_url"
 
 echo "→ starting build on $DEVICES"
@@ -155,14 +201,25 @@ print(json.dumps({
 }))
 PY
 )
-build=$(curl -sS "${AUTH[@]}" -H 'Content-Type: application/json' -d "$payload" \
-  "$API/maestro/v2/build" | python3 -c 'import json,sys; print(json.load(sys.stdin)["build_id"])')
+# Platform-scoped: /maestro/v2/ios/build, not /maestro/v2/build. The
+# unscoped path exists in neither form and answers with an HTML 404.
+# Only the trigger is scoped this way -- the /maestro/v2/builds/{id}
+# poll below is platform-agnostic and correct as written.
+# --echo: the raw body is printed before build_id is pulled out of it,
+# because the two failures this endpoint has already produced — an HTML
+# 404 from the unscoped path, and `422 BROWSERSTACK_APP_BUILT_FOR_IPHONE`
+# from an iPad device — are both explained entirely by the response and
+# by nothing else the script prints.
+build=$(bs_api --echo build_id -H 'Content-Type: application/json' -d "$payload" \
+  "$API/maestro/v2/ios/build")
 echo "  build $build"
 
 echo "→ waiting"
 while :; do
   status=$(curl -sS "${AUTH[@]}" "$API/maestro/v2/builds/$build" \
-    | python3 -c 'import json,sys; print(json.load(sys.stdin).get("status","?"))')
+    | python3 -c 'import json,sys
+try: print(json.load(sys.stdin).get("status","?"))
+except ValueError: print("?")')
   echo "  $status"
   case "$status" in
     running|queued|'?') sleep 20 ;;

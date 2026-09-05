@@ -117,16 +117,37 @@ session, are deliberately excluded from `FALLBACK_ELIGIBLE`.
 
 ## Device run
 
-None. Neither a real device nor a simulator got as far as running the
-flow, so waypoints A and B are unobserved and everything in "The
-`no_session` dead ends" below is source reading, not a captured run.
+Still none end-to-end: no run has yet driven the app, so waypoints A and B
+remain unobserved and everything in "The `no_session` dead ends" is source
+reading rather than a captured run.
 
-- Real device: the signed IPA builds, but the BrowserStack account lives
-  in Trusty Squire and its egress proxy forwards JSON only, so a 53MB
-  multipart upload returns `415`. The IPA cannot be published to reach the
-  farm another way — it embeds the production Vouchflow write key and this
-  repo is public. Unblocked by putting `BROWSERSTACK_USER` /
-  `BROWSERSTACK_KEY` in Actions secrets.
+What has changed is that the harness now reaches BrowserStack. The first
+real run got far enough to be rejected twice, and both rejections were
+harness bugs rather than app or Vouchflow behaviour. Both are fixed:
+
+- **`POST /maestro/v2/build` → HTML 404.** The Maestro build *trigger* is
+  platform-scoped; the correct path is `/maestro/v2/ios/build`
+  (`/android/build` for Android). Uploads (`/app-automate/upload`,
+  `/maestro/v2/test-suite`) and the `/maestro/v2/builds/{id}` poll are
+  **not** scoped and were correct as written.
+- **`422 BROWSERSTACK_APP_BUILT_FOR_IPHONE` on every iPad.** The app is
+  built iPhone-only (`UIDeviceFamily`), so BrowserStack will not install
+  it on an iPad. The default device is now an iPhone.
+
+  This costs nothing in evidence. The un-attestable condition this proof
+  depends on comes from the farm wiping the device between sessions — no
+  passcode, no enrolled biometric — not from the form factor, and farm
+  iPhones are wiped the same way. The App Store reviewer used an iPad, but
+  reproducing that exact hardware would first require the app to declare
+  iPad support, which is a product decision and not one this harness
+  should force.
+
+Both failures were slower to read than they should have been: the 404 was
+an HTML body fed straight into a JSON parser, which reports a decode error
+at column 1 rather than "404". The runner now prints the raw response
+before parsing it, and names the HTTP status when a reply is not the JSON
+it expected.
+
 - Simulator (`ios-fallback-e2e.yml`): first attempt failed booting, on a
   device-type/runtime pairing bug since fixed; second failed in the
   simulator build step, and its log could not be retrieved. The workflow
