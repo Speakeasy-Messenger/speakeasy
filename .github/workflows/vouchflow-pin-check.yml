@@ -1,0 +1,46 @@
+name: Vouchflow pin check
+
+# Watches the live api.vouchflow.dev certificate chain against the pins
+# committed in the app, so a chain change is caught here instead of by users
+# stuck in an unrecoverable "Verify this device" loop.
+#
+# Deliberately NOT part of CI: this job needs the network and a third-party
+# endpoint, so it must never be the reason a PR goes red. The offline half of
+# the guard — iOS pins must equal Android pins, and neither may be a leaf —
+# runs in `npm run test` on every PR
+# (apps/mobile/src/integration/vouchflow-pin-rotation.test.ts).
+#
+# A failure here is not urgent-by-minutes but it is dated: pins that no longer
+# appear in the served chain mean every already-shipped build stops being able
+# to verify, and no app update can reach users retroactively.
+
+on:
+  schedule:
+    # Mondays 08:00 UTC. Let's Encrypt renews ~30 days before expiry, so a
+    # weekly cadence still leaves weeks of lead time to ship a pin update.
+    - cron: '0 8 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  live-chain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Compare committed pins against the live chain
+        working-directory: apps/mobile
+        env:
+          VOUCHFLOW_LIVE_PIN_CHECK: '1'
+        run: npx vitest run src/integration/vouchflow-pin-rotation.test.ts

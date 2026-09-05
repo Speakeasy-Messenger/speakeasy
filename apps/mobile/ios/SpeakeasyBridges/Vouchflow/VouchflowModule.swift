@@ -259,6 +259,14 @@ class VouchflowModule: NSObject {
         // to @unknown default — it's SPI, not part of the public contract.)
         case .payloadSignatureRejected: return ("unknown_error",             "payload signature rejected")
         case .canonicalizationFailed:   return ("unknown_error",             "request canonicalization failed")
+        // Added in VouchflowSDK 2.5.0, which validates the TLS chain before
+        // comparing pins. A chain that fails OS validation now surfaces here
+        // instead of as `pinningFailure`; both are transport-level failures
+        // with the same user-visible remedy, so they share a code. Mapped
+        // explicitly, per the 2.3.0 precedent above, so it does not silently
+        // degrade to "unknown error" — the common real-world cause is a
+        // device clock that is badly wrong, not an attack.
+        case .trustEvaluationFailure:   return ("network_unavailable",       "tls trust evaluation failure")
         @unknown default:               return ("unknown_error",             "unknown VouchflowError")
         }
     }
