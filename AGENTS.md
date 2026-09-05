@@ -28,8 +28,9 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   and `apps/mobile/src/auth/stale-verification-recovery.test.ts`.
 - Automatic re-verification (`launch_refresh`, `websocket_auth_failed`,
   `missing_token`) is rate-limited with an escalating cooldown in
-  `apps/mobile/src/auth/verify-device.ts`; user-initiated verification is never
-  throttled. See `verify-device-cooldown.test.ts` for the contract.
+  `apps/mobile/src/auth/verify-device.ts`; that escalating cooldown does not
+  apply to user-initiated verification, though the pre-existing 60-second
+  cancellation cooldown applies to all reasons. See `verify-device-cooldown.test.ts` for the contract.
 
 ## Maintaining this file
 

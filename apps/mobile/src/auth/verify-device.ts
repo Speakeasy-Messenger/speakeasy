@@ -26,8 +26,8 @@ const CANCEL_COOLDOWN_MS = 60_000;
  * timer (the WS reconnect ladder caps its backoff at 30s), so without a
  * brake a device that remains rejected is re-prompted indefinitely. A
  * verification the user asked for (sending a message, a group action)
- * cannot loop without them and is always honoured, preserving a usable
- * retry path.
+ * cannot loop without them, so this escalating cooldown does not apply.
+ * The pre-existing 60-second cancellation cooldown still applies to all reasons.
  */
 const AUTOMATIC_REASONS: ReadonlySet<VerificationReason> = new Set([
   'launch_refresh',

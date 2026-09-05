@@ -129,7 +129,7 @@ describe('automatic re-verification brake', () => {
     stopTapping();
   });
 
-  it('never throttles a verification the user asked for', async () => {
+  it('does not apply the automatic cooldown to a user-requested verification', async () => {
     const { verifyDeviceWithExplanation, stopTapping } = await harness();
     const vouchflow = client();
 
