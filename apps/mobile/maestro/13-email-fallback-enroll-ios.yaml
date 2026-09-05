@@ -171,7 +171,14 @@ env:
 - takeScreenshot: 03-otp-requested
 
 # ─── Waypoint C: OTP → device token → api.enroll (the inferred step) ───
+# `env:` is not optional here. A sub-flow does NOT inherit the caller's
+# variables: whatever it declares in its own `env:` block wins, and
+# anything it does not declare is simply undefined. Passing both values
+# explicitly is the only thing that gets them across the boundary.
 - runFlow:
     when:
       true: ${FALLBACK_OTP !== 'SKIP' || OTP_URL !== ''}
     file: _email-fallback-otp.yaml
+    env:
+      OTP_URL: ${OTP_URL}
+      FALLBACK_OTP: ${FALLBACK_OTP}

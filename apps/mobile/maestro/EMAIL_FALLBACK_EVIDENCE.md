@@ -175,6 +175,16 @@ carried a code, both fixed:
   `trycloudflare.com` hostname takes a few seconds to resolve, and the
   runner probed it once, immediately, then exited "not reachable" before
   uploading anything. Now a bounded retry (18 x 5s).
+- **The sub-flow never polled at all.** `_email-fallback-otp.yaml`
+  declared its own `env: OTP_URL: ''`, and that declaration shadowed the
+  value the parent flow had: a sub-flow does not inherit the caller's
+  variables. So `OTP_URL` was always empty inside it, the poll loop's
+  `OTP_URL !== ''` guard was never true, the whole `repeat` was skipped,
+  and the run failed at `assertTrue output.otp !== ''` — reporting "no
+  code arrived" while the relay held a perfectly good code. The parent now
+  passes both values through `runFlow: env:`, and the sub-flow declares no
+  defaults at all, so there is nothing left to shadow regardless of which
+  way that precedence runs.
 
 ### Earlier attempts
 

@@ -14,11 +14,24 @@
 #   - onboarding-fallback-otp is on screen (waypoint B passed).
 #   - Either FALLBACK_OTP holds a code still inside its 5-minute window,
 #     or OTP_URL points at a running `scripts/otp-relay.py`.
+#   - Both of those are passed in by the caller's `runFlow: env:` block.
+#
+# THIS FILE DECLARES NO `env:` DEFAULTS, DELIBERATELY.
+#   It used to default `OTP_URL: ''`, and that default SHADOWED the value
+#   the parent had — a sub-flow does not inherit caller variables, and its
+#   own declaration wins. So OTP_URL was always '' in here, the poll loop's
+#   `OTP_URL !== ''` guard was never true, the whole repeat was skipped and
+#   the run died at the assert below, reporting "no code arrived" while the
+#   relay was sitting on a perfectly good code.
+#
+#   Declaring nothing means there is nothing to shadow, whatever the
+#   precedence between a passed env and a declared default turns out to be.
+#   The cost is that running this file directly needs both values on the
+#   command line:
+#     maestro test -e OTP_URL=... -e FALLBACK_OTP=... _email-fallback-otp.yaml
+#   which is fine — it already requires the app to be sitting on waypoint B.
 
 appId: xyz.speakeasyapp.app
-env:
-  FALLBACK_OTP: SKIP
-  OTP_URL: ''
 ---
 # Where the code comes from. A statically supplied FALLBACK_OTP wins (that
 # is the manual path, and the one a human uses to re-run a single build);
