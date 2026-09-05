@@ -37,6 +37,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Preserve the offline parity/floor guard in
   `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts` and its weekly
   live-chain workflow at `.github/workflows/vouchflow-pin-check.yml`.
+- Every Play Console edit in `scripts/play-*.sh` must be committed with
+  `changesNotSentForReview=true`. Speakeasy does not use Google review;
+  without the flag Google auto-sends a reviewed-track (production / beta /
+  Open Testing) edit for review and the next edit on that track fails with
+  HTTP 400 INVALID_ARGUMENT. Each script's header explains it, and the guard
+  in `apps/mobile/src/integration/release-pipeline.test.ts` fails if any
+  `:commit` call drops the flag.
 
 ## Maintaining this file
 

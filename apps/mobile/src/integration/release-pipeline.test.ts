@@ -1,4 +1,4 @@
-import { readFileSync } from 'node:fs';
+import { readFileSync, readdirSync } from 'node:fs';
 import { resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { describe, expect, it } from 'vitest';
@@ -59,5 +59,28 @@ describe('coordinated mobile release contracts', () => {
     expect(fastfile).toContain('ipa: ENV["IPA_PATH"] || "build/Speakeasy.ipa"');
     expect(workflow).toContain('BUILD_NUMBER: ${{ github.run_id }}');
     expect(fallback).toContain('BUILD_NUMBER: ${{ github.run_id }}');
+  });
+
+  // Play Console auto-sends a committed edit for Google review unless the
+  // commit carries `changesNotSentForReview=true`. Speakeasy does not use
+  // Google review, and an edit left in review makes the NEXT edit on that
+  // track fail with HTTP 400 INVALID_ARGUMENT. Guards every publisher
+  // script at once so a new one can't reintroduce the bug.
+  it('commits every Play edit without sending it for Google review', () => {
+    const scriptsDir = resolve(repoRoot, 'scripts');
+    const commitLines = readdirSync(scriptsDir)
+      .filter((name) => name.endsWith('.sh'))
+      .flatMap((name) =>
+        source(`scripts/${name}`)
+          .split('\n')
+          .map((line) => line.trim())
+          .filter((line) => line.includes(':commit') && !line.startsWith('#'))
+          .map((line) => `${name}: ${line}`),
+      );
+
+    expect(commitLines.length).toBeGreaterThan(0);
+    for (const line of commitLines) {
+      expect(line).toContain(':commit?changesNotSentForReview=true');
+    }
   });
 });
