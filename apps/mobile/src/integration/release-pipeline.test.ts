@@ -9,6 +9,20 @@ function source(relativePath: string): string {
   return readFileSync(resolve(repoRoot, relativePath), 'utf8');
 }
 
+// Every executable (non-comment) line across scripts/*.sh matching `predicate`,
+// prefixed with its script name so a failure names the offending file.
+function playApiLines(predicate: (line: string) => boolean): string[] {
+  return readdirSync(resolve(repoRoot, 'scripts'))
+    .filter((name) => name.endsWith('.sh'))
+    .flatMap((name) =>
+      source(`scripts/${name}`)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => !line.startsWith('#') && predicate(line))
+        .map((line) => `${name}: ${line}`),
+    );
+}
+
 describe('coordinated mobile release contracts', () => {
   it('keeps the react-native-webrtc patch parseable by clean installs', () => {
     const patchPath = resolve(repoRoot, 'apps/mobile/patches/react-native-webrtc+124.0.7.patch');
@@ -67,20 +81,21 @@ describe('coordinated mobile release contracts', () => {
   // track fail with HTTP 400 INVALID_ARGUMENT. Guards every publisher
   // script at once so a new one can't reintroduce the bug.
   it('commits every Play edit without sending it for Google review', () => {
-    const scriptsDir = resolve(repoRoot, 'scripts');
-    const commitLines = readdirSync(scriptsDir)
-      .filter((name) => name.endsWith('.sh'))
-      .flatMap((name) =>
-        source(`scripts/${name}`)
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line.includes(':commit') && !line.startsWith('#'))
-          .map((line) => `${name}: ${line}`),
-      );
+    const commitLines = playApiLines((line) => line.includes(':commit'));
 
     expect(commitLines.length).toBeGreaterThan(0);
     for (const line of commitLines) {
       expect(line).toContain(':commit?changesNotSentForReview=true');
     }
+  });
+
+  // `changesNotSentForReview` is documented on `edits.commit` only —
+  // `edits.validate` accepts no query parameters — so on a reviewed track
+  // (production / beta / Open Testing) a `:validate` call fails with the
+  // same HTTP 400 INVALID_ARGUMENT however well-formed the edit is, with no
+  // flag able to quiet it. `:validate` is optional and `:commit` rejects a
+  // bad edit anyway, so no script may call it.
+  it('never validates a Play edit, which reviewed tracks always reject', () => {
+    expect(playApiLines((line) => line.includes(':validate'))).toEqual([]);
   });
 });

@@ -29,6 +29,16 @@
 # automatically. Please set the query parameter changesNotSentForReview
 # to true." Keep the flag on every `:commit` call here.
 #
+# There is deliberately NO `:validate` call before the commit. Google
+# documents `changesNotSentForReview` on `edits.commit` ONLY —
+# `edits.validate` takes no query parameters at all — so on a reviewed
+# track `:validate` fails with the exact same HTTP 400 INVALID_ARGUMENT
+# no matter how well-formed the edit is, and there is no flag that can
+# quiet it. `:validate` is optional; the commit rejects a bad edit on
+# its own and an edit is atomic, so nothing partially applies. Do not
+# reintroduce it — the guard in
+# apps/mobile/src/integration/release-pipeline.test.ts fails if you do.
+#
 # Required environment:
 #   ACCESS_TOKEN     — OAuth access token with androidpublisher scope
 #   PACKAGE_NAME     — e.g. xyz.speakeasyapp.app
@@ -188,9 +198,6 @@ echo "▸ Writing modified release to $TRACK"
 api PUT "$API/edits/$EDIT_ID/tracks/$TRACK" \
     -H 'Content-Type: application/json' \
     -d "$MODIFIED" >/dev/null
-
-echo "▸ Validating edit"
-api POST "$API/edits/$EDIT_ID:validate" >/dev/null
 
 echo "▸ Committing edit"
 api POST "$API/edits/$EDIT_ID:commit?changesNotSentForReview=true" >/dev/null

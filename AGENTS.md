@@ -43,7 +43,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Open Testing) edit for review and the next edit on that track fails with
   HTTP 400 INVALID_ARGUMENT. Each script's header explains it, and the guard
   in `apps/mobile/src/integration/release-pipeline.test.ts` fails if any
-  `:commit` call drops the flag.
+  `:commit` call drops the flag. That same guard also bans `:validate`
+  entirely: the flag is a `commit`-only query parameter, so `:validate`
+  raises the identical 400 on a reviewed track with no way to silence it,
+  and `:commit` validates the edit anyway.
 
 ## Maintaining this file
 
