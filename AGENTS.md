@@ -31,6 +31,15 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `apps/mobile/src/auth/verify-device.ts`; that escalating cooldown does not
   apply to user-initiated verification, though the pre-existing 60-second
   cancellation cooldown applies to all reasons. See `verify-device-cooldown.test.ts` for the contract.
+- Never pin the `api.vouchflow.dev` **leaf** certificate: it rotates roughly
+  every 90 days and every already-shipped build dies with it (this has fired
+  once, `352ba1a`). Both platforms pin the Let's Encrypt YE1 + YE2 issuing
+  intermediates — `apps/mobile/ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift`
+  (read its header comment before touching the pins; it records the SDK's real
+  matching semantics and the accepted residual risk) and
+  `MainApplication.kt`. `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts`
+  enforces iOS/Android pin parity offline in CI, and
+  `.github/workflows/vouchflow-pin-check.yml` re-checks the live chain weekly.
 
 ## Maintaining this file
 
