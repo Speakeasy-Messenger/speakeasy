@@ -183,8 +183,25 @@ carried a code, both fixed:
   and the run failed at `assertTrue output.otp !== ''` — reporting "no
   code arrived" while the relay held a perfectly good code. The parent now
   passes both values through `runFlow: env:`, and the sub-flow declares no
-  defaults at all, so there is nothing left to shadow regardless of which
-  way that precedence runs.
+  defaults at all, so there is nothing left to shadow.
+
+  The precedence is measured, not assumed. Running a parent with two
+  sub-flows on Maestro 2.5.1 and having each report what it saw:
+
+  | Flow | `OTP_URL` seen |
+  |------|----------------|
+  | parent, `env: OTP_URL: PARENT_PATCHED` | `PARENT_PATCHED` |
+  | sub-flow **with** `env: OTP_URL: ''`, passed `PARENT_PATCHED` | `''` |
+  | sub-flow with **no** `env:` block, passed `PARENT_PATCHED` | `PARENT_PATCHED` |
+
+  So a declared default beats the value passed to it — it shadows rather
+  than defaults — and declaring nothing is what lets the caller's value
+  through. The same rig then ran the sub-flow's real fetch block against a
+  stub relay that answered empty three times and then `740170`: the loop
+  polled four times and came out holding `740170`, which is what
+  `inputText` types. `src/integration/email-fallback-flow.test.ts` fails if
+  the `env:` block reappears, and the runner now patches every flow in the
+  suite by key rather than only the entry flow.
 
 ### Earlier attempts
 

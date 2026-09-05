@@ -24,8 +24,14 @@
 #   the run died at the assert below, reporting "no code arrived" while the
 #   relay was sitting on a perfectly good code.
 #
-#   Declaring nothing means there is nothing to shadow, whatever the
-#   precedence between a passed env and a declared default turns out to be.
+#   Measured on Maestro 2.5.1, parent declaring OTP_URL=PARENT_PATCHED:
+#     parent                                -> PARENT_PATCHED
+#     sub-flow WITH `env: OTP_URL: ''`      -> ''              <- shadowed
+#     sub-flow with NO `env:` block         -> PARENT_PATCHED  <- this file
+#   So the declared default beats the passed one; declaring nothing is what
+#   lets the caller's value through. `src/integration/email-fallback-flow.test.ts`
+#   fails if an `env:` block reappears here.
+#
 #   The cost is that running this file directly needs both values on the
 #   command line:
 #     maestro test -e OTP_URL=... -e FALLBACK_OTP=... _email-fallback-otp.yaml

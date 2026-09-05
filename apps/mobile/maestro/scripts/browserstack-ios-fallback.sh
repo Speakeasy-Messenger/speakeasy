@@ -178,13 +178,21 @@ fi
 unzip -q "$SUITE" -d "$work/suite"
 target=$(find "$work/suite" -name "$FLOW")
 test -n "$target"
-sed -i.bak \
-  -e "s|^  HANDLE: .*|  HANDLE: ${HANDLE}|" \
-  -e "s|^  FALLBACK_EMAIL: .*|  FALLBACK_EMAIL: ${FALLBACK_EMAIL}|" \
-  -e "s|^  FALLBACK_OTP: .*|  FALLBACK_OTP: ${FALLBACK_OTP}|" \
-  -e "s|^  OTP_URL: .*|  OTP_URL: '${OTP_URL}'|" \
-  "$target"
-rm -f "$target.bak"
+# Every flow in the suite, not just the entry flow. Only the entry flow
+# declares these keys today, so this is a no-op elsewhere -- but a
+# sub-flow that declares one shadows what the caller passes it (Maestro
+# 2.5.1: a declared default beats `runFlow: env:`), and patching by key
+# means such a flow gets the real value instead of a stale placeholder.
+# Cheap insurance against re-introducing the bug that cost three runs.
+while IFS= read -r flow; do
+  sed -i.bak \
+    -e "s|^  HANDLE: .*|  HANDLE: ${HANDLE}|" \
+    -e "s|^  FALLBACK_EMAIL: .*|  FALLBACK_EMAIL: ${FALLBACK_EMAIL}|" \
+    -e "s|^  FALLBACK_OTP: .*|  FALLBACK_OTP: ${FALLBACK_OTP}|" \
+    -e "s|^  OTP_URL: .*|  OTP_URL: '${OTP_URL}'|" \
+    "$flow"
+  rm -f "$flow.bak"
+done < <(find "$work/suite" -name '*.yaml')
 # Echoed so the run's inputs are visible, with the relay's guard token
 # masked — the log of a proof run gets pasted into PRs.
 sed -n '/^env:/,/^---/p' "$target" \
