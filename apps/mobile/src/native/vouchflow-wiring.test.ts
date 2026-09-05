@@ -1,65 +1,68 @@
-import { describe, expect, it } from 'vitest';
-import { readFileSync, readdirSync } from 'node:fs';
-import path from 'node:path';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-/**
- * Wiring guard for the September 2026 Android verification lockout.
- *
- * `lake-late-trout` sat in a permanent "Verify this device" loop: the
- * device's last Vouchflow verification aged past the server's 30-day
- * freshness window, the client correctly decided to re-verify, but the
- * re-verification never reached the native SDK — the app's global
- * client was a `CachingVouchflowClient`, which could answer `verify()`
- * from a cached success. The stale credential was re-presented, the
- * server rejected it again, and zero verification rows were created.
- *
- * These tests exist so the caching layer cannot come back by accident.
- * `src/auth/stale-verification-recovery.test.ts` proves the recovery
- * behaviour against a bare client; THIS file is what pins the app's
- * production wiring to that same bare client.
- */
+const native = vi.hoisted(() => {
+  const verify = vi.fn(async () => ({ deviceToken: 'dvt_test' }));
+  return { instance: undefined as unknown, verify };
+});
 
-const mobileSrc = path.resolve(__dirname, '..');
-
-function productionFiles(dir: string, out: string[] = []): string[] {
-  for (const entry of readdirSync(dir, { withFileTypes: true })) {
-    const full = path.join(dir, entry.name);
-    if (entry.isDirectory()) {
-      if (entry.name === '__mocks__') continue;
-      productionFiles(full, out);
-      continue;
+vi.mock('./vouchflow.js', () => ({
+  NativeVouchflowClient: class {
+    constructor() {
+      native.instance = this;
     }
-    if (!/\.tsx?$/.test(entry.name)) continue;
-    if (/\.test\.tsx?$/.test(entry.name)) continue;
-    out.push(full);
-  }
-  return out;
-}
+
+    verify(...args: unknown[]) {
+      return native.verify(...args);
+    }
+
+    requestFallback = vi.fn();
+    submitFallbackOtp = vi.fn();
+    getCachedDeviceToken = vi.fn();
+  },
+}));
+
+vi.mock('@speakeasy/crypto', () => ({
+  NativeGroupMessagingModule: class {},
+  NativeSignalProtocolModule: class {},
+}));
+
+vi.mock('../api/client.js', () => ({
+  ApiClient: class {},
+}));
+
+vi.mock('../config.js', () => ({
+  config: { apiBaseUrl: 'https://api.test', wsUrl: 'wss://ws.test' },
+}));
+
+vi.mock('../ws/client.js', () => ({
+  SpeakeasyWsClient: class {},
+}));
+
+vi.mock('../store/connection.js', () => ({
+  useConnection: { getState: () => ({ setState: vi.fn() }) },
+}));
+
+vi.mock('../diag/log.js', () => ({ diag: vi.fn() }));
+
+vi.mock('../push/push-notifications.js', () => ({
+  NativePushNotificationService: class {},
+}));
+
+import { vouchflow } from '../services.js';
 
 describe('Vouchflow client wiring', () => {
-  it('wires the app-wide client straight to the native SDK — no interposed layer', () => {
-    const services = readFileSync(path.join(mobileSrc, 'services.ts'), 'utf8');
-    const decl = /export const vouchflow[^=]*=\s*([\s\S]*?);/.exec(services);
-    expect(decl, 'services.ts must export a `vouchflow` const').not.toBeNull();
-
-    const initializer = decl![1]!
-      .replace(/\s+/g, ' ')
-      .replace(/,\s*\)/g, ')')
-      .trim();
-    // Anything between the app and `NativeVouchflowClient` can answer
-    // verify() without the SDK — which is exactly the lockout.
-    expect(initializer).toBe('new NativeVouchflowClient()');
+  beforeEach(() => {
+    native.verify.mockClear();
   });
 
-  it('has exactly one production implementation of VouchflowClient', () => {
-    const implementers = productionFiles(mobileSrc)
-      .filter((f) => /implements\s+VouchflowClient\b/.test(readFileSync(f, 'utf8')))
-      .map((f) => path.relative(mobileSrc, f))
-      .sort();
+  it('exports the native client instance without an interposed layer', () => {
+    expect(vouchflow).toBe(native.instance);
+  });
 
-    // A second implementation is how a cache/memo wrapper gets back in:
-    // it satisfies the interface, so every call site keeps compiling
-    // while forced re-verification silently stops reaching the SDK.
-    expect(implementers).toEqual(['native/vouchflow.ts']);
+  it('delegates every verification to the native SDK', async () => {
+    await vouchflow.verify({ context: 'login', minimumConfidence: 'low' });
+    await vouchflow.verify({ context: 'login', minimumConfidence: 'low' });
+
+    expect(native.verify).toHaveBeenCalledTimes(2);
   });
 });

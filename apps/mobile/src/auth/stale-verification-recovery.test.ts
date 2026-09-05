@@ -1,8 +1,54 @@
 import { beforeEach, afterEach, describe, expect, it, vi } from 'vitest';
+
+const native = vi.hoisted(() => {
+  const verify = vi.fn();
+  return { instance: undefined as unknown, verify };
+});
+
+vi.mock('../native/vouchflow.js', () => ({
+  NativeVouchflowClient: class {
+    constructor() {
+      native.instance = this;
+    }
+
+    verify(...args: unknown[]) {
+      return native.verify(...args);
+    }
+
+    requestFallback = vi.fn();
+    submitFallbackOtp = vi.fn();
+    getCachedDeviceToken = vi.fn();
+  },
+}));
+
+vi.mock('@speakeasy/crypto', () => ({
+  NativeGroupMessagingModule: class {},
+  NativeSignalProtocolModule: class {},
+}));
+
+vi.mock('../api/client.js', () => ({
+  ApiClient: class {},
+}));
+
+vi.mock('../config.js', () => ({
+  config: { apiBaseUrl: 'https://api.test', wsUrl: 'wss://ws.test' },
+}));
+
+vi.mock('../store/connection.js', () => ({
+  useConnection: { getState: () => ({ setState: vi.fn() }) },
+}));
+
+vi.mock('../diag/log.js', () => ({ diag: vi.fn() }));
+
+vi.mock('../push/push-notifications.js', () => ({
+  NativePushNotificationService: class {},
+}));
+
 import { SpeakeasyWsClient } from '../ws/client.js';
 import { useIdentity } from '../store/identity.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
 import { verifyDeviceWithExplanation } from './verify-device.js';
+import { vouchflow } from '../services.js';
 import type { VerifyResult, VouchflowClient } from '../native/vouchflow.js';
 
 /**
@@ -21,16 +67,6 @@ import type { VerifyResult, VouchflowClient } from '../native/vouchflow.js';
  * sheet flow, and a stub standing in for the native SDK that counts how
  * many verifications it was asked to create.
  */
-
-/**
- * The app's Vouchflow wiring, mirroring `services.ts`: the SDK client
- * with nothing in front of it. `native/vouchflow-wiring.test.ts` pins
- * `services.ts` to this same shape, so a wrapper reintroduced there
- * fails there rather than silently diverging from this test.
- */
-function buildAppVouchflowClient(sdk: VouchflowClient): VouchflowClient {
-  return sdk;
-}
 
 class FakeSocket {
   static instances: FakeSocket[] = [];
@@ -139,6 +175,7 @@ beforeEach(() => {
     verificationInFlight: false,
     nonce: 0,
   });
+  native.verify.mockReset();
   vi.useFakeTimers();
 });
 afterEach(() => {
@@ -148,7 +185,7 @@ afterEach(() => {
 describe('stale-verification recovery', () => {
   it('reaches the native SDK on a forced refresh, so the stale credential is replaced', async () => {
     const sdk = nativeSdkStub();
-    const vouchflow = buildAppVouchflowClient(sdk);
+    native.verify.mockImplementation(sdk.verify);
     const stopTapping = autoTapContinue();
 
     // An earlier verification in this process (onboarding / launch
