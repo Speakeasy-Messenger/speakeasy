@@ -69,7 +69,6 @@ for name, value in (
     if not value:
         sys.exit(f"otp-relay: {name} is required")
 
-SINCE = datetime.fromisoformat(SINCE_RAW.replace("Z", "+00:00"))
 
 _found = {"code": None}
 _seen_ids: set[str] = set()
@@ -87,12 +86,21 @@ def api(path: str):
         return json.load(res)
 
 
+def aware(stamp: datetime) -> datetime:
+    """Force UTC. Comparing an aware datetime with a naive one raises
+    TypeError, which would kill the poller thread and leave the relay
+    silently serving nothing for the whole window."""
+    if stamp.tzinfo is None:
+        return stamp.replace(tzinfo=timezone.utc)
+    return stamp.astimezone(timezone.utc)
+
+
 def created_at(email: dict):
     raw = email.get("created_at")
     if not raw:
         return None
     try:
-        return datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+        return aware(datetime.fromisoformat(str(raw).replace("Z", "+00:00")))
     except ValueError:
         return None
 
@@ -149,6 +157,9 @@ def poll_once() -> None:
             log(f"code found in email {eid} sent {stamp.isoformat()}")
             _found["code"] = code
             return
+
+
+SINCE = aware(datetime.fromisoformat(SINCE_RAW.replace("Z", "+00:00")))
 
 
 def poller() -> None:
