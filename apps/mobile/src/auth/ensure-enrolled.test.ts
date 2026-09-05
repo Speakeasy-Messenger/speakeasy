@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useIdentity } from '../store/identity.js';
 
 // Mock services.ts so we don't drag the real ApiClient / native
-// VouchflowSDK / CachingVouchflowClient into the test process.
+// VouchflowSDK into the test process.
 const apiMock = {
   fetchUser: vi.fn(),
   enroll: vi.fn(),
@@ -127,9 +127,7 @@ describe('ensureServerBinding', () => {
     // match what the server has on file. Rebind refuses (correctly —
     // we'd be letting any biometric-passing device steal the handle).
     apiMock.enroll.mockRejectedValueOnce(new ApiError(409, 'taken'));
-    apiMock.rebindDevice.mockRejectedValueOnce(
-      new ApiError(401, 'identity_mismatch'),
-    );
+    apiMock.rebindDevice.mockRejectedValueOnce(new ApiError(401, 'identity_mismatch'));
     const result = await ensureServerBinding({
       signalProtocol,
       vouchflow,
