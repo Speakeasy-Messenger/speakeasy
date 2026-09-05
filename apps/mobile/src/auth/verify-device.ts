@@ -24,11 +24,10 @@ const CANCEL_COOLDOWN_MS = 60_000;
  * Reasons the app raises by itself, with no user gesture behind them.
  * Only these are throttled: they are the ones that can re-fire on a
  * timer (the WS reconnect ladder caps its backoff at 30s), so without a
- * brake a device that never satisfies the server is re-prompted every
- * 30 seconds forever — the modal loop reported in September 2026. A
+ * brake a device that remains rejected is re-prompted indefinitely. A
  * verification the user asked for (sending a message, a group action)
- * cannot loop without them and is always honoured, so the app degrades
- * into a usable one with a working retry rather than a dead end.
+ * cannot loop without them and is always honoured, preserving a usable
+ * retry path.
  */
 const AUTOMATIC_REASONS: ReadonlySet<VerificationReason> = new Set([
   'launch_refresh',
