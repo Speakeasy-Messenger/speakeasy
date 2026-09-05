@@ -37,45 +37,51 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     //
     // ## What the SDK actually compares these against
     //
-    // Verified against vouchflow/ios-sdk **v2.4.0** — the exact version
+    // Verified against vouchflow/ios-sdk **v2.5.0** — the exact version
     // pinned in `Speakeasy.xcodeproj/project.pbxproj` — not assumed from the
     // parameter names:
     //
-    //   * `PinningDelegate.urlSession(_:didReceive:completionHandler:)` walks
-    //     *every* certificate in the served chain and accepts the connection
-    //     on the first SPKI-SHA256 match against **either** configured pin
-    //     (OR semantics). Neither slot is position-checked, so the names
+    //   * `PinningDelegate` validates *first*, then pins. It binds an
+    //     `SecPolicyCreateSSL` policy to the expected host and requires
+    //     `SecTrustEvaluateWithError` to pass — expiry, revocation,
+    //     chain-to-a-trusted-root and hostname are all checked by the OS —
+    //     and only then compares SPKI pins as an **additional** constraint.
+    //   * Pin comparison walks *every* certificate in the served chain and
+    //     accepts on the first SPKI-SHA256 match against **either** configured
+    //     pin (OR semantics). Neither slot is position-checked, so the names
     //     `leafCertificatePin` / `intermediateCertificatePin` are historical
     //     labels only: an intermediate SPKI in the "leaf" slot is valid and
     //     is what the SDK's own defaults ship.
     //   * SDK >= 2.2.0 branches its ASN.1 SPKI header on the certificate's
     //     actual curve. Both YE1 and YE2 are EC P-384; before 2.2.0 the SDK
     //     hardcoded the P-256 header and an intermediate pin could therefore
-    //     *never* match. We are on 2.4.0, so this is safe — but do not
-    //     downgrade the SPM pin below 2.2.0 without moving back to a leaf pin.
+    //     *never* match.
     //   * The values must be raw base64 (no `sha256/` prefix); the SDK
     //     `precondition`s on that at configure() time.
     //
-    // ## Known residual risk (deliberate, not an oversight)
+    // ## Why v2.5.0 is not separable from these pin values
     //
-    // v2.4.0's `PinningDelegate` never calls `SecTrustEvaluateWithError`: a
-    // pin match short-circuits straight to `.useCredential`, which replaces
-    // the system's chain/hostname evaluation rather than adding to it. With a
-    // *public* CA in the pin set, a network attacker holding any certificate
-    // issued by YE1/YE2 — for any hostname, obtainable free in minutes —
-    // would be accepted. Android is not exposed to this: OkHttp's
-    // CertificatePinner runs *after* the platform trust manager has already
-    // validated chain and hostname, which is why the same two constants give
-    // a stronger posture there.
+    // Do **not** downgrade the SPM pin below 2.5.0 while these constants are
+    // intermediates. Up to and including v2.4.0 the SDK never called
+    // `SecTrustEvaluateWithError`: a pin match short-circuited straight to
+    // `.useCredential`, replacing the system's chain/hostname evaluation
+    // rather than adding to it. A *leaf* pin masked that, because exactly one
+    // key could satisfy it. An *intermediate* pin does not: YE1/YE2 appear in
+    // the chain of every certificate Let's Encrypt issues, so on <= 2.4.0
+    // these values would accept any attacker-obtained LE certificate, for any
+    // hostname, given network position. Intermediate pins and 2.5.0 ship
+    // together or not at all — `vouchflow-pin-rotation.test.ts` asserts the
+    // floor so a downgrade fails CI rather than silently reopening it.
     //
-    // This trade-off was taken knowingly (captain decision hold
-    // `speakeasy-verify-loop-diagnosis-decision-ios-cert-pin-strategy`): the
-    // alternative, leaf pinning, is a *guaranteed* total iOS outage every
-    // ~90 days, and this attack additionally requires active network
-    // interception. The durable fix belongs in the SDK — evaluate hostname
-    // and chain validity first, then apply the SPKI comparison as an extra
-    // constraint (Apple TN3126). Once an ios-sdk release does that, this
-    // comment and the risk go away with no change to the pins below.
+    // (Android was never exposed to this: OkHttp's CertificatePinner runs
+    // *after* the platform trust manager validates chain and hostname, which
+    // is why the same two constants were always safe there.)
+    //
+    // This closes the residual risk recorded under captain decision hold
+    // `speakeasy-verify-loop-diagnosis-decision-ios-cert-pin-strategy`, whose
+    // third option was to press Vouchflow to evaluate hostname/chain validity
+    // before its SPKI comparison. v2.5.0 (`972fe82`, "validate TLS before
+    // certificate pinning") is that fix.
 
     /// Let's Encrypt YE1 issuing intermediate (EC P-384). Kept alongside YE2
     /// so an issuer rollover is already covered without an app update.

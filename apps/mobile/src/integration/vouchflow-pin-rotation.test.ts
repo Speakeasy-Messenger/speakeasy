@@ -101,9 +101,17 @@ describe('Vouchflow certificate pins — committed sources', () => {
     expect(ios).toMatch(/intermediateCertificatePin:\s*letsEncryptYE1Pin/);
   });
 
-  it('keeps the iOS SPM pin at an SDK that can hash a P-384 intermediate', () => {
-    // vouchflow/ios-sdk < 2.2.0 hardcoded the EC P-256 SPKI header, so an
-    // intermediate pin could never match and pinning would fail closed.
+  it('keeps the iOS SPM pin at an SDK that validates TLS before pinning', () => {
+    // The intermediate pins above are only safe on vouchflow/ios-sdk >= 2.5.0.
+    // Up to 2.4.0 the SDK never called SecTrustEvaluateWithError, so a pin
+    // match replaced the OS chain/hostname check instead of adding to it. A
+    // leaf pin masked that (one key could satisfy it); an intermediate pin
+    // does not, because YE1/YE2 appear in every Let's Encrypt chain — on
+    // <= 2.4.0 these values would accept any attacker-obtained LE certificate
+    // for any hostname. 2.5.0 evaluates trust first, then pins.
+    //
+    // (< 2.2.0 was separately broken for intermediates: it hardcoded the EC
+    // P-256 SPKI header, so a P-384 intermediate pin could never match.)
     const pbxproj = readFileSync(
       resolve(mobileRoot, 'ios/Speakeasy.xcodeproj/project.pbxproj'),
       'utf8',
@@ -113,7 +121,13 @@ describe('Vouchflow certificate pins — committed sources', () => {
     )?.[1];
     expect(version).toBeDefined();
     const [major, minor] = version!.split('.').map(Number);
-    expect(major > 2 || (major === 2 && minor >= 2)).toBe(true);
+    expect(
+      major > 2 || (major === 2 && minor >= 5),
+      `iOS SDK is pinned at ${version}, but the committed intermediate pins ` +
+        `require >= 2.5.0 (the release that evaluates TLS trust before ` +
+        `comparing pins). Downgrading below 2.5.0 while pinning intermediates ` +
+        `reopens the "any Let's Encrypt certificate is accepted" hole.`,
+    ).toBe(true);
   });
 });
 

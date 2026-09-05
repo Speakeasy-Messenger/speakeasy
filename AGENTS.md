@@ -36,10 +36,13 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   once, `352ba1a`). Both platforms pin the Let's Encrypt YE1 + YE2 issuing
   intermediates — `apps/mobile/ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift`
   (read its header comment before touching the pins; it records the SDK's real
-  matching semantics and the accepted residual risk) and
+  matching semantics) and
   `apps/mobile/android/app/src/main/java/xyz/speakeasyapp/app/MainApplication.kt`.
-  `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts`
-  enforces iOS/Android pin parity offline in CI, and
+  On iOS those intermediate pins are only safe on vouchflow/ios-sdk >= 2.5.0,
+  which evaluates TLS trust before comparing pins; never downgrade the SPM
+  version in `Speakeasy.xcodeproj/project.pbxproj` below that while pinning
+  intermediates. `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts`
+  enforces iOS/Android pin parity and that SDK floor offline in CI, and
   `.github/workflows/vouchflow-pin-check.yml` re-checks the live chain weekly.
 
 ## Maintaining this file
