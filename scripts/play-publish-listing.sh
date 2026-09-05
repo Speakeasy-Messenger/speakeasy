@@ -19,6 +19,15 @@
 #   takes the token in `Authorization: Bearer`, so 60 lines of curl
 #   beats a 200MB Ruby + bundler dependency.
 #
+# Commit-review model: every edit this script creates is committed with
+# `changesNotSentForReview=true`. Speakeasy's release model does NOT use
+# Google review — releases commit directly. Without that query parameter
+# Google auto-sends a reviewed-track edit (production / beta / Open
+# Testing) for review, and the NEXT edit on that track fails hard with
+# HTTP 400 INVALID_ARGUMENT: "Changes cannot be sent for review
+# automatically. Please set the query parameter changesNotSentForReview
+# to true." Keep the flag on every `:commit` call here.
+#
 # Required environment:
 #   ACCESS_TOKEN     — OAuth access token with androidpublisher scope
 #   PACKAGE_NAME     — e.g. xyz.speakeasyapp.app
@@ -151,7 +160,7 @@ api POST "$API/edits/$EDIT_ID:validate" >/dev/null
 echo "  ok"
 
 echo "▸ Committing edit"
-api POST "$API/edits/$EDIT_ID:commit" >/dev/null
+api POST "$API/edits/$EDIT_ID:commit?changesNotSentForReview=true" >/dev/null
 echo "  Listing updates are live in Play Console."
 echo ""
 echo "What changed:"

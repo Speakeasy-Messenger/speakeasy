@@ -5,21 +5,29 @@
 #
 # Use cases:
 #
-#   1. Send a draft release for Google review without clicking
-#      anything in Play Console. Set `RELEASE_STATUS=completed`
-#      (auto-publish after review) or `inProgress` (staged rollout).
+#   1. Publish a draft release without clicking anything in Play
+#      Console. Set `RELEASE_STATUS=completed` (publish in full) or
+#      `inProgress` (staged rollout).
 #
 #   2. Add or update release notes on the active release without
 #      changing its status. Set `RELEASE_NOTES_TEXT` and leave
 #      `RELEASE_STATUS` empty.
 #
-#   3. Both at once — set the notes and submit for review in one
-#      atomic edit.
+#   3. Both at once — set the notes and publish in one atomic edit.
 #
 # Companion to scripts/play-publish.sh (AAB upload), play-publish-
 # listing.sh (store listing), play-promote-track.sh (track-to-track
 # promotion), and play-clear-track.sh (wipe). Same WIF-friendly
 # bearer-token pattern.
+#
+# Commit-review model: every edit this script creates is committed with
+# `changesNotSentForReview=true`. Speakeasy's release model does NOT use
+# Google review — releases commit directly. Without that query parameter
+# Google auto-sends a reviewed-track edit (production / beta / Open
+# Testing) for review, and the NEXT edit on that track fails hard with
+# HTTP 400 INVALID_ARGUMENT: "Changes cannot be sent for review
+# automatically. Please set the query parameter changesNotSentForReview
+# to true." Keep the flag on every `:commit` call here.
 #
 # Required environment:
 #   ACCESS_TOKEN     — OAuth access token with androidpublisher scope
@@ -31,7 +39,8 @@
 #   RELEASE_STATUS   — draft | inProgress | halted | completed
 #                       Omit to preserve the current status (e.g. when
 #                       only updating release notes).
-#                       completed = auto-publish after review.
+#                       completed = publish in full (no Google review —
+#                       see the commit-review note above).
 #                       inProgress = staged rollout; pair with
 #                       USER_FRACTION (e.g. 0.1 for 10%).
 #                       halted = pause an active rollout.
@@ -184,5 +193,5 @@ echo "▸ Validating edit"
 api POST "$API/edits/$EDIT_ID:validate" >/dev/null
 
 echo "▸ Committing edit"
-api POST "$API/edits/$EDIT_ID:commit" >/dev/null
+api POST "$API/edits/$EDIT_ID:commit?changesNotSentForReview=true" >/dev/null
 echo "  $TRACK modification committed."

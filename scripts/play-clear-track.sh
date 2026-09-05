@@ -9,6 +9,15 @@
 # scripts/play-promote-track.sh (track promotion). Same WIF auth,
 # same bearer-token model, same atomic commit.
 #
+# Commit-review model: every edit this script creates is committed with
+# `changesNotSentForReview=true`. Speakeasy's release model does NOT use
+# Google review — releases commit directly. Without that query parameter
+# Google auto-sends a reviewed-track edit (production / beta / Open
+# Testing) for review, and the NEXT edit on that track fails hard with
+# HTTP 400 INVALID_ARGUMENT: "Changes cannot be sent for review
+# automatically. Please set the query parameter changesNotSentForReview
+# to true." Keep the flag on every `:commit` call here.
+#
 # Required environment:
 #   ACCESS_TOKEN     — OAuth access token with androidpublisher scope
 #   PACKAGE_NAME     — e.g. xyz.speakeasyapp.app
@@ -68,7 +77,7 @@ echo "▸ Validating edit"
 api POST "$API/edits/$EDIT_ID:validate" >/dev/null
 
 echo "▸ Committing edit"
-api POST "$API/edits/$EDIT_ID:commit" >/dev/null
+api POST "$API/edits/$EDIT_ID:commit?changesNotSentForReview=true" >/dev/null
 echo "  $TRACK track cleared. Any draft / pending releases removed."
 echo ""
 echo "Released-to-testers history is unaffected; this only removes"
