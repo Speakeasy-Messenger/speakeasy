@@ -47,6 +47,19 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   entirely: the flag is a `commit`-only query parameter, so `:validate`
   raises the identical 400 on a reviewed track with no way to silence it,
   and `:commit` validates the edit anyway.
+- Pushing a release tag does NOT reach production/App Store on either
+  platform — it only reaches the pre-production tracks. A `v*`/`alpha-*` tag
+  (`release-play.yml`) publishes to Play Internal then auto-promotes to
+  **beta** (Open Testing) only; reaching **production** requires a separate
+  manual dispatch: `gh workflow run play-promote.yml -f from_track=beta -f
+  to_track=production -f release_status=completed` (see `play-promote.yml`'s
+  header — this repo's no-review model means `completed` goes live
+  immediately, no Google review). Likewise an `ios-*` tag / a plain
+  `release-ios.yml` run defaults to `lane=beta` (TestFlight only); the App
+  Store Connect build needs `gh workflow run release-ios.yml -f
+  lane=release`, which builds+uploads only (`submit_for_review: false` in
+  `ios/fastlane/Fastfile`'s `release` lane) and never submits to Apple
+  review.
 
 ## Maintaining this file
 
