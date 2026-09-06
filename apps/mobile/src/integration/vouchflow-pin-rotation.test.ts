@@ -1,17 +1,27 @@
 /**
- * Guard against the dated, self-inflicted iOS outage described in
- * `#204` / `352ba1a`: `api.vouchflow.dev` is served with a ~90-day Let's
- * Encrypt leaf, so any build that pins that leaf stops working on rotation
- * day. Both platforms must pin the *issuing intermediates* instead.
+ * Guard against the dated, self-inflicted outages described in `#204` /
+ * `352ba1a` (leaf pin, 2026-08-10 rotation) and the 2026-09-06 YE1→YE2
+ * intermediate rotation: `api.vouchflow.dev` must stay reachable for every
+ * already-shipped build across routine CA-side rotations. Both platforms pin
+ * the two ISRG **roots** — the anchors of the chains Let's Encrypt serves —
+ * not the leaf, and not the issuing intermediates (they rotate a few times a
+ * year and buy no security over the root: any certificate the CA issues to
+ * anyone carries the same intermediate, so a fraudulently issued certificate
+ * for our hostname would pass an intermediate pin exactly as it passes a
+ * root pin. Captain's decision 2026-09-06: pin the roots).
  *
- * Two layers, deliberately split:
+ * Three layers, deliberately split:
  *
  *   1. An offline parity check (always runs, including in CI and on a plane):
  *      the pins committed for iOS must be exactly the pins committed for
- *      Android, must be the two intermediates, and must not be a leaf.
- *      Android's pins are the reference because OkHttp has survived a real
- *      rotation with them.
- *   2. A live-chain check against `api.vouchflow.dev` (opt-in, never gates a
+ *      Android.
+ *   2. An offline derivation check (also always runs): the committed pins
+ *      must equal the SPKI SHA-256 hashes recomputed from the checked-in
+ *      root certificates (`src/integration/fixtures/isrg-root-{x1,x2}.pem`,
+ *      fetched from letsencrypt.org, fingerprints cross-checked against the
+ *      published values at check-in time). A mistyped or stale hash fails
+ *      here instead of in production.
+ *   3. A live-chain check against `api.vouchflow.dev` (opt-in, never gates a
  *      PR): set `VOUCHFLOW_LIVE_PIN_CHECK=1`. Run on a schedule by
  *      `.github/workflows/vouchflow-pin-check.yml` so a chain change is
  *      noticed by CI rather than by users in a verification loop.
@@ -31,9 +41,36 @@ const iosPath = resolve(mobileRoot, 'ios/SpeakeasyBridges/Vouchflow/VouchflowBoo
 const android = readFileSync(androidPath, 'utf8');
 const ios = readFileSync(iosPath, 'utf8');
 
-/** Let's Encrypt issuing intermediates. Both are EC P-384. */
-const YE1_PIN = 'brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4=';
-const YE2_PIN = 's/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y=';
+const fixturesDir = resolve(__dirname, 'fixtures');
+
+/**
+ * ISRG Root X2 (EC P-384, expires 2040-09-17): the trust anchor of the chain
+ * `api.vouchflow.dev` serves today (leaf → YE2 → Root YE → ISRG Root X2).
+ */
+const ISRG_ROOT_X2_PEM = readFileSync(resolve(fixturesDir, 'isrg-root-x2.pem'));
+
+/**
+ * ISRG Root X1 (RSA 4096, expires 2035-06-04): the RSA-chain anchor. Kept on
+ * both platforms for parity, but only effective on Android — ios-sdk 2.5.0
+ * hashes EC keys only (see VouchflowBootstrap.swift, vf-sdk-rsa-spki).
+ */
+const ISRG_ROOT_X1_PEM = readFileSync(resolve(fixturesDir, 'isrg-root-x1.pem'));
+
+/**
+ * SPKI SHA-256 of a PEM certificate, base64 — the exact value both SDKs
+ * compute on device and the same one the
+ * `openssl x509 -pubkey | openssl pkey -pubin -outform der |
+ * openssl dgst -sha256 -binary | base64` pipeline produces.
+ */
+function spkiPin(pem: Buffer): string {
+  return createHash('sha256')
+    .update(new X509Certificate(pem).publicKey.export({ type: 'spki', format: 'der' }))
+    .digest('base64');
+}
+
+/** Pins derived from the checked-in roots — the source of truth, not a copy. */
+const ROOT_X2_PIN = spkiPin(ISRG_ROOT_X2_PEM);
+const ROOT_X1_PIN = spkiPin(ISRG_ROOT_X1_PEM);
 
 /**
  * Leaf SPKIs that were pinned at some point and must never come back. The
@@ -73,10 +110,16 @@ describe('Vouchflow certificate pins — committed sources', () => {
     expect(i).toEqual(a);
   });
 
-  it('pins both issuing intermediates, so a leaf rotation is survivable', () => {
+  it('commits exactly the SPKI pins of the checked-in ISRG root fixtures', () => {
+    // Recomputed from the certificates themselves, so a typo in either
+    // platform's constants (or a stale fixture) fails CI before it fails
+    // sign-in for every shipped user.
+    expect(ROOT_X2_PIN).toMatch(new RegExp(`^${SPKI_BASE64}$`));
+    expect(ROOT_X1_PIN).toMatch(new RegExp(`^${SPKI_BASE64}$`));
+    expect(ROOT_X2_PIN).not.toEqual(ROOT_X1_PIN);
+
     for (const pins of [androidPins(), iosPins()]) {
-      expect(pins).toContain(YE1_PIN);
-      expect(pins).toContain(YE2_PIN);
+      expect(pins.sort()).toEqual([ROOT_X1_PIN, ROOT_X2_PIN].sort());
     }
   });
 
@@ -88,30 +131,20 @@ describe('Vouchflow certificate pins — committed sources', () => {
     }
   });
 
-  it('passes the intermediate constants into both Android SDK pin slots', () => {
-    expect(android).toMatch(/leafCertificatePin\s*=\s*VOUCHFLOW_LETS_ENCRYPT_YE2_PIN/);
-    expect(android).toMatch(/intermediateCertificatePin\s*=\s*VOUCHFLOW_LETS_ENCRYPT_YE1_PIN/);
-  });
-
-  it('passes the intermediate constants into both iOS SDK pin slots', () => {
-    // The iOS SDK compares both slots against every certificate in the served
-    // chain (OR semantics, no position check), so the slot names are
-    // historical — but the values must still both be intermediates.
-    expect(ios).toMatch(/leafCertificatePin:\s*letsEncryptYE2Pin/);
-    expect(ios).toMatch(/intermediateCertificatePin:\s*letsEncryptYE1Pin/);
-  });
-
   it('keeps the iOS SPM pin at an SDK that validates TLS before pinning', () => {
-    // The intermediate pins above are only safe on vouchflow/ios-sdk >= 2.5.0.
+    // The root pins above are only acceptable on vouchflow/ios-sdk >= 2.5.0.
     // Up to 2.4.0 the SDK never called SecTrustEvaluateWithError, so a pin
     // match replaced the OS chain/hostname check instead of adding to it. A
-    // leaf pin masked that (one key could satisfy it); an intermediate pin
-    // does not, because YE1/YE2 appear in every Let's Encrypt chain — on
-    // <= 2.4.0 these values would accept any attacker-obtained LE certificate
-    // for any hostname. 2.5.0 evaluates trust first, then pins.
+    // leaf pin masked that (one key could satisfy it); a root pin does not:
+    // on <= 2.4.0 these values would accept any attacker-obtained
+    // certificate that chains to the pinned root — i.e. effectively any
+    // Let's Encrypt certificate ever issued, for any hostname. 2.5.0
+    // evaluates TLS trust (chain, expiry, revocation, hostname) first, then
+    // applies pins as an additional constraint. That validate-first
+    // property is exactly what makes root pinning safe.
     //
-    // (< 2.2.0 was separately broken for intermediates: it hardcoded the EC
-    // P-256 SPKI header, so a P-384 intermediate pin could never match.)
+    // (< 2.2.0 was separately broken for P-384 pins: it hardcoded the EC
+    // P-256 SPKI header, so a P-384 pin — ISRG Root X2 — could never match.)
     const pbxproj = readFileSync(
       resolve(mobileRoot, 'ios/Speakeasy.xcodeproj/project.pbxproj'),
       'utf8',
@@ -123,9 +156,9 @@ describe('Vouchflow certificate pins — committed sources', () => {
     const [major, minor] = version!.split('.').map(Number);
     expect(
       major > 2 || (major === 2 && minor >= 5),
-      `iOS SDK is pinned at ${version}, but the committed intermediate pins ` +
+      `iOS SDK is pinned at ${version}, but the committed root pins ` +
         `require >= 2.5.0 (the release that evaluates TLS trust before ` +
-        `comparing pins). Downgrading below 2.5.0 while pinning intermediates ` +
+        `comparing pins). Downgrading below 2.5.0 while pinning roots ` +
         `reopens the "any Let's Encrypt certificate is accepted" hole.`,
     ).toBe(true);
   });
