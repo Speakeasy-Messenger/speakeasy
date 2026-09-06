@@ -57,10 +57,21 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     //   * ISRG Root X2 — EC P-384, expires 2040-09-17. The trust anchor of
     //     the chain `api.vouchflow.dev` serves today (leaf EC P-256 → YE2 →
     //     Root YE → ISRG Root X2).
-    //   * ISRG Root X1 — RSA 4096, expires 2035-06-04. The RSA-chain anchor;
-    //     kept in the second slot so an RSA chain — or a switch back to one —
-    //     still validates. On devices whose trust store lacks X2, evaluation
-    //     anchors at X1 via the X2 cross-sign that the server serves.
+    //   * ISRG Root X1 — RSA 4096, expires 2035-06-04. The RSA-chain anchor,
+    //     kept in the second slot for parity with Android, where OkHttp
+    //     hashes every chain certificate regardless of key type, so an RSA
+    //     chain — or a switch back to one — still validates *there*. On iOS
+    //     this slot is INERT with SDK 2.5.0: `PinningDelegate`'s
+    //     `spkiHeader(forKeyType:sizeBits:)` does `guard isEC else
+    //     { return nil }`, so RSA certificates are never hashed and X1 can
+    //     never match. iOS therefore has a single effective pin — ISRG Root
+    //     X2 — until the SDK gains RSA SPKI support (tracked as
+    //     vf-sdk-rsa-spki). A server switch to an RSA-only chain would break
+    //     iOS sign-in until that SDK release ships.
+    //
+    //     On devices whose trust store lacks X2, evaluation anchors at X1 via
+    //     the X2 cross-sign the server serves; that cross-signed certificate
+    //     carries X2's (EC) key, so the X2 pin still matches on those devices.
     //
     // ## What the SDK actually compares these against
     //
@@ -86,7 +97,9 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     //   * SDK >= 2.2.0 branches its ASN.1 SPKI header on the certificate's
     //     actual curve. ISRG Root X2 is EC P-384; before 2.2.0 the SDK
     //     hardcoded the P-256 header and a P-384 pin could therefore *never*
-    //     match.
+    //     match. The branch covers EC P-256 and P-384 only: any other key
+    //     type (including RSA, i.e. ISRG Root X1) yields no header, is
+    //     logged as unsupported and skipped, and so cannot satisfy a pin.
     //   * The values must be raw base64 (no `sha256/` prefix); the SDK
     //     `precondition`s on that at configure() time.
     //
@@ -112,8 +125,9 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     /// chain `api.vouchflow.dev` serves today.
     private static let isrgRootX2Pin = "diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI="
 
-    /// ISRG Root X1 (RSA 4096, expires 2035-06-04): the RSA-chain anchor, so
-    /// an RSA chain or a switch back to one still validates.
+    /// ISRG Root X1 (RSA 4096, expires 2035-06-04): the RSA-chain anchor, kept
+    /// for parity with Android. Inert on iOS with SDK 2.5.0, which hashes EC
+    /// keys only — see the note above (vf-sdk-rsa-spki).
     private static let isrgRootX1Pin = "C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M="
 
     /// Called once from AppDelegate at app launch. Reads the api key and
@@ -122,7 +136,7 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     ///
     /// Slot assignment mirrors Android so the two platforms diff cleanly; the
     /// SDK treats the two slots identically (see the note above) — both hold
-    /// root pins here.
+    /// root pins here, of which only X2 is effective on iOS today.
     @objc public static func configure(apiKey: String, environment: String) throws {
         let env: VouchflowEnvironment = (environment == "sandbox") ? .sandbox : .production
         let cfg = VouchflowConfig(

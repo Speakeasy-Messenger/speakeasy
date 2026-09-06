@@ -49,7 +49,11 @@ const fixturesDir = resolve(__dirname, 'fixtures');
  */
 const ISRG_ROOT_X2_PEM = readFileSync(resolve(fixturesDir, 'isrg-root-x2.pem'));
 
-/** ISRG Root X1 (RSA 4096, expires 2035-06-04): the RSA-chain anchor. */
+/**
+ * ISRG Root X1 (RSA 4096, expires 2035-06-04): the RSA-chain anchor. Kept on
+ * both platforms for parity, but only effective on Android — ios-sdk 2.5.0
+ * hashes EC keys only (see VouchflowBootstrap.swift, vf-sdk-rsa-spki).
+ */
 const ISRG_ROOT_X1_PEM = readFileSync(resolve(fixturesDir, 'isrg-root-x1.pem'));
 
 /**
@@ -117,19 +121,6 @@ describe('Vouchflow certificate pins — committed sources', () => {
     for (const pins of [androidPins(), iosPins()]) {
       expect(pins.sort()).toEqual([ROOT_X1_PIN, ROOT_X2_PIN].sort());
     }
-  });
-
-  it('anchors at ISRG Root X2 first (the chain served today) with X1 as fallback', () => {
-    // The first slot must be X2 — the trust anchor of the chain
-    // api.vouchflow.dev serves right now — and the second X1, the RSA-chain
-    // anchor that older trust stores fall back to via the served X2
-    // cross-sign. The SDK treats both slots identically (OR semantics), so
-    // this is about keeping the two platforms diffing cleanly with a
-    // deliberate order, not about SDK behavior.
-    expect(android).toMatch(/leafCertificatePin\s*=\s*VOUCHFLOW_ISRG_ROOT_X2_PIN/);
-    expect(android).toMatch(/intermediateCertificatePin\s*=\s*VOUCHFLOW_ISRG_ROOT_X1_PIN/);
-    expect(ios).toMatch(/leafCertificatePin:\s*isrgRootX2Pin/);
-    expect(ios).toMatch(/intermediateCertificatePin:\s*isrgRootX1Pin/);
   });
 
   it('pins no leaf certificate on either platform', () => {

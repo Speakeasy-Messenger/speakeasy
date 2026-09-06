@@ -53,7 +53,11 @@ import dev.vouchflow.sdk.VouchflowEnvironment
 //   * ISRG Root X2 — EC P-384, expires 2040-09-17. Trust anchor of the
 //     chain api.vouchflow.dev serves today (leaf → YE2 → Root YE → X2).
 //   * ISRG Root X1 — RSA 4096, expires 2035-06-04. RSA-chain anchor; second
-//     slot, so an RSA chain or a switch back to one still validates.
+//     slot, so an RSA chain or a switch back to one still validates here:
+//     OkHttp's CertificatePinner hashes every chain certificate regardless
+//     of key type. That is NOT true on iOS — ios-sdk 2.5.0 hashes EC keys
+//     only, so X1 is inert there and iOS has a single effective pin (X2)
+//     until vf-sdk-rsa-spki ships. See VouchflowBootstrap.swift.
 //
 // Parity with iOS (VouchflowBootstrap.swift) and the pin values themselves
 // are asserted by apps/mobile/src/integration/vouchflow-pin-rotation.test.ts,
@@ -112,7 +116,8 @@ class MainApplication : Application(), ReactApplication {
     // that expired during the August 2026 rotation. The property names are
     // historical: OkHttp matches both values against the full cleaned peer
     // chain (root included), so both slots hold ISRG ROOT pins here — X2,
-    // the anchor of today's chain, and X1 as the RSA fallback. This keeps
+    // the anchor of today's chain, and X1 as the RSA fallback (effective on
+    // Android only; see the note on the constants above). This keeps
     // pinning without coupling app availability to a 90-day leaf or to
     // Let's Encrypt's rotating issuing intermediates.
     Vouchflow.configure(
