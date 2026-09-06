@@ -41,14 +41,20 @@ NSE_PROFILE = "match AppStore #{NSE_IDENTIFIER}".freeze
 #   raw Tunes request client (DELETE v1/reviewSubmissionItems/{id}).
 # - ReviewSubmissionItem.all(review_submission_id:) exists (class method,
 #   paginates via get_review_submission_items).
+def cancel_review_submission(submission)
+  cancelled = submission.cancel_submission
+  UI.success("Cancelled review submission id=#{submission.id} state=#{cancelled&.state}")
+  true
+rescue => e
+  UI.important("cancel_submission on id=#{submission.id} failed (#{e.class}: #{e.message[0, 160]})")
+  false
+end
+
 def reset_unresolved_submission!(app:, submission:)
   old_id = submission.id
   UI.message("Resetting review submission id=#{old_id} state=#{submission.state} (UNRESOLVED_ISSUES)")
-  begin
-    submission.cancel_submission
-    UI.success("Cancelled review submission id=#{old_id}")
-  rescue => e
-    UI.important("cancel_submission failed (#{e.class}: #{e.message[0, 160]}) — falling back to removing its items")
+  unless cancel_review_submission(submission)
+    UI.important("Falling back to removing the items of submission id=#{old_id}")
     items = (Array(submission.items) rescue [])
     begin
       items = Spaceship::ConnectAPI::ReviewSubmissionItem.all(review_submission_id: old_id) if items.empty?
@@ -60,17 +66,44 @@ def reset_unresolved_submission!(app:, submission:)
     rescue => e2
       UI.user_error!("Could not cancel submission #{old_id} nor delete its items: #{e2.class}: #{e2.message[0, 200]}")
     end
+    UI.message("Retrying cancel_submission on the now-empty submission id=#{old_id}")
+    cancel_review_submission(submission)
   end
 
-  # Cancellation is asynchronous on ASC; the version stays attached to the old
-  # submission until it settles. Poll until the old submission is no longer
-  # reported as in-progress, then create the fresh one.
+  # Cancellation is asynchronous on ASC: the submission reports CANCELING (which
+  # get_in_progress_review_submission does NOT match) while the version is still
+  # attached to it. Poll the submission itself until it leaves every open state
+  # (or disappears), then create the fresh one.
+  states = Spaceship::ConnectAPI::ReviewSubmission::ReviewSubmissionState
+  open_states = [states::CANCELING, states::UNRESOLVED_ISSUES, states::WAITING_FOR_REVIEW,
+                 states::IN_REVIEW, states::READY_FOR_REVIEW]
   deadline = Time.now + 180
+  last_state = submission.state
+  settled = false
   while Time.now < deadline
-    current = app.get_in_progress_review_submission(platform: "IOS")
-    break if current.nil? || current.id != old_id
-    UI.message("Waiting for ASC to release submission id=#{old_id} (state=#{current.state})...")
+    begin
+      current = Spaceship::ConnectAPI::ReviewSubmission.get(review_submission_id: old_id)
+      last_state = current&.state
+      unless open_states.include?(last_state)
+        UI.success("Review submission id=#{old_id} settled with state=#{last_state.inspect}")
+        settled = true
+        break
+      end
+    rescue => e
+      raise unless e.message =~ /NOT_FOUND|\b404\b/
+      UI.success("Review submission id=#{old_id} no longer exists — treating as settled")
+      settled = true
+      break
+    end
+    UI.message("Waiting for ASC to release submission id=#{old_id} (state=#{last_state})...")
     sleep(15)
+  end
+  unless settled
+    UI.user_error!(
+      "Review submission id=#{old_id} is still open (state=#{last_state}) after waiting 180s " \
+      "for the cancellation to settle. Not creating a new submission on top of it — " \
+      "wait a few minutes and re-run with reset_submission=true."
+    )
   end
 
   fresh = app.create_review_submission(platform: "IOS")
@@ -536,8 +569,10 @@ platform :ios do
     # submission (or create one), add this version, then submit. Reaching the
     # 'Add for Review' button is unreliable on the ASC mobile web, so do it here.
     submission = app.get_in_progress_review_submission(platform: "IOS")
+    fresh_submission = false
     if submission.nil?
       submission = app.create_review_submission(platform: "IOS")
+      fresh_submission = true
       UI.message("Created review submission id=#{submission.id} state=#{submission.state}")
     elsif submission.state == Spaceship::ConnectAPI::ReviewSubmission::ReviewSubmissionState::UNRESOLVED_ISSUES
       # A submission in UNRESOLVED_ISSUES (the previously REJECTED item) cannot
@@ -554,6 +589,7 @@ platform :ios do
         )
       end
       submission = reset_unresolved_submission!(app: app, submission: submission)
+      fresh_submission = true
     else
       UI.message("Reusing in-progress review submission id=#{submission.id} state=#{submission.state}")
     end
@@ -562,6 +598,13 @@ platform :ios do
       submission.add_app_store_version_to_review_items(app_store_version_id: version.id)
       UI.message("Added version #{version.id} to the review submission")
     rescue => e
+      if fresh_submission
+        UI.user_error!(
+          "Could not add version #{version.id} to the freshly created review submission " \
+          "id=#{submission.id} state=#{submission.state}: #{e.class}: #{e.message[0, 300]}. " \
+          "Not submitting an empty submission."
+        )
+      end
       UI.important("add_app_store_version_to_review_items: #{e.message} (may already be included)")
     end
 
