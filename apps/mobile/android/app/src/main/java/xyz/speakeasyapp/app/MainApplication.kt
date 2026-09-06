@@ -32,14 +32,37 @@ import dev.vouchflow.sdk.Vouchflow
 import dev.vouchflow.sdk.VouchflowConfig
 import dev.vouchflow.sdk.VouchflowEnvironment
 
-// Pin the issuing intermediates, not the short-lived leaf certificate.  Let's
-// Encrypt may serve either YE1 or YE2 while rotating api.vouchflow.dev.  The
-// Vouchflow SDK accepts a connection when any configured SPKI pin appears in
-// the otherwise-valid certificate chain.
-private const val VOUCHFLOW_LETS_ENCRYPT_YE1_PIN =
-    "brzvtCELCIZUo4sD/qPX0ccRtPsd3DY6RfmxpOU9oB4="
-private const val VOUCHFLOW_LETS_ENCRYPT_YE2_PIN =
-    "s/tdAOmUzd8syaTuqfgGvFcn6DzA5Cmb+Vby1ST+U3Y="
+// Pin the two ISRG roots (Let's Encrypt's parent CAs), never the short-lived
+// leaf and never an issuing intermediate.  The Vouchflow SDK accepts a
+// connection when any configured SPKI pin appears in the otherwise-valid
+// certificate chain, and OkHttp's CertificatePinner runs after the platform
+// trust manager has already validated chain and hostname, so a root pin adds
+// a constraint on top of a full TLS evaluation.
+//
+// Why the roots: pinning the leaf broke on every leaf rotation (the
+// 2026-08-10 outage, patched reactively in PR #204), and pinning the
+// issuing intermediates (YE1 + YE2, 2026-08-14 → 2026-09-06) broke when
+// Let's Encrypt rotated YE1 out of the served chain on 2026-09-06 — an
+// emergency release and an Apple review. Intermediates rotate a few times a
+// year, and they buy almost no security over the root: any certificate that
+// authority issues to anyone carries the same intermediate, so a
+// fraudulently issued certificate for our hostname would pass an
+// intermediate pin exactly as it passes a root pin. Captain's decision
+// (2026-09-06): pin the roots.
+//
+//   * ISRG Root X2 — EC P-384, expires 2040-09-17. Trust anchor of the
+//     chain api.vouchflow.dev serves today (leaf → YE2 → Root YE → X2).
+//   * ISRG Root X1 — RSA 4096, expires 2035-06-04. RSA-chain anchor; second
+//     slot, so an RSA chain or a switch back to one still validates.
+//
+// Parity with iOS (VouchflowBootstrap.swift) and the pin values themselves
+// are asserted by apps/mobile/src/integration/vouchflow-pin-rotation.test.ts,
+// which recomputes both pins from the checked-in root fixtures
+// (src/integration/fixtures/isrg-root-{x1,x2}.pem).
+private const val VOUCHFLOW_ISRG_ROOT_X2_PIN =
+    "diGVwiVYbubAI3RW4hB9xU8e/CH2GnkuvVFZE8zmgzI="
+private const val VOUCHFLOW_ISRG_ROOT_X1_PIN =
+    "C5+lpZ7tcVwmwQIMcRtPbsQtWLABXhQzejna0wHFr8M="
 
 class MainApplication : Application(), ReactApplication {
 
@@ -86,10 +109,12 @@ class MainApplication : Application(), ReactApplication {
     // for the API key — see android/gradle.properties.example).
     //
     // Override the SDK defaults because android-sdk 2.3.0 still pins the leaf
-    // that expired during the August 2026 YE1 → YE2 rotation. The property
-    // names are historical: OkHttp matches both values against the full peer
-    // chain, so using the two issuing intermediates preserves pinning without
-    // coupling app availability to a 90-day leaf certificate.
+    // that expired during the August 2026 rotation. The property names are
+    // historical: OkHttp matches both values against the full cleaned peer
+    // chain (root included), so both slots hold ISRG ROOT pins here — X2,
+    // the anchor of today's chain, and X1 as the RSA fallback. This keeps
+    // pinning without coupling app availability to a 90-day leaf or to
+    // Let's Encrypt's rotating issuing intermediates.
     Vouchflow.configure(
         VouchflowConfig(
             apiKey = BuildConfig.VOUCHFLOW_API_KEY,
@@ -97,8 +122,8 @@ class MainApplication : Application(), ReactApplication {
                 if (BuildConfig.VOUCHFLOW_ENVIRONMENT == "sandbox")
                     VouchflowEnvironment.SANDBOX
                 else VouchflowEnvironment.PRODUCTION,
-            leafCertificatePin = VOUCHFLOW_LETS_ENCRYPT_YE2_PIN,
-            intermediateCertificatePin = VOUCHFLOW_LETS_ENCRYPT_YE1_PIN,
+            leafCertificatePin = VOUCHFLOW_ISRG_ROOT_X2_PIN,
+            intermediateCertificatePin = VOUCHFLOW_ISRG_ROOT_X1_PIN,
         ))
   }
 
