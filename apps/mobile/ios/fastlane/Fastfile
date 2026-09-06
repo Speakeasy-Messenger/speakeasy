@@ -89,9 +89,8 @@ def reset_unresolved_submission!(app:, submission:)
         settled = true
         break
       end
-    rescue => e
-      raise unless e.message =~ /NOT_FOUND|\b404\b/
-      UI.success("Review submission id=#{old_id} no longer exists — treating as settled")
+    rescue Spaceship::UnexpectedResponse => e
+      UI.success("Review submission id=#{old_id} can no longer be fetched (#{e.message[0, 160]}) — treating as settled")
       settled = true
       break
     end
