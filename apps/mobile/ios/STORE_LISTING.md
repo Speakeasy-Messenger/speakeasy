@@ -45,14 +45,14 @@ prefer to file an annual self-classification report instead, flip the key to
 
 The privacy manifest, `Speakeasy/PrivacyInfo.xcprivacy`, is the authoritative
 declaration: it lists every collected data type with its Linked / Tracking /
-Purpose values (every purpose is App Functionality; `NSPrivacyTracking` is
-false). Anything not listed there is **Data Not Collected**. Keep the per-type
-answers in the manifest only — do not maintain a second copy here.
+Purpose values (`NSPrivacyTracking` is false). Anything not listed there is
+**Data Not Collected**. Keep the per-type answers in the manifest only — do not
+maintain a second copy here.
 
 - **Before resubmission:** update the App Store Connect App Privacy answers to
   match the manifest exactly (no more, no less). The repository manifest alone
   is not sufficient — App Store Connect does not read it.
-- **Contact Info → Email Address** is declared not linked to the user: it is
+- **Contact Info → Email Address** is declared linked to the user: it is
   entered only if device attestation is unavailable, then passed to Vouchflow
   to deliver a one-time code; Speakeasy does not store it with the handle.
 - **Identifiers → Device ID** covers the Vouchflow attestation token and the
