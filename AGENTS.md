@@ -31,10 +31,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `apps/mobile/src/auth/verify-device.ts`; that escalating cooldown does not
   apply to user-initiated verification, though the pre-existing 60-second
   cancellation cooldown applies to all reasons. See `verify-device-cooldown.test.ts` for the contract.
-- Never pin the `api.vouchflow.dev` leaf certificate. The authoritative pin
-  rationale, SDK floor, and platform values live in
+- Never pin the `api.vouchflow.dev` leaf certificate or Let's Encrypt's
+  issuing intermediates; both platforms pin the ISRG roots. The authoritative
+  pin rationale, SDK floor, and platform values live in
   `apps/mobile/ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift`.
-  Preserve the offline parity/floor guard in
+  Preserve the offline parity/fixture-derivation/floor guard in
   `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts` and its weekly
   live-chain workflow at `.github/workflows/vouchflow-pin-check.yml`.
 - Every Play Console edit in `scripts/play-*.sh` must be committed with
