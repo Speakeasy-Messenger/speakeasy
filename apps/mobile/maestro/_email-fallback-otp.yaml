@@ -1,0 +1,115 @@
+# Shared sub-flow: submit the emailed code and assert the enrollment it
+# unlocks. Split out of `13-email-fallback-enroll-ios.yaml` so the
+# unattended part of that flow can run without a code, and so any future
+# harness that CAN read an inbox reuses the same assertions.
+#
+# This sub-flow is the actual proof obligation. `submitFallbackOtp`
+# returns no device token of its own — `completeEmailFallbackClaim`
+# (src/auth/claim-handle.ts) reads the SDK's cached token, and only falls
+# back to a second `verify()` if there is none. Landing on the face step
+# is what proves that read produced a token the Speakeasy API accepted:
+# `api.enroll` is the only thing between the code screen and step 04.
+#
+# Pre-conditions:
+#   - onboarding-fallback-otp is on screen (waypoint B passed).
+#   - Either FALLBACK_OTP holds a code still inside its 5-minute window,
+#     or OTP_URL points at a running `scripts/otp-relay.py`.
+#   - Both of those are passed in by the caller's `runFlow: env:` block.
+#
+# THIS FILE DECLARES NO `env:` DEFAULTS, DELIBERATELY.
+#   It used to default `OTP_URL: ''`, and that default SHADOWED the value
+#   the parent had — a sub-flow does not inherit caller variables, and its
+#   own declaration wins. So OTP_URL was always '' in here, the poll loop's
+#   `OTP_URL !== ''` guard was never true, the whole repeat was skipped and
+#   the run died at the assert below, reporting "no code arrived" while the
+#   relay was sitting on a perfectly good code.
+#
+#   Measured on Maestro 2.5.1, parent declaring OTP_URL=PARENT_PATCHED:
+#     parent                                -> PARENT_PATCHED
+#     sub-flow WITH `env: OTP_URL: ''`      -> ''              <- shadowed
+#     sub-flow with NO `env:` block         -> PARENT_PATCHED  <- this file
+#   So the declared default beats the passed one; declaring nothing is what
+#   lets the caller's value through. `src/integration/email-fallback-flow.test.ts`
+#   fails if an `env:` block reappears here.
+#
+#   The cost is that running this file directly needs both values on the
+#   command line:
+#     maestro test -e OTP_URL=... -e FALLBACK_OTP=... _email-fallback-otp.yaml
+#   which is fine — it already requires the app to be sitting on waypoint B.
+
+appId: xyz.speakeasyapp.app
+---
+# Where the code comes from. A statically supplied FALLBACK_OTP wins (that
+# is the manual path, and the one a human uses to re-run a single build);
+# otherwise this starts empty and the poll below fills it in.
+#
+# `.replace('SKIP', '')` rather than a ternary on purpose: a YAML plain
+# scalar treats the ternary's " : " as a mapping separator and the flow
+# fails to parse. Every expression in this file is written to avoid ": ".
+- evalScript: ${output.otp = FALLBACK_OTP.replace('SKIP', '')}
+
+# ─── Fetch the code the device cannot have been given in advance ───
+# Vouchflow mints the code when `requestFallback` fires (waypoint B, one
+# screen back) and expires it five minutes later, so it cannot be patched
+# into this flow before upload. `scripts/otp-relay.py` watches the inbox
+# and serves the six digits at OTP_URL.
+#
+# There is no sleep here because Maestro has no dependable one: the relay
+# BLOCKS each GET for ~5s while it waits, so this loop is paced by the
+# server and each request still returns well inside Maestro's 10s HTTP
+# read timeout. 48 attempts is therefore a ~4 minute budget, comfortably
+# inside the code's five-minute life.
+#
+# The relay only ever serves a validated six-digit code or an empty body,
+# so "non-empty" is the whole client-side check.
+- repeat:
+    times: 48
+    while:
+      true: ${output.otp === '' && OTP_URL !== ''}
+    commands:
+      # `optional` so one refused connection costs a single 5s tick
+      # rather than the whole run — the relay sits behind a throwaway
+      # tunnel, and a 4-minute poll should ride out a blip. A window that
+      # never yields a code still fails loudly, at the assert below.
+      - evalScript:
+          script: ${output.otp = String(http.get(OTP_URL).body).trim()}
+          label: 'poll otp-relay for the emailed code'
+          optional: true
+
+# Fail here, not at the tap below, so an exhausted poll is legible as "no
+# code arrived" instead of "the verify button did nothing".
+- assertTrue: ${output.otp !== ''}
+
+- tapOn:
+    id: 'onboarding-fallback-otp'
+- inputText: ${output.otp}
+- hideKeyboard
+# Same reflow hazard as the email step in the parent flow: settle before
+# tapping, so this cannot land on "Generate one for me" and swap the
+# handle out from under the claim this very tap performs.
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'onboarding-fallback-verify'
+
+# Step 04 (Face) is the next onboarding screen. Reaching it means
+# api.enroll returned a user id — the server resolved the device token
+# through GET /v1/device/{token}/reputation and it passed the confidence,
+# freshness and risk gates in packages/vouchflow/src/validator.ts.
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-face-fox'
+    timeout: 60000
+- takeScreenshot: 04-enrolled-face-step
+
+# Carry it one screen further so the evidence shows a usable session
+# rather than a single lucky frame.
+- tapOn:
+    id: 'onboarding-face-fox'
+- tapOn:
+    id: 'onboarding-face-confirm'
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-permissions-continue'
+    timeout: 30000
+- takeScreenshot: 05-past-face-step

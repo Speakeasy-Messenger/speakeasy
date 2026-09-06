@@ -1,0 +1,184 @@
+# Maestro flow: onboarding via the Vouchflow email-OTP fallback (Tier C — real device)
+#
+# Covers the path added in #206: a device that CANNOT attest must still be
+# able to claim a handle, using Vouchflow SDK's own fallback tier
+# (`requestFallback` → `submitFallbackOtp`) and then the SAME `api.enroll`
+# the attestation path uses. That post-OTP device-token step was inferred
+# from the SDK surface rather than documented behaviour, so it is the one
+# this flow exists to hold down.
+#
+# WHY A REAL DEVICE, AND HOW THE UN-ATTESTABLE CASE IS FORCED
+#   No app-side "force fallback" switch is used on purpose — faking the
+#   trigger would prove nothing about the branch a reviewer actually hits.
+#   Instead this runs on a device-farm iPhone, which is wiped between
+#   sessions and therefore has NO passcode and NO enrolled biometric. The
+#   SDK's `VerificationManager.signChallenge` pre-checks
+#   `LAContext.canEvaluatePolicy(.deviceOwnerAuthentication)`, which is
+#   false on such a device, so `verify()` throws `biometricUnavailable`
+#   AFTER `POST /v1/verify` has already created the session that
+#   `requestFallback` needs.
+#
+#   An iPhone, not the iPad the reviewer used, because the app is built
+#   iPhone-only (`UIDeviceFamily`) and BrowserStack refuses to install it
+#   on an iPad — `422 BROWSERSTACK_APP_BUILT_FOR_IPHONE`. Nothing is lost:
+#   the un-attestable condition comes from the farm wipe, not the form
+#   factor, and farm iPhones are wiped exactly the same way. Proving this
+#   on an iPad would mean shipping iPad support, which is a product
+#   decision and not one this harness should force.
+#
+#   If the farm device DOES have a passcode, `verify()` instead presents
+#   the system passcode sheet, nothing dismisses it, and the flow fails at
+#   the first waypoint after 60s (`VERIFY_TIMEOUT_MS` in
+#   `src/auth/claim-handle.ts`). A failure there means "device was
+#   attestable", not "fallback is broken" — read the video before triaging.
+#
+# WAYPOINTS — each isolates one link in the chain, so a failure names its
+# own cause rather than just "onboarding broke":
+#   A  onboarding-fallback-email visible  → verify() failed in a
+#      fallback-eligible way and HandleStep offered email instead of
+#      dead-ending (the App Store 2.1(a) fix).
+#   B  onboarding-fallback-otp visible    → `requestFallback` returned a
+#      session id. This is the step that fails with `no_session` if the
+#      caller reaches the fallback WITHOUT a live verify() session.
+#   C  onboarding-face-fox visible        → `submitFallbackOtp` verified,
+#      a usable device token was obtained, and `api.enroll` accepted it.
+#      C is the inferred step. Nothing before C proves it.
+#
+# OTP DELIVERY
+#   Vouchflow has no test/deterministic OTP: the code is emailed, minted
+#   only once the device reaches the code screen, and dead in five
+#   minutes — so it cannot be baked into this file before upload. Two
+#   ways to satisfy waypoint C:
+#
+#     OTP_URL   — unattended. `scripts/otp-relay.py` watches the inbox
+#                 and serves the code; the sub-flow polls that URL from
+#                 the device. This is what the runner script wires up,
+#                 and it is what makes one unattended run prove the whole
+#                 chain rather than stopping at B.
+#     FALLBACK_OTP — manual. A code read out of the inbox by hand:
+#                 maestro test -e FALLBACK_OTP=123456 13-email-fallback-enroll-ios.yaml
+#
+#   With neither, the flow still asserts A and B unattended and stops at
+#   the code screen. See `_email-fallback-otp.yaml`.
+#
+# Args (env):
+#   HANDLE         — handle to claim. Must be free on the target API.
+#   FALLBACK_EMAIL — inbox that receives the Vouchflow code.
+#   FALLBACK_OTP   — a 6-digit code, or "SKIP" to defer to OTP_URL.
+#   OTP_URL        — otp-relay endpoint, or "" for no runtime fetch.
+
+appId: xyz.speakeasyapp.app
+name: iOS email-fallback onboarding (Tier C, real device)
+env:
+  HANDLE: fallbackqa
+  FALLBACK_EMAIL: qa@speakeasyapp.xyz
+  FALLBACK_OTP: SKIP
+  OTP_URL: ''
+---
+# clearKeychain matters as much as clearState here: the Vouchflow device
+# token lives in the iOS keychain with kSecAttrAccessibleAfterFirstUnlock
+# and survives reinstall, so without it a second run would skip enrollment
+# and read a token the first run left behind.
+- launchApp:
+    clearState: true
+    clearKeychain: true
+
+# ─── Step 01: Door ───
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-door-continue'
+    timeout: 60000
+- tapOn:
+    id: 'onboarding-door-continue'
+
+# ─── Step 02: The room ───
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-room-continue'
+    timeout: 15000
+- tapOn:
+    id: 'onboarding-room-continue'
+
+# ─── Step 03: Handle ───
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-handle'
+    timeout: 15000
+- tapOn:
+    id: 'onboarding-handle'
+- inputText: ${HANDLE}
+# Both matchers, so this fails on "text went somewhere else" rather than
+# only on "nothing is available". The handle in this field at OTP-verify
+# time is the one that actually gets claimed, so it has to be the one
+# this run was told to claim.
+- assertVisible:
+    id: 'onboarding-handle'
+    text: ${HANDLE}
+- extendedWaitUntil:
+    visible:
+      text: 'available'
+    timeout: 30000
+- takeScreenshot: 01-handle-available
+- tapOn:
+    id: 'onboarding-continue'
+
+# ─── Waypoint A: the fallback is offered instead of a dead end ───
+# Generous timeout: this covers Vouchflow enrollment (Secure Enclave
+# keypair + POST /v1/enroll) plus POST /v1/verify plus the LAContext
+# pre-check, on a cold device over the farm's network.
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-fallback-email'
+    timeout: 90000
+- takeScreenshot: 02-fallback-offered
+
+- tapOn:
+    id: 'onboarding-fallback-email'
+- inputText: ${FALLBACK_EMAIL}
+- hideKeyboard
+# `KeyboardAvoidingView behavior="padding"` reflows this screen when the
+# keyboard goes, and Maestro resolves an element's coordinates before it
+# taps them. Without a settle the next tap can land on whatever slid into
+# that spot — "Generate one for me" sits in the same stack, and a stray
+# hit on it silently replaces the handle (run 1: the screen reached the
+# code step showing an auto-picked `sable-high-pier`).
+- waitForAnimationToEnd:
+    timeout: 3000
+- tapOn:
+    id: 'onboarding-fallback-request'
+
+# ─── Waypoint B: requestFallback minted a session ───
+# The OTP field replaces the email field only after
+# `startEmailFallback` resolves. If the SDK had no active verification
+# session this instead surfaces `[no_session]` in onboarding-error.
+- extendedWaitUntil:
+    visible:
+      id: 'onboarding-fallback-otp'
+    timeout: 45000
+# Maestro text matchers are regexes that must match the element's FULL
+# text, so the bare prefix fails against "We sent a code to <addr>. Enter
+# it to finish." — that is what failed run 1, with the code screen
+# correctly on display behind it. `.*` covers the rest of the sentence.
+# The address itself stays out of the pattern: a "+" tag in it would be
+# read as a quantifier.
+- assertVisible: 'We sent a code to.*'
+
+# The handle can only have drifted via a stray tap since it was typed
+# (see the settle above). Catch it here, before the sub-flow claims it.
+- assertVisible:
+    id: 'onboarding-handle'
+    text: ${HANDLE}
+- takeScreenshot: 03-otp-requested
+
+# ─── Waypoint C: OTP → device token → api.enroll (the inferred step) ───
+# `env:` is not optional here. A sub-flow does NOT inherit the caller's
+# variables: whatever it declares in its own `env:` block wins, and
+# anything it does not declare is simply undefined. Passing both values
+# explicitly is the only thing that gets them across the boundary.
+- runFlow:
+    when:
+      true: ${FALLBACK_OTP !== 'SKIP' || OTP_URL !== ''}
+    file: _email-fallback-otp.yaml
+    env:
+      OTP_URL: ${OTP_URL}
+      FALLBACK_OTP: ${FALLBACK_OTP}

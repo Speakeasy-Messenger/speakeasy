@@ -22,6 +22,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `store/verify-sheet.ts`'s `fallback` field rather than closing and reopening
   the sheet — see that file's comments before changing its resolve/reject
   contract.
+- Whether that fallback actually enrolls a device is settled by the harness in
+  `apps/mobile/maestro/`, not by the unit tests — `claim-handle.test.ts` mocks
+  the two steps that decide it. `EMAIL_FALLBACK_EVIDENCE.md` there is the
+  authoritative record of what each waypoint proves, what is still unproven,
+  and how to run one unattended real-device pass.
 - `apps/mobile/src/services.ts` must expose Vouchflow's native client directly:
   no layer may answer `verify()` itself. The executable wiring and stale-device
   recovery coverage live in `apps/mobile/src/native/vouchflow-wiring.test.ts`

@@ -82,3 +82,7 @@ generated/
 
 # CodeGraph local index (not source)
 .codegraph/
+
+# Python bytecode (maestro/scripts/otp-relay.py)
+__pycache__/
+*.pyc
