@@ -28,6 +28,56 @@ EXT_PROFILE = "match AppStore #{EXT_IDENTIFIER}".freeze
 NSE_IDENTIFIER = "xyz.speakeasyapp.app.NotificationService".freeze
 NSE_PROFILE = "match AppStore #{NSE_IDENTIFIER}".freeze
 
+# Cancels a review submission that is stuck in UNRESOLVED_ISSUES (Apple will
+# not accept new items on one, so submit_for_review on it always fails with
+# "Version is not ready to be submitted yet"), waits for the cancellation to
+# settle, and returns a FRESH submission the version can be added to.
+#
+# Verified against the vendored fastlane 2.239 spaceship source:
+# - ReviewSubmission#cancel_submission exists (PATCH reviewSubmissions/{id}
+#   with canceled: true) — the only first-class reset the gem offers.
+# - ReviewSubmission#delete! and ReviewSubmissionItem#delete/delete! do NOT
+#   exist in fastlane 2.239; the item-delete fallback below goes through the
+#   raw Tunes request client (DELETE v1/reviewSubmissionItems/{id}).
+# - ReviewSubmissionItem.all(review_submission_id:) exists (class method,
+#   paginates via get_review_submission_items).
+def reset_unresolved_submission!(app:, submission:)
+  old_id = submission.id
+  UI.message("Resetting review submission id=#{old_id} state=#{submission.state} (UNRESOLVED_ISSUES)")
+  begin
+    submission.cancel_submission
+    UI.success("Cancelled review submission id=#{old_id}")
+  rescue => e
+    UI.important("cancel_submission failed (#{e.class}: #{e.message[0, 160]}) — falling back to removing its items")
+    items = (Array(submission.items) rescue [])
+    begin
+      items = Spaceship::ConnectAPI::ReviewSubmissionItem.all(review_submission_id: old_id) if items.empty?
+      client = Spaceship::ConnectAPI.client
+      items.each do |item|
+        client.tunes_request_client.delete("v1/reviewSubmissionItems/#{item.id}")
+        UI.success("Deleted review submission item id=#{item.id}")
+      end
+    rescue => e2
+      UI.user_error!("Could not cancel submission #{old_id} nor delete its items: #{e2.class}: #{e2.message[0, 200]}")
+    end
+  end
+
+  # Cancellation is asynchronous on ASC; the version stays attached to the old
+  # submission until it settles. Poll until the old submission is no longer
+  # reported as in-progress, then create the fresh one.
+  deadline = Time.now + 180
+  while Time.now < deadline
+    current = app.get_in_progress_review_submission(platform: "IOS")
+    break if current.nil? || current.id != old_id
+    UI.message("Waiting for ASC to release submission id=#{old_id} (state=#{current.state})...")
+    sleep(15)
+  end
+
+  fresh = app.create_review_submission(platform: "IOS")
+  UI.success("Created NEW review submission id=#{fresh.id} state=#{fresh.state}")
+  return fresh
+end
+
 def asc_api_key
   app_store_connect_api_key(
     key_id: ENV.fetch("ASC_KEY_ID"),
@@ -369,7 +419,9 @@ platform :ios do
         ).to_models
         UI.important("review submissions: #{all_subs.length}")
         all_subs.each do |rs|
-          items = (rs.items || [])
+          # Array() — `items` comes back nil (not raising) when the
+          # relationship was not fetched, and nil.length crashes.
+          items = Array(rs.items)
           vers = items.map { |it| (it.app_store_version&.version_string rescue nil) }.compact
           UI.message("  id=#{rs.id} state=#{rs.state} items=#{items.length} versions=#{vers.inspect}")
           if items.empty? && ENV["CLEAR_EMPTY_SUBMISSION"] == "true"
@@ -397,7 +449,9 @@ platform :ios do
 
       sub = app.get_in_progress_review_submission(platform: "IOS")
       if sub
-        items = (sub.items rescue [])
+        # Array() — `items` comes back nil (not raising) when the relationship
+        # was not fetched, and nil.length crashes here.
+        items = Array(sub.items)
         UI.important("in-progress review submission id=#{sub.id} state=#{sub.state} items=#{items.length}")
         if items.empty? && ENV["CLEAR_EMPTY_SUBMISSION"] == "true"
           begin
@@ -440,7 +494,10 @@ platform :ios do
      begin
       # NOTE: creating a review detail fails with "Access Unavailable" when one
       # already exists, so a failed FETCH must not fall through to create.
-      detail = version.get_app_store_review_detail
+      # fastlane 2.239 renamed the fetcher: AppStoreVersion has
+      # fetch_app_store_review_detail (get_app_store_review_detail does NOT
+      # exist on it — that NoMethodError is what used to break this append).
+      detail = version.fetch_app_store_review_detail
       current = (detail&.notes || "")
       if current.include?(extra.strip)
         UI.message("Review notes already contain the addition — leaving as-is.")
@@ -481,7 +538,22 @@ platform :ios do
     submission = app.get_in_progress_review_submission(platform: "IOS")
     if submission.nil?
       submission = app.create_review_submission(platform: "IOS")
-      UI.message("Created review submission id=#{submission.id}")
+      UI.message("Created review submission id=#{submission.id} state=#{submission.state}")
+    elsif submission.state == Spaceship::ConnectAPI::ReviewSubmission::ReviewSubmissionState::UNRESOLVED_ISSUES
+      # A submission in UNRESOLVED_ISSUES (the previously REJECTED item) cannot
+      # take new items; submitting it again is known to fail with "Version is
+      # not ready to be submitted yet". Either reset it (cancel + fresh
+      # submission) or fail early with instructions — never the doomed submit.
+      unless ENV["RESET_SUBMISSION"] == "true"
+        UI.user_error!(
+          "In-progress review submission id=#{submission.id} is in UNRESOLVED_ISSUES " \
+          "(it still holds the previously rejected item). Apple rejects any " \
+          "submit on it with 'Version is not ready to be submitted yet'. " \
+          "Re-run this workflow with reset_submission=true to cancel it and " \
+          "create a fresh submission."
+        )
+      end
+      submission = reset_unresolved_submission!(app: app, submission: submission)
     else
       UI.message("Reusing in-progress review submission id=#{submission.id} state=#{submission.state}")
     end

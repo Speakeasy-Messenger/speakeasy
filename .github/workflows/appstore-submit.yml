@@ -38,6 +38,10 @@ on:
         description: 'Submit the EXISTING draft submission that already holds the version.'
         type: boolean
         default: false
+      reset_submission:
+        description: 'Cancel an UNRESOLVED_ISSUES review submission (rejected review) and create a fresh one before submitting.'
+        type: boolean
+        default: false
       submit_for_review:
         description: 'Also submit for review? Leave false to only attach the build.'
         type: boolean
@@ -74,4 +78,5 @@ jobs:
           DIAGNOSE: ${{ inputs.diagnose }}
           CLEAR_EMPTY_SUBMISSION: ${{ inputs.clear_empty_submission }}
           SUBMIT_EXISTING: ${{ inputs.submit_existing }}
+          RESET_SUBMISSION: ${{ inputs.reset_submission }}
         run: bundle exec fastlane ios submit_build
