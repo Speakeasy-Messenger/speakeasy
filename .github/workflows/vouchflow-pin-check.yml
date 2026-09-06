@@ -13,6 +13,10 @@ name: Vouchflow pin check
 # A failure here is not urgent-by-minutes but it is dated: pins that no longer
 # appear in the served chain mean every already-shipped build stops being able
 # to verify, and no app update can reach users retroactively.
+#
+# A red run alone is not a notification — the failure and the 180-day expiry
+# warning each open/update a GitHub issue with a stable title, so the alarm
+# reaches a human without any third-party service or extra secret.
 
 on:
   schedule:
@@ -23,6 +27,14 @@ on:
 
 permissions:
   contents: read
+  issues: write
+
+env:
+  FAILURE_ISSUE_TITLE: 'Vouchflow pin check FAILED: a committed pin is missing from the live chain'
+  WARNING_ISSUE_TITLE: 'Vouchflow pin check WARNING: a committed pin expires within 180 days'
+  # Written by the live-chain test when the warning tier fires; consumed below.
+  WARNING_FILE: pin-check-warning.md
+  LOG_FILE: pin-check-output.log
 
 jobs:
   live-chain:
@@ -43,4 +55,79 @@ jobs:
         working-directory: apps/mobile
         env:
           VOUCHFLOW_LIVE_PIN_CHECK: '1'
-        run: npx vitest run src/integration/vouchflow-pin-rotation.test.ts
+          # Absolute path: the test's cwd is apps/mobile, but the warning
+          # step below reads it relative to the workspace root.
+          VOUCHFLOW_PIN_WARNING_FILE: ${{ github.workspace }}/${{ env.WARNING_FILE }}
+        # tee keeps the vitest output available to the failure-issue step
+        # (the useful "No committed pin appears…" / "only live match is the
+        # leaf" assertions are at the end of that output).
+        run: |
+          set -o pipefail
+          npx vitest run src/integration/vouchflow-pin-rotation.test.ts 2>&1 | tee "${{ github.workspace }}/${{ env.LOG_FILE }}"
+
+      - name: Success summary
+        if: success()
+        run: |
+          echo "✅ Committed pins are present in the live api.vouchflow.dev chain, above the leaf." >> "$GITHUB_STEP_SUMMARY"
+          if [ -f "$WARNING_FILE" ]; then
+            cat "$WARNING_FILE" >> "$GITHUB_STEP_SUMMARY"
+          fi
+
+      - name: Open or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ env.FAILURE_ISSUE_TITLE }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "The scheduled Vouchflow pin check failed — no committed pin appears in the live \`api.vouchflow.dev\` chain (or the only match is the leaf)."
+            echo "**Every shipped iOS and Android build is failing TLS right now.** See the repin runbook in"
+            echo "\`apps/mobile/src/integration/vouchflow-pin-rotation.test.ts\` and \`apps/mobile/ios/SpeakeasyBridges/Vouchflow/VouchflowBootstrap.swift\`."
+            echo
+            echo "Run: $RUN_URL"
+            echo
+            echo '<details><summary>Check output (tail)</summary>'
+            echo
+            echo '```'
+            tail -60 "$LOG_FILE"
+            echo '```'
+            echo '</details>'
+          } > issue-body.md
+          bash .github/workflows/scripts/pin-check-issue.sh "$TITLE" issue-body.md
+
+      - name: Detect expiry warning
+        id: warning
+        if: success()
+        run: |
+          if [ -f "$WARNING_FILE" ]; then
+            echo "found=true" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Open or update the expiry-warning issue
+        if: success() && steps.warning.outputs.found == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TITLE: ${{ env.WARNING_ISSUE_TITLE }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          {
+            echo "The Vouchflow pin check found that a committed pin matches a live \`api.vouchflow.dev\` certificate expiring within 180 days."
+            echo "The pins still work today, but a rotation is coming — repin before the expiry."
+            echo
+            echo "Latest check: $RUN_URL"
+            echo
+            cat "$WARNING_FILE"
+          } > issue-body.md
+          bash .github/workflows/scripts/pin-check-issue.sh "$TITLE" issue-body.md
+
+      - name: Upload check output
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: pin-check-output
+          path: |
+            ${{ env.LOG_FILE }}
+            ${{ env.WARNING_FILE }}
+          if-no-files-found: ignore
+          retention-days: 30
