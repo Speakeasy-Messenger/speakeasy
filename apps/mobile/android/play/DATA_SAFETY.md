@@ -143,11 +143,11 @@ All sub-types: **NOT collected**.
 
 ### App info and performance
 
-| Sub-type                   | Collected?               | Shared?    | Notes                                                                                                                                                                                                    |
-| -------------------------- | ------------------------ | ---------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Crash logs                 | **Collected** (optional) | NOT shared | Diagnostic crashes when the app crashes — sent to our error reporting (no third-party crash analytics yet). Does NOT include message contents. **Why collected: app functionality (debugging crashes).** |
+| Sub-type                   | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                                                                                  |
+| -------------------------- | ------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Crash logs                 | **Collected** (optional) | NOT shared | Diagnostic crashes when the app crashes — sent to our error reporting (no third-party crash analytics yet). Does NOT include message contents. **Why collected: app functionality (debugging crashes).**                                                                                                               |
 | Diagnostics                | **Collected** (required) | NOT shared | The in-app diagnostics buffer (Diagnostics screen) auto-uploads to our error reporting on a crash or a failed call (beta builds only; the `diagStreaming` setting defaults ON and there is currently no in-app control to turn it off). Tied to the account's `userId` server-side. Does NOT include message contents. |
-| Other app performance data | NOT collected            | —          |                                                                                                                                                                                                          |
+| Other app performance data | NOT collected            | —          |                                                                                                                                                                                                                                                                                                                        |
 
 ### Device or other IDs
 
