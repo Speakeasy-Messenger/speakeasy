@@ -16,6 +16,8 @@ const packageRoots = {
 const consoleAllowlist = new Set([
   'apps/api/src/ws/load-test.ts',
   'apps/api/src/server.ts',
+  // Emits ::warning:: annotations for .github/workflows/vouchflow-pin-check.yml.
+  'apps/mobile/src/integration/vouchflow-pin-rotation.test.ts',
 ]);
 
 function walk(dir, out = []) {
@@ -65,11 +67,15 @@ function checkMigrations() {
   });
   const drizzleReadme = join(root, 'apps/api/drizzle/README.md');
   if (!existsSync(drizzleReadme)) {
-    failures.push('apps/api/drizzle/README.md must declare infra/migrations as production source of truth');
+    failures.push(
+      'apps/api/drizzle/README.md must declare infra/migrations as production source of truth',
+    );
   } else {
     const text = readFileSync(drizzleReadme, 'utf8');
     if (!text.includes('infra/migrations') || !text.includes('production source of truth')) {
-      failures.push('apps/api/drizzle/README.md must document that infra/migrations is the production source of truth');
+      failures.push(
+        'apps/api/drizzle/README.md must document that infra/migrations is the production source of truth',
+      );
     }
   }
   return failures;
