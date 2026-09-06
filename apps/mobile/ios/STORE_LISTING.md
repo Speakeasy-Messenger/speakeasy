@@ -43,24 +43,22 @@ prefer to file an annual self-classification report instead, flip the key to
 
 ## App Privacy ("nutrition label") — App Store Connect → App Privacy
 
-Speakeasy is built to collect as little as possible. Recommended answers:
+The privacy manifest, `Speakeasy/PrivacyInfo.xcprivacy`, is the authoritative
+declaration: it lists every collected data type with its Linked / Tracking /
+Purpose values (every purpose is App Functionality; `NSPrivacyTracking` is
+false). Anything not listed there is **Data Not Collected**. Keep the per-type
+answers in the manifest only — do not maintain a second copy here.
 
-- **Data Not Collected** for: Health, Financial, Location, Browsing History,
-  Search History, Contacts, Identifiers→User ID, Purchases, Sensitive Info,
-  and Messages content (E2E — the server only sees ciphertext).
-- **Contact Info → Email Address:** declare **App Functionality**, not linked
-  to the user and not used for tracking. It is entered only if device
-  attestation is unavailable, then passed to Vouchflow to deliver a one-time
-  code; Speakeasy does not store it with the handle.
 - **Before resubmission:** update the App Store Connect App Privacy answers to
-  match this declaration. The repository privacy manifest alone is not
-  sufficient.
-- **One nuance to confirm:** the FCM **push token** (a device identifier) is
-  sent to the server to route notifications. If you count that as "collected,"
-  declare **Identifiers → Device ID**, purpose **App Functionality**, **not**
-  linked to the user's identity, **not** used for tracking. If the server
-  treats it as ephemeral routing state, "Data Not Collected" stands. This is
-  the only judgment call — everything else is clearly Not Collected.
+  match the manifest exactly (no more, no less). The repository manifest alone
+  is not sufficient — App Store Connect does not read it.
+- **Contact Info → Email Address** is declared not linked to the user: it is
+  entered only if device attestation is unavailable, then passed to Vouchflow
+  to deliver a one-time code; Speakeasy does not store it with the handle.
+- **Identifiers → Device ID** covers the Vouchflow attestation token and the
+  push token. iOS push routes through Firebase Cloud Messaging as well
+  (`apps/mobile/src/push/push-notifications.ts`), so Firebase receives the
+  device push identifier.
 - **Tracking:** No. (No ads, no cross-app/-site tracking; analytics disabled —
   `IS_ANALYTICS_ENABLED=false` in GoogleService-Info.plist.)
 
