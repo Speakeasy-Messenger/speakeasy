@@ -90,7 +90,9 @@ jobs:
             echo '<details><summary>Check output (tail)</summary>'
             echo
             echo '```'
-            tail -60 "$LOG_FILE"
+            # The log only exists if the check step ran; npm ci or checkout
+            # can fail first, and the issue must still be created.
+            tail -60 "$LOG_FILE" 2>/dev/null || echo '(check output unavailable — the run failed before the check produced output)'
             echo '```'
             echo '</details>'
           } > issue-body.md

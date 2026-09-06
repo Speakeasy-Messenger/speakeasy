@@ -6,7 +6,7 @@
 # Usage: pin-check-issue.sh "<title>" <body-file>
 set -euo pipefail
 
-TITLE=$1
+export TITLE=$1
 BODY_FILE=$2
 
 # Exact-title match (not --search, whose phrase handling mangles punctuation
