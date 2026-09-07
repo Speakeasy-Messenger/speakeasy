@@ -60,7 +60,7 @@ describe('VouchflowValidator', () => {
   it('accepts low, medium and high confidence by default', async () => {
     // The floor is `low` (spec §2) — a device that attested weakly still
     // enrolls. Devices that cannot attest at all never produce a token
-    // here; they take the client-side email-OTP fallback instead.
+    // here.
     for (const c of ['low', 'medium', 'high'] as Confidence[]) {
       const r = rep();
       r.last_verification!.confidence = c;
