@@ -68,26 +68,25 @@ export async function verifyDeviceWithExplanation(
 
   promptInFlight = (async () => {
     await useVerifySheet.getState().request(reason);
-    let deviceToken: string;
-    try {
-      const result = await verifyWithTimeout(vouchflow, {
-        context: 'login',
-        minimumConfidence: 'low',
-      });
-      deviceToken = result.deviceToken;
-      useVerifySheet.getState().finish();
-    } catch (err) {
-      useVerifySheet
-        .getState()
-        .fail(
-          isUnsupportedDeviceError(err)
-            ? UNSUPPORTED_DEVICE_MESSAGE
-            : "Couldn't verify this device. Please try again.",
+    for (;;) {
+      try {
+        const result = await verifyWithTimeout(vouchflow, {
+          context: 'login',
+          minimumConfidence: 'low',
+        });
+        useVerifySheet.getState().finish();
+        useIdentity.getState().setDeviceToken(result.deviceToken);
+        return { deviceToken: result.deviceToken };
+      } catch (err) {
+        const unsupported = isUnsupportedDeviceError(err);
+        useVerifySheet.getState().fail(
+          unsupported ? UNSUPPORTED_DEVICE_MESSAGE : "Couldn't verify this device. Please try again.",
+          !unsupported,
         );
-      throw err;
+        if (unsupported) throw err;
+        await useVerifySheet.getState().waitForRetry();
+      }
     }
-    useIdentity.getState().setDeviceToken(deviceToken);
-    return { deviceToken };
   })();
 
   try {

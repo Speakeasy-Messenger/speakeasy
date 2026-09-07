@@ -12,8 +12,10 @@ export function VerifyDeviceSheet(): React.ReactElement {
   const insets = useSafeAreaInsets();
   const pending = useVerifySheet((s) => s.pending);
   const error = useVerifySheet((s) => s.error);
+  const retryable = useVerifySheet((s) => s.retryable);
   const nonce = useVerifySheet((s) => s.nonce);
   const confirm = useVerifySheet((s) => s.confirm);
+  const retry = useVerifySheet((s) => s.retry);
   const cancel = useVerifySheet((s) => s.cancel);
 
   // Local — purely "has Continue been tapped for this prompt yet",
@@ -63,9 +65,22 @@ export function VerifyDeviceSheet(): React.ReactElement {
           ) : null}
 
           {error ? (
-            <Text style={[styles.body, { color: themed.slate }]} testID="verify-device-error">
-              {error}
-            </Text>
+            <>
+              <Text style={[styles.body, { color: themed.slate }]} testID="verify-device-error">
+                {error}
+              </Text>
+              {retryable ? (
+                <View style={styles.actions}>
+                  <Pressable
+                    onPress={retry}
+                    style={[styles.btnPrimary, { backgroundColor: themed.primary }]}
+                    testID="verify-device-retry"
+                  >
+                    <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>Try again</Text>
+                  </Pressable>
+                </View>
+              ) : null}
+            </>
           ) : (
             <>
               <Text style={[styles.body, { color: themed.slate }]}>

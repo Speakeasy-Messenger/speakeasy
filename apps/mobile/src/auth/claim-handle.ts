@@ -50,17 +50,16 @@ export interface ClaimedIdentity {
 
 export type ClaimResult = ({ kind: 'claimed' } & ClaimedIdentity) | { kind: 'unsupported_device' };
 
-const RETRY_ONLY: ReadonlySet<VouchflowErrorReason> = new Set([
-  'biometric_cancelled',
-  'biometric_failed',
-  'network_unavailable',
+const UNSUPPORTED_DEVICE_REASONS: ReadonlySet<VouchflowErrorReason> = new Set([
+  'biometric_unavailable',
+  'attestation_unavailable',
+  'minimum_confidence_unmet',
+  'enrollment_failed',
+  'account_store_access_denied',
 ]);
 
 export function isUnsupportedDeviceError(error: unknown): boolean {
-  return (
-    error instanceof VerificationTimeoutError ||
-    (error instanceof VouchflowClientError && !RETRY_ONLY.has(error.reason))
-  );
+  return error instanceof VouchflowClientError && UNSUPPORTED_DEVICE_REASONS.has(error.reason);
 }
 
 export async function enrollHandle(

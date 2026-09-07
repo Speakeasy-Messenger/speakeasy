@@ -33,7 +33,7 @@ public final class SpeakeasyVouchflowBootstrap: NSObject {
     // raises `pinningFailure`, `VouchflowModule.swift` maps it to
     // `network_unavailable`, `verify()` then fails before it can even create
     // a session, and the user is parked in an unrecoverable "Verify this
-    // device" loop that no retry can clear. That
+    // device" loop that no retry and no email fallback can clear. That
     // actually happened — PR #204 (`352ba1a`, 2026-08-14) was the reactive
     // patch for the 2026-08-10 leaf rotation.
     //

@@ -56,6 +56,7 @@ describe('verifyDeviceWithExplanation', () => {
     useVerifySheet.setState({
       pending: undefined,
       error: undefined,
+      retryable: false,
       verificationInFlight: false,
       nonce: 0,
     });
@@ -78,7 +79,7 @@ describe('verifyDeviceWithExplanation', () => {
     expect(useVerifySheet.getState().pending).toBeUndefined();
   });
 
-  it.each(['biometric_unavailable', 'attestation_unavailable', 'unknown_error'] as const)(
+  it.each(['biometric_unavailable', 'attestation_unavailable'] as const)(
     'rejects %s, preserves the enrolled identity, and leaves the requirement visible',
     async (reason) => {
       const vouchflow = client();
@@ -97,25 +98,23 @@ describe('verifyDeviceWithExplanation', () => {
     },
   );
 
-  it('settles a stalled verification after timeout and keeps the message dismissible', async () => {
-    vi.useFakeTimers();
-    try {
-      const vouchflow = client();
-      vi.mocked(vouchflow.verify).mockImplementation(() => new Promise(() => {}));
-      const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
-      const rejected = expect(pending).rejects.toThrow('Timeout');
-      useVerifySheet.getState().confirm();
-      await flush();
-      useVerifySheet.getState().cancel();
-      expect(useVerifySheet.getState().pending).toBeDefined();
-      await vi.advanceTimersByTimeAsync(60_000);
-      await rejected;
-      expect(useVerifySheet.getState().error).toBe(UNSUPPORTED_DEVICE_MESSAGE);
-      useVerifySheet.getState().cancel();
-      expect(useVerifySheet.getState().pending).toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
+  it('retries an unknown failure without replacing the enrolled identity', async () => {
+    const vouchflow = client();
+    useIdentity.setState({ deviceToken: 'dvt_existing' });
+    vi.mocked(vouchflow.verify)
+      .mockRejectedValueOnce(new VouchflowClientError('unknown_error'))
+      .mockResolvedValueOnce(result('dvt_retried'));
+    const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
+
+    useVerifySheet.getState().confirm();
+    await flush();
+    expect(useVerifySheet.getState().error).toBe("Couldn't verify this device. Please try again.");
+    expect(useVerifySheet.getState().retryable).toBe(true);
+    expect(useIdentity.getState().deviceToken).toBe('dvt_existing');
+
+    useVerifySheet.getState().retry();
+    await expect(pending).resolves.toEqual({ deviceToken: 'dvt_retried' });
+    expect(useIdentity.getState().userId).toBe('alice');
   });
 
   it('does not call verify when the user cancels the sheet', async () => {
@@ -135,6 +134,7 @@ describe('getDeviceTokenOrVerify', () => {
     useVerifySheet.setState({
       pending: undefined,
       error: undefined,
+      retryable: false,
       verificationInFlight: false,
       nonce: 0,
     });

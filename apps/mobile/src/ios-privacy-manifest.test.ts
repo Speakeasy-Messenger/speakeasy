@@ -6,7 +6,8 @@ import { XMLParser } from 'fast-xml-parser';
 
 /**
  * The iOS privacy manifest (`ios/Speakeasy/PrivacyInfo.xcprivacy`) is the
- * declaration Apple reads at submission time. This test
+ * declaration Apple reads at submission time, and it must agree exactly with
+ * the App Store privacy label already published for Speakeasy. This test
  * parses the plist into a typed model and compares meaning — not text — so a
  * re-ordered or re-indented manifest still passes, while any type added,
  * dropped, or flipped (Linked / Tracking / Purpose) fails.

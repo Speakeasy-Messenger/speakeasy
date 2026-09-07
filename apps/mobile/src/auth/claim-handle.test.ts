@@ -125,19 +125,18 @@ describe('claimWithDeviceAttestation', () => {
     });
   });
 
-  it('reports an unsupported device for an unmapped SDK error instead of a retry-only dead end', async () => {
+  it('rethrows an unknown SDK error so onboarding keeps retry controls available', async () => {
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new VouchflowClientError('unknown_error'),
     );
-    const result = await claimWithDeviceAttestation(deps, 'reviewer');
-    expect(result).toEqual({
-      kind: 'unsupported_device',
+    await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
+      reason: 'unknown_error',
     });
     expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
-  it('reports an unsupported device instead of a retry-only dead end when verification stalls', async () => {
+  it('rethrows a verification timeout so onboarding keeps retry controls available', async () => {
     vi.useFakeTimers();
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
@@ -145,9 +144,7 @@ describe('claimWithDeviceAttestation', () => {
     );
 
     const claim = claimWithDeviceAttestation(deps, 'reviewer');
-    const settled = expect(claim).resolves.toEqual({
-      kind: 'unsupported_device',
-    });
+    const settled = expect(claim).rejects.toThrow('Timeout');
     await vi.advanceTimersByTimeAsync(60_000);
 
     await settled;

@@ -42,4 +42,18 @@ describe('unsupported device sheet', () => {
     expect(useVerifySheet.getState().pending).toBeUndefined();
     tree.unmount();
   });
+
+  it('renders a retry control for a transient verification failure', () => {
+    void useVerifySheet.getState().request('launch_refresh');
+    useVerifySheet.getState().confirm();
+    useVerifySheet.getState().fail("Couldn't verify this device. Please try again.", true);
+    const tree = create(React.createElement(VerifyDeviceSheet));
+    expect(tree.root.findByProps({ testID: 'verify-device-retry' }).props.children.props.children).toBe(
+      'Try again',
+    );
+    act(() => tree.root.findByProps({ testID: 'verify-device-retry' }).props.onPress());
+    expect(useVerifySheet.getState().error).toBeUndefined();
+    expect(useVerifySheet.getState().verificationInFlight).toBe(true);
+    tree.unmount();
+  });
 });
