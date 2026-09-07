@@ -116,13 +116,13 @@ Google's reviewer sees:
 
 | Category          | Items                                      | Why                                     |
 | ----------------- | ------------------------------------------ | --------------------------------------- |
-| Personal info     | User IDs (handle + Vouchflow device token) | Account functionality                   |
+| Personal info     | User IDs (handle)                          | Account functionality                   |
 | Messages          | In-app messages (ciphertext only)          | App functionality (relay between users) |
 | Photos and videos | Photos, videos (when user attaches)        | App functionality                       |
 | Audio files       | Voice notes + live call audio              | App functionality (Private Calls)       |
 | Files and docs    | File attachments                           | App functionality                       |
 | App info          | Crash logs, diagnostics                    | App functionality (debugging)           |
-| Device IDs        | Vouchflow attestation token                | Account management                      |
+| Device IDs        | Vouchflow attestation token + push token   | Account management                      |
 
 **What is NOT collected** (and where competitors often get this wrong):
 phone number, real name, location (precise or coarse), contacts, calendar,
