@@ -1,4 +1,4 @@
-> Historical evidence only: the email enrollment path has been removed. These email harnesses do not validate the reviewer-code flow.
+> Historical evidence only: the email enrollment path has been removed. These email harnesses no longer validate the app.
 
 # Email-fallback onboarding: what is proven, and what is not
 

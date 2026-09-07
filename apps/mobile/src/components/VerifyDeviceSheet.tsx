@@ -1,36 +1,24 @@
-import { verifyReviewerCode } from '../auth/reviewer-code.js';
 import React, { useEffect, useState } from 'react';
-import {
-  KeyboardAvoidingView,
-  Modal,
-  Platform,
-  Pressable,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { Modal, Pressable, StyleSheet, Text, View } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
 import type { VerificationReason } from '../auth/verify-device-types.js';
 
-import { ReviewerVerification } from './ReviewerVerification.js';
-
 export function VerifyDeviceSheet(): React.ReactElement {
   const themed = useColors();
   // Edge-to-edge: clear the nav bar so the buttons aren't behind it.
   const insets = useSafeAreaInsets();
   const pending = useVerifySheet((s) => s.pending);
-  const fallback = useVerifySheet((s) => s.fallback);
+  const error = useVerifySheet((s) => s.error);
   const nonce = useVerifySheet((s) => s.nonce);
   const confirm = useVerifySheet((s) => s.confirm);
   const cancel = useVerifySheet((s) => s.cancel);
-  const resolveFallback = useVerifySheet((s) => s.resolveFallback);
 
   // Local — purely "has Continue been tapped for this prompt yet",
   // which the store doesn't track (see verify-device.ts: `pending`
-  // stays set from Continue all the way through success/fallback so
+  // stays set from Continue all the way through success/failure so
   // the sheet never flickers closed). Resets whenever a new prompt
   // (or a re-prompt of the same reason) opens.
   const [confirmed, setConfirmed] = useState(false);
@@ -43,12 +31,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
     confirm();
   }
 
-  async function handleReviewerVerified(args: { code: string }): Promise<void> {
-    const { deviceToken } = await verifyReviewerCode({ code: args.code, context: 'login' });
-    resolveFallback(deviceToken);
-  }
-
-  const verifying = confirmed && !fallback;
+  const verifying = confirmed && !error;
 
   return (
     <Modal
@@ -59,12 +42,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
       statusBarTranslucent
     >
       <Pressable style={[styles.scrim, { backgroundColor: scrim.modal }]} onPress={cancel} />
-      {/* Keep the code entry above the keyboard. */}
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.wrap}
-        pointerEvents="box-none"
-      >
+      <View style={styles.wrap} pointerEvents="box-none">
         <View
           style={[
             styles.sheet,
@@ -77,37 +55,17 @@ export function VerifyDeviceSheet(): React.ReactElement {
           testID="verify-device-sheet"
         >
           <View style={[styles.grab, { backgroundColor: themed.divider }]} />
-          <Text style={[styles.title, { color: themed.ink }]}>
-            Verify this device
-            <Text style={{ color: themed.primary }}>.</Text>
-          </Text>
+          {!error ? (
+            <Text style={[styles.title, { color: themed.ink }]}>
+              Verify this device
+              <Text style={{ color: themed.primary }}>.</Text>
+            </Text>
+          ) : null}
 
-          {fallback ? (
-            <>
-              <View style={styles.fallbackBlock}>
-                <ReviewerVerification
-                  onSubmit={handleReviewerVerified}
-                  colors={{ text: themed.ink, muted: themed.slate, faint: themed.divider }}
-                  testIDPrefix="verify-device-fallback"
-                  renderButton={(btn) => (
-                    <Pressable
-                      onPress={btn.onPress}
-                      disabled={btn.disabled}
-                      style={[
-                        styles.btnPrimary,
-                        { backgroundColor: themed.primary },
-                        btn.disabled && styles.btnDisabled,
-                      ]}
-                      testID={btn.testID}
-                    >
-                      <Text style={[styles.btnPrimaryText, { color: themed.cream }]}>
-                        {btn.loading ? 'Verifying…' : btn.label}
-                      </Text>
-                    </Pressable>
-                  )}
-                />
-              </View>
-            </>
+          {error ? (
+            <Text style={[styles.body, { color: themed.slate }]} testID="verify-device-error">
+              {error}
+            </Text>
           ) : (
             <>
               <Text style={[styles.body, { color: themed.slate }]}>
@@ -148,7 +106,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
             </>
           )}
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }
@@ -201,7 +159,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
     marginBottom: space.xl,
   },
-  fallbackBlock: { marginTop: space.s },
   actions: { gap: space.s },
   btnPrimary: {
     paddingVertical: space.base,

@@ -15,8 +15,6 @@ vi.mock('../native/vouchflow.js', () => ({
       return native.verify(...args);
     }
 
-    requestFallback = vi.fn();
-    submitFallbackOtp = vi.fn();
     getCachedDeviceToken = vi.fn();
   },
 }));
@@ -149,7 +147,7 @@ function nativeSdkStub(): VouchflowClient & { attempts: number } {
 /** The user tapping Continue on the verify sheet as soon as it appears. */
 function autoTapContinue(): () => void {
   return useVerifySheet.subscribe((s) => {
-    if (s.pending && !s.verificationInFlight && !s.fallback) {
+    if (s.pending && !s.verificationInFlight && !s.error) {
       void Promise.resolve().then(() => useVerifySheet.getState().confirm());
     }
   });
@@ -165,7 +163,7 @@ beforeEach(() => {
   });
   useVerifySheet.setState({
     pending: undefined,
-    fallback: undefined,
+    error: undefined,
     verificationInFlight: false,
     nonce: 0,
   });

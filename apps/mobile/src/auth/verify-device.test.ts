@@ -1,3 +1,4 @@
+import { UNSUPPORTED_DEVICE_MESSAGE } from './unsupported-device.js';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { VouchflowClient, VerifyResult } from '../native/vouchflow.js';
 import { VouchflowClientError } from '../native/vouchflow.js';
@@ -54,7 +55,7 @@ describe('verifyDeviceWithExplanation', () => {
     });
     useVerifySheet.setState({
       pending: undefined,
-      fallback: undefined,
+      error: undefined,
       verificationInFlight: false,
       nonce: 0,
     });
@@ -77,83 +78,45 @@ describe('verifyDeviceWithExplanation', () => {
     expect(useVerifySheet.getState().pending).toBeUndefined();
   });
 
-  it('offers the reviewer-code entry when the passkey attempt fails, and resolves once the sheet completes it', async () => {
-    const vouchflow = client();
-    (vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new VouchflowClientError('biometric_unavailable'),
-    );
-    const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
+  it.each(['biometric_unavailable', 'attestation_unavailable', 'unknown_error'] as const)(
+    'rejects %s, preserves the enrolled identity, and leaves the requirement visible',
+    async (reason) => {
+      const vouchflow = client();
+      useIdentity.setState({ deviceToken: 'dvt_existing' });
+      const failure = new VouchflowClientError(reason);
+      vi.mocked(vouchflow.verify).mockRejectedValueOnce(failure);
+      const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
+      const rejected = expect(pending).rejects.toBe(failure);
+      useVerifySheet.getState().confirm();
+      await rejected;
+      expect(useVerifySheet.getState().error).toBe(UNSUPPORTED_DEVICE_MESSAGE);
+      expect(useIdentity.getState().deviceToken).toBe('dvt_existing');
+      expect(useIdentity.getState().userId).toBe('alice');
+      useVerifySheet.getState().cancel();
+      expect(useVerifySheet.getState().pending).toBeUndefined();
+    },
+  );
 
-    await Promise.resolve();
-    useVerifySheet.getState().confirm();
-    await flush();
-
-    const sheetState = useVerifySheet.getState();
-    expect(sheetState.fallback?.reason).toBe('biometric_unavailable');
-    // The sheet never flickers closed between the passkey failure and
-    // the fallback step — `pending` stays set the whole time.
-    expect(sheetState.pending).toBeDefined();
-
-    sheetState.resolveFallback('dvt_fallback');
-    await expect(pending).resolves.toMatchObject({ deviceToken: 'dvt_fallback' });
-    expect(useIdentity.getState().deviceToken).toBe('dvt_fallback');
-    expect(useVerifySheet.getState().pending).toBeUndefined();
-    expect(useVerifySheet.getState().fallback).toBeUndefined();
-  });
-
-  it('maps an unmapped Vouchflow error to the sdk_error fallback reason instead of dead-ending', async () => {
-    const vouchflow = client();
-    (vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new VouchflowClientError('unknown_error'),
-    );
-    const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
-
-    await Promise.resolve();
-    useVerifySheet.getState().confirm();
-    await flush();
-
-    expect(useVerifySheet.getState().fallback?.reason).toBe('sdk_error');
-
-    // Settle it — an unresolved fallback would leave the module-level
-    // `promptInFlight` singleton stuck for every test that follows.
-    useVerifySheet.getState().resolveFallback('dvt_fallback');
-    await pending;
-  });
-
-  it('keeps the sheet open through a stalled passkey attempt and offers the timeout fallback', async () => {
+  it('settles a stalled verification after timeout and keeps the message dismissible', async () => {
     vi.useFakeTimers();
     try {
       const vouchflow = client();
-      (vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
-        () => new Promise<VerifyResult>(() => {}),
-      );
+      vi.mocked(vouchflow.verify).mockImplementation(() => new Promise(() => {}));
       const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
-
-      await Promise.resolve();
+      const rejected = expect(pending).rejects.toThrow('Timeout');
       useVerifySheet.getState().confirm();
       await flush();
-      expect(useVerifySheet.getState().verificationInFlight).toBe(true);
-
       useVerifySheet.getState().cancel();
       expect(useVerifySheet.getState().pending).toBeDefined();
-
       await vi.advanceTimersByTimeAsync(60_000);
-      await flush();
-      expect(useVerifySheet.getState().fallback?.reason).toBe('attestation_timeout');
-      expect(useVerifySheet.getState().verificationInFlight).toBe(false);
-
-      useVerifySheet.getState().resolveFallback('dvt_fallback');
-      await expect(pending).resolves.toMatchObject({ deviceToken: 'dvt_fallback' });
+      await rejected;
+      expect(useVerifySheet.getState().error).toBe(UNSUPPORTED_DEVICE_MESSAGE);
+      useVerifySheet.getState().cancel();
+      expect(useVerifySheet.getState().pending).toBeUndefined();
     } finally {
       vi.useRealTimers();
     }
   });
-
-  // The two cancel-triggering tests below run last: `verify-device.ts`
-  // tracks `lastCancelledAt` at module scope (a real 60s cooldown so a
-  // "Not now" tap can't be immediately re-prompted), so any test after
-  // one of these within the same file would otherwise see every
-  // `request()` short-circuit into an immediate cancellation.
 
   it('does not call verify when the user cancels the sheet', async () => {
     const vouchflow = client();
@@ -165,40 +128,13 @@ describe('verifyDeviceWithExplanation', () => {
     expect(vouchflow.verify).not.toHaveBeenCalled();
     expect(useVerifySheet.getState().pending).toBeUndefined();
   });
-
-  it('rejects the caller if the user cancels during the fallback step', async () => {
-    // Jump past the previous test's cancel cooldown — see the comment
-    // above these two tests.
-    vi.useFakeTimers();
-    vi.setSystemTime(Date.now() + 61_000);
-    try {
-      const vouchflow = client();
-      (vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-        new VouchflowClientError('biometric_unavailable'),
-      );
-      const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
-
-      await Promise.resolve();
-      useVerifySheet.getState().confirm();
-      await flush();
-      expect(useVerifySheet.getState().fallback).toBeDefined();
-
-      useVerifySheet.getState().cancel();
-      await expect(pending).rejects.toBeInstanceOf(DeviceVerificationCancelledError);
-      expect(useVerifySheet.getState().pending).toBeUndefined();
-      expect(useVerifySheet.getState().fallback).toBeUndefined();
-      expect(useIdentity.getState().deviceToken).toBeUndefined();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
 });
 
 describe('getDeviceTokenOrVerify', () => {
   beforeEach(() => {
     useVerifySheet.setState({
       pending: undefined,
-      fallback: undefined,
+      error: undefined,
       verificationInFlight: false,
       nonce: 0,
     });

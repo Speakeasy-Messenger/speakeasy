@@ -11,12 +11,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   default guard in `apps/api/src/{server,production-guard}.ts`, and every
   client `minimumConfidence: 'low'` call site — `apps/mobile/src/auth/{claim-handle,verify-device}.ts`
   and `apps/mobile/src/screens/VerifyGateScreen.tsx`.
-- Device verification must not collect email or phone numbers. The shared
-  unsupported-device message and secondary reviewer-code entry live in
-  `apps/mobile/src/components/ReviewerVerification.tsx`; onboarding enrolls
-  a handle only after verification, while returning-user surfaces refresh
-  the token on the existing identity. See `auth/claim-handle.ts` and
-  `auth/verify-device.ts` for the orchestration.
+- Device verification must not collect email or phone numbers. Unsupported
+  devices receive the message in `apps/mobile/src/auth/unsupported-device.ts`.
+  Auth requires the native passkey flow; keep enrollment and token-refresh
+  behavior aligned with `auth/claim-handle.ts` and `auth/verify-device.ts`.
 - `apps/mobile/src/services.ts` must expose Vouchflow's native client directly:
   no layer may answer `verify()` itself. The executable wiring and stale-device
   recovery coverage live in `apps/mobile/src/native/vouchflow-wiring.test.ts`

@@ -48,19 +48,6 @@ export interface VerifyOpts {
   minimumConfidence?: Confidence;
 }
 
-export type FallbackReason =
-  | 'attestation_unavailable'
-  | 'attestation_failed'
-  | 'attestation_timeout'
-  | 'biometric_unavailable'
-  | 'biometric_failed'
-  | 'biometric_cancelled'
-  | 'key_invalidated'
-  | 'sdk_error'
-  | 'minimum_confidence_unmet'
-  | 'developer_initiated'
-  | 'enrollment_failed';
-
 export interface VouchflowClient {
   /** Full attestation flow. Returns the `deviceToken` to pass to your server. */
   verify(opts: VerifyOpts): Promise<VerifyResult>;

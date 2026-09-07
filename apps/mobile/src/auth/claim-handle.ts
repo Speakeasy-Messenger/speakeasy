@@ -1,7 +1,7 @@
 import type { ApiClient } from '../api/client.js';
 import { ApiError } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
-import type { FallbackReason, VouchflowClient, VouchflowErrorReason } from '../native/vouchflow.js';
+import type { VouchflowClient, VouchflowErrorReason } from '../native/vouchflow.js';
 import { VouchflowClientError } from '../native/vouchflow.js';
 import { diag } from '../diag/log.js';
 
@@ -48,17 +48,7 @@ export interface ClaimedIdentity {
   deviceToken: string;
 }
 
-export type ClaimResult =
-  | ({ kind: 'claimed' } & ClaimedIdentity)
-  | { kind: 'unsupported_device'; reason: FallbackReason; noLock: boolean };
-
-const FALLBACK_ELIGIBLE: Partial<Record<VouchflowErrorReason, FallbackReason>> = {
-  biometric_unavailable: 'biometric_unavailable',
-  attestation_unavailable: 'attestation_unavailable',
-  minimum_confidence_unmet: 'attestation_unavailable',
-  enrollment_failed: 'attestation_unavailable',
-  account_store_access_denied: 'attestation_unavailable',
-};
+export type ClaimResult = ({ kind: 'claimed' } & ClaimedIdentity) | { kind: 'unsupported_device' };
 
 const RETRY_ONLY: ReadonlySet<VouchflowErrorReason> = new Set([
   'biometric_cancelled',
@@ -66,8 +56,11 @@ const RETRY_ONLY: ReadonlySet<VouchflowErrorReason> = new Set([
   'network_unavailable',
 ]);
 
-export function fallbackReasonFor(reason: VouchflowErrorReason): FallbackReason {
-  return FALLBACK_ELIGIBLE[reason] ?? 'sdk_error';
+export function isUnsupportedDeviceError(error: unknown): boolean {
+  return (
+    error instanceof VerificationTimeoutError ||
+    (error instanceof VouchflowClientError && !RETRY_ONLY.has(error.reason))
+  );
 }
 
 export async function enrollHandle(
@@ -101,7 +94,7 @@ export async function claimWithDeviceAttestation(
   handle: string,
 ): Promise<ClaimResult> {
   if (!(await deps.isDeviceSecure())) {
-    return { kind: 'unsupported_device', reason: 'biometric_unavailable', noLock: true };
+    return { kind: 'unsupported_device' };
   }
 
   let deviceToken: string;
@@ -112,31 +105,7 @@ export async function claimWithDeviceAttestation(
     });
     deviceToken = verifyResult.deviceToken;
   } catch (err) {
-    if (err instanceof VerificationTimeoutError) {
-      diag('onboarding', 'attestation timed out — device verification unavailable', {
-        timeoutMs: VERIFY_TIMEOUT_MS,
-      });
-      return { kind: 'unsupported_device', reason: 'attestation_timeout', noLock: false };
-    }
-    if (err instanceof VouchflowClientError) {
-      const reason = FALLBACK_ELIGIBLE[err.reason];
-      if (reason) {
-        diag('onboarding', 'attestation unavailable — device verification unavailable', {
-          reason: err.reason,
-        });
-        return { kind: 'unsupported_device', reason, noLock: false };
-      }
-      if (!RETRY_ONLY.has(err.reason)) {
-        diag('onboarding', 'unmapped attestation error — device verification unavailable', {
-          reason: err.reason,
-        });
-        return {
-          kind: 'unsupported_device',
-          reason: fallbackReasonFor(err.reason),
-          noLock: false,
-        };
-      }
-    }
+    if (isUnsupportedDeviceError(err)) return { kind: 'unsupported_device' };
     throw err;
   }
 
@@ -156,11 +125,7 @@ export async function claimWithDeviceAttestation(
         status: err.status,
         code: err.code,
       });
-      return {
-        kind: 'unsupported_device',
-        reason: 'attestation_unavailable',
-        noLock: !(await deps.isDeviceSecure()),
-      };
+      return { kind: 'unsupported_device' };
     }
     throw err;
   }

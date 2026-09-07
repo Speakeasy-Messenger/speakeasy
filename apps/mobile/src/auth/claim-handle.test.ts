@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VerifyResult } from '../native/vouchflow.js';
-import { claimWithDeviceAttestation, fallbackReasonFor, type ClaimDeps } from './claim-handle.js';
+import { claimWithDeviceAttestation, type ClaimDeps } from './claim-handle.js';
 
 function verifyResult(
   token = 'dvt_new',
@@ -76,41 +76,34 @@ describe('claimWithDeviceAttestation', () => {
     expect(result).toMatchObject({ kind: 'claimed', deviceToken: 'dvt_weak' });
   });
 
-  it('reports an unsupported device (and the lock deep link) when the device has no lock', async () => {
+  it('reports an unsupported device when the device has no lock', async () => {
     const deps = makeDeps({ isDeviceSecure: vi.fn(async () => false) });
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
 
     expect(result).toEqual({
       kind: 'unsupported_device',
-      reason: 'biometric_unavailable',
-      noLock: true,
     });
     // The lockless device must never reach the biometric prompt.
     expect(deps.vouchflow.verify).not.toHaveBeenCalled();
   });
 
   it.each([
-    ['biometric_unavailable', 'biometric_unavailable'],
-    ['attestation_unavailable', 'attestation_unavailable'],
-    ['minimum_confidence_unmet', 'attestation_unavailable'],
-    ['enrollment_failed', 'attestation_unavailable'],
-    ['account_store_access_denied', 'attestation_unavailable'],
-  ] as const)(
-    'reports an unsupported device when verify fails with %s',
-    async (reason, fallbackReason) => {
-      const deps = makeDeps();
-      (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-        new VouchflowClientError(reason),
-      );
-      const result = await claimWithDeviceAttestation(deps, 'reviewer');
-      expect(result).toEqual({
-        kind: 'unsupported_device',
-        reason: fallbackReason,
-        noLock: false,
-      });
-      expect(deps.api.enroll).not.toHaveBeenCalled();
-    },
-  );
+    'biometric_unavailable',
+    'attestation_unavailable',
+    'minimum_confidence_unmet',
+    'enrollment_failed',
+    'account_store_access_denied',
+  ] as const)('reports an unsupported device when verify fails with %s', async (reason) => {
+    const deps = makeDeps();
+    (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new VouchflowClientError(reason),
+    );
+    const result = await claimWithDeviceAttestation(deps, 'reviewer');
+    expect(result).toEqual({
+      kind: 'unsupported_device',
+    });
+    expect(deps.api.enroll).not.toHaveBeenCalled();
+  });
 
   it('rethrows a cancelled prompt instead of offering the fallback', async () => {
     const deps = makeDeps();
@@ -140,8 +133,6 @@ describe('claimWithDeviceAttestation', () => {
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
     expect(result).toEqual({
       kind: 'unsupported_device',
-      reason: 'sdk_error',
-      noLock: false,
     });
     expect(deps.api.enroll).not.toHaveBeenCalled();
   });
@@ -156,8 +147,6 @@ describe('claimWithDeviceAttestation', () => {
     const claim = claimWithDeviceAttestation(deps, 'reviewer');
     const settled = expect(claim).resolves.toEqual({
       kind: 'unsupported_device',
-      reason: 'attestation_timeout',
-      noLock: false,
     });
     await vi.advanceTimersByTimeAsync(60_000);
 
@@ -173,8 +162,6 @@ describe('claimWithDeviceAttestation', () => {
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
     expect(result).toEqual({
       kind: 'unsupported_device',
-      reason: 'attestation_unavailable',
-      noLock: false,
     });
   });
 
@@ -204,17 +191,6 @@ describe('claimWithDeviceAttestation', () => {
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
     expect(result).toEqual({
       kind: 'unsupported_device',
-      reason: 'attestation_unavailable',
-      noLock: false,
     });
-  });
-});
-
-describe('fallbackReasonFor', () => {
-  it('maps known reasons and falls back to sdk_error for the rest', () => {
-    expect(fallbackReasonFor('biometric_unavailable')).toBe('biometric_unavailable');
-    expect(fallbackReasonFor('minimum_confidence_unmet')).toBe('attestation_unavailable');
-    expect(fallbackReasonFor('no_session')).toBe('sdk_error');
-    expect(fallbackReasonFor('unknown_error')).toBe('sdk_error');
   });
 });

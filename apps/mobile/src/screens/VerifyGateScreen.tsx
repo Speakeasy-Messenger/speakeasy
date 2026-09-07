@@ -1,4 +1,4 @@
-import { verifyReviewerCode } from '../auth/reviewer-code.js';
+import { UNSUPPORTED_DEVICE_MESSAGE } from '../auth/unsupported-device.js';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -16,13 +16,7 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { vouchflow } from '../services.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
-import {
-  fallbackReasonFor,
-  VerificationTimeoutError,
-  verifyWithTimeout,
-} from '../auth/claim-handle.js';
-import { ReviewerVerification } from '../components/ReviewerVerification.js';
-import { VouchflowClientError, type FallbackReason } from '../native/vouchflow.js';
+import { isUnsupportedDeviceError, verifyWithTimeout } from '../auth/claim-handle.js';
 import { accent, brand, font, motion, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 import { diag } from '../diag/log.js';
@@ -35,7 +29,7 @@ export function VerifyGateScreen(): React.ReactElement {
   const [verifying, setVerifying] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | undefined>(undefined);
 
-  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>(undefined);
+  const [unsupported, setUnsupported] = useState(false);
 
   const reveal = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -69,24 +63,26 @@ export function VerifyGateScreen(): React.ReactElement {
     } catch (err) {
       diag('app', 'verify gate: failed', { userId, err: String(err) });
 
-      setErrorCopy(undefined);
-      setFallbackReason(
-        err instanceof VerificationTimeoutError
-          ? 'attestation_timeout'
-          : err instanceof VouchflowClientError
-            ? fallbackReasonFor(err.reason)
-            : 'sdk_error',
+      const unavailable = isUnsupportedDeviceError(err);
+      setUnsupported(unavailable);
+      setErrorCopy(
+        unavailable ? UNSUPPORTED_DEVICE_MESSAGE : "Couldn't verify this device. Please try again.",
       );
     } finally {
       setVerifying(false);
     }
   };
 
-  async function handleReviewerVerified(args: { code: string }): Promise<void> {
-    const { deviceToken } = await verifyReviewerCode({ code: args.code, context: 'login' });
-    useIdentity.getState().setDeviceToken(deviceToken);
-    diag('app', 'verify gate: success via reviewer code', { userId });
-  }
+  if (unsupported)
+    return (
+      <SafeAreaView testID="verify-gate-screen" style={styles.root}>
+        <View style={styles.body}>
+          <Text style={styles.error} testID="verify-gate-error">
+            {UNSUPPORTED_DEVICE_MESSAGE}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
 
   return (
     <SafeAreaView testID="verify-gate-screen" style={styles.root}>
@@ -124,32 +120,10 @@ export function VerifyGateScreen(): React.ReactElement {
                 {errorCopy}
               </Text>
             ) : null}
-
-            {fallbackReason !== undefined ? (
-              <View style={styles.fallbackBlock}>
-                <ReviewerVerification
-                  onSubmit={handleReviewerVerified}
-                  colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
-                  testIDPrefix="verify-gate-fallback"
-                  renderButton={(btn) => (
-                    <Pressable
-                      onPress={btn.onPress}
-                      disabled={btn.disabled}
-                      style={[styles.btnPrimary, btn.disabled && styles.btnPrimaryDisabled]}
-                      testID={btn.testID}
-                    >
-                      <Text style={styles.btnPrimaryText}>
-                        {btn.loading ? 'Verifying…' : btn.label}
-                      </Text>
-                    </Pressable>
-                  )}
-                />
-              </View>
-            ) : null}
           </Animated.View>
         </View>
 
-        {fallbackReason === undefined ? (
+        {!unsupported ? (
           <View style={styles.actions}>
             <Pressable
               onPress={onVerify}
@@ -216,10 +190,6 @@ const styles = StyleSheet.create({
     fontFamily: font.medium,
     color: BONE,
   },
-  // `stack` centers its children, so a plain child would shrink-wrap
-  // its TextInput instead of filling the available width — stretch
-  // opts this block back into the default column-fill behavior.
-  fallbackBlock: { alignSelf: 'stretch', marginTop: space.md },
   copyHint: {
     fontFamily: font.regular,
     fontSize: 13,
