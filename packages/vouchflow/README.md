@@ -7,11 +7,8 @@ service (`vouchflow.dev`).
 
 Vouchflow replaces SMS OTP with Secure Enclave (iOS) / Keystore (Android)
 cryptography plus a cross-app device-reputation network. It is the **only**
-authentication method in Speakeasy — no SMS, no recovery codes (`spec.md`
-§2). The single exception is Vouchflow's own email-OTP fallback tier, which
-the mobile app can use when its normal device-verification path cannot
-complete; it is a client-side SDK flow and does not touch this package. See
-`spec.md` §2 for the mobile fallback policy.
+authentication method in Speakeasy — no SMS, email, or recovery codes
+(`spec.md` §2).
 
 What this package provides:
 

@@ -15,8 +15,6 @@ vi.mock('./vouchflow.js', () => ({
       return native.verify();
     }
 
-    requestFallback = vi.fn();
-    submitFallbackOtp = vi.fn();
     getCachedDeviceToken = vi.fn();
   },
 }));

@@ -1,5 +1,6 @@
-import { fallbackReasonFor, VerificationTimeoutError, verifyWithTimeout } from './claim-handle.js';
-import { VouchflowClientError, type VouchflowClient } from '../native/vouchflow.js';
+import { UNSUPPORTED_DEVICE_MESSAGE } from './unsupported-device.js';
+import { isUnsupportedDeviceError, verifyWithTimeout } from './claim-handle.js';
+import { type VouchflowClient } from '../native/vouchflow.js';
 import { useIdentity } from '../store/identity.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
 import { diag } from '../diag/log.js';
@@ -41,14 +42,7 @@ const AUTO_COOLDOWN_MAX_MS = 15 * 60_000;
 let autoCooldownUntil = 0;
 let autoStreak = 0;
 
-/**
- * Opens the branded verify sheet, attempts the passkey verify at the
- * `low` floor, and — never dead-ending a passkey-less device — falls
- * back to Vouchflow's email OTP path when that attempt fails. The sheet
- * stays open across both steps (see `store/verify-sheet.ts`); this
- * function is what drives the actual Vouchflow calls, exactly as it did
- * before the fallback existed, so it stays testable without a renderer.
- */
+/** Prompts for passkey verification and keeps failures visible until dismissed. */
 export async function verifyDeviceWithExplanation(
   vouchflow: VouchflowClient,
   reason: VerificationReason,
@@ -74,28 +68,29 @@ export async function verifyDeviceWithExplanation(
 
   promptInFlight = (async () => {
     await useVerifySheet.getState().request(reason);
-    let deviceToken: string;
-    try {
-      const result = await verifyWithTimeout(vouchflow, {
-        context: 'login',
-        minimumConfidence: 'low',
-      });
-      deviceToken = result.deviceToken;
-      useVerifySheet.getState().finish();
-    } catch (err) {
-      const fallbackReason =
-        err instanceof VerificationTimeoutError
-          ? 'attestation_timeout'
-          : err instanceof VouchflowClientError
-            ? fallbackReasonFor(err.reason)
-            : 'sdk_error';
-      diag('auth', 'monthly verify failed — offering email fallback', { reason: fallbackReason });
-      // The sheet component drives the email round trip from here and
-      // resolves this once it has a token — see `VerifyDeviceSheet.tsx`.
-      deviceToken = await useVerifySheet.getState().requestFallback(fallbackReason);
+    for (;;) {
+      try {
+        const result = await verifyWithTimeout(vouchflow, {
+          context: 'login',
+          minimumConfidence: 'low',
+        });
+        useVerifySheet.getState().finish();
+        useIdentity.getState().setDeviceToken(result.deviceToken);
+        return { deviceToken: result.deviceToken };
+      } catch (err) {
+        const unsupported = isUnsupportedDeviceError(err);
+        useVerifySheet
+          .getState()
+          .fail(
+            unsupported
+              ? UNSUPPORTED_DEVICE_MESSAGE
+              : "Couldn't verify this device. Please try again.",
+            !unsupported,
+          );
+        if (unsupported) throw err;
+        await useVerifySheet.getState().waitForRetry();
+      }
     }
-    useIdentity.getState().setDeviceToken(deviceToken);
-    return { deviceToken };
   })();
 
   try {

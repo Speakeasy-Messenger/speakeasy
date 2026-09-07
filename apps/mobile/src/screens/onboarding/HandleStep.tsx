@@ -1,44 +1,18 @@
+import { UNSUPPORTED_DEVICE_MESSAGE } from '../../auth/unsupported-device.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../../components/Button.js';
-import { EmailVerifyFallback } from '../../components/EmailVerifyFallback.js';
-import { isDeviceSecure, openSecuritySettings } from '../../native/lock-screen.js';
+import { isDeviceSecure } from '../../native/lock-screen.js';
 import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
-import {
-  VouchflowClientError,
-  type FallbackReason,
-  type VouchflowErrorReason,
-} from '../../native/vouchflow.js';
-import {
-  claimWithDeviceAttestation,
-  completeEmailFallbackClaim,
-  EmailFallbackError,
-  type ClaimDeps,
-} from '../../auth/claim-handle.js';
+import { VouchflowClientError, type VouchflowErrorReason } from '../../native/vouchflow.js';
+import { claimWithDeviceAttestation, type ClaimDeps } from '../../auth/claim-handle.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
 import { generateShortHandle } from '../../utils/generate-handle.js';
 import { diag } from '../../diag/log.js';
-
-/**
- * Onboarding screen 03 — Handle.
- * Spec: ONBOARDING.md §2.3.
- *
- * Eyebrow + "You are" prefix + handle input with fixed brass `@` +
- * 5-state availability indicator + secondary "Generate one for me" +
- * primary "This one's mine".
- *
- * On accept: vouchflow.verify (biometric) → api.enroll → returns the
- * server-assigned userId + deviceToken to the parent for step 04.
- * Devices that cannot complete the normal verification path (no screen
- * lock, an un-attestable device, or an enrollment failure) are offered
- * Vouchflow's email-OTP fallback instead of an error — see
- * `auth/claim-handle.ts`, which owns both paths so they stay testable
- * outside a React renderer.
- */
 
 const deps: ClaimDeps = { api, signalProtocol, vouchflow, isDeviceSecure };
 
@@ -62,15 +36,8 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
   const [availability, setAvailability] = useState<AvailabilityState>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  // True when the device has no secure lock (no PIN/pattern/biometric) —
-  // surfaces a "Set up screen lock" deep link, the better fix when the
-  // device is otherwise capable. Shown alongside the email fallback,
-  // never instead of it.
-  const [needsLock, setNeedsLock] = useState(false);
-  // Set once the normal verification path cannot complete — the email
-  // fallback (`EmailVerifyFallback`) takes over from there; see
-  // `handleEmailVerified`.
-  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>();
+
+  const [unsupported, setUnsupported] = useState(false);
 
   const tokenRef = useRef(0);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
@@ -136,18 +103,12 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     if (availability.kind !== 'available') return;
     setBusy(true);
     setError(undefined);
-    setNeedsLock(false);
-    setFallbackReason(undefined);
+    setUnsupported(false);
     try {
       const result = await claimWithDeviceAttestation(deps, handle);
-      if (result.kind === 'needs_email_fallback') {
-        // Not a dead end: the normal verification path could not
-        // complete, so offer the email code instead. A lockless device
-        // also gets the "Set up screen lock" deep link, which is the
-        // better fix when it applies.
-        setNeedsLock(result.noLock);
-        setError(result.noLock ? VERIFY_SETUP_HELP : VERIFY_DEVICE_HELP);
-        setFallbackReason(result.reason);
+      if (result.kind === 'unsupported_device') {
+        setError(undefined);
+        setUnsupported(true);
         return;
       }
       // Push token registration is intentionally NOT done here.
@@ -173,27 +134,6 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     }
   }
 
-  /** The fallback's final step: submit the code, then enroll exactly as
-   * the attestation path does. `EmailFallbackError` is rethrown so
-   * `EmailVerifyFallback` shows its own inline retry message; anything
-   * else also goes through `reportClaimFailure` for the screen's usual
-   * error handling (e.g. a `taken` handle race). */
-  async function handleEmailVerified(args: { sessionId: string; otp: string }) {
-    try {
-      const claimed = await completeEmailFallbackClaim(deps, {
-        handle,
-        sessionId: args.sessionId,
-        otp: args.otp,
-      });
-      onClaimed(claimed);
-    } catch (err: unknown) {
-      if (!(err instanceof EmailFallbackError)) {
-        reportClaimFailure(err);
-      }
-      throw err;
-    }
-  }
-
   function reportClaimFailure(err: unknown) {
     const errAny = err as { cause?: unknown; stack?: string };
     diag('onboarding', 'claim failed', {
@@ -214,7 +154,7 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
       // empty + reset focus so the user types again.
       setAvailability({ kind: 'idle' });
       setHandle('');
-      setFallbackReason(undefined);
+      setUnsupported(false);
       setError('Someone else just took that one.');
       inputRef.current?.focus();
     } else if (err instanceof ApiError && err.status === 409 && err.code === 'reserved') {
@@ -226,6 +166,17 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
       setError(`Unexpected: ${name} — ${msg}`);
     }
   }
+
+  if (unsupported)
+    return (
+      <SafeAreaView style={styles.root} testID="onboarding-screen">
+        <View style={styles.content}>
+          <Text style={styles.error} testID="onboarding-error">
+            {UNSUPPORTED_DEVICE_MESSAGE}
+          </Text>
+        </View>
+      </SafeAreaView>
+    );
 
   return (
     <SafeAreaView testID="onboarding-screen" style={styles.root}>
@@ -288,37 +239,7 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
               {error}
             </Text>
           ) : null}
-          {fallbackReason !== undefined ? (
-            <View style={styles.fallbackBlock}>
-              <EmailVerifyFallback
-                reason={fallbackReason}
-                vouchflow={vouchflow}
-                onSubmit={handleEmailVerified}
-                onBusyChange={setBusy}
-                colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
-                testIDPrefix="onboarding-fallback"
-                renderButton={(btn) => (
-                  <Button
-                    label={btn.label}
-                    onPress={btn.onPress}
-                    loading={btn.loading}
-                    disabled={btn.disabled}
-                    testID={btn.testID}
-                  />
-                )}
-              />
-            </View>
-          ) : null}
           <View style={styles.buttonStack}>
-            {needsLock ? (
-              <Button
-                label="Set up screen lock"
-                onPress={() => void openSecuritySettings()}
-                variant="secondary"
-                disabled={busy}
-                testID="onboarding-setup-lock"
-              />
-            ) : null}
             <Button
               label="Generate one for me"
               onPress={handleGenerate}
@@ -327,10 +248,10 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
               testID="onboarding-generate"
             />
             <Button
-              label={fallbackReason === undefined ? "This one's mine" : 'Try this device again'}
+              label="This one's mine"
               onPress={() => void handleClaim()}
-              loading={busy && fallbackReason === undefined}
-              variant={fallbackReason === undefined ? 'primary' : 'secondary'}
+              loading={busy}
+              variant="primary"
               disabled={availability.kind !== 'available' || busy}
               testID="onboarding-continue"
             />
@@ -384,40 +305,18 @@ function focusBorderFor(s: AvailabilityState) {
   return { borderColor: TEXT_FAINT };
 }
 
-/**
- * Shown when the device has NO secure lock — the fixable case. We detect
- * this directly via `isDeviceSecure()` (a lock is exactly the "passkey"
- * Vouchflow needs), so it's surfaced proactively before the biometric
- * prompt and paired with a "Set up screen lock" deep link. The email
- * fallback is offered alongside it, so a user who won't add a lock is
- * still never stuck.
- */
-export const VERIFY_SETUP_HELP =
-  'This device has no screen lock. Set up a PIN, pattern, or fingerprint/face unlock in your phone’s settings, then try again.';
-
-/**
- * Shown when a lock IS present but verification still failed — i.e. the
- * device itself can't be attested (too old, modified/rooted, or missing
- * Google Play services). "Set up a lock" would be wrong here, so this
- * pairs with the email fallback instead.
- */
-export const VERIFY_DEVICE_HELP =
-  Platform.OS === 'ios'
-    ? 'Couldn’t verify this device. It may be too old, jailbroken, or unable to complete a security check.'
-    : 'Couldn’t verify this device. It may be too old, modified, or missing Google Play services.';
-
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
   switch (reason) {
     case 'biometric_cancelled':
       return 'Biometric prompt cancelled. Tap "This one\'s mine" to try again.';
     case 'biometric_failed':
-      return 'Biometric check failed. Try again, or use another sign-in method.';
+      return 'Biometric check failed. Please try again.';
     case 'biometric_unavailable':
     case 'attestation_unavailable':
     case 'minimum_confidence_unmet':
       // No-lock is caught proactively before verify(), so reaching here
       // means a lock is present but the device still couldn't attest.
-      return VERIFY_DEVICE_HELP;
+      return UNSUPPORTED_DEVICE_MESSAGE;
     case 'network_unavailable':
       return `Can't reach the room. Try again.`;
     case 'enrollment_failed':
@@ -498,7 +397,6 @@ const styles = StyleSheet.create({
     maxWidth: 32 * 8,
   },
   bottom: { paddingHorizontal: 24, paddingBottom: 24, gap: 8 },
-  fallbackBlock: { gap: 8 },
   error: {
     fontFamily: font.regular,
     fontSize: typeScale.caption.size,

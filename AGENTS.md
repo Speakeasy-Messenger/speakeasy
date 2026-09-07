@@ -11,22 +11,10 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   default guard in `apps/api/src/{server,production-guard}.ts`, and every
   client `minimumConfidence: 'low'` call site — `apps/mobile/src/auth/{claim-handle,verify-device}.ts`
   and `apps/mobile/src/screens/VerifyGateScreen.tsx`.
-- Every device-verification surface (onboarding's `HandleStep`, the returning-
-  user `VerifyGateScreen`, and the monthly re-verify `VerifyDeviceSheet`) must
-  offer the email-OTP fallback when the passkey/attestation path can't
-  complete — never a retry-only dead end. The shared pieces: fallback
-  decision + network calls in `apps/mobile/src/auth/claim-handle.ts`
-  (`fallbackReasonFor`, `startEmailFallback`, `completeEmailFallbackVerification`)
-  and the shared UI in `apps/mobile/src/components/EmailVerifyFallback.tsx`.
-  `VerifyDeviceSheet` bridges its passkey attempt to the inline email step via
-  `store/verify-sheet.ts`'s `fallback` field rather than closing and reopening
-  the sheet — see that file's comments before changing its resolve/reject
-  contract.
-- Whether that fallback actually enrolls a device is settled by the harness in
-  `apps/mobile/maestro/`, not by the unit tests — `claim-handle.test.ts` mocks
-  the two steps that decide it. `EMAIL_FALLBACK_EVIDENCE.md` there is the
-  authoritative record of what each waypoint proves, what is still unproven,
-  and how to run one unattended real-device pass.
+- Device verification must not collect email or phone numbers. Unsupported
+  devices receive the message in `apps/mobile/src/auth/unsupported-device.ts`.
+  Auth requires the native passkey flow; keep enrollment and token-refresh
+  behavior aligned with `auth/claim-handle.ts` and `auth/verify-device.ts`.
 - `apps/mobile/src/services.ts` must expose Vouchflow's native client directly:
   no layer may answer `verify()` itself. The executable wiring and stale-device
   recovery coverage live in `apps/mobile/src/native/vouchflow-wiring.test.ts`
@@ -58,12 +46,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   (`release-play.yml`) publishes to Play Internal then auto-promotes to
   **beta** (Open Testing) only; reaching **production** requires a separate
   manual dispatch: `gh workflow run play-promote.yml -f from_track=beta -f
-  to_track=production -f release_status=completed` (see `play-promote.yml`'s
+to_track=production -f release_status=completed` (see `play-promote.yml`'s
   header — this repo's no-review model means `completed` goes live
   immediately, no Google review). Likewise an `ios-*` tag / a plain
   `release-ios.yml` run defaults to `lane=beta` (TestFlight only); the App
   Store Connect build needs `gh workflow run release-ios.yml -f
-  lane=release`, which builds+uploads only (`submit_for_review: false` in
+lane=release`, which builds+uploads only (`submit_for_review: false` in
   `ios/fastlane/Fastfile`'s `release` lane) and never submits to Apple
   review.
 

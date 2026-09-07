@@ -41,12 +41,6 @@ function client(): VouchflowClient {
       };
     }),
     getCachedDeviceToken: vi.fn(async () => null),
-    requestFallback: vi.fn(async () => {
-      throw new Error('not reached');
-    }),
-    submitFallbackOtp: vi.fn(async () => {
-      throw new Error('not reached');
-    }),
   };
 }
 
@@ -74,7 +68,7 @@ async function harness(): Promise<Harness> {
     hydrated: true,
   });
   const stopTapping = useVerifySheet.subscribe((s) => {
-    if (s.pending && !s.verificationInFlight && !s.fallback) {
+    if (s.pending && !s.verificationInFlight && !s.error) {
       void Promise.resolve().then(() => useVerifySheet.getState().confirm());
     }
   });

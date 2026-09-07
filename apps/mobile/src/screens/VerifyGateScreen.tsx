@@ -1,3 +1,4 @@
+import { UNSUPPORTED_DEVICE_MESSAGE } from '../auth/unsupported-device.js';
 import React, { useEffect, useRef, useState } from 'react';
 import {
   Animated,
@@ -15,53 +16,11 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { vouchflow } from '../services.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
-import {
-  completeEmailFallbackVerification,
-  fallbackReasonFor,
-  VerificationTimeoutError,
-  verifyWithTimeout,
-} from '../auth/claim-handle.js';
-import { EmailVerifyFallback } from '../components/EmailVerifyFallback.js';
-import { VouchflowClientError, type FallbackReason } from '../native/vouchflow.js';
+import { isUnsupportedDeviceError, verifyWithTimeout } from '../auth/claim-handle.js';
 import { accent, brand, font, motion, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 import { diag } from '../diag/log.js';
 
-/**
- * Full-screen verify gate. Mounted by the router when an authed user
- * (userId set) has no cached Vouchflow device token — i.e. the
- * cryptographic credentials the rest of the app depends on are
- * absent. Two scenarios reach here:
- *
- *   1. Fresh install of an account that already exists on the server
- *      (the userId hydrated from disk on a reinstall, but the token —
- *      stored separately in the native keystore — did not).
- *   2. Token explicitly cleared (account reset attempt, error recovery
- *      path that wiped the token but not the userId).
- *
- * The monthly-expiry case does NOT route here: the launch-refresh
- * effect handles a stale-but-present token via the bottom sheet so
- * the app can stay usable on cached identity if the user dismisses
- * the prompt (see App.tsx launch verify useEffect + the "lunchboxxx
- * incident" reason comment). The gate fires only when the token is
- * GENUINELY missing — there is no usable identity to fall back on.
- *
- * Unlike VerifyDeviceSheet, this is non-dismissible. The user MUST
- * verify (or close the app). That's the point — half-working state
- * is worse UX than a clean welcome-back gate.
- *
- * Brand canvas. AvatarRenderer at the top frames the moment as
- * "welcome back" rather than "authenticate." Single primary action.
- * Tap → vouchflow.verify directly (no sheet — the screen itself is
- * the explanation). On success, setDeviceToken flips the router
- * condition and the gate unmounts.
- *
- * On failure — including a passkey-less device, which is the whole
- * point of this fix — offers the same email-send + code-entry fallback
- * onboarding uses (`EmailVerifyFallback`) instead of a retry-only dead
- * end. Completing it sets the device token exactly as the passkey path
- * does, so the gate unmounts the same way.
- */
 export function VerifyGateScreen(): React.ReactElement {
   const userId = useIdentity((s) => s.userId);
   const profile = useProfiles((s) => s.byUserId[userId ?? '']);
@@ -69,10 +28,8 @@ export function VerifyGateScreen(): React.ReactElement {
 
   const [verifying, setVerifying] = useState(false);
   const [errorCopy, setErrorCopy] = useState<string | undefined>(undefined);
-  // Set once the passkey attempt fails — offers the email fallback
-  // instead of a retry-only dead end. `undefined` means "still on the
-  // passkey step."
-  const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>(undefined);
+
+  const [unsupported, setUnsupported] = useState(false);
 
   const reveal = useRef(new Animated.Value(0)).current;
   useEffect(() => {
@@ -105,31 +62,27 @@ export function VerifyGateScreen(): React.ReactElement {
       diag('app', 'verify gate: success', { userId });
     } catch (err) {
       diag('app', 'verify gate: failed', { userId, err: String(err) });
-      // No-passkey or any other failed verify: never dead-end into a
-      // retry-only screen — offer the email fallback instead.
-      setErrorCopy("Couldn't verify with a passkey. Verify by email instead.");
-      setFallbackReason(
-        err instanceof VerificationTimeoutError
-          ? 'attestation_timeout'
-          : err instanceof VouchflowClientError
-            ? fallbackReasonFor(err.reason)
-            : 'sdk_error',
+
+      const unavailable = isUnsupportedDeviceError(err);
+      setUnsupported(unavailable);
+      setErrorCopy(
+        unavailable ? UNSUPPORTED_DEVICE_MESSAGE : "Couldn't verify this device. Please try again.",
       );
     } finally {
       setVerifying(false);
     }
   };
 
-  /** The fallback's final step — resolves the token exactly as the
-   * passkey path does, no `enroll` (the account already exists). */
-  async function handleEmailVerified(args: { sessionId: string; otp: string }): Promise<void> {
-    const { deviceToken } = await completeEmailFallbackVerification(
-      { vouchflow },
-      { sessionId: args.sessionId, otp: args.otp, context: 'login' },
+  if (unsupported)
+    return (
+      <SafeAreaView testID="verify-gate-screen" style={styles.root}>
+        <View style={styles.body}>
+          <Text style={styles.error} testID="verify-gate-error">
+            {UNSUPPORTED_DEVICE_MESSAGE}
+          </Text>
+        </View>
+      </SafeAreaView>
     );
-    useIdentity.getState().setDeviceToken(deviceToken);
-    diag('app', 'verify gate: success via email fallback', { userId });
-  }
 
   return (
     <SafeAreaView testID="verify-gate-screen" style={styles.root}>
@@ -167,34 +120,10 @@ export function VerifyGateScreen(): React.ReactElement {
                 {errorCopy}
               </Text>
             ) : null}
-
-            {fallbackReason !== undefined ? (
-              <View style={styles.fallbackBlock}>
-                <EmailVerifyFallback
-                  reason={fallbackReason}
-                  vouchflow={vouchflow}
-                  onSubmit={handleEmailVerified}
-                  colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
-                  testIDPrefix="verify-gate-fallback"
-                  renderButton={(btn) => (
-                    <Pressable
-                      onPress={btn.onPress}
-                      disabled={btn.disabled}
-                      style={[styles.btnPrimary, btn.disabled && styles.btnPrimaryDisabled]}
-                      testID={btn.testID}
-                    >
-                      <Text style={styles.btnPrimaryText}>
-                        {btn.loading ? 'Verifying…' : btn.label}
-                      </Text>
-                    </Pressable>
-                  )}
-                />
-              </View>
-            ) : null}
           </Animated.View>
         </View>
 
-        {fallbackReason === undefined ? (
+        {!unsupported ? (
           <View style={styles.actions}>
             <Pressable
               onPress={onVerify}
@@ -261,10 +190,6 @@ const styles = StyleSheet.create({
     fontFamily: font.medium,
     color: BONE,
   },
-  // `stack` centers its children, so a plain child would shrink-wrap
-  // its TextInput instead of filling the available width — stretch
-  // opts this block back into the default column-fill behavior.
-  fallbackBlock: { alignSelf: 'stretch', marginTop: space.md },
   copyHint: {
     fontFamily: font.regular,
     fontSize: 13,

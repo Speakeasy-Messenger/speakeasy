@@ -22,9 +22,6 @@
 //                 crossAppHistory, anomalyFlags } }
 //
 //  SDK 2.0.0 adds:
-//    - requestFallback(email:reason:) → { fallbackSessionId, expiresAt }
-//    - submitFallbackOtp(sessionId:otp:) → { verified, confidence, sessionState,
-//                                             fallbackSignals }
 //    - VouchflowResult now includes deviceAgeDays, networkVerifications,
 //      firstSeen, context
 //    - VouchflowError.biometricCancelled(sessionId) / .biometricFailed(sessionId)
@@ -80,69 +77,6 @@ class VouchflowModule: NSObject {
         }
     }
 
-    // MARK: - Fallback
-
-    /// Initiate email OTP fallback. Call after catching biometricCancelled or biometricFailed.
-    @objc(requestFallback:reason:resolver:rejecter:)
-    func requestFallback(_ email: NSString,
-                         reason: NSString?,
-                         resolver resolve: @escaping RCTPromiseResolveBlock,
-                         rejecter reject: @escaping RCTPromiseRejectBlock) {
-        let fallbackReason = parseFallbackReason(reason as String?)
-
-        Task { @MainActor in
-            do {
-                let result = try await Vouchflow.shared.requestFallback(
-                    email: email as String,
-                    reason: fallbackReason
-                )
-                resolve([
-                    "fallbackSessionId": result.fallbackSessionId,
-                    "expiresAt": ISO8601DateFormatter().string(from: result.expiresAt)
-                ])
-            } catch let err as VouchflowError {
-                let (code, message) = mapError(err)
-                reject(code, message, err)
-            } catch {
-                reject("unknown_error", error.localizedDescription, error)
-            }
-        }
-    }
-
-    /// Submit OTP code for a fallback session.
-    @objc(submitFallbackOtp:otp:resolver:rejecter:)
-    func submitFallbackOtp(_ sessionId: NSString,
-                           otp: NSString,
-                           resolver resolve: @escaping RCTPromiseResolveBlock,
-                           rejecter reject: @escaping RCTPromiseRejectBlock) {
-        Task { @MainActor in
-            do {
-                let result = try await Vouchflow.shared.submitFallbackOTP(
-                    sessionId: sessionId as String,
-                    otp: otp as String
-                )
-                resolve([
-                    "verified": result.verified,
-                    "confidence": confidenceString(result.confidence),
-                    "sessionState": result.sessionState,
-                    "fallbackSignals": [
-                        "ipConsistent": result.fallbackSignals.ipConsistent,
-                        "disposableEmailDomain": result.fallbackSignals.disposableEmailDomain,
-                        "deviceHasPriorVerifications": result.fallbackSignals.deviceHasPriorVerifications,
-                        "emailDomainAgeDays": result.fallbackSignals.emailDomainAgeDays as Any,
-                        "otpAttempts": result.fallbackSignals.otpAttempts,
-                        "timeToCompleteSeconds": result.fallbackSignals.timeToCompleteSeconds
-                    ]
-                ])
-            } catch let err as VouchflowError {
-                let (code, message) = mapError(err)
-                reject(code, message, err)
-            } catch {
-                reject("unknown_error", error.localizedDescription, error)
-            }
-        }
-    }
-
   /// Read the locally-cached device token without triggering biometric or
   /// network calls. Returns null if the device has never enrolled.
   @objc(getCachedDeviceToken:rejecter:)
@@ -169,23 +103,6 @@ class VouchflowModule: NSObject {
         case "medium": return .medium
         case "low":    return .low
         default:       return nil
-        }
-    }
-
-    private func parseFallbackReason(_ s: String?) -> FallbackReason {
-        switch s {
-        case "attestation_unavailable": return .attestationUnavailable
-        case "attestation_failed":      return .attestationFailed
-        case "attestation_timeout":     return .attestationTimeout
-        case "biometric_unavailable":   return .biometricUnavailable
-        case "biometric_failed":        return .biometricFailed
-        case "biometric_cancelled":     return .biometricCancelled
-        case "key_invalidated":         return .keyInvalidated
-        case "sdk_error":               return .sdkError
-        case "minimum_confidence_unmet": return .minimumConfidenceUnmet
-        case "developer_initiated":     return .developerInitiated
-        case "enrollment_failed":       return .enrollmentFailed
-        default:                        return .biometricFailed
         }
     }
 

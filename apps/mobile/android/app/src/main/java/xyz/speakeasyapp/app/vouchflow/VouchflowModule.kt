@@ -8,7 +8,6 @@ import com.facebook.react.bridge.ReactApplicationContext
 import com.facebook.react.bridge.ReactContextBaseJavaModule
 import com.facebook.react.bridge.ReactMethod
 import dev.vouchflow.sdk.Confidence
-import dev.vouchflow.sdk.FallbackReason
 import dev.vouchflow.sdk.VerificationContext
 import dev.vouchflow.sdk.Vouchflow
 import dev.vouchflow.sdk.VouchflowError
@@ -20,23 +19,6 @@ import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
 
 private const val TAG = "VouchflowModule"
-
-internal fun parseFallbackReason(reason: String?): FallbackReason =
-    when (reason) {
-      "attestation_unavailable" -> FallbackReason.ATTESTATION_UNAVAILABLE
-      "attestation_failed" -> FallbackReason.ATTESTATION_FAILED
-      "attestation_timeout" -> FallbackReason.ATTESTATION_TIMEOUT
-      "biometric_unavailable" -> FallbackReason.BIOMETRIC_UNAVAILABLE
-      "biometric_failed" -> FallbackReason.BIOMETRIC_FAILED
-      "biometric_cancelled" -> FallbackReason.BIOMETRIC_CANCELLED
-      "key_invalidated" -> FallbackReason.KEY_INVALIDATED
-      "sdk_error" -> FallbackReason.SDK_ERROR
-      "minimum_confidence_unmet" -> FallbackReason.MINIMUM_CONFIDENCE_UNMET
-      "developer_initiated" -> FallbackReason.DEVELOPER_INITIATED
-      "enrollment_failed" -> FallbackReason.ENROLLMENT_FAILED
-      null -> FallbackReason.BIOMETRIC_FAILED
-      else -> throw IllegalArgumentException("unknown fallback reason: $reason")
-    }
 
 /**
  * RN bridge for the Vouchflow Android SDK (`dev.vouchflow:android-sdk`).
@@ -51,15 +33,6 @@ internal fun parseFallbackReason(reason: String?): FallbackReason =
  *     deviceAgeDays, networkVerifications, firstSeen, context,
  *     signals: { biometricUsed, attestationVerified, persistentToken,
  *                crossAppHistory, anomalyFlags },
- *   }>
- *   requestFallback(email, reasonStr | null) → Promise<{
- *     fallbackSessionId, expiresAt,
- *   }>
- *   submitFallbackOtp(sessionId, otp) → Promise<{
- *     verified, confidence, sessionState,
- *     fallbackSignals: { ipConsistent, disposableEmailDomain,
- *       deviceHasPriorVerifications, emailDomainAgeDays, otpAttempts,
- *       timeToCompleteSeconds },
  *   }>
  *
  * Errors are rejected with codes mirroring `VouchflowError` subtypes:
@@ -197,69 +170,6 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
       } catch (e: Throwable) {
         Log.e(TAG, "verify: unknown_error (${e.javaClass.name})", e)
         promise.reject("unknown_error", e.message ?: e.toString(), e)
-      }
-    }
-  }
-
-  /**
-   * Request an OTP fallback verification via email.
-   *
-   * Maps `reasonStr` to `FallbackReason`; a missing value defaults to
-   * `BIOMETRIC_FAILED`, while an unrecognised value rejects the request.
-   */
-  @ReactMethod
-  fun requestFallback(email: String, reasonStr: String?, promise: Promise) {
-    val reason =
-        try {
-          parseFallbackReason(reasonStr)
-        } catch (e: IllegalArgumentException) {
-          promise.reject("bad_fallback_reason", e.message)
-          return
-        }
-
-    scope.launch {
-      try {
-        val result = Vouchflow.shared.requestFallback(email, reason)
-        val map =
-            Arguments.createMap().apply {
-              putString("fallbackSessionId", result.fallbackSessionId)
-              putString("expiresAt", DateTimeFormatter.ISO_INSTANT.format(result.expiresAt))
-            }
-        promise.resolve(map)
-      } catch (e: Throwable) {
-        promise.reject("unknown_error", e.message, e)
-      }
-    }
-  }
-
-  /**
-   * Submit an OTP code for a fallback verification session.
-   */
-  @ReactMethod
-  fun submitFallbackOtp(sessionId: String, otp: String, promise: Promise) {
-    scope.launch {
-      try {
-        val result = Vouchflow.shared.submitFallbackOtp(sessionId, otp)
-        val fallbackSignals =
-            Arguments.createMap().apply {
-              putBoolean("ipConsistent", result.fallbackSignals.ipConsistent)
-              putBoolean("disposableEmailDomain", result.fallbackSignals.disposableEmailDomain)
-              putBoolean("deviceHasPriorVerifications", result.fallbackSignals.deviceHasPriorVerifications)
-              val emailAgeDays = result.fallbackSignals.emailDomainAgeDays
-              if (emailAgeDays != null) putInt("emailDomainAgeDays", emailAgeDays)
-              putInt("otpAttempts", result.fallbackSignals.otpAttempts)
-              putDouble("timeToCompleteSeconds", result.fallbackSignals.timeToCompleteSeconds.toDouble())
-            }
-        val map =
-            Arguments.createMap().apply {
-              putBoolean("verified", result.verified)
-              putString("confidence", result.confidence.name.lowercase())
-              putString("sessionState", result.sessionState)
-              putMap("fallbackSignals", fallbackSignals)
-            }
-        promise.resolve(map)
-      } catch (e: Throwable) {
-        promise.reject("unknown_error", e.message, e)
       }
     }
   }

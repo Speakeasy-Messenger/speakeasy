@@ -13,8 +13,6 @@ import type { Confidence, VerificationContext } from '@speakeasy/vouchflow';
  *
  * SDK 2.0.0 adds:
  *   - VouchflowResult.deviceAgeDays, networkVerifications, firstSeen, context
- *   - requestFallback(email, reason) → { fallbackSessionId, expiresAt }
- *   - submitFallbackOtp(sessionId, otp) → FallbackVerificationResult
  *   - BiometricCancelled/Failed now carry sessionId
  *   - AccountStoreAccessDenied error (iOS: keychainAccessDenied)
  */
@@ -50,46 +48,9 @@ export interface VerifyOpts {
   minimumConfidence?: Confidence;
 }
 
-export interface FallbackResult {
-  fallbackSessionId: string;
-  /** ISO 8601 timestamp. */
-  expiresAt: string;
-}
-
-export interface FallbackVerificationResult {
-  verified: boolean;
-  confidence: Confidence;
-  sessionState: string;
-  fallbackSignals: {
-    ipConsistent: boolean;
-    disposableEmailDomain: boolean;
-    deviceHasPriorVerifications: boolean;
-    emailDomainAgeDays: number | null;
-    otpAttempts: number;
-    timeToCompleteSeconds: number;
-  };
-}
-
-export type FallbackReason =
-  | 'attestation_unavailable'
-  | 'attestation_failed'
-  | 'attestation_timeout'
-  | 'biometric_unavailable'
-  | 'biometric_failed'
-  | 'biometric_cancelled'
-  | 'key_invalidated'
-  | 'sdk_error'
-  | 'minimum_confidence_unmet'
-  | 'developer_initiated'
-  | 'enrollment_failed';
-
 export interface VouchflowClient {
   /** Full attestation flow. Returns the `deviceToken` to pass to your server. */
   verify(opts: VerifyOpts): Promise<VerifyResult>;
-  /** Initiate email OTP fallback after biometric failure. */
-  requestFallback(email: string, reason?: FallbackReason): Promise<FallbackResult>;
-  /** Submit OTP code to complete fallback verification. */
-  submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult>;
   /** Read the cached device token without biometric/network. Null if not enrolled. */
   getCachedDeviceToken(): Promise<string | null>;
 }
@@ -135,29 +96,6 @@ interface NativeVouchflowModule {
     fallbackUsed: boolean;
     signals: VouchflowSignals;
   }>;
-  requestFallback(
-    email: string,
-    reason: string | null,
-  ): Promise<{
-    fallbackSessionId: string;
-    expiresAt: string;
-  }>;
-  submitFallbackOtp(
-    sessionId: string,
-    otp: string,
-  ): Promise<{
-    verified: boolean;
-    confidence: 'high' | 'medium' | 'low';
-    sessionState: string;
-    fallbackSignals: {
-      ipConsistent: boolean;
-      disposableEmailDomain: boolean;
-      deviceHasPriorVerifications: boolean;
-      emailDomainAgeDays: number | null;
-      otpAttempts: number;
-      timeToCompleteSeconds: number;
-    };
-  }>;
   /** Returns the cached device token (null if never enrolled). */
   getCachedDeviceToken(): Promise<string | null>;
 }
@@ -178,8 +116,7 @@ function loadNativeModule(): NativeVouchflowModule | undefined {
 }
 
 /**
- * Production wiring — calls `NativeModules.Vouchflow.verify()`,
- * `requestFallback()`, and `submitFallbackOtp()`
+ * Production wiring — calls `NativeModules.Vouchflow.verify()`
  * (Kotlin/Swift modules wrapping `dev.vouchflow:android-sdk:2.0.0` /
  * `VouchflowSDK` 2.0.0). Throws `VouchflowClientError` with a
  * `reason` mirroring the SDK's `VouchflowError` subtypes.
@@ -216,34 +153,6 @@ export class NativeVouchflowClient implements VouchflowClient {
     } catch (err) {
       const reason = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
       throw new VouchflowClientError(reason, (err as Error).message);
-    }
-  }
-
-  async requestFallback(email: string, reason?: FallbackReason): Promise<FallbackResult> {
-    try {
-      const r = await this.module.requestFallback(email, reason ?? null);
-      return {
-        fallbackSessionId: r.fallbackSessionId,
-        expiresAt: r.expiresAt,
-      };
-    } catch (err) {
-      const reasonCode = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
-      throw new VouchflowClientError(reasonCode, (err as Error).message);
-    }
-  }
-
-  async submitFallbackOtp(sessionId: string, otp: string): Promise<FallbackVerificationResult> {
-    try {
-      const r = await this.module.submitFallbackOtp(sessionId, otp);
-      return {
-        verified: r.verified,
-        confidence: r.confidence as Confidence,
-        sessionState: r.sessionState,
-        fallbackSignals: r.fallbackSignals,
-      };
-    } catch (err) {
-      const reasonCode = (err as { code?: VouchflowErrorReason }).code ?? 'unknown_error';
-      throw new VouchflowClientError(reasonCode, (err as Error).message);
     }
   }
 

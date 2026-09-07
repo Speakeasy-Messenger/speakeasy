@@ -630,8 +630,7 @@ dependencies {
     // VerificationContext to VouchflowResult; BiometricCancelled and
     // BiometricFailed are now data classes with sessionId; EnrollmentFailed
     // is a data class with enrollmentCause; new AccountStoreAccessDenied
-    // error; and FallbackReason enum with requestFallback/submitFallbackOtp
-    // for OTP-based verification fallback.
+    // error.
     // 2.1.1 fixes a first-launch crash — configure() no longer lets an
     // AccountManager SecurityException escape Application.onCreate()
     // (vouchflow/android-sdk#1); it falls back to Keystore-only storage.

@@ -33,8 +33,8 @@ target 'Speakeasy' do
   # Added via Xcode: File → Add Package Dependencies → paste URL:
   #   https://github.com/vouchflow/ios-sdk
   # **Pin: exact 2.0.0** (matches the Android coordinate
-  # `dev.vouchflow:android-sdk:2.0.0` — required for fallback OTP,
-  # new VouchflowResult fields, and sessionId on biometric errors).
+  # `dev.vouchflow:android-sdk:2.0.0` — required for new VouchflowResult
+  # fields and sessionId on biometric errors).
 
   # libsignal-client iOS — git-based CocoaPods dep (the canonical install
   # path per signalapp/libsignal's swift/README.md). The pod's

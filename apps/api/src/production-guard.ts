@@ -118,11 +118,9 @@ export function collectProductionConfigErrors(env: NodeJS.ProcessEnv = process.e
 
   const minConfidence = env.VOUCHFLOW_MIN_CONFIDENCE;
   // `low` is the product floor (spec §2), matching the vouchflow.dev
-  // dashboard: a device that attests weakly still enrols, and a device
-  // that cannot attest at all takes the email-OTP fallback rather than
-  // dead-ending. Only a value that isn't a confidence level at all is a
-  // config error — a typo would otherwise silently fall through to the
-  // library default.
+  // dashboard: a device that attests weakly still enrols. Only a value that
+  // isn't a confidence level at all is a config error — a typo would
+  // otherwise silently fall through to the library default.
   if (minConfidence && !['low', 'medium', 'high'].includes(minConfidence)) {
     errors.push(
       `VOUCHFLOW_MIN_CONFIDENCE=${minConfidence} is not a confidence ` +
