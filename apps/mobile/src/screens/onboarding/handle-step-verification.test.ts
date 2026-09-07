@@ -54,7 +54,7 @@ vi.mock('react-native', () => ({
 }));
 vi.mock('react-native-safe-area-context', () => ({ SafeAreaView: 'section' }));
 vi.mock('../../components/Button.js', () => ({
-  Button: (props: unknown) => React.createElement('button', props),
+  Button: (props: React.Attributes) => React.createElement('button', props),
 }));
 vi.mock('../../services.js', () => services);
 vi.mock('../../native/lock-screen.js', () => lockScreen);
