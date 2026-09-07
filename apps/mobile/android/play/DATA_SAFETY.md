@@ -185,8 +185,9 @@ any future issue if Play tightens URL validation).
   keys to decrypt user content."
 - "No phone number, no email address, and no real name is collected.
   Devices are verified with hardware-backed attestation — there are no
-  email or SMS one-time codes. The user-chosen handle and per-device
-  attestation token are the only persistent IDs."
+  email or SMS one-time codes. The user-chosen handle, the per-device
+  Vouchflow attestation token, and the push token used to deliver
+  notifications are the only persistent identifiers."
 - "Contacts are not accessed. Users add peers by exchanging handles
   manually, not by ingesting the device address book."
 

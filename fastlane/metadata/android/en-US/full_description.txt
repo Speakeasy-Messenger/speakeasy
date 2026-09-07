@@ -1,6 +1,6 @@
 Speakeasy is a private messenger built on the premise that you shouldn't have to hand over your phone number or real name to talk to someone you trust.
 
-When you sign up, you pick a handle — anything you want, like @alice or @midnight_traveler — and the app generates a fresh cryptographic identity on your device. If a device cannot complete its security verification, you can instead verify a one-time code sent by email. That address is used only for the code and is not attached to your handle.
+When you sign up, you pick a handle — anything you want, like @alice or @midnight_traveler — and the app generates a fresh cryptographic identity on your device, verified by the device's own hardware security (screen lock or biometrics). No email, no phone number, no one-time codes sent anywhere.
 
 WHAT YOU GET
 
