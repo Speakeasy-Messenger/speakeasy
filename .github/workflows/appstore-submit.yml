@@ -39,7 +39,7 @@ on:
         type: boolean
         default: false
       reset_submission:
-        description: 'Cancel an UNRESOLVED_ISSUES review submission (rejected review) and create a fresh one before submitting.'
+        description: 'Withdraw an in-flight review submission (a locked in-review version, or one stuck in UNRESOLVED_ISSUES) and create a fresh one. Required to supersede the build of a version in WAITING_FOR_REVIEW/IN_REVIEW.'
         type: boolean
         default: false
       submit_for_review:
