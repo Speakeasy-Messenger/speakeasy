@@ -79,10 +79,14 @@ export async function verifyDeviceWithExplanation(
         return { deviceToken: result.deviceToken };
       } catch (err) {
         const unsupported = isUnsupportedDeviceError(err);
-        useVerifySheet.getState().fail(
-          unsupported ? UNSUPPORTED_DEVICE_MESSAGE : "Couldn't verify this device. Please try again.",
-          !unsupported,
-        );
+        useVerifySheet
+          .getState()
+          .fail(
+            unsupported
+              ? UNSUPPORTED_DEVICE_MESSAGE
+              : "Couldn't verify this device. Please try again.",
+            !unsupported,
+          );
         if (unsupported) throw err;
         await useVerifySheet.getState().waitForRetry();
       }

@@ -155,9 +155,7 @@ describe('claimWithDeviceAttestation', () => {
     'keeps onboarding retryable when enrollment returns 401 %s',
     async (code) => {
       const deps = makeDeps();
-      (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-        new ApiError(401, code),
-      );
+      (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ApiError(401, code));
       await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
         status: 401,
         code,

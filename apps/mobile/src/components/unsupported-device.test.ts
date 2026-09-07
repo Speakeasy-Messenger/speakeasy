@@ -48,9 +48,9 @@ describe('unsupported device sheet', () => {
     useVerifySheet.getState().confirm();
     useVerifySheet.getState().fail("Couldn't verify this device. Please try again.", true);
     const tree = create(React.createElement(VerifyDeviceSheet));
-    expect(tree.root.findByProps({ testID: 'verify-device-retry' }).props.children.props.children).toBe(
-      'Try again',
-    );
+    expect(
+      tree.root.findByProps({ testID: 'verify-device-retry' }).props.children.props.children,
+    ).toBe('Try again');
     act(() => tree.root.findByProps({ testID: 'verify-device-retry' }).props.onPress());
     expect(useVerifySheet.getState().error).toBeUndefined();
     expect(useVerifySheet.getState().verificationInFlight).toBe(true);

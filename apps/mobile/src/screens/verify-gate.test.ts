@@ -58,9 +58,9 @@ describe('VerifyGateScreen', () => {
     expect(tree.root.findByProps({ testID: 'verify-gate-error' }).props.children).toBe(
       "Couldn't verify this device. Please try again.",
     );
-    expect(tree.root.findByProps({ testID: 'verify-gate-continue' }).props.children.props.children).toBe(
-      'Verify this device',
-    );
+    expect(
+      tree.root.findByProps({ testID: 'verify-gate-continue' }).props.children.props.children,
+    ).toBe('Verify this device');
     tree.unmount();
   });
 });
