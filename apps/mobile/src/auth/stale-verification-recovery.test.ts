@@ -139,12 +139,6 @@ function nativeSdkStub(): VouchflowClient & { attempts: number } {
         },
       };
     },
-    async requestFallback() {
-      throw new Error('not reached');
-    },
-    async submitFallbackOtp() {
-      throw new Error('not reached');
-    },
     async getCachedDeviceToken() {
       return null;
     },

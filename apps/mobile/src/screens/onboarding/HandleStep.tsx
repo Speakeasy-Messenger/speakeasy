@@ -1,9 +1,10 @@
+import { verifyReviewerCode } from '../../auth/reviewer-code.js';
 import React, { useEffect, useRef, useState } from 'react';
 import { KeyboardAvoidingView, Platform, StyleSheet, Text, TextInput, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { validateHandle } from '@speakeasy/shared';
 import { Button } from '../../components/Button.js';
-import { EmailVerifyFallback } from '../../components/EmailVerifyFallback.js';
+import { ReviewerVerification } from '../../components/ReviewerVerification.js';
 import { isDeviceSecure, openSecuritySettings } from '../../native/lock-screen.js';
 import { api, signalProtocol, vouchflow } from '../../services.js';
 import { ApiError } from '../../api/client.js';
@@ -14,31 +15,13 @@ import {
 } from '../../native/vouchflow.js';
 import {
   claimWithDeviceAttestation,
-  completeEmailFallbackClaim,
-  EmailFallbackError,
+  enrollHandle,
   type ClaimDeps,
 } from '../../auth/claim-handle.js';
 import { SignalClientError } from '@speakeasy/crypto';
 import { accent, brand, font, space, type as typeScale, workspace } from '../../theme/tokens.js';
 import { generateShortHandle } from '../../utils/generate-handle.js';
 import { diag } from '../../diag/log.js';
-
-/**
- * Onboarding screen 03 — Handle.
- * Spec: ONBOARDING.md §2.3.
- *
- * Eyebrow + "You are" prefix + handle input with fixed brass `@` +
- * 5-state availability indicator + secondary "Generate one for me" +
- * primary "This one's mine".
- *
- * On accept: vouchflow.verify (biometric) → api.enroll → returns the
- * server-assigned userId + deviceToken to the parent for step 04.
- * Devices that cannot complete the normal verification path (no screen
- * lock, an un-attestable device, or an enrollment failure) are offered
- * Vouchflow's email-OTP fallback instead of an error — see
- * `auth/claim-handle.ts`, which owns both paths so they stay testable
- * outside a React renderer.
- */
 
 const deps: ClaimDeps = { api, signalProtocol, vouchflow, isDeviceSecure };
 
@@ -62,14 +45,9 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
   const [availability, setAvailability] = useState<AvailabilityState>({ kind: 'idle' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | undefined>();
-  // True when the device has no secure lock (no PIN/pattern/biometric) —
-  // surfaces a "Set up screen lock" deep link, the better fix when the
-  // device is otherwise capable. Shown alongside the email fallback,
-  // never instead of it.
+
   const [needsLock, setNeedsLock] = useState(false);
-  // Set once the normal verification path cannot complete — the email
-  // fallback (`EmailVerifyFallback`) takes over from there; see
-  // `handleEmailVerified`.
+
   const [fallbackReason, setFallbackReason] = useState<FallbackReason | undefined>();
 
   const tokenRef = useRef(0);
@@ -140,13 +118,9 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     setFallbackReason(undefined);
     try {
       const result = await claimWithDeviceAttestation(deps, handle);
-      if (result.kind === 'needs_email_fallback') {
-        // Not a dead end: the normal verification path could not
-        // complete, so offer the email code instead. A lockless device
-        // also gets the "Set up screen lock" deep link, which is the
-        // better fix when it applies.
+      if (result.kind === 'unsupported_device') {
         setNeedsLock(result.noLock);
-        setError(result.noLock ? VERIFY_SETUP_HELP : VERIFY_DEVICE_HELP);
+        setError(undefined);
         setFallbackReason(result.reason);
         return;
       }
@@ -173,23 +147,13 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
     }
   }
 
-  /** The fallback's final step: submit the code, then enroll exactly as
-   * the attestation path does. `EmailFallbackError` is rethrown so
-   * `EmailVerifyFallback` shows its own inline retry message; anything
-   * else also goes through `reportClaimFailure` for the screen's usual
-   * error handling (e.g. a `taken` handle race). */
-  async function handleEmailVerified(args: { sessionId: string; otp: string }) {
+  async function handleReviewerVerified(args: { code: string }) {
     try {
-      const claimed = await completeEmailFallbackClaim(deps, {
-        handle,
-        sessionId: args.sessionId,
-        otp: args.otp,
-      });
+      const { deviceToken } = await verifyReviewerCode({ code: args.code, context: 'signup' });
+      const claimed = await enrollHandle(deps, { handle, deviceToken });
       onClaimed(claimed);
     } catch (err: unknown) {
-      if (!(err instanceof EmailFallbackError)) {
-        reportClaimFailure(err);
-      }
+      if (err instanceof ApiError) reportClaimFailure(err);
       throw err;
     }
   }
@@ -290,10 +254,8 @@ export function HandleStep({ onClaimed }: Props): React.ReactElement {
           ) : null}
           {fallbackReason !== undefined ? (
             <View style={styles.fallbackBlock}>
-              <EmailVerifyFallback
-                reason={fallbackReason}
-                vouchflow={vouchflow}
-                onSubmit={handleEmailVerified}
+              <ReviewerVerification
+                onSubmit={handleReviewerVerified}
                 onBusyChange={setBusy}
                 colors={{ text: BONE, muted: TEXT_MUTE, faint: TEXT_FAINT }}
                 testIDPrefix="onboarding-fallback"
@@ -384,27 +346,8 @@ function focusBorderFor(s: AvailabilityState) {
   return { borderColor: TEXT_FAINT };
 }
 
-/**
- * Shown when the device has NO secure lock — the fixable case. We detect
- * this directly via `isDeviceSecure()` (a lock is exactly the "passkey"
- * Vouchflow needs), so it's surfaced proactively before the biometric
- * prompt and paired with a "Set up screen lock" deep link. The email
- * fallback is offered alongside it, so a user who won't add a lock is
- * still never stuck.
- */
-export const VERIFY_SETUP_HELP =
-  'This device has no screen lock. Set up a PIN, pattern, or fingerprint/face unlock in your phone’s settings, then try again.';
-
-/**
- * Shown when a lock IS present but verification still failed — i.e. the
- * device itself can't be attested (too old, modified/rooted, or missing
- * Google Play services). "Set up a lock" would be wrong here, so this
- * pairs with the email fallback instead.
- */
 export const VERIFY_DEVICE_HELP =
-  Platform.OS === 'ios'
-    ? 'Couldn’t verify this device. It may be too old, jailbroken, or unable to complete a security check.'
-    : 'Couldn’t verify this device. It may be too old, modified, or missing Google Play services.';
+  "This device can't be verified. Speakeasy needs a device with a screen lock and secure hardware.";
 
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
   switch (reason) {

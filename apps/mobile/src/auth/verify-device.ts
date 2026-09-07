@@ -44,7 +44,7 @@ let autoStreak = 0;
 /**
  * Opens the branded verify sheet, attempts the passkey verify at the
  * `low` floor, and — never dead-ending a passkey-less device — falls
- * back to Vouchflow's email OTP path when that attempt fails. The sheet
+ * back to Vouchflow's reviewer-code path when that attempt fails. The sheet
  * stays open across both steps (see `store/verify-sheet.ts`); this
  * function is what drives the actual Vouchflow calls, exactly as it did
  * before the fallback existed, so it stays testable without a renderer.
@@ -89,8 +89,8 @@ export async function verifyDeviceWithExplanation(
           : err instanceof VouchflowClientError
             ? fallbackReasonFor(err.reason)
             : 'sdk_error';
-      diag('auth', 'monthly verify failed — offering email fallback', { reason: fallbackReason });
-      // The sheet component drives the email round trip from here and
+      diag('auth', 'monthly verify failed — offering reviewer-code entry', { reason: fallbackReason });
+      // The sheet component drives the reviewer-code verification from here and
       // resolves this once it has a token — see `VerifyDeviceSheet.tsx`.
       deviceToken = await useVerifySheet.getState().requestFallback(fallbackReason);
     }

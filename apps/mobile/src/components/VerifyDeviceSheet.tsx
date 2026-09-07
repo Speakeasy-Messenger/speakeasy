@@ -1,3 +1,4 @@
+import { verifyReviewerCode } from '../auth/reviewer-code.js';
 import React, { useEffect, useState } from 'react';
 import {
   KeyboardAvoidingView,
@@ -13,26 +14,9 @@ import { useColors } from '../theme/index.js';
 import { font, scrim, space } from '../theme/tokens.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
 import type { VerificationReason } from '../auth/verify-device-types.js';
-import { completeEmailFallbackVerification } from '../auth/claim-handle.js';
-import { vouchflow } from '../services.js';
-import { EmailVerifyFallback } from './EmailVerifyFallback.js';
 
-/**
- * Branded bottom-sheet replacement for the system Alert that used to
- * gate `vouchflow.verify()`. Same imperative contract — the
- * verify-sheet store's `request(reason)` returns a Promise that
- * resolves on Continue and rejects on Not-now / scrim / back.
- *
- * `verify-device.ts` drives the actual passkey attempt; when it fails,
- * it calls `requestFallback(reason)` and the store's `fallback` field
- * flips this sheet — without ever closing (`pending` stays set) — into
- * the same email-send + code-entry flow onboarding uses, so the
- * monthly re-verify can complete without a passkey.
- *
- * Visual rules: workspace canvas, slide-up sheet, brass primary.
- * Mirrors BurnConfirmSheet so the user sees the same confirmation
- * language across the app.
- */
+import { ReviewerVerification } from './ReviewerVerification.js';
+
 export function VerifyDeviceSheet(): React.ReactElement {
   const themed = useColors();
   // Edge-to-edge: clear the nav bar so the buttons aren't behind it.
@@ -59,11 +43,8 @@ export function VerifyDeviceSheet(): React.ReactElement {
     confirm();
   }
 
-  async function handleEmailVerified(args: { sessionId: string; otp: string }): Promise<void> {
-    const { deviceToken } = await completeEmailFallbackVerification(
-      { vouchflow },
-      { sessionId: args.sessionId, otp: args.otp, context: 'login' },
-    );
+  async function handleReviewerVerified(args: { code: string }): Promise<void> {
+    const { deviceToken } = await verifyReviewerCode({ code: args.code, context: 'login' });
     resolveFallback(deviceToken);
   }
 
@@ -78,8 +59,7 @@ export function VerifyDeviceSheet(): React.ReactElement {
       statusBarTranslucent
     >
       <Pressable style={[styles.scrim, { backgroundColor: scrim.modal }]} onPress={cancel} />
-      {/* The fallback's email/OTP inputs need the sheet to rise above
-          the keyboard — the confirm-only sheet never needed this. */}
+      {/* Keep the code entry above the keyboard. */}
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.wrap}
@@ -104,14 +84,9 @@ export function VerifyDeviceSheet(): React.ReactElement {
 
           {fallback ? (
             <>
-              <Text style={[styles.body, { color: themed.slate }]}>
-                Couldn’t verify with a passkey.
-              </Text>
               <View style={styles.fallbackBlock}>
-                <EmailVerifyFallback
-                  reason={fallback.reason}
-                  vouchflow={vouchflow}
-                  onSubmit={handleEmailVerified}
+                <ReviewerVerification
+                  onSubmit={handleReviewerVerified}
                   colors={{ text: themed.ink, muted: themed.slate, faint: themed.divider }}
                   testIDPrefix="verify-device-fallback"
                   renderButton={(btn) => (

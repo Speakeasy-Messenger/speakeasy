@@ -22,7 +22,7 @@ interface VerifySheetState {
   pending: PendingPrompt | undefined;
   /**
    * Non-null once the passkey attempt has failed and the sheet is
-   * showing the email fallback instead. `pending` stays set the whole
+   * showing the reviewer-code entry instead. `pending` stays set the whole
    * time so the sheet never flickers closed between the two steps.
    */
   fallback: PendingFallback | undefined;
@@ -35,11 +35,11 @@ interface VerifySheetState {
   /**
    * `verify-device.ts` calls this when the passkey attempt fails —
    * `pending` is left set (so the sheet stays visible) while the sheet
-   * component switches to rendering `EmailVerifyFallback`. Resolves
+   * component switches to rendering `ReviewerVerification`. Resolves
    * with the device token once that flow completes.
    */
   requestFallback: (reason: FallbackReason) => Promise<string>;
-  /** The sheet calls this once the email path yields a device token. */
+  /** The sheet calls this once the reviewer path yields a device token. */
   resolveFallback: (deviceToken: string) => void;
   /** Clears visibility after a passkey-only success (no fallback ever opened). */
   finish: () => void;
@@ -55,7 +55,7 @@ interface VerifySheetState {
  * on Not-now, scrim tap, or Android back. `verify-device.ts` owns the
  * single-flight + cooldown bookkeeping and the actual `vouchflow.verify()`
  * attempt; this store delivers the confirmation gesture and — when that
- * attempt fails — bridges to the email fallback the sheet renders
+ * attempt fails — bridges to the reviewer-code entry the sheet renders
  * inline, so a passkey-less device is never dead-ended.
  */
 export const useVerifySheet = create<VerifySheetState>((set, get) => ({

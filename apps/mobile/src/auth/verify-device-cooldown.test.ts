@@ -41,12 +41,6 @@ function client(): VouchflowClient {
       };
     }),
     getCachedDeviceToken: vi.fn(async () => null),
-    requestFallback: vi.fn(async () => {
-      throw new Error('not reached');
-    }),
-    submitFallbackOtp: vi.fn(async () => {
-      throw new Error('not reached');
-    }),
   };
 }
 

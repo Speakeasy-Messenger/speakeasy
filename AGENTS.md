@@ -11,22 +11,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   default guard in `apps/api/src/{server,production-guard}.ts`, and every
   client `minimumConfidence: 'low'` call site — `apps/mobile/src/auth/{claim-handle,verify-device}.ts`
   and `apps/mobile/src/screens/VerifyGateScreen.tsx`.
-- Every device-verification surface (onboarding's `HandleStep`, the returning-
-  user `VerifyGateScreen`, and the monthly re-verify `VerifyDeviceSheet`) must
-  offer the email-OTP fallback when the passkey/attestation path can't
-  complete — never a retry-only dead end. The shared pieces: fallback
-  decision + network calls in `apps/mobile/src/auth/claim-handle.ts`
-  (`fallbackReasonFor`, `startEmailFallback`, `completeEmailFallbackVerification`)
-  and the shared UI in `apps/mobile/src/components/EmailVerifyFallback.tsx`.
-  `VerifyDeviceSheet` bridges its passkey attempt to the inline email step via
-  `store/verify-sheet.ts`'s `fallback` field rather than closing and reopening
-  the sheet — see that file's comments before changing its resolve/reject
-  contract.
-- Whether that fallback actually enrolls a device is settled by the harness in
-  `apps/mobile/maestro/`, not by the unit tests — `claim-handle.test.ts` mocks
-  the two steps that decide it. `EMAIL_FALLBACK_EVIDENCE.md` there is the
-  authoritative record of what each waypoint proves, what is still unproven,
-  and how to run one unattended real-device pass.
+- Device verification must not collect email or phone numbers. The shared
+  unsupported-device message and secondary reviewer-code entry live in
+  `apps/mobile/src/components/ReviewerVerification.tsx`; onboarding enrolls
+  a handle only after verification, while returning-user surfaces refresh
+  the token on the existing identity. See `auth/claim-handle.ts` and
+  `auth/verify-device.ts` for the orchestration.
 - `apps/mobile/src/services.ts` must expose Vouchflow's native client directly:
   no layer may answer `verify()` itself. The executable wiring and stale-device
   recovery coverage live in `apps/mobile/src/native/vouchflow-wiring.test.ts`

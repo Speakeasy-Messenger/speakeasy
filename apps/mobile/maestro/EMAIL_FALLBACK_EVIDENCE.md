@@ -1,3 +1,5 @@
+> Historical evidence only: the email enrollment path has been removed. These email harnesses do not validate the reviewer-code flow.
+
 # Email-fallback onboarding: what is proven, and what is not
 
 Evidence for the Vouchflow email-OTP fallback added in #206 (App Store

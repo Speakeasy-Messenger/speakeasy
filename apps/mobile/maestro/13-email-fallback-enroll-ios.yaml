@@ -149,7 +149,7 @@ env:
 
 # ─── Waypoint B: requestFallback minted a session ───
 # The OTP field replaces the email field only after
-# `startEmailFallback` resolves. If the SDK had no active verification
+# the former email request resolved. If the SDK had no active verification
 # session this instead surfaces `[no_session]` in onboarding-error.
 - extendedWaitUntil:
     visible:

@@ -1,17 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ApiError } from '../api/client.js';
 import { VouchflowClientError, type VerifyResult } from '../native/vouchflow.js';
-import {
-  claimWithDeviceAttestation,
-  completeEmailFallbackClaim,
-  completeEmailFallbackVerification,
-  EmailFallbackError,
-  fallbackReasonFor,
-  isLikelyEmail,
-  startEmailFallback,
-  type ClaimDeps,
-  VerificationTimeoutError,
-} from './claim-handle.js';
+import { claimWithDeviceAttestation, fallbackReasonFor, type ClaimDeps } from './claim-handle.js';
 
 function verifyResult(
   token = 'dvt_new',
@@ -51,23 +41,6 @@ function makeDeps(overrides: Partial<ClaimDeps> = {}): ClaimDeps {
     },
     vouchflow: {
       verify: vi.fn(async () => verifyResult()),
-      requestFallback: vi.fn(async () => ({
-        fallbackSessionId: 'fbs_1',
-        expiresAt: '2026-09-03T12:00:00Z',
-      })),
-      submitFallbackOtp: vi.fn(async () => ({
-        verified: true,
-        confidence: 'low' as const,
-        sessionState: 'verified',
-        fallbackSignals: {
-          ipConsistent: true,
-          disposableEmailDomain: false,
-          deviceHasPriorVerifications: false,
-          emailDomainAgeDays: 4000,
-          otpAttempts: 1,
-          timeToCompleteSeconds: 12,
-        },
-      })),
       getCachedDeviceToken: vi.fn(async () => null),
     },
     isDeviceSecure: vi.fn(async () => true),
@@ -103,25 +76,17 @@ describe('claimWithDeviceAttestation', () => {
     expect(result).toMatchObject({ kind: 'claimed', deviceToken: 'dvt_weak' });
   });
 
-  it('offers the email fallback (and the lock deep link) when the device has no lock', async () => {
+  it('reports an unsupported device (and the lock deep link) when the device has no lock', async () => {
     const deps = makeDeps({ isDeviceSecure: vi.fn(async () => false) });
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
 
     expect(result).toEqual({
-      kind: 'needs_email_fallback',
+      kind: 'unsupported_device',
       reason: 'biometric_unavailable',
       noLock: true,
     });
     // The lockless device must never reach the biometric prompt.
     expect(deps.vouchflow.verify).not.toHaveBeenCalled();
-    if (result.kind !== 'needs_email_fallback') {
-      throw new Error('Expected email fallback for a device without a lock');
-    }
-    await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
-    expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
-      'reviewer@example.com',
-      'biometric_unavailable',
-    );
   });
 
   it.each([
@@ -131,7 +96,7 @@ describe('claimWithDeviceAttestation', () => {
     ['enrollment_failed', 'attestation_unavailable'],
     ['account_store_access_denied', 'attestation_unavailable'],
   ] as const)(
-    'offers the email fallback when verify fails with %s',
+    'reports an unsupported device when verify fails with %s',
     async (reason, fallbackReason) => {
       const deps = makeDeps();
       (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
@@ -139,19 +104,11 @@ describe('claimWithDeviceAttestation', () => {
       );
       const result = await claimWithDeviceAttestation(deps, 'reviewer');
       expect(result).toEqual({
-        kind: 'needs_email_fallback',
+        kind: 'unsupported_device',
         reason: fallbackReason,
         noLock: false,
       });
       expect(deps.api.enroll).not.toHaveBeenCalled();
-      if (result.kind !== 'needs_email_fallback') {
-        throw new Error('Expected email fallback for an unattestable device');
-      }
-      await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
-      expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
-        'reviewer@example.com',
-        fallbackReason,
-      );
     },
   );
 
@@ -175,21 +132,21 @@ describe('claimWithDeviceAttestation', () => {
     });
   });
 
-  it('offers the email fallback for an unmapped SDK error instead of a retry-only dead end', async () => {
+  it('reports an unsupported device for an unmapped SDK error instead of a retry-only dead end', async () => {
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new VouchflowClientError('unknown_error'),
     );
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
     expect(result).toEqual({
-      kind: 'needs_email_fallback',
+      kind: 'unsupported_device',
       reason: 'sdk_error',
       noLock: false,
     });
     expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
-  it('offers the email fallback instead of a retry-only dead end when verification stalls', async () => {
+  it('reports an unsupported device instead of a retry-only dead end when verification stalls', async () => {
     vi.useFakeTimers();
     const deps = makeDeps();
     (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
@@ -198,7 +155,7 @@ describe('claimWithDeviceAttestation', () => {
 
     const claim = claimWithDeviceAttestation(deps, 'reviewer');
     const settled = expect(claim).resolves.toEqual({
-      kind: 'needs_email_fallback',
+      kind: 'unsupported_device',
       reason: 'attestation_timeout',
       noLock: false,
     });
@@ -208,25 +165,17 @@ describe('claimWithDeviceAttestation', () => {
     expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
-  it('offers the email fallback when the server rejects the token as low confidence', async () => {
+  it('reports an unsupported device when the server rejects the token as low confidence', async () => {
     const deps = makeDeps();
     (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new ApiError(401, 'low_confidence'),
     );
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
     expect(result).toEqual({
-      kind: 'needs_email_fallback',
+      kind: 'unsupported_device',
       reason: 'attestation_unavailable',
       noLock: false,
     });
-    if (result.kind !== 'needs_email_fallback') {
-      throw new Error('Expected email fallback for low server confidence');
-    }
-    await startEmailFallback(deps, { email: 'reviewer@example.com', reason: result.reason });
-    expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
-      'reviewer@example.com',
-      'attestation_unavailable',
-    );
   });
 
   it('rethrows a taken handle so the caller can reset the input', async () => {
@@ -249,12 +198,12 @@ describe('claimWithDeviceAttestation', () => {
     });
   });
 
-  it('offers the email fallback for an unmapped enroll failure instead of a retry-only dead end', async () => {
+  it('reports an unsupported device for an unmapped enroll failure instead of a retry-only dead end', async () => {
     const deps = makeDeps();
     (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ApiError(500));
     const result = await claimWithDeviceAttestation(deps, 'reviewer');
     expect(result).toEqual({
-      kind: 'needs_email_fallback',
+      kind: 'unsupported_device',
       reason: 'attestation_unavailable',
       noLock: false,
     });
@@ -267,176 +216,5 @@ describe('fallbackReasonFor', () => {
     expect(fallbackReasonFor('minimum_confidence_unmet')).toBe('attestation_unavailable');
     expect(fallbackReasonFor('no_session')).toBe('sdk_error');
     expect(fallbackReasonFor('unknown_error')).toBe('sdk_error');
-  });
-});
-
-describe('startEmailFallback', () => {
-  it('forwards the address and the reason to the SDK', async () => {
-    const deps = makeDeps();
-    const out = await startEmailFallback(deps, {
-      email: '  reviewer@example.com ',
-      reason: 'biometric_unavailable',
-    });
-    expect(deps.vouchflow.requestFallback).toHaveBeenCalledWith(
-      'reviewer@example.com',
-      'biometric_unavailable',
-    );
-    expect(out.sessionId).toBe('fbs_1');
-  });
-
-  it('rejects an obviously malformed address without a round trip', async () => {
-    const deps = makeDeps();
-    await expect(
-      startEmailFallback(deps, { email: 'nope', reason: 'biometric_unavailable' }),
-    ).rejects.toMatchObject({ reason: 'invalid_email' });
-    expect(deps.vouchflow.requestFallback).not.toHaveBeenCalled();
-  });
-
-  it('isLikelyEmail accepts ordinary addresses and rejects junk', () => {
-    expect(isLikelyEmail('a@b.co')).toBe(true);
-    expect(isLikelyEmail('a@b')).toBe(false);
-    expect(isLikelyEmail('a b@c.co')).toBe(false);
-    expect(isLikelyEmail('')).toBe(false);
-  });
-});
-
-describe('completeEmailFallbackClaim', () => {
-  it('enrolls with the token the verified session unlocks', async () => {
-    const deps = makeDeps();
-    (deps.vouchflow.getCachedDeviceToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      'dvt_fallback',
-    );
-    const claimed = await completeEmailFallbackClaim(deps, {
-      handle: 'reviewer',
-      sessionId: 'fbs_1',
-      otp: ' 123456 ',
-    });
-
-    expect(deps.vouchflow.submitFallbackOtp).toHaveBeenCalledWith('fbs_1', '123456');
-    expect(claimed).toEqual({ userId: 'reviewer', deviceToken: 'dvt_fallback' });
-    expect(deps.api.enroll).toHaveBeenCalledWith(
-      expect.objectContaining({ token: 'dvt_fallback', user_id: 'reviewer' }),
-    );
-  });
-
-  it('falls back to verify() when the SDK has no cached token yet', async () => {
-    const deps = makeDeps();
-    const claimed = await completeEmailFallbackClaim(deps, {
-      handle: 'reviewer',
-      sessionId: 'fbs_1',
-      otp: '123456',
-    });
-    expect(deps.vouchflow.verify).toHaveBeenCalledWith({
-      context: 'signup',
-      minimumConfidence: 'low',
-    });
-    expect(claimed).toEqual({ userId: 'reviewer', deviceToken: 'dvt_new' });
-  });
-
-  it('rejects a wrong code without enrolling', async () => {
-    const deps = makeDeps();
-    (deps.vouchflow.submitFallbackOtp as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      verified: false,
-      confidence: 'low',
-      sessionState: 'otp_pending',
-      fallbackSignals: {
-        ipConsistent: true,
-        disposableEmailDomain: false,
-        deviceHasPriorVerifications: false,
-        emailDomainAgeDays: null,
-        otpAttempts: 2,
-        timeToCompleteSeconds: 30,
-      },
-    });
-    await expect(
-      completeEmailFallbackClaim(deps, { handle: 'reviewer', sessionId: 'fbs_1', otp: '000000' }),
-    ).rejects.toBeInstanceOf(EmailFallbackError);
-    expect(deps.api.enroll).not.toHaveBeenCalled();
-  });
-
-  it('surfaces `no_device_token` when neither the cache nor verify yields one', async () => {
-    const deps = makeDeps();
-    (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new VouchflowClientError('biometric_unavailable'),
-    );
-    await expect(
-      completeEmailFallbackClaim(deps, { handle: 'reviewer', sessionId: 'fbs_1', otp: '123456' }),
-    ).rejects.toMatchObject({ reason: 'no_device_token' });
-  });
-});
-
-describe('completeEmailFallbackVerification', () => {
-  it('resolves the cached token without enrolling — used by the returning-user surfaces', async () => {
-    const deps = makeDeps();
-    (deps.vouchflow.getCachedDeviceToken as ReturnType<typeof vi.fn>).mockResolvedValueOnce(
-      'dvt_fallback',
-    );
-    const result = await completeEmailFallbackVerification(deps, {
-      sessionId: 'fbs_1',
-      otp: '123456',
-      context: 'login',
-    });
-    expect(result).toEqual({ deviceToken: 'dvt_fallback' });
-    expect(deps.api.enroll).not.toHaveBeenCalled();
-  });
-
-  it('asks verify() at the `login` context + `low` floor when nothing is cached', async () => {
-    const deps = makeDeps();
-    const result = await completeEmailFallbackVerification(deps, {
-      sessionId: 'fbs_1',
-      otp: '123456',
-      context: 'login',
-    });
-    expect(deps.vouchflow.verify).toHaveBeenCalledWith({
-      context: 'login',
-      minimumConfidence: 'low',
-    });
-    expect(result).toEqual({ deviceToken: 'dvt_new' });
-  });
-
-  it('surfaces no_device_token when recovery verification times out', async () => {
-    vi.useFakeTimers();
-    try {
-      const deps = makeDeps();
-      (deps.vouchflow.verify as ReturnType<typeof vi.fn>).mockImplementation(
-        () => new Promise<VerifyResult>(() => {}),
-      );
-
-      const completion = completeEmailFallbackVerification(deps, {
-        sessionId: 'fbs_1',
-        otp: '123456',
-        context: 'login',
-      });
-      const settled = expect(completion).rejects.toMatchObject({ reason: 'no_device_token' });
-
-      await vi.advanceTimersByTimeAsync(60_000);
-      await settled;
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
-  it('rejects a wrong code', async () => {
-    const deps = makeDeps();
-    (deps.vouchflow.submitFallbackOtp as ReturnType<typeof vi.fn>).mockResolvedValueOnce({
-      verified: false,
-      confidence: 'low',
-      sessionState: 'otp_pending',
-      fallbackSignals: {
-        ipConsistent: true,
-        disposableEmailDomain: false,
-        deviceHasPriorVerifications: false,
-        emailDomainAgeDays: null,
-        otpAttempts: 2,
-        timeToCompleteSeconds: 30,
-      },
-    });
-    await expect(
-      completeEmailFallbackVerification(deps, {
-        sessionId: 'fbs_1',
-        otp: '000000',
-        context: 'login',
-      }),
-    ).rejects.toBeInstanceOf(EmailFallbackError);
   });
 });

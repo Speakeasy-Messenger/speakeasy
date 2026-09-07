@@ -34,12 +34,6 @@ function client(): VouchflowClient {
   return {
     verify: vi.fn(async () => result()),
     getCachedDeviceToken: vi.fn(async () => null),
-    requestFallback: vi.fn(async () => {
-      throw new Error('not implemented');
-    }),
-    submitFallbackOtp: vi.fn(async () => {
-      throw new Error('not implemented');
-    }),
   };
 }
 
@@ -83,7 +77,7 @@ describe('verifyDeviceWithExplanation', () => {
     expect(useVerifySheet.getState().pending).toBeUndefined();
   });
 
-  it('offers the email fallback when the passkey attempt fails, and resolves once the sheet completes it', async () => {
+  it('offers the reviewer-code entry when the passkey attempt fails, and resolves once the sheet completes it', async () => {
     const vouchflow = client();
     (vouchflow.verify as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
       new VouchflowClientError('biometric_unavailable'),
