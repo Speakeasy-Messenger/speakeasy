@@ -151,7 +151,7 @@ All sub-types: **NOT collected**.
 
 | Sub-type            | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                                                 |
 | ------------------- | ------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token and push token — per-install identifiers. Required so the server knows which device is connecting and can deliver notifications; without them, end-to-end encryption setup would have no anchor. **Why collected: account management (authentication).** Encrypted in transit. |
+| Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token and push token — per-install identifiers. Required so the server knows which device is connecting and can deliver notifications; without them, end-to-end encryption setup would have no anchor. Vouchflow's cross-app device-reputation network is not live: no attestation data is transferred to or used by a cross-app network. Vouchflow receives the token solely as Speakeasy's service provider (same owner), and Firebase receives the push token as its messaging provider. Neither transfer is sharing under Google's Data Safety definition. **Why collected: account management (authentication).** Encrypted in transit. |
 
 ---
 
@@ -162,7 +162,7 @@ Tick everything that's true:
 - [x] Data is encrypted in transit
 - [x] You can request that data be deleted
 - [x] Committed to follow the Play Families Policy
-- [x] Independent security review (we should note: libsignal is
+- [ ] Independent security review (we should note: libsignal is
       audited; the Speakeasy app layer hasn't had a third-party audit
       yet. Be honest — uncheck "Independent security review" until we
       pay for one. The Play form allows "no" without consequence.)

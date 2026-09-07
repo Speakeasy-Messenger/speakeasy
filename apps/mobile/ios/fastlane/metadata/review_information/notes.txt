@@ -22,6 +22,8 @@ Testing messaging + calls (needs two installs):
    ciphertext.
 
 Notes:
+- Speakeasy verifies your device with a passkey. Please review on a physical device with a screen lock set (not an emulator). Device verification requires secure hardware; on a capable device, sign-in completes with the device passkey.
+- There is no reviewer code and no email; the app requires a passkey-capable device.
 - Private Calls require microphone permission; messaging needs no special
   permissions.
 - There is no central directory — you can only reach someone whose handle or

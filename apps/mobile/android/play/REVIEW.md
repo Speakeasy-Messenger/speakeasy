@@ -154,10 +154,9 @@ Google's reviewer will try to test the app. Provide:
   passwords. There is no fallback verification path, so the review device
   must be able to attest (screen lock / hardware attestation available). In
   the Notes field paste:
-  > "Speakeasy uses Vouchflow device attestation. To test, install the AAB
-  > and sign up with the reviewer handle on a device that can complete
-  > hardware attestation (screen lock enabled); no email or SMS code
-  > fallback exists."
+  > "Speakeasy verifies your device with a passkey. Please review on a physical device with a screen lock set (not an emulator). Device verification requires secure hardware; on a capable device, sign-in completes with the device passkey."
+  There is no reviewer code and no email; the app requires a
+  passkey-capable device.
 - **Other instructions**: Mention that the messaging and call flows
   require a peer. Provide a SECOND reviewer handle if Google's review
   is single-tester, so the reviewer can message themselves between two
