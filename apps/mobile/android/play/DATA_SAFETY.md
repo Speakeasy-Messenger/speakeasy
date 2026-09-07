@@ -33,7 +33,8 @@ email or SMS one-time codes exist.
   outer envelope.
 - Call audio: end-to-end via WebRTC SRTP, peer-to-peer when possible,
   TURN-relayed encrypted when not.
-- Account metadata (handle, prekey bundles, push tokens): TLS to our
+- Account metadata (handle, prekey bundles, push tokens including the regular
+  FCM/APNs token and iOS PushKit VoIP token): TLS to our
   API. No application-layer encryption because these are public-by-
   definition or device-authentication artifacts.
 
@@ -44,7 +45,8 @@ email or SMS one-time codes exist.
 - The handle (released back to the public pool)
 - The user's prekey bundle on the server
 - The user's encrypted message-relay buffer
-- The push token registration
+- The push token registrations (the regular FCM/APNs token and iOS PushKit
+  VoIP token)
 - The Vouchflow device attestation record
 
 Messages already delivered to peer devices remain on those devices —
@@ -151,7 +153,7 @@ All sub-types: **NOT collected**.
 
 | Sub-type            | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                                                 |
 | ------------------- | ------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token and push token — per-install identifiers. Required so the server knows which device is connecting and can deliver notifications; without them, end-to-end encryption setup would have no anchor. Vouchflow's cross-app device-reputation network is not live: no attestation data is transferred to or used by a cross-app network. Vouchflow receives the token solely as Speakeasy's service provider (same owner), and Firebase receives the push token as its messaging provider. Neither transfer is sharing under Google's Data Safety definition. **Why collected: account management (authentication).** Encrypted in transit. |
+| Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token and push tokens (the regular FCM/APNs token and the iOS PushKit VoIP token) — per-install identifiers. Required so the server knows which device is connecting and can deliver notifications; without them, end-to-end encryption setup would have no anchor. Vouchflow's cross-app device-reputation network is not live: no attestation data is transferred to or used by a cross-app network. Vouchflow receives the token solely as Speakeasy's service provider (same owner), and Firebase receives the push tokens as its messaging provider. Neither transfer is sharing under Google's Data Safety definition. **Why collected: account management (authentication).** Encrypted in transit. |
 
 ---
 
@@ -186,8 +188,9 @@ any future issue if Play tightens URL validation).
 - "No phone number, no email address, and no real name is collected.
   Devices are verified with hardware-backed attestation — there are no
   email or SMS one-time codes. The user-chosen handle, the per-device
-  Vouchflow attestation token, and the push token used to deliver
-  notifications are the only persistent identifiers."
+  Vouchflow attestation token, and the push tokens (the regular FCM/APNs token
+  and the iOS PushKit VoIP token) used to deliver notifications are the only
+  persistent identifiers."
 - "Contacts are not accessed. Users add peers by exchanging handles
   manually, not by ingesting the device address book."
 

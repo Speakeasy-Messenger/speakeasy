@@ -122,7 +122,7 @@ Google's reviewer sees:
 | Audio files       | Voice notes + live call audio              | App functionality (Private Calls)       |
 | Files and docs    | File attachments                           | App functionality                       |
 | App info          | Crash logs, diagnostics                    | App functionality (debugging)           |
-| Device IDs        | Vouchflow attestation token + push token   | Account management                      |
+| Device IDs        | Vouchflow attestation token + push tokens (regular FCM/APNs + iOS PushKit VoIP) | Account management |
 
 **What is NOT collected** (and where competitors often get this wrong):
 phone number, real name, location (precise or coarse), contacts, calendar,
