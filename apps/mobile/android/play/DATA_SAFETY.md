@@ -17,12 +17,12 @@ optimistic and wrong.
 
 ### Does your app collect or share any of the required user data types?
 
-**Yes** — Speakeasy collects audio (for calls), messages (for relay
-between users), and, only when a device-verification flow cannot
-complete and the user chooses the fallback, an email address for
-Vouchflow to send a one-time code. Google's definition of "collect"
+**Yes** — Speakeasy collects audio (for calls) and messages (for relay
+between users). Google's definition of "collect"
 includes "transmits off the device for any duration," so we declare
-each of these.
+these. No email address and no phone number are collected anywhere in
+the app: device verification is hardware-backed attestation only — no
+email or SMS one-time codes exist.
 
 ### Is all of the user data collected by your app encrypted in transit?
 
@@ -33,11 +33,10 @@ each of these.
   outer envelope.
 - Call audio: end-to-end via WebRTC SRTP, peer-to-peer when possible,
   TURN-relayed encrypted when not.
-- Account metadata (handle, prekey bundles, push tokens): TLS to our
+- Account metadata (handle, prekey bundles, push tokens including the regular
+  FCM/APNs token and iOS PushKit VoIP token): TLS to our
   API. No application-layer encryption because these are public-by-
   definition or device-authentication artifacts.
-- Email address (optional Vouchflow fallback): TLS to Vouchflow solely
-  to deliver a one-time code; it is not stored with the handle.
 
 ### Do you provide a way for users to request that their data be deleted?
 
@@ -46,8 +45,10 @@ each of these.
 - The handle (released back to the public pool)
 - The user's prekey bundle on the server
 - The user's encrypted message-relay buffer
-- The push token registration
-- The Vouchflow device attestation record
+- The push token registrations (the regular FCM/APNs token and iOS PushKit
+  VoIP token)
+- Speakeasy's persisted device record (device token and push tokens) — the
+  Vouchflow attestation service is not called to erase its own record
 
 Messages already delivered to peer devices remain on those devices —
 we do not have the cryptographic ability to reach into someone else's
@@ -65,8 +66,8 @@ Walk the form's data-type checklist. For each category, mark
 | Sub-type                       | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                |
 | ------------------------------ | ------------------------ | ---------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Name                           | NOT collected            | —          | Handle is not a real name.                                                                                                                                                                                                                           |
-| Email address                  | **Collected** (optional) | NOT shared | Entered only when a device-verification flow cannot complete, then sent to Vouchflow to deliver a one-time code. It is not stored with the handle. **Why collected: account functionality.** Encrypted in transit.                                   |
-| User IDs                       | **Collected** (required) | NOT shared | The user-chosen handle (a short lowercase string, 3–20 chars) and the Vouchflow device token. Both are app-internal — neither links to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
+| Email address                  | NOT collected            | —          | No email is requested anywhere in the app. Device verification is hardware-backed attestation; no email-OTP fallback exists.                                                                                                                         |
+| User IDs                       | **Collected** (required) | NOT shared | The user-chosen handle (a short lowercase string, 3–20 chars). It is app-internal and does not link to real-world identity. **Why collected: account functionality.** Encrypted in transit. Required to use the app. |
 | Address                        | NOT collected            | —          |                                                                                                                                                                                                                                                      |
 | Phone number                   | NOT collected            | —          | Famously not asked.                                                                                                                                                                                                                                  |
 | Race and ethnicity             | NOT collected            | —          |                                                                                                                                                                                                                                                      |
@@ -153,7 +154,7 @@ All sub-types: **NOT collected**.
 
 | Sub-type            | Collected?               | Shared?    | Notes                                                                                                                                                                                                                                                                                 |
 | ------------------- | ------------------------ | ---------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token — a per-install cryptographic identifier. Required so the server knows which device is connecting; without it, end-to-end encryption setup would have no anchor. **Why collected: account management (authentication).** Encrypted in transit. |
+| Device or other IDs | **Collected** (required) | NOT shared | The Vouchflow device attestation token and push tokens (the regular FCM/APNs token and the iOS PushKit VoIP token) — per-install identifiers. Required so the server knows which device is connecting and can deliver notifications; without them, end-to-end encryption setup would have no anchor. Vouchflow's cross-app device-reputation network is not live: no attestation data is transferred to or used by a cross-app network. Vouchflow receives the token solely as Speakeasy's service provider (same owner), and Firebase receives the push tokens as its messaging provider. Neither transfer is sharing under Google's Data Safety definition. **Why collected: account management (authentication).** Encrypted in transit. |
 
 ---
 
@@ -164,7 +165,7 @@ Tick everything that's true:
 - [x] Data is encrypted in transit
 - [x] You can request that data be deleted
 - [x] Committed to follow the Play Families Policy
-- [x] Independent security review (we should note: libsignal is
+- [ ] Independent security review (we should note: libsignal is
       audited; the Speakeasy app layer hasn't had a third-party audit
       yet. Be honest — uncheck "Independent security review" until we
       pay for one. The Play form allows "no" without consequence.)
@@ -185,11 +186,12 @@ any future issue if Play tightens URL validation).
 - "Messages and call audio are end-to-end encrypted with the Signal
   Protocol. The server transmits only ciphertext and does not have the
   keys to decrypt user content."
-- "No phone number or real name is collected. If a device cannot
-  attest, an optional email address is sent to Vouchflow solely to
-  deliver a one-time code; it is not stored with the handle. The
-  user-chosen handle and per-device attestation token are the only
-  persistent IDs."
+- "No phone number, no email address, and no real name is collected.
+  Devices are verified with hardware-backed attestation — there are no
+  email or SMS one-time codes. The user-chosen handle, the per-device
+  Vouchflow attestation token, and the push tokens (the regular FCM/APNs token
+  and the iOS PushKit VoIP token) used to deliver notifications are the only
+  persistent identifiers."
 - "Contacts are not accessed. Users add peers by exchanging handles
   manually, not by ingesting the device address book."
 

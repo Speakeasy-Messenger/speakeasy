@@ -52,9 +52,9 @@ maintain a second copy here.
 - **Before resubmission:** update the App Store Connect App Privacy answers to
   match the manifest exactly (no more, no less). The repository manifest alone
   is not sufficient — App Store Connect does not read it.
-- **Contact Info → Email Address** is declared linked to the user: it is
-  entered only if device attestation is unavailable, then passed to Vouchflow
-  to deliver a one-time code; Speakeasy does not store it with the handle.
+- **No email address is collected** — the optional email-OTP fallback for
+  device verification was removed; hardware-backed device attestation is the
+  only verification path.
 - **Identifiers → Device ID** covers the Vouchflow attestation token and the
   push token. iOS push routes through Firebase Cloud Messaging as well
   (`apps/mobile/src/push/push-notifications.ts`), so Firebase receives the
