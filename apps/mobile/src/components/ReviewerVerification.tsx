@@ -34,7 +34,7 @@ export function ReviewerVerification({
   const [error, setError] = useState<string>();
 
   async function submit() {
-    if (inFlight.current || !/^\d{6}$/.test(code)) return;
+    if (inFlight.current || !/^[0-9a-f]{32}$/.test(code)) return;
     inFlight.current = true;
     setBusy(true);
     onBusyChange?.(true);
@@ -42,7 +42,7 @@ export function ReviewerVerification({
     try {
       await onSubmit({ code });
     } catch {
-      setError("Couldn't verify that code. Check the code and your connection, then try again.");
+      setError("That code didn't work. Check it and try again.");
     } finally {
       inFlight.current = false;
       setBusy(false);
@@ -69,11 +69,11 @@ export function ReviewerVerification({
         <>
           <TextInput
             value={code}
-            onChangeText={(value) => setCode(value.replace(/[^0-9]/g, '').slice(0, 6))}
-            placeholder="6-digit code"
+            onChangeText={(value) => setCode(value.trim().toLowerCase().slice(0, 32))}
+            placeholder="Verification code"
             accessibilityLabel="Reviewer verification code"
-            keyboardType="number-pad"
-            maxLength={6}
+            keyboardType="ascii-capable"
+            maxLength={32}
             autoCapitalize="none"
             autoCorrect={false}
             editable={!busy}
@@ -93,7 +93,7 @@ export function ReviewerVerification({
           {renderButton({
             label: 'Verify code',
             onPress: () => void submit(),
-            disabled: busy || !/^\d{6}$/.test(code),
+            disabled: busy || !/^[0-9a-f]{32}$/.test(code),
             loading: busy,
             testID: `${testIDPrefix}-verify`,
           })}

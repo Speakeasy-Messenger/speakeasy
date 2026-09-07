@@ -38,18 +38,18 @@ describe('unsupported device reviewer entry', () => {
     expect(tree.root.findAllByType(TextInput)).toHaveLength(0);
   });
 
-  it('reveals a six-digit input and submits only the code after an explicit reviewer action', async () => {
+  it('reveals a verification-code input and submits only the code after an explicit reviewer action', async () => {
     const { tree, find, onSubmit } = mount();
     act(() => find('reviewer').props.onPress());
     expect(tree.root.findAllByType(TextInput)).toHaveLength(1);
-    act(() => find('code').props.onChangeText('12ab3'));
-    expect(find('code').props.value).toBe('123');
+    act(() => find('code').props.onChangeText('12abg'));
+    expect(find('code').props.value).toBe('12abg');
     expect(find('verify').props.disabled).toBe(true);
-    act(() => find('code').props.onChangeText('1234567'));
-    expect(find('code').props.value).toBe('123456');
+    act(() => find('code').props.onChangeText('0123456789ABCDEF0123456789ABCDEF'));
+    expect(find('code').props.value).toBe('0123456789abcdef0123456789abcdef');
     await act(async () => find('verify').props.onPress());
     expect(onSubmit).toHaveBeenCalledTimes(1);
-    expect(onSubmit).toHaveBeenCalledWith({ code: '123456' });
+    expect(onSubmit).toHaveBeenCalledWith({ code: '0123456789abcdef0123456789abcdef' });
   });
 
   it('keeps a rejected code on the screen for retry and prevents concurrent submissions', async () => {
@@ -62,7 +62,7 @@ describe('unsupported device reviewer entry', () => {
     );
     const { find } = mount(onSubmit);
     act(() => find('reviewer').props.onPress());
-    act(() => find('code').props.onChangeText('123456'));
+    act(() => find('code').props.onChangeText('0123456789abcdef0123456789abcdef'));
     act(() => {
       find('verify').props.onPress();
       find('verify').props.onPress();
@@ -70,7 +70,7 @@ describe('unsupported device reviewer entry', () => {
     expect(onSubmit).toHaveBeenCalledTimes(1);
     expect(find('code').props.editable).toBe(false);
     await act(async () => reject(new Error('Rejected')));
-    expect(find('error').props.children).toContain("Couldn't verify that code");
+    expect(find('error').props.children).toContain("That code didn't work");
     expect(find('verify').props.disabled).toBe(false);
   });
 });
