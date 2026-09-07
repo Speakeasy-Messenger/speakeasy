@@ -127,7 +127,7 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 ### Rules
 
 - **Vouchflow is the only authentication method.** There is no phone number fallback and no recovery code flow. The one exception is Vouchflow's own **email-OTP fallback tier** (SDK 2.0.0 `requestFallback` / `submitFallbackOtp`), offered on every device-verification surface when its normal verification path cannot complete — for example, no screen lock or no Secure Enclave / Play Integrity (an App Store review iPad). Email is never required and is not attached to the handle: Speakeasy stays anonymous by default.
-- **Minimum device confidence: low.** Below-`low` is impossible — a device that cannot attest produces no token at all, and takes the email fallback instead. The freshness, risk-score and anomaly gates still apply to every token.
+- **Minimum device confidence: low.** Below-`low` is impossible — a device that cannot attest produces no token at all. The freshness, risk-score and anomaly gates still apply to every token.
 - **Vouchflow identity does not need to pre-exist.** A new Vouchflow identity is created during Speakeasy enrollment if one does not already exist on the device.
 - Enrollment flow: Vouchflow device attestation → random ID generated and issued → Signal Protocol PreKey bundle generated and uploaded → user enters the app.
 

@@ -185,12 +185,14 @@ describe('claimWithDeviceAttestation', () => {
     });
   });
 
-  it('reports an unsupported device for an unmapped enroll failure instead of a retry-only dead end', async () => {
+  it('rethrows an internal enrollment failure so onboarding keeps retry controls available', async () => {
     const deps = makeDeps();
-    (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(new ApiError(500));
-    const result = await claimWithDeviceAttestation(deps, 'reviewer');
-    expect(result).toEqual({
-      kind: 'unsupported_device',
+    (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+      new ApiError(500, 'internal'),
+    );
+    await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
+      status: 500,
+      code: 'internal',
     });
   });
 });

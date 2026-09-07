@@ -113,18 +113,7 @@ export async function claimWithDeviceAttestation(
     const claimed = await enrollHandle(deps, { handle, deviceToken });
     return { kind: 'claimed', ...claimed };
   } catch (err) {
-    if (
-      err instanceof ApiError &&
-      err.status === 409 &&
-      (err.code === 'taken' || err.code === 'reserved')
-    ) {
-      throw err;
-    }
-    if (err instanceof ApiError) {
-      diag('onboarding', 'enroll failed — device verification unavailable', {
-        status: err.status,
-        code: err.code,
-      });
+    if (err instanceof ApiError && err.status === 401) {
       return { kind: 'unsupported_device' };
     }
     throw err;

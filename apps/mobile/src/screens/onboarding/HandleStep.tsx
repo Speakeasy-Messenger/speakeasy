@@ -305,8 +305,6 @@ function focusBorderFor(s: AvailabilityState) {
   return { borderColor: TEXT_FAINT };
 }
 
-export const VERIFY_DEVICE_HELP = UNSUPPORTED_DEVICE_MESSAGE;
-
 function messageForVouchflowError(reason: VouchflowErrorReason): string {
   switch (reason) {
     case 'biometric_cancelled':
@@ -318,7 +316,7 @@ function messageForVouchflowError(reason: VouchflowErrorReason): string {
     case 'minimum_confidence_unmet':
       // No-lock is caught proactively before verify(), so reaching here
       // means a lock is present but the device still couldn't attest.
-      return VERIFY_DEVICE_HELP;
+      return UNSUPPORTED_DEVICE_MESSAGE;
     case 'network_unavailable':
       return `Can't reach the room. Try again.`;
     case 'enrollment_failed':
