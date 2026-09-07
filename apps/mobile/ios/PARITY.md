@@ -37,7 +37,7 @@ All app logic in `src/` (stores, screens, WS, navigation, the
 | Version        | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity |
 
 SDK versions — LibSignal `0.59.0` (both), SQLCipher `~4.6`
-iOS / `4.14.1` Android, Vouchflow iOS `2.5.0` / Android `2.3.0`.
+iOS / `4.14.1` Android, Vouchflow iOS `2.5.1` / Android `2.3.0`.
 
 ## 3. `Platform.OS` divergence ledger
 
