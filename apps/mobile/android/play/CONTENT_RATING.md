@@ -126,11 +126,12 @@ can see the messaging flow.
   `@reviewer_speakeasy` — sign up once, save the handle and a backup
   of the keystore).
 - **Password**: N/A — Speakeasy uses Vouchflow device attestation, not
-  passwords. If the review device cannot attest, the handle screen offers a
-  one-time email-code fallback. Note this in the "Notes" field of the App
-  access form: "Speakeasy uses Vouchflow device attestation. To test, install
-  the APK and sign up with the reviewer handle; if the review device cannot
-  complete attestation, choose the email-code fallback on the handle screen."
+  passwords. There is no fallback verification path, so the review device
+  must be able to attest (screen lock / hardware attestation available).
+  Note this in the "Notes" field of the App access form: "Speakeasy uses
+  Vouchflow device attestation. To test, install the APK and sign up with
+  the reviewer handle on a device that can complete hardware attestation
+  (screen lock enabled); no email or SMS code fallback exists."
 - **Other instructions**: Mention that some features require a peer
   to interact with. Provide a second test handle if Google's
   reviewer flow is single-tester.

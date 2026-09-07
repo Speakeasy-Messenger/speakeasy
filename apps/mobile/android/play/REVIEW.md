@@ -14,16 +14,16 @@ Last assembled: 2026-05-28.
 
 ## App details
 
-| Field                  | Value                                                                    | Notes                                                                                               |
-| ---------------------- | ------------------------------------------------------------------------ | --------------------------------------------------------------------------------------------------- |
-| **App name**           | `Speakeasy — Private Messages`                                           | 30/30 chars (Play's max). Uses an em-dash, not a hyphen — looks intentional and brand-correct.      |
-| **Short description**  | `Encrypted messaging without a phone number or your real name.`          | Keeps the privacy differentiators without implying that the optional email fallback does not exist. |
-| **App category**       | Communication                                                            | Not Social, not Productivity.                                                                       |
-| **Tags** (up to 5)     | Messaging · Encrypted communication · Privacy · Voice calls · Group chat | Specific tags > generic ones for Play search ranking.                                               |
-| **Contact email**      | `hello@speakeasyapp.xyz`                                                 | **TODO: confirm this inbox is actually monitored.** Google uses it for enforcement notices.         |
-| **Contact phone**      | (blank)                                                                  | Optional.                                                                                           |
-| **Website**            | `https://speakeasyapp.xyz`                                               |                                                                                                     |
-| **Privacy policy URL** | `https://speakeasyapp.xyz/privacy/`                                      | Confirmed live (5.7 KB branded page).                                                               |
+| Field                  | Value                                                                    | Notes                                                                                          |
+| ---------------------- | ------------------------------------------------------------------------ | ---------------------------------------------------------------------------------------------- |
+| **App name**           | `Speakeasy — Private Messages`                                           | 30/30 chars (Play's max). Uses an em-dash, not a hyphen — looks intentional and brand-correct. |
+| **Short description**  | `Encrypted messaging without a phone number or your real name.`          | Keeps the privacy differentiators — device-verified, no email or phone number anywhere.        |
+| **App category**       | Communication                                                            | Not Social, not Productivity.                                                                  |
+| **Tags** (up to 5)     | Messaging · Encrypted communication · Privacy · Voice calls · Group chat | Specific tags > generic ones for Play search ranking.                                          |
+| **Contact email**      | `hello@speakeasyapp.xyz`                                                 | **TODO: confirm this inbox is actually monitored.** Google uses it for enforcement notices.    |
+| **Contact phone**      | (blank)                                                                  | Optional.                                                                                      |
+| **Website**            | `https://speakeasyapp.xyz`                                               |                                                                                                |
+| **Privacy policy URL** | `https://speakeasyapp.xyz/privacy/`                                      | Confirmed live (5.7 KB branded page).                                                          |
 
 ---
 
@@ -114,22 +114,21 @@ Google's reviewer sees:
 
 **What's declared as collected:**
 
-| Category          | Items                                                                         | Why                                     |
-| ----------------- | ----------------------------------------------------------------------------- | --------------------------------------- |
-| Personal info     | Email address (optional fallback), User IDs (handle + Vouchflow device token) | Account functionality                   |
-| Messages          | In-app messages (ciphertext only)                                             | App functionality (relay between users) |
-| Photos and videos | Photos, videos (when user attaches)                                           | App functionality                       |
-| Audio files       | Voice notes + live call audio                                                 | App functionality (Private Calls)       |
-| Files and docs    | File attachments                                                              | App functionality                       |
-| App info          | Crash logs, diagnostics                                                       | App functionality (debugging)           |
-| Device IDs        | Vouchflow attestation token                                                   | Account management                      |
+| Category          | Items                                      | Why                                     |
+| ----------------- | ------------------------------------------ | --------------------------------------- |
+| Personal info     | User IDs (handle + Vouchflow device token) | Account functionality                   |
+| Messages          | In-app messages (ciphertext only)          | App functionality (relay between users) |
+| Photos and videos | Photos, videos (when user attaches)        | App functionality                       |
+| Audio files       | Voice notes + live call audio              | App functionality (Private Calls)       |
+| Files and docs    | File attachments                           | App functionality                       |
+| App info          | Crash logs, diagnostics                    | App functionality (debugging)           |
+| Device IDs        | Vouchflow attestation token                | Account management                      |
 
 **What is NOT collected** (and where competitors often get this wrong):
 phone number, real name, location (precise or coarse), contacts, calendar,
-web browsing, in-app interactions, installed apps, advertising ID. Email is
-collected only when the user chooses the Vouchflow fallback after a
-device-verification flow cannot complete; it is used to deliver the one-time
-code and is not stored with the handle.
+web browsing, in-app interactions, installed apps, advertising ID. No
+email address is collected either: device attestation is the only
+verification path, and no email- or SMS-code fallback exists.
 
 **Nothing is shared** — every "Shared?" column is "No."
 
@@ -151,13 +150,14 @@ Google's reviewer will try to test the app. Provide:
 - **Username/Handle**: A pre-enrolled reviewer handle (e.g.
   `@reviewer-speakeasy`). **TODO: create this account + save its keystore
   backup before submitting.**
-- **Password**: N/A — Speakeasy uses Vouchflow device attestation. If a
-  review device cannot attest, the onboarding screen offers a one-time
-  email-code fallback instead. In the Notes field paste:
+- **Password**: N/A — Speakeasy uses Vouchflow device attestation, not
+  passwords. There is no fallback verification path, so the review device
+  must be able to attest (screen lock / hardware attestation available). In
+  the Notes field paste:
   > "Speakeasy uses Vouchflow device attestation. To test, install the AAB
-  > and sign up with the reviewer handle; if the review device cannot
-  > complete attestation, choose the email-code fallback on the handle
-  > screen."
+  > and sign up with the reviewer handle on a device that can complete
+  > hardware attestation (screen lock enabled); no email or SMS code
+  > fallback exists."
 - **Other instructions**: Mention that the messaging and call flows
   require a peer. Provide a SECOND reviewer handle if Google's review
   is single-tester, so the reviewer can message themselves between two

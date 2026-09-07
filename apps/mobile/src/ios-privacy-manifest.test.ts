@@ -12,8 +12,9 @@ import { XMLParser } from 'fast-xml-parser';
  * re-ordered or re-indented manifest still passes, while any type added,
  * dropped, or flipped (Linked / Tracking / Purpose) fails.
  *
- * Published label (source of truth, App Store Connect → App Privacy):
- *   Email Address          Linked=true   App Functionality
+ * Published label (source of truth, App Store Connect → App Privacy).
+ * The email-fallback device-verification path has been removed from the
+ * app, so Email Address is no longer collected or declared:
  *   User ID                Linked=false  App Functionality
  *   Device ID              Linked=false  App Functionality
  *   Crash Data             Linked=false  Analytics
@@ -33,11 +34,7 @@ const MANIFEST_PATH = path.resolve(
   'PrivacyInfo.xcprivacy',
 );
 
-type PlistValue =
-  | string
-  | boolean
-  | PlistValue[]
-  | { [key: string]: PlistValue };
+type PlistValue = string | boolean | PlistValue[] | { [key: string]: PlistValue };
 type PlistDict = { [key: string]: PlistValue };
 
 /** One element in fast-xml-parser's `preserveOrder` output. */
@@ -91,9 +88,10 @@ function loadManifest(): PlistDict {
   });
   const doc = parser.parse(xml) as OrderedNode[];
   const plist = doc.find((n) => Array.isArray(n.plist));
-  const rootDict = plist && Array.isArray(plist.plist)
-    ? plist.plist.find((n) => Array.isArray(n.dict))
-    : undefined;
+  const rootDict =
+    plist && Array.isArray(plist.plist)
+      ? plist.plist.find((n) => Array.isArray(n.dict))
+      : undefined;
   if (rootDict === undefined) throw new Error('no <plist><dict> root');
   return plistNode(rootDict) as PlistDict;
 }
@@ -120,11 +118,22 @@ const APP_FUNCTIONALITY = 'NSPrivacyCollectedDataTypePurposeAppFunctionality';
 const ANALYTICS = 'NSPrivacyCollectedDataTypePurposeAnalytics';
 
 const PUBLISHED_LABEL: Record<string, Declared> = {
-  NSPrivacyCollectedDataTypeEmailAddress: { linked: true, tracking: false, purposes: [APP_FUNCTIONALITY] },
-  NSPrivacyCollectedDataTypeUserID: { linked: false, tracking: false, purposes: [APP_FUNCTIONALITY] },
-  NSPrivacyCollectedDataTypeDeviceID: { linked: false, tracking: false, purposes: [APP_FUNCTIONALITY] },
+  NSPrivacyCollectedDataTypeUserID: {
+    linked: false,
+    tracking: false,
+    purposes: [APP_FUNCTIONALITY],
+  },
+  NSPrivacyCollectedDataTypeDeviceID: {
+    linked: false,
+    tracking: false,
+    purposes: [APP_FUNCTIONALITY],
+  },
   NSPrivacyCollectedDataTypeCrashData: { linked: false, tracking: false, purposes: [ANALYTICS] },
-  NSPrivacyCollectedDataTypeOtherDiagnosticData: { linked: false, tracking: false, purposes: [ANALYTICS] },
+  NSPrivacyCollectedDataTypeOtherDiagnosticData: {
+    linked: false,
+    tracking: false,
+    purposes: [ANALYTICS],
+  },
 };
 
 describe('iOS privacy manifest', () => {
