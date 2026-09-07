@@ -1,11 +1,10 @@
 # Speakeasy
 
-Private, end-to-end-encrypted messenger. No phone number or conventional
-account — just a handle you pick (or let us suggest). Devices that cannot
-complete device attestation can use a one-time email code without attaching
-that address to the handle. Messages disappear by default. Built on Signal
-Protocol 1:1 + Sender Keys for groups, X25519 ECIES for community channel
-keys, and Vouchflow for device-attested signup (no SIM, no captcha).
+Private, end-to-end-encrypted messenger. No phone number, email address, or
+conventional account — just a handle you pick (or let us suggest). Messages
+disappear by default. Built on Signal Protocol 1:1 + Sender Keys for groups,
+X25519 ECIES for community channel keys, and Vouchflow for device-attested
+signup (no SIM, no captcha).
 
 See [`spec.md`](./spec.md) for the full design.
 

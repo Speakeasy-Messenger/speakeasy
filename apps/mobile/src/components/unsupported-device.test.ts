@@ -5,6 +5,9 @@ import { VerifyDeviceSheet } from './VerifyDeviceSheet.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
 import { UNSUPPORTED_DEVICE_MESSAGE } from '../auth/unsupported-device.js';
 
+const PASSKEY_ONLY_MESSAGE =
+  'Speakeasy only works on devices that support passkeys, like Face ID, Touch ID, or fingerprint.';
+
 vi.mock('react-native', () => ({
   Modal: 'div',
   Pressable: 'button',
@@ -32,7 +35,7 @@ describe('unsupported device sheet', () => {
     useVerifySheet.getState().fail(UNSUPPORTED_DEVICE_MESSAGE);
     const tree = create(React.createElement(VerifyDeviceSheet));
     expect(tree.root.findByProps({ testID: 'verify-device-error' }).props.children).toBe(
-      UNSUPPORTED_DEVICE_MESSAGE,
+      PASSKEY_ONLY_MESSAGE,
     );
     expect(tree.root.findAllByType('input')).toHaveLength(0);
     // The sole press target is the existing dismissal scrim, with no label or children.
