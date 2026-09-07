@@ -1,9 +1,7 @@
 import type { ApiClient } from '../api/client.js';
-import { ApiError } from '../api/client.js';
 import type { SignalProtocolModule } from '@speakeasy/crypto';
 import type { VouchflowClient, VouchflowErrorReason } from '../native/vouchflow.js';
 import { VouchflowClientError } from '../native/vouchflow.js';
-import { diag } from '../diag/log.js';
 
 const PREKEY_BATCH_SIZE = 100;
 
@@ -108,13 +106,6 @@ export async function claimWithDeviceAttestation(
     throw err;
   }
 
-  try {
-    const claimed = await enrollHandle(deps, { handle, deviceToken });
-    return { kind: 'claimed', ...claimed };
-  } catch (err) {
-    if (err instanceof ApiError && err.status === 401) {
-      return { kind: 'unsupported_device' };
-    }
-    throw err;
-  }
+  const claimed = await enrollHandle(deps, { handle, deviceToken });
+  return { kind: 'claimed', ...claimed };
 }

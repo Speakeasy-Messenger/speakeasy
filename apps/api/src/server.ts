@@ -152,11 +152,9 @@ function defaultValidator(log: import('fastify').FastifyBaseLogger): Validator {
   const maxAge = Number(process.env.VOUCHFLOW_MAX_VERIFICATION_AGE_MS) || undefined;
   const maxRisk = Number(process.env.VOUCHFLOW_MAX_RISK_SCORE) || undefined;
   // The floor is `low`, matching the vouchflow.dev dashboard's
-  // device-confidence floor. Devices that cannot attest at all (no
-  // Secure Enclave / Play Integrity — an App Store review iPad, a
-  // sideloaded debug-signed APK) never reach even `low` and take the
-  // client-side email-OTP fallback instead; rejecting `low` here only
-  // dead-ended devices that DID attest, just weakly.
+  // device-confidence floor. Devices that cannot attest at all never reach
+  // even `low`; rejecting `low` here only dead-ended devices that DID attest,
+  // just weakly.
   // VOUCHFLOW_MIN_CONFIDENCE raises the floor per-deployment.
   const envOverride = process.env.VOUCHFLOW_MIN_CONFIDENCE as 'low' | 'medium' | 'high' | undefined;
   const minConfidence = envOverride ?? MIN_CONFIDENCE;

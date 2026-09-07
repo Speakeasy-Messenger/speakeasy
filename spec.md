@@ -38,10 +38,8 @@
 
 Speakeasy is a private, encrypted messenger with the following core principles:
 
-- **Anonymous by default.** No phone number or real name is collected. When a
-  device-verification flow cannot complete, a user may provide an email address
-  to Vouchflow solely to receive a one-time verification code; it is not
-  attached to the handle.
+- **Anonymous by default.** No phone number, email address, or real name is
+  collected.
 - **Device-native identity.** Authentication is handled entirely by Vouchflow (vouchflow.dev) — a device-native verification API using Secure Enclave (iOS) and Keystore (Android) cryptography.
 - **Ephemeral by default.** Messages disappear after 7 days locally. Persistence must be explicitly opted into per conversation.
 - **Human-readable anonymous IDs.** Every user is identified by a handle they pick (or generate) at enrollment — any single-token name matching `HANDLE_REGEX` (e.g. `@alice`, `@midnight_traveler`, `@quiet_fox`). This is their only identifier. No display name layer exists on top.
@@ -140,7 +138,7 @@ There is no shared HMAC secret. The server's `defaultValidator()` requires `VOUC
 | High   | Strong history, multiple attestations   | ✅      |
 
 A device that cannot attest at all never reaches this table — it has no
-`last_verification` to score. That is one case the email-OTP fallback covers.
+`last_verification` to score.
 
 ---
 

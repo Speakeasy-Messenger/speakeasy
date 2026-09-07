@@ -15,11 +15,9 @@
  *   high   — strong history, multi-attestation
  *
  * `low` is the floor, matching the vouchflow.dev dashboard's
- * device-confidence floor. Devices that cannot attest and therefore cannot
- * produce even a `low` verification are
- * offered the SDK's email-OTP fallback client-side; the remaining
- * gates here (freshness, risk score, anomaly flags) still apply to
- * every token.
+ * device-confidence floor. Devices that cannot attest cannot produce even a
+ * `low` verification; the remaining gates here (freshness, risk score,
+ * anomaly flags) still apply to every token.
  */
 
 export type Confidence = 'low' | 'medium' | 'high';

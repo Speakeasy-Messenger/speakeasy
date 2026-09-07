@@ -151,16 +151,19 @@ describe('claimWithDeviceAttestation', () => {
     expect(deps.api.enroll).not.toHaveBeenCalled();
   });
 
-  it('reports an unsupported device when the server rejects the token as low confidence', async () => {
-    const deps = makeDeps();
-    (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
-      new ApiError(401, 'low_confidence'),
-    );
-    const result = await claimWithDeviceAttestation(deps, 'reviewer');
-    expect(result).toEqual({
-      kind: 'unsupported_device',
-    });
-  });
+  it.each(['network_error', 'rate_limited', 'device_not_found', 'low_confidence'])(
+    'keeps onboarding retryable when enrollment returns 401 %s',
+    async (code) => {
+      const deps = makeDeps();
+      (deps.api.enroll as ReturnType<typeof vi.fn>).mockRejectedValueOnce(
+        new ApiError(401, code),
+      );
+      await expect(claimWithDeviceAttestation(deps, 'reviewer')).rejects.toMatchObject({
+        status: 401,
+        code,
+      });
+    },
+  );
 
   it('rethrows a taken handle so the caller can reset the input', async () => {
     const deps = makeDeps();
