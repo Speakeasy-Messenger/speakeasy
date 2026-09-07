@@ -81,8 +81,7 @@ describe('collectProductionConfigErrors', () => {
 
   it('allows every real confidence floor, including the `low` default', () => {
     // `low` is the product floor (spec §2): a device that attested weakly
-    // still enrolls, and one that cannot attest at all takes the email
-    // fallback rather than dead-ending on the first onboarding screen.
+    // still enrolls.
     for (const level of ['low', 'medium', 'high']) {
       expect(
         collectProductionConfigErrors({
