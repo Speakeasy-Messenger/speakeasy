@@ -47,7 +47,8 @@ email or SMS one-time codes exist.
 - The user's encrypted message-relay buffer
 - The push token registrations (the regular FCM/APNs token and iOS PushKit
   VoIP token)
-- The Vouchflow device attestation record
+- Speakeasy's persisted device record (device token and push tokens) — the
+  Vouchflow attestation service is not called to erase its own record
 
 Messages already delivered to peer devices remain on those devices —
 we do not have the cryptographic ability to reach into someone else's
