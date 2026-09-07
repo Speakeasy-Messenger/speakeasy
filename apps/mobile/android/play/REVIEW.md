@@ -189,7 +189,8 @@ ticked:
 - [x] Data safety form submitted — **TODO** (answers ready in `DATA_SAFETY.md`)
 - [x] Target audience set — **TODO** (answers: 13+, no kid appeal, no ads)
 - [x] Categorization set — **TODO** (Communication + 5 tags)
-- [x] App access / reviewer credentials provided — **TODO** (need reviewer handle)
+- [x] App access instructions provided — **TODO** (review on an
+      attestation-capable physical device)
 
 **For the current Alpha (Closed Testing) track, none of the above are
 required.** They become blockers only when promoting to Open Testing or
@@ -204,8 +205,9 @@ In rough order of effort:
 1. **Generate two graphics still missing** — app icon (512×512) and
    feature graphic (1024×500). Screenshots are done (7 real-device
    captures landed under `images/phoneScreenshots/`).
-2. **Create reviewer handle(s)** in production — 10 minutes once we have
-   a stable build.
+2. **Provide app-access instructions** — tell reviewers to create an
+   available handle on an attestation-capable physical device, and use a
+   second such device if they need a messaging or call peer.
 3. **Fill content rating + data safety + target audience in Play
    Console** — copy-paste from the linked docs, ~30 minutes total.
 4. **Promote rc.27 from Closed → Open** (or upload a fresh rc to the
