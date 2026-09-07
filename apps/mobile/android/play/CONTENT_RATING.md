@@ -119,19 +119,16 @@ audience:
 
 ## App access for review
 
-Google's reviewers test the app. Provide test credentials so they
-can see the messaging flow.
+Google's reviewers test the app. They can create their own available
+handles to see the messaging flow.
 
-- **Username/Handle**: Provide a pre-enrolled test handle (e.g.
-  `@reviewer_speakeasy` — sign up once, save the handle and a backup
-  of the keystore).
+- **Username/Handle**: Create an available handle of your choice during
+  sign-up on the physical review device.
 - **Password**: N/A — Speakeasy uses Vouchflow device attestation, not
-  passwords. There is no fallback verification path, so the review device
-  must be able to attest (screen lock / hardware attestation available).
-  Note this in the "Notes" field of the App access form: "Speakeasy uses
-  Vouchflow device attestation. To test, install the APK and sign up with
-  the reviewer handle on a device that can complete hardware attestation
-  (screen lock enabled); no email or SMS code fallback exists."
-- **Other instructions**: Mention that some features require a peer
-  to interact with. Provide a second test handle if Google's
-  reviewer flow is single-tester.
+  passwords. Speakeasy verifies your device with a passkey. Please review on
+  a physical device with a screen lock set (not an emulator). Device
+  verification requires secure hardware; on a capable device, sign-in
+  completes with the device passkey.
+- **Other instructions**: Messaging and call flows require a peer. If needed,
+  provision a second attestation-capable physical device and create an
+  available handle on it for peer testing.

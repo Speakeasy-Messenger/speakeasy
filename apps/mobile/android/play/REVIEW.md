@@ -147,9 +147,8 @@ verification path, and no email- or SMS-code fallback exists.
 
 Google's reviewer will try to test the app. Provide:
 
-- **Username/Handle**: A pre-enrolled reviewer handle (e.g.
-  `@reviewer-speakeasy`). **TODO: create this account + save its keystore
-  backup before submitting.**
+- **Username/Handle**: Create an available handle of your choice during
+  sign-up on the physical review device.
 - **Password**: N/A — Speakeasy uses Vouchflow device attestation, not
   passwords. There is no fallback verification path, so the review device
   must be able to attest (screen lock / hardware attestation available). In
@@ -157,10 +156,9 @@ Google's reviewer will try to test the app. Provide:
   > "Speakeasy verifies your device with a passkey. Please review on a physical device with a screen lock set (not an emulator). Device verification requires secure hardware; on a capable device, sign-in completes with the device passkey."
   There is no reviewer code and no email; the app requires a
   passkey-capable device.
-- **Other instructions**: Mention that the messaging and call flows
-  require a peer. Provide a SECOND reviewer handle if Google's review
-  is single-tester, so the reviewer can message themselves between two
-  test devices/emulators.
+- **Other instructions**: Messaging and call flows require a peer. If needed,
+  provision a second attestation-capable physical device and create an
+  available handle on it for peer testing.
 
 ---
 
