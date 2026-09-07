@@ -27,10 +27,10 @@
  *      noticed by CI rather than by users in a verification loop.
  */
 import { createHash, X509Certificate } from 'node:crypto';
-import { readFileSync } from 'node:fs';
+import { appendFileSync, readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { connect, type PeerCertificate } from 'node:tls';
-import { describe, expect, it } from 'vitest';
+import { connect, type PeerCertificate, type TLSSocket } from 'node:tls';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 
 const mobileRoot = resolve(__dirname, '../..');
 const androidPath = resolve(
@@ -164,31 +164,38 @@ describe('Vouchflow certificate pins — committed sources', () => {
   });
 });
 
+/** A served certificate's SPKI SHA-256 pin and the date it stops being valid. */
+interface ServedCertificate {
+  pin: string;
+  validTo: Date;
+}
+
 /**
- * Reads the SPKI SHA-256 pins of every certificate `host` actually serves,
- * leaf first. Same value the `openssl x509 -pubkey | openssl pkey -pubin
- * -outform der | openssl dgst -sha256 -binary | base64` pipeline produces,
- * and the same one both SDKs compute on device.
+ * Opens one TLS connection to `host` and reads the SPKI SHA-256 pin and
+ * expiry of every certificate it serves, leaf first. Same pin value the
+ * `openssl x509 -pubkey | openssl pkey -pubin -outform der |
+ * openssl dgst -sha256 -binary | base64` pipeline produces, and the same one
+ * both SDKs compute on device. The caller owns the socket (end it when done).
  */
-function servedChainPins(host: string): Promise<string[]> {
-  return new Promise((resolvePins, reject) => {
+function servedChain(host: string): Promise<{ socket: TLSSocket; chain: ServedCertificate[] }> {
+  return new Promise((resolveChain, reject) => {
     const socket = connect({ host, port: 443, servername: host }, () => {
-      const pins: string[] = [];
+      const chain: ServedCertificate[] = [];
       const seen = new Set<string>();
       let cert: PeerCertificate | undefined = socket.getPeerCertificate(true);
       // The root self-signs, so `issuerCertificate` eventually points at
       // itself — stop there rather than looping forever.
       while (cert?.raw && !seen.has(cert.fingerprint256)) {
         seen.add(cert.fingerprint256);
-        const spki = new X509Certificate(cert.raw).publicKey.export({
-          type: 'spki',
-          format: 'der',
+        const x509 = new X509Certificate(cert.raw);
+        const spki = x509.publicKey.export({ type: 'spki', format: 'der' });
+        chain.push({
+          pin: createHash('sha256').update(spki).digest('base64'),
+          validTo: x509.validToDate,
         });
-        pins.push(createHash('sha256').update(spki).digest('base64'));
         cert = cert.issuerCertificate;
       }
-      socket.end();
-      resolvePins(pins);
+      resolveChain({ socket, chain });
     });
     socket.setTimeout(15_000, () =>
       socket.destroy(new Error('TLS handshake to api.vouchflow.dev timed out')),
@@ -202,28 +209,61 @@ function servedChainPins(host: string): Promise<string[]> {
 const live = process.env.VOUCHFLOW_LIVE_PIN_CHECK === '1';
 
 describe.skipIf(!live)('Vouchflow certificate pins — live chain (opt-in)', () => {
-  it('serves a chain containing a committed pin, above the leaf', async () => {
-    const served = await servedChainPins('api.vouchflow.dev');
+  let socket: TLSSocket | undefined;
+  let served: ServedCertificate[] = [];
+
+  // One handshake for the whole block; every assertion below reads the same
+  // served chain.
+  beforeAll(async () => {
+    ({ socket, chain: served } = await servedChain('api.vouchflow.dev'));
+  });
+
+  afterAll(() => {
+    socket?.end();
+  });
+
+  it('serves a chain containing a committed pin, above the leaf', () => {
     expect(served.length).toBeGreaterThan(1);
 
     const committed = new Set(iosPins());
-    const matches = served.filter((pin) => committed.has(pin));
+    const matches = served.filter(({ pin }) => committed.has(pin));
 
     // Any match at all means shipped builds still connect today.
     expect(
       matches,
       `No committed pin appears in the live api.vouchflow.dev chain. ` +
-        `Committed: ${[...committed].join(', ')}. Served: ${served.join(', ')}. ` +
+        `Committed: ${[...committed].join(', ')}. Served: ${served.map((c) => c.pin).join(', ')}. ` +
         `Every shipped iOS and Android build is failing TLS right now.`,
     ).not.toHaveLength(0);
 
     // A match only at index 0 would mean we are back to pinning the leaf,
     // i.e. the outage is merely rescheduled to the next rotation.
     expect(
-      served.slice(1).some((pin) => committed.has(pin)),
+      served.slice(1).some(({ pin }) => committed.has(pin)),
       `The only live match is the leaf certificate. The pins have drifted ` +
         `back to leaf pinning and will break at the next rotation. ` +
-        `Served: ${served.join(', ')}.`,
+        `Served: ${served.map((c) => c.pin).join(', ')}.`,
     ).toBe(true);
+
+    // Warning tier: a committed pin that still matches but expires within
+    // 180 days means a CA-side rotation is coming. The test stays green —
+    // the pins work today — but the annotations, summary, and marker file
+    // let .github/workflows/vouchflow-pin-check.yml open a warning issue so
+    // the repin happens on a schedule instead of during an outage.
+    const WARNING_HORIZON_MS = 180 * 24 * 60 * 60 * 1000;
+    for (const { pin, validTo } of served) {
+      if (!committed.has(pin) || validTo.getTime() - Date.now() >= WARNING_HORIZON_MS) continue;
+      const message =
+        `Committed pin ${pin} matches a live api.vouchflow.dev certificate ` +
+        `expiring ${validTo.toISOString()} (within 180 days) — repin before then.`;
+      console.warn(`::warning::${message}`);
+      if (process.env.GITHUB_STEP_SUMMARY) {
+        appendFileSync(process.env.GITHUB_STEP_SUMMARY, `⚠️ ${message}\n`);
+      }
+      const warningFile = process.env.VOUCHFLOW_PIN_WARNING_FILE;
+      if (warningFile) {
+        writeFileSync(warningFile, `⚠️ ${message}\n`);
+      }
+    }
   });
 });
