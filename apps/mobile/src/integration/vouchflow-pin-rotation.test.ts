@@ -51,8 +51,9 @@ const ISRG_ROOT_X2_PEM = readFileSync(resolve(fixturesDir, 'isrg-root-x2.pem'));
 
 /**
  * ISRG Root X1 (RSA 4096, expires 2035-06-04): the RSA-chain anchor. Kept on
- * both platforms for parity, but only effective on Android — ios-sdk 2.5.0
- * hashes EC keys only (see VouchflowBootstrap.swift, vf-sdk-rsa-spki).
+ * both platforms for parity, but only effective on Android before ios-sdk
+ * 2.5.1, which added RSA SPKI hashing (see VouchflowBootstrap.swift,
+ * vf-sdk-rsa-spki).
  */
 const ISRG_ROOT_X1_PEM = readFileSync(resolve(fixturesDir, 'isrg-root-x1.pem'));
 
@@ -132,7 +133,7 @@ describe('Vouchflow certificate pins — committed sources', () => {
   });
 
   it('keeps the iOS SPM pin at an SDK that validates TLS before pinning', () => {
-    // The root pins above are only acceptable on vouchflow/ios-sdk >= 2.5.0.
+    // The root pins above are only acceptable on vouchflow/ios-sdk >= 2.5.1.
     // Up to 2.4.0 the SDK never called SecTrustEvaluateWithError, so a pin
     // match replaced the OS chain/hostname check instead of adding to it. A
     // leaf pin masked that (one key could satisfy it); a root pin does not:
@@ -143,6 +144,12 @@ describe('Vouchflow certificate pins — committed sources', () => {
     // applies pins as an additional constraint. That validate-first
     // property is exactly what makes root pinning safe.
     //
+    // 2.5.1 additionally fixes RSA SPKI hashing: 2.5.0's
+    // `PinningDelegate.spkiHeader` did `guard isEC else { return nil }`, so
+    // RSA certificates were silently skipped and the ISRG Root X1 (RSA) pin
+    // never matched — below 2.5.1 X1 is decorative, leaving iOS with a
+    // single effective pin and no spare (the fragility behind the
+    // 2026-09-06 production lockout).
     // (< 2.2.0 was separately broken for P-384 pins: it hardcoded the EC
     // P-256 SPKI header, so a P-384 pin — ISRG Root X2 — could never match.)
     const pbxproj = readFileSync(
@@ -153,13 +160,19 @@ describe('Vouchflow certificate pins — committed sources', () => {
       /XCRemoteSwiftPackageReference "ios-sdk"[\s\S]*?version = ([\d.]+);/,
     )?.[1];
     expect(version).toBeDefined();
-    const [major, minor] = version!.split('.').map(Number);
+    const [major, minor, patch] = version!.split('.').map(Number);
+    const atLeast = (v: [number, number, number]) =>
+      major! > v[0] ||
+      (major === v[0] && minor! > v[1]) ||
+      (major === v[0] && minor === v[1] && patch! >= v[2]);
     expect(
-      major > 2 || (major === 2 && minor >= 5),
+      atLeast([2, 5, 1]),
       `iOS SDK is pinned at ${version}, but the committed root pins ` +
-        `require >= 2.5.0 (the release that evaluates TLS trust before ` +
-        `comparing pins). Downgrading below 2.5.0 while pinning roots ` +
-        `reopens the "any Let's Encrypt certificate is accepted" hole.`,
+        `require >= 2.5.1: 2.5.0 evaluates TLS trust before comparing pins ` +
+        `but cannot hash RSA keys, so the ISRG Root X1 pin never matches ` +
+        `and X1 is decorative. Downgrading below 2.5.1 while pinning ` +
+        `roots reopens the "any Let's Encrypt certificate is accepted" ` +
+        `hole with only one effective pin.`,
     ).toBe(true);
   });
 });
