@@ -28,10 +28,13 @@ EXT_PROFILE = "match AppStore #{EXT_IDENTIFIER}".freeze
 NSE_IDENTIFIER = "xyz.speakeasyapp.app.NotificationService".freeze
 NSE_PROFILE = "match AppStore #{NSE_IDENTIFIER}".freeze
 
-# Cancels a review submission that is stuck in UNRESOLVED_ISSUES (Apple will
-# not accept new items on one, so submit_for_review on it always fails with
-# "Version is not ready to be submitted yet"), waits for the cancellation to
-# settle, and returns a FRESH submission the version can be added to.
+# Cancels an in-flight review submission — one stuck in UNRESOLVED_ISSUES
+# (Apple will not accept new items on one, so submit_for_review on it always
+# fails with "Version is not ready to be submitted yet") OR one holding a
+# version that is itself locked in review (a locked version refuses
+# select_build, so the submission must be withdrawn BEFORE the build attach).
+# Waits for the cancellation to settle, and returns a FRESH submission the
+# version can be added to.
 #
 # Verified against the vendored fastlane 2.239 spaceship source:
 # - ReviewSubmission#cancel_submission exists (PATCH reviewSubmissions/{id}
@@ -52,7 +55,7 @@ end
 
 def reset_unresolved_submission!(app:, submission:)
   old_id = submission.id
-  UI.message("Resetting review submission id=#{old_id} state=#{submission.state} (UNRESOLVED_ISSUES)")
+  UI.message("Resetting review submission id=#{old_id} state=#{submission.state} (in-flight)")
   unless cancel_review_submission(submission)
     UI.important("Falling back to removing the items of submission id=#{old_id}")
     items = (Array(submission.items) rescue [])
@@ -166,6 +169,29 @@ def set_ci_build_number
   bn = ENV["BUILD_NUMBER"]
   return if bn.nil? || bn.empty?
   increment_build_number(xcodeproj: "Speakeasy.xcodeproj", build_number: bn)
+end
+
+# After a review submission is cancelled, the version it held only becomes
+# editable again asynchronously (same ASC lag the submission settle-wait in
+# reset_unresolved_submission! covers). Poll the version itself, bounded, so
+# select_build never runs against a still-locked version.
+def wait_until_version_editable!(app:, version_id:, target:, locked_states:)
+  deadline = Time.now + 180
+  last_state = nil
+  while Time.now < deadline
+    v = app.get_app_store_versions.find { |x| x.id == version_id }
+    last_state = v&.app_store_state
+    unless last_state.nil? || locked_states.include?(last_state)
+      UI.success("Version #{target} is editable again (state=#{last_state})")
+      return v
+    end
+    UI.message("Waiting for version #{target} to become editable (state=#{last_state.inspect})...")
+    sleep(15)
+  end
+  UI.user_error!(
+    "Version #{target} is still state=#{last_state.inspect} after 180s — the cancelled review " \
+    "submission has not released it yet. Wait a few minutes and re-run with reset_submission=true."
+  )
 end
 
 # Spaceship token from the same ASC API key env the rest of the lane uses,
@@ -512,6 +538,47 @@ platform :ios do
     UI.user_error!("Build #{target}(#{build_num}) not found in App Store Connect") unless build
     UI.message("Found build #{target}(#{build_num}) id=#{build.id} state=#{build.processing_state}")
 
+    # A version that is in (or finished) review is LOCKED: Apple refuses
+    # select_build on it with a different build. Hit live 2026-09-07: v1.0 in
+    # WAITING_FOR_REVIEW holding build A while a newer processed build B
+    # existed — the attach failed and the reset below never ran, because it
+    # was gated on the SUBMISSION being UNRESOLVED_ISSUES and sat after the
+    # attach. Read the real state enum the vendored gem exposes
+    # (Spaceship::ConnectAPI::AppStoreVersion::AppStoreState) — no hardcoded
+    # strings.
+    locked_states = [
+      Spaceship::ConnectAPI::AppStoreVersion::AppStoreState::WAITING_FOR_REVIEW,
+      Spaceship::ConnectAPI::AppStoreVersion::AppStoreState::IN_REVIEW,
+      Spaceship::ConnectAPI::AppStoreVersion::AppStoreState::PENDING_DEVELOPER_RELEASE,
+    ]
+    pre_reset_submission = nil
+    if locked_states.include?(version.app_store_state)
+      unless ENV["RESET_SUBMISSION"] == "true"
+        UI.user_error!(
+          "Version #{target} is in state #{version.app_store_state} (in review) and is locked — " \
+          "it will not accept a different build (select_build fails on a locked version). " \
+          "Re-run this workflow with reset_submission=true to withdraw the in-flight review " \
+          "submission and supersede it with build #{target}(#{build_num})."
+        )
+      end
+      submission = app.get_in_progress_review_submission(platform: "IOS")
+      if submission.nil?
+        UI.user_error!(
+          "Version #{target} is in state #{version.app_store_state} and reset_submission=true was " \
+          "set, but there is no in-flight review submission to cancel — that state usually means " \
+          "review already finished. Handle it in App Store Connect (reject or release the " \
+          "version) and re-run."
+        )
+      end
+      # Cancel the in-flight submission FIRST, wait for the version to become
+      # editable again, and only then attach — the order the live failure
+      # proved necessary.
+      pre_reset_submission = reset_unresolved_submission!(app: app, submission: submission)
+      version = wait_until_version_editable!(
+        app: app, version_id: version.id, target: target, locked_states: locked_states
+      )
+    end
+
     # Attach the build to the version (the step that can't be done in ASC
     # mobile web).
     version.select_build(build_id: build.id)
@@ -567,13 +634,22 @@ platform :ios do
     # Submit for review via the new ASC review-submission model: find an open
     # submission (or create one), add this version, then submit. Reaching the
     # 'Add for Review' button is unreliable on the ASC mobile web, so do it here.
-    submission = app.get_in_progress_review_submission(platform: "IOS")
-    fresh_submission = false
+    if pre_reset_submission
+      # The version was locked pre-attach and the in-flight submission was
+      # already cancelled + replaced above — carry that fresh submission
+      # through instead of re-querying (a settled/CANCELLED one no longer
+      # matches get_in_progress_review_submission).
+      submission = pre_reset_submission
+      fresh_submission = true
+    else
+      submission = app.get_in_progress_review_submission(platform: "IOS")
+      fresh_submission = false
+    end
     if submission.nil?
       submission = app.create_review_submission(platform: "IOS")
       fresh_submission = true
       UI.message("Created review submission id=#{submission.id} state=#{submission.state}")
-    elsif submission.state == Spaceship::ConnectAPI::ReviewSubmission::ReviewSubmissionState::UNRESOLVED_ISSUES
+    elsif !pre_reset_submission && submission.state == Spaceship::ConnectAPI::ReviewSubmission::ReviewSubmissionState::UNRESOLVED_ISSUES
       # A submission in UNRESOLVED_ISSUES (the previously REJECTED item) cannot
       # take new items; submitting it again is known to fail with "Version is
       # not ready to be submitted yet". Either reset it (cancel + fresh
@@ -589,6 +665,8 @@ platform :ios do
       end
       submission = reset_unresolved_submission!(app: app, submission: submission)
       fresh_submission = true
+    elsif pre_reset_submission
+      UI.message("Using the fresh submission id=#{submission.id} state=#{submission.state} created before the build attach")
     else
       UI.message("Reusing in-progress review submission id=#{submission.id} state=#{submission.state}")
     end
