@@ -13,14 +13,9 @@
 #   auth action gives us. 50 lines of curl, no extra dependency, easier
 #   to debug.
 #
-# Commit-review model: every edit this script creates is committed with
-# `changesNotSentForReview=true`. Speakeasy's release model does NOT use
-# Google review — releases commit directly. Without that query parameter
-# Google auto-sends a reviewed-track edit (production / beta / Open
-# Testing) for review, and the NEXT edit on that track fails hard with
-# HTTP 400 INVALID_ARGUMENT: "Changes cannot be sent for review
-# automatically. Please set the query parameter changesNotSentForReview
-# to true." Keep the flag on every `:commit` call here.
+# Commit-review model: coordinated releases use Google's ordinary review
+# flow. Commit the edit without `changesNotSentForReview`; Google rejects
+# that parameter when changes must be sent for review automatically.
 #
 # Required environment:
 #   ACCESS_TOKEN     — OAuth access token with androidpublisher scope
@@ -123,7 +118,7 @@ api PUT "${API}/edits/${edit_id}/tracks/${TRACK}" \
 echo "  track release configured"
 
 echo "4/4 Committing edit..."
-api POST "${API}/edits/${edit_id}:commit?changesNotSentForReview=true" -H "Content-Length: 0" > /dev/null
+api POST "${API}/edits/${edit_id}:commit" -H "Content-Length: 0" > /dev/null
 echo "  edit committed — versionCode ${version_code} is now on the ${TRACK} track"
 echo ""
 echo "Play Console URL: https://play.google.com/console/u/0/developers/-/app-list?search=${PACKAGE_NAME}"
