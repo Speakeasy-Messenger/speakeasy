@@ -51,6 +51,7 @@ import {
   __resetDiagForTests,
   clearDiag,
   diag,
+  diagImportant,
   formatDiag,
   getDiagSnapshot,
   loadPersistedDiag,
@@ -91,6 +92,15 @@ describe('diag() in-memory ring', () => {
     // Oldest survivors are events 50..249; verify first + last.
     expect(snap[0]!.msg).toBe('event-50');
     expect(snap[snap.length - 1]!.msg).toBe('event-249');
+  });
+
+  it('retains decisive events across a sampling flood while remaining bounded', () => {
+    diagImportant('native-audio', 'capture start error', { callId: 'call-1' });
+    for (let i = 0; i < 250; i++) diag('webrtc-audio', `sample-${i}`);
+    const snap = getDiagSnapshot();
+    expect(snap).toHaveLength(200);
+    expect(snap.some((entry) => entry.msg === 'capture start error')).toBe(true);
+    expect(snap.at(-1)?.msg).toBe('sample-249');
   });
 });
 

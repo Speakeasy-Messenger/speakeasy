@@ -45,16 +45,17 @@ export function parseNativeCallKitReport(value: unknown): NativeCallKitReport | 
     typeof raw.peer_user_id === 'string' && raw.peer_user_id.length > 0
       ? raw.peer_user_id
       : undefined;
-  const expired = raw.expired === true;
-  const reportCompleted = raw.report_completed === true;
+  const expired = typeof raw.expired === 'boolean' ? raw.expired : undefined;
+  const reportCompleted =
+    typeof raw.report_completed === 'boolean' ? raw.report_completed : undefined;
   const reportedAtMs = typeof raw.at === 'number' && Number.isFinite(raw.at) ? raw.at : undefined;
-  if (!callId && !expired) return undefined;
+  if (!callId && expired !== true) return undefined;
   return {
     ...(callId ? { callId } : {}),
     callUUID: raw.call_uuid.toLowerCase(),
     ...(peerUserId ? { peerUserId } : {}),
-    ...(expired ? { expired: true } : {}),
-    ...(reportCompleted ? { reportCompleted: true } : {}),
+    ...(expired !== undefined ? { expired } : {}),
+    ...(reportCompleted !== undefined ? { reportCompleted } : {}),
     ...(reportedAtMs !== undefined ? { reportedAtMs } : {}),
   };
 }

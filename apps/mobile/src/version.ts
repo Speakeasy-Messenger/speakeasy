@@ -41,6 +41,7 @@ import { NativeModules } from 'react-native';
 interface SpeakeasyVersionModule {
   readonly versionName: string;
   readonly versionCode: number;
+  readonly diagnosticsBeta?: boolean;
 }
 
 function readNativeVersion(): { name: string; build: string } {
@@ -77,4 +78,10 @@ export function appVersion(): string {
  */
 export function appBuild(): string {
   return readNativeVersion().build;
+}
+
+/** True only for an explicitly-built diagnostics beta artifact. */
+export function isDiagnosticsBetaBuild(): boolean {
+  return (NativeModules as { SpeakeasyVersion?: SpeakeasyVersionModule }).SpeakeasyVersion
+    ?.diagnosticsBeta === true;
 }

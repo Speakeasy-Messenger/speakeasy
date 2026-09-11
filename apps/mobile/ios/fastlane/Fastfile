@@ -285,6 +285,7 @@ platform :ios do
     match(type: "appstore", readonly: is_ci, api_key: key)
     pin_signing
     set_ci_build_number
+    diagnostic_xcargs = ENV["SPEAKEASY_DIAGNOSTICS_BETA"] == "true" ? "SPEAKEASY_DIAGNOSTICS_BETA=YES" : "SPEAKEASY_DIAGNOSTICS_BETA=NO"
     build_app(
       workspace: WORKSPACE,
       scheme: SCHEME,
@@ -293,6 +294,7 @@ platform :ios do
       output_directory: "build",
       output_name: "Speakeasy.ipa",
       clean: true,
+      xcargs: diagnostic_xcargs,
     )
   end
 

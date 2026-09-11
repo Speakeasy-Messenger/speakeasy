@@ -903,13 +903,36 @@ index e7f52a1..837cc59 100644
  
  - (void)stopCapture {
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
-index cd4fa13..64ab025 100644
+index cd4fa13..6f9fbcb 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
-@@ -7,13 +7,39 @@
+@@ -7,14 +7,67 @@
  
  @implementation WebRTCModule (RTCAudioSession)
  
++static NSDictionary *SpeakeasyAudioSessionSnapshot(NSString *source) {
++    RTCAudioSession *rtc = [RTCAudioSession sharedInstance];
++    AVAudioSession *audio = [AVAudioSession sharedInstance];
++    NSMutableArray *outputs = [NSMutableArray array];
++    for (AVAudioSessionPortDescription *port in audio.currentRoute.outputs) {
++        [outputs addObject:port.portType ?: @"unknown"];
++    }
++    AVAudioSessionPortDescription *input = audio.currentRoute.inputs.firstObject;
++    return @{
++        @"source": source ?: @"unknown",
++        @"nativeElapsedMs": @([NSProcessInfo processInfo].systemUptime * 1000.0),
++        @"manualAudio": @(rtc.useManualAudio),
++        @"isAudioEnabled": @(rtc.isAudioEnabled),
++        @"category": audio.category ?: [NSNull null],
++        @"mode": audio.mode ?: [NSNull null],
++        @"sampleRate": @(audio.sampleRate),
++        @"ioBufferDuration": @(audio.IOBufferDuration),
++        @"inputAvailable": @(audio.inputAvailable),
++        @"currentInputPort": input.portType ?: [NSNull null],
++        @"currentOutputPorts": outputs,
++    };
++}
++
 +// Speakeasy patch: manual-audio mode for CallKit coexistence.
 +//
 +// Stock react-native-webrtc 124 never sets `useManualAudio`, so WebRTC's ADM
@@ -926,25 +949,32 @@ index cd4fa13..64ab025 100644
 +// webrtc RTCAudioSession (useManualAudio / isAudioEnabled).
 +RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(setManualAudio : (BOOL)manual) {
 +    [RTCAudioSession sharedInstance].useManualAudio = manual;
-+    return nil;
++    return SpeakeasyAudioSessionSnapshot(@"setManualAudio");
++}
++
++RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionSnapshot : (NSString *)source) {
++    return SpeakeasyAudioSessionSnapshot(source);
 +}
 +
  RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidActivate) {
 -    [[RTCAudioSession sharedInstance] audioSessionDidActivate:[AVAudioSession sharedInstance]];
+-    return nil;
 +    RTCAudioSession *session = [RTCAudioSession sharedInstance];
 +    [session audioSessionDidActivate:[AVAudioSession sharedInstance]];
 +    // Grant WebRTC permission to run its VoIP audio unit now that CallKit has
 +    // activated the session. No-op unless useManualAudio == YES.
 +    session.isAudioEnabled = YES;
-     return nil;
++    return SpeakeasyAudioSessionSnapshot(@"callkit-didActivate");
  }
  
  RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(audioSessionDidDeactivate) {
 -    [[RTCAudioSession sharedInstance] audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
+-    return nil;
 +    RTCAudioSession *session = [RTCAudioSession sharedInstance];
 +    [session audioSessionDidDeactivate:[AVAudioSession sharedInstance]];
 +    // CallKit tore the session down — stop the VoIP audio unit.
 +    session.isAudioEnabled = NO;
-     return nil;
++    return SpeakeasyAudioSessionSnapshot(@"callkit-didDeactivate");
  }
  
+ @end

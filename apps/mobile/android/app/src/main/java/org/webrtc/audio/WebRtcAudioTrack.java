@@ -20,6 +20,7 @@ import android.os.Build;
 import android.os.Process;
 import androidx.annotation.Nullable;
 import java.nio.ByteBuffer;
+import java.util.HashMap;
 import org.webrtc.CalledByNative;
 import org.webrtc.Logging;
 import org.webrtc.ThreadUtils;
@@ -27,6 +28,7 @@ import org.webrtc.audio.JavaAudioDeviceModule.AudioTrackErrorCallback;
 import org.webrtc.audio.JavaAudioDeviceModule.AudioTrackStartErrorCode;
 import org.webrtc.audio.JavaAudioDeviceModule.AudioTrackStateCallback;
 import org.webrtc.audio.LowLatencyAudioBufferManager;
+import xyz.speakeasyapp.app.audiodiag.AudioDiagnosticsStore;
 
 class WebRtcAudioTrack {
   private static final String TAG = "WebRtcAudioTrackExternal";
@@ -86,6 +88,8 @@ class WebRtcAudioTrack {
   private class AudioTrackThread extends Thread {
     private volatile boolean keepAlive = true;
     private LowLatencyAudioBufferManager bufferManager;
+    private int diagnosticBuffers;
+    private long lastPlaybackHead;
 
     public AudioTrackThread(String name) {
       super(name);
@@ -120,6 +124,18 @@ class WebRtcAudioTrack {
           byteBuffer.position(0);
         }
         int bytesWritten = audioTrack.write(byteBuffer, sizeInBytes, AudioTrack.WRITE_BLOCKING);
+        diagnosticBuffers++;
+        if (diagnosticBuffers >= 200) {
+          long head = Integer.toUnsignedLong(audioTrack.getPlaybackHeadPosition());
+          HashMap<String, Object> fields = new HashMap<>();
+          fields.put("playState", audioTrack.getPlayState());
+          fields.put("playbackHeadDelta", Math.max(0, head - lastPlaybackHead));
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) fields.put("underrunCount", audioTrack.getUnderrunCount());
+          if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) fields.put("routedDevice", AudioDiagnosticsStore.deviceType(audioTrack.getRoutedDevice()));
+          AudioDiagnosticsStore.record("playout samples", false, fields);
+          lastPlaybackHead = head;
+          diagnosticBuffers = 0;
+        }
         if (bytesWritten != sizeInBytes) {
           Logging.e(TAG, "AudioTrack.write played invalid number of bytes: " + bytesWritten);
           // If a write() returns a negative value, an error has occurred.
@@ -261,6 +277,10 @@ class WebRtcAudioTrack {
     }
     logMainParameters();
     logMainParametersExtended();
+    HashMap<String, Object> fields = new HashMap<>();
+    fields.put("sampleRate", sampleRate); fields.put("channels", channels);
+    fields.put("playState", audioTrack.getPlayState());
+    AudioDiagnosticsStore.record("playout initialized", true, fields);
     return minBufferSizeInBytes;
   }
 
@@ -295,6 +315,8 @@ class WebRtcAudioTrack {
     // request decoded audio from WebRTC.
     audioThread = new AudioTrackThread("AudioTrackJavaThread");
     audioThread.start();
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("playState", audioTrack.getPlayState());
+    AudioDiagnosticsStore.record("playout started", true, fields);
     return true;
   }
 
@@ -308,6 +330,7 @@ class WebRtcAudioTrack {
     assertTrue(audioThread != null);
     logUnderrunCount();
     audioThread.stopThread();
+    AudioDiagnosticsStore.record("playout stopped", true, new HashMap<String, Object>());
 
     Logging.d(TAG, "Stopping the AudioTrackThread...");
     audioThread.interrupt();
@@ -547,6 +570,8 @@ class WebRtcAudioTrack {
 
   private void reportWebRtcAudioTrackInitError(String errorMessage) {
     Logging.e(TAG, "Init playout error: " + errorMessage);
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("error", errorMessage);
+    AudioDiagnosticsStore.record("playout init error", true, fields);
     WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     if (errorCallback != null) {
       errorCallback.onWebRtcAudioTrackInitError(errorMessage);
@@ -556,6 +581,8 @@ class WebRtcAudioTrack {
   private void reportWebRtcAudioTrackStartError(
       AudioTrackStartErrorCode errorCode, String errorMessage) {
     Logging.e(TAG, "Start playout error: " + errorCode + ". " + errorMessage);
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("error", errorMessage); fields.put("code", errorCode.toString());
+    AudioDiagnosticsStore.record("playout start error", true, fields);
     WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     if (errorCallback != null) {
       errorCallback.onWebRtcAudioTrackStartError(errorCode, errorMessage);
@@ -564,6 +591,8 @@ class WebRtcAudioTrack {
 
   private void reportWebRtcAudioTrackError(String errorMessage) {
     Logging.e(TAG, "Run-time playback error: " + errorMessage);
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("error", errorMessage);
+    AudioDiagnosticsStore.record("playout runtime error", true, fields);
     WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     if (errorCallback != null) {
       errorCallback.onWebRtcAudioTrackError(errorMessage);

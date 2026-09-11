@@ -19,6 +19,7 @@ import com.facebook.react.defaults.DefaultReactNativeHost
 import com.facebook.react.soloader.OpenSourceMergedSoMapping
 import com.facebook.soloader.SoLoader
 import xyz.speakeasyapp.app.channelkey.ChannelKeyPackage
+import xyz.speakeasyapp.app.audiodiag.AudioDiagnosticsPackage
 import xyz.speakeasyapp.app.fileopener.FileOpenerPackage
 import xyz.speakeasyapp.app.lockscreen.LockScreenPackage
 import xyz.speakeasyapp.app.notif.NotifMessagingPackage
@@ -76,6 +77,7 @@ class MainApplication : Application(), ReactApplication {
             PackageList(this).packages.apply {
               // Phase 5b: hand-registered (local modules, not autolinked).
               add(VouchflowPackage())
+              add(AudioDiagnosticsPackage())
               add(SignalProtocolPackage())
               add(ChannelKeyPackage())
               add(VersionPackage())

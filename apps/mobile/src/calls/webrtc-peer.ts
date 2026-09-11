@@ -7,7 +7,13 @@ import {
   type MediaStreamTrack,
 } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
-import { AppState, DeviceEventEmitter, Platform, type EmitterSubscription } from 'react-native';
+import {
+  AppState,
+  DeviceEventEmitter,
+  NativeModules,
+  Platform,
+  type EmitterSubscription,
+} from 'react-native';
 import type {
   CallAnswerPayload,
   CallIceCandidate,
@@ -17,8 +23,14 @@ import type {
 import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './types.js';
 import { ANIMATION_CHANNEL_LABEL } from './animation-channel.js';
 import { summarizeVideoStats } from './video-stats.js';
+import {
+  summarizeAudioPeer,
+  summarizeAudioSdp,
+  type AudioCounterState,
+} from './audio-diagnostics.js';
 import { ensureCameraPermission, ensureMicPermission } from '../permissions/runtime.js';
-import { diag } from '../diag/log.js';
+import { diag, diagImportant } from '../diag/log.js';
+import { audioDiagnostics } from '../native/audio-diagnostics.js';
 import { utf8ToBytes } from '../utils/bytes.js';
 
 /**
@@ -74,6 +86,11 @@ class WebRtcCallPeer implements CallPeer {
   // every modern WebRTC stack populates `audioLevel` on getStats output.
   private audioLevelCb?: (levels: { local: number; remote: number }) => void;
   private audioLevelTimer?: ReturnType<typeof setInterval>;
+  private audioDiagTimer?: ReturnType<typeof setInterval>;
+  private audioDiagActive = false;
+  private audioDiagQueue: Promise<void> = Promise.resolve();
+  private lastAudioCounters?: AudioCounterState;
+  private nativeAudioUnsub?: () => void;
   /**
    * Cumulative video RTP counters sampled every five seconds. The counters
    * survive a suspended JS timer, so the first sample after foregrounding can
@@ -119,6 +136,7 @@ class WebRtcCallPeer implements CallPeer {
 
   constructor(
     iceServers: IceServer[],
+    private readonly callId: string,
     private readonly mediaKind: CallMediaKind = 'audio',
   ) {
     // Speaker default mirrors the orchestrator's `active.speakerOn` so the
@@ -164,6 +182,7 @@ class WebRtcCallPeer implements CallPeer {
       bundlePolicy: 'max-bundle',
       iceTransportPolicy: 'all',
     });
+    this.nativeAudioUnsub = audioDiagnostics.start(callId);
 
     // RN-WebRTC's EventTarget shim doesn't expose addEventListener via
     // its TS surface in a way that's easy to call from generic code, so
@@ -214,10 +233,16 @@ class WebRtcCallPeer implements CallPeer {
         // reassertAudioRoute() for the callee-mic bug this addresses.
         this.reassertAudioRoute();
         this.startVideoDiagnostics();
+        this.startAudioDiagnostics();
+        this.scheduleAudioStats('connected', true);
         this.scheduleVideoStats('connected');
       } else if (s === 'disconnected' || s === 'failed' || s === 'closed') {
         this.scheduleVideoStats(s);
-        if (s === 'failed' || s === 'closed') this.stopVideoDiagnostics();
+        this.scheduleAudioStats(s, true);
+        if (s === 'failed' || s === 'closed') {
+          this.stopVideoDiagnostics();
+          this.stopAudioDiagnostics();
+        }
       }
       if (
         s === 'connecting' ||
@@ -274,10 +299,18 @@ class WebRtcCallPeer implements CallPeer {
     // shows up. Keeping this small (200ms) avoids ringing latency.
     await waitForInitialIce(this.pc, 200);
     const desc = this.pc.localDescription!;
+    diagImportant('webrtc-audio', 'negotiation local offer', {
+      callId: this.callId,
+      audio: summarizeAudioSdp(desc.sdp),
+    });
     return { v: 1, sdp: desc.sdp, candidates: [] };
   }
 
   async setRemoteOffer(payload: CallOfferPayload): Promise<void> {
+    diagImportant('webrtc-audio', 'negotiation remote offer', {
+      callId: this.callId,
+      audio: summarizeAudioSdp(payload.sdp),
+    });
     await this.pc.setRemoteDescription(
       new RTCSessionDescription({ type: 'offer', sdp: payload.sdp }),
     );
@@ -292,10 +325,18 @@ class WebRtcCallPeer implements CallPeer {
     await this.pc.setLocalDescription(answer);
     await waitForInitialIce(this.pc, 200);
     const desc = this.pc.localDescription!;
+    diagImportant('webrtc-audio', 'negotiation local answer', {
+      callId: this.callId,
+      audio: summarizeAudioSdp(desc.sdp),
+    });
     return { v: 1, sdp: desc.sdp, candidates: [] };
   }
 
   async setRemoteAnswer(payload: CallAnswerPayload): Promise<void> {
+    diagImportant('webrtc-audio', 'negotiation remote answer', {
+      callId: this.callId,
+      audio: summarizeAudioSdp(payload.sdp),
+    });
     await this.pc.setRemoteDescription(
       new RTCSessionDescription({ type: 'answer', sdp: payload.sdp }),
     );
@@ -493,6 +534,54 @@ class WebRtcCallPeer implements CallPeer {
     }
   }
 
+  private startAudioDiagnostics(): void {
+    if (this.audioDiagTimer) return;
+    this.audioDiagActive = true;
+    this.audioDiagTimer = setInterval(() => this.scheduleAudioStats('periodic'), 2_000);
+  }
+
+  private stopAudioDiagnostics(): void {
+    this.audioDiagActive = false;
+    if (this.audioDiagTimer) clearInterval(this.audioDiagTimer);
+    this.audioDiagTimer = undefined;
+  }
+
+  private scheduleAudioStats(trigger: string, important = false): void {
+    this.audioDiagQueue = this.audioDiagQueue.then(() => this.dumpAudioStats(trigger, important));
+  }
+
+  private async dumpAudioStats(trigger: string, important: boolean): Promise<void> {
+    if (!this.audioDiagActive && trigger === 'periodic') return;
+    try {
+      const stats = await this.pc.getStats();
+      if (!this.audioDiagActive && trigger === 'periodic') return;
+      const reports: Record<string, unknown>[] = [];
+      stats.forEach((report: any) => reports.push(report as Record<string, unknown>));
+      const pc = this.pc as any;
+      const { snapshot, counters } = summarizeAudioPeer(
+        reports,
+        {
+          getSenders: () => pc.getSenders?.() ?? [],
+          getReceivers: () => pc.getReceivers?.() ?? [],
+          getTransceivers: () => pc.getTransceivers?.() ?? [],
+          localStream: this.localStream,
+        },
+        this.lastAudioCounters,
+        Date.now(),
+      );
+      this.lastAudioCounters = counters;
+      const ctx = { callId: this.callId, trigger, ...snapshot };
+      if (important) diagImportant('webrtc-audio', 'snapshot', ctx);
+      else diag('webrtc-audio', 'snapshot', ctx);
+    } catch (err) {
+      diagImportant('webrtc-audio', 'getStats failed', {
+        callId: this.callId,
+        trigger,
+        err: String(err),
+      });
+    }
+  }
+
   async addRemoteIce(payload: CallIcePayload): Promise<void> {
     for (const c of payload.candidates) {
       try {
@@ -622,11 +711,33 @@ class WebRtcCallPeer implements CallPeer {
         (err: unknown) => {
           diag('webrtc', 'chooseAudioRoute headset error', { err: String(err) });
         },
-      );
+      ).finally(() => this.snapshotIosAudio('wired-route-applied'));
       diag('webrtc', 'audio route -> wired headset', {});
     } else {
       InCallManager.setForceSpeakerphoneOn(this.speakerOn);
       diag('webrtc', 'audio route -> speaker pref', { speakerOn: this.speakerOn });
+      this.snapshotIosAudio('speaker-route-applied');
+    }
+  }
+
+  /** Query AVAudioSession itself; never infer the effective iOS route from UI intent. */
+  private snapshotIosAudio(trigger: string): void {
+    if (Platform.OS !== 'ios') return;
+    try {
+      const wm = NativeModules.WebRTCModule as
+        | { audioSessionSnapshot?: (source: string) => Record<string, unknown> }
+        | undefined;
+      diagImportant('native-audio', 'iOS audio session snapshot', {
+        callId: this.callId,
+        trigger,
+        state: wm?.audioSessionSnapshot?.(trigger) ?? null,
+      });
+    } catch (err) {
+      diagImportant('native-audio', 'iOS audio session snapshot failed', {
+        callId: this.callId,
+        trigger,
+        err: String(err),
+      });
     }
   }
 
@@ -666,6 +777,11 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   close(): void {
+    diagImportant('webrtc-audio', 'final counters', {
+      callId: this.callId,
+      counters: this.lastAudioCounters ?? null,
+    });
+    this.stopAudioDiagnostics();
     if (this.lastVideoDiag) {
       diag('webrtc', 'video stats final counters', this.lastVideoDiag);
     }
@@ -703,6 +819,9 @@ class WebRtcCallPeer implements CallPeer {
       InCallManager.stop({});
       this.startedManager = false;
     }
+    audioDiagnostics.stop(this.callId);
+    this.nativeAudioUnsub?.();
+    this.nativeAudioUnsub = undefined;
   }
 
   // ---------- Private Call animation data channel ----------
@@ -1010,6 +1129,6 @@ function waitForInitialIce(pc: RTCPeerConnection, maxMs: number): Promise<void> 
 
 export const reactNativeWebRtcPeerFactory: CallPeerFactory = {
   async create(opts): Promise<CallPeer> {
-    return new WebRtcCallPeer(opts.iceServers, opts.mediaKind ?? 'audio');
+    return new WebRtcCallPeer(opts.iceServers, opts.callId, opts.mediaKind ?? 'audio');
   },
 };

@@ -31,5 +31,6 @@ class VersionModule(reactContext: ReactApplicationContext) :
   override fun getConstants(): Map<String, Any> = mapOf(
       "versionName" to BuildConfig.VERSION_NAME,
       "versionCode" to BuildConfig.VERSION_CODE,
+      "diagnosticsBeta" to BuildConfig.SPEAKEASY_DIAGNOSTICS_BETA,
   )
 }

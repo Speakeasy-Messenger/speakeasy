@@ -24,7 +24,7 @@ import { b64ToBytes, bytesToB64, utf8FromBytes, utf8ToBytes } from '../utils/byt
 import { ensureCameraPermission, ensureMicPermission } from '../permissions/runtime.js';
 import { Platform } from 'react-native';
 import { diag } from '../diag/log.js';
-import { uploadDiag } from '../diag/upload.js';
+import { isDiagStreamingEnabled, uploadDiag } from '../diag/upload.js';
 import type {
   ActiveCall,
   CallEndedReason,
@@ -340,6 +340,7 @@ export class CallOrchestrator {
       this.assertActiveGeneration(generation, callId);
       diag('call', 'iceServers fetched', { count: iceServers.length });
       const peer = await this.deps.peerFactory.create({
+        callId,
         iceServers,
         role: 'caller',
         // 'private' → 'audio' at WebRTC layer (see mediaKindForCall).
@@ -816,6 +817,7 @@ export class CallOrchestrator {
       if (!this.isCurrentGeneration(generation)) return;
       if (this.rejectIncomingOfferIfBusy(fromUserId, callId)) return;
       const peer = await this.deps.peerFactory.create({
+        callId,
         iceServers,
         role: 'callee',
         // 'private' maps to 'audio' at the WebRTC layer — the filter
@@ -1317,6 +1319,7 @@ export class CallOrchestrator {
       reason === 'filter_failure' ||
       reason === 'peer_filter_failure' ||
       (reason === 'hangup' && !connectedAt);
+    const uploadAfterTeardown = !abnormalEnd && isDiagStreamingEnabled();
     if (abnormalEnd) {
       void uploadDiag({ reason: `call_${reason}`, callId: this.active.callId });
     }
@@ -1355,6 +1358,14 @@ export class CallOrchestrator {
       this.cleanup();
     } catch (err) {
       diag('call', 'cleanup threw (continuing teardown)', { err: String(err) });
+    }
+    if (uploadAfterTeardown) {
+      // A silent/one-way call looks like a normal user hangup to the state
+      // machine. Diagnostic betas therefore upload every completed call, after
+      // native teardown has had a short bounded window to append stop/route events.
+      setTimeout(() => {
+        void uploadDiag({ reason: `call_${reason}`, callId: ended.callId });
+      }, 250);
     }
     // Now dismiss — the peer/stream is already torn down, so unmounting
     // the RTCView can't race the native close.
