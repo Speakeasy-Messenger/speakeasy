@@ -2,15 +2,19 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 // Control the version gate without a native module. Default to a GA
 // string so the "no-op on GA" case is the resting state.
-vi.mock('../version.js', () => ({ appVersion: vi.fn(() => '1.0.50') }));
+vi.mock('../version.js', () => ({
+  appVersion: vi.fn(() => '1.0.50'),
+  isDiagnosticsBetaBuild: vi.fn(() => false),
+}));
 
-import { appVersion } from '../version.js';
+import { appVersion, isDiagnosticsBetaBuild } from '../version.js';
 import { uploadDiag } from './upload.js';
 import { diag, __resetDiagForTests } from './log.js';
 import { useSettings } from '../store/settings.js';
 import type { DiagUploadPayload } from '../api/client.js';
 
 const mockVersion = vi.mocked(appVersion);
+const mockDiagnosticsBeta = vi.mocked(isDiagnosticsBetaBuild);
 
 function makeApi() {
   const uploadDiag = vi.fn(
@@ -27,6 +31,7 @@ const deps = (api: ReturnType<typeof makeApi>, token: string | undefined = 'dvt_
 beforeEach(() => {
   __resetDiagForTests();
   mockVersion.mockReturnValue('1.0.50'); // GA by default
+  mockDiagnosticsBeta.mockReturnValue(false);
   useSettings.setState({ diagStreaming: true });
 });
 
@@ -70,6 +75,16 @@ describe('uploadDiag', () => {
     expect(payload.callId).toBe('c1');
     expect(payload.entries.length).toBeGreaterThan(0);
     expect(payload.entries.at(-1)?.tag).toBe('call');
+  });
+
+  it('uploads a store-versioned artifact only when its native diagnostics-beta flag is set', async () => {
+    mockDiagnosticsBeta.mockReturnValue(true);
+    const api = makeApi();
+    await uploadDiag({ reason: 'call_completed', callId: 'paired-call' }, deps(api));
+    expect(api.uploadDiag.mock.calls[0]![1]).toMatchObject({
+      appVersion: '1.0.50-rc.diag',
+      callId: 'paired-call',
+    });
   });
 
   it('omits callId when none is given (crash / manual)', async () => {

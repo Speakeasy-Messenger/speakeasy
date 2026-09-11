@@ -34,6 +34,15 @@ describe('coordinated mobile release contracts', () => {
     expect(result.status, result.stderr).toBe(0);
   });
 
+  it('keeps the react-native-incall-manager diagnostics patch parseable', () => {
+    const patchPath = resolve(repoRoot, 'apps/mobile/patches/react-native-incall-manager+4.2.1.patch');
+    const result = spawnSync('git', ['apply', '--numstat', patchPath], {
+      cwd: repoRoot,
+      encoding: 'utf8',
+    });
+    expect(result.status, result.stderr).toBe(0);
+  });
+
   it('builds both Android artifacts in one Gradle invocation', () => {
     const workflow = source('.github/workflows/release-play.yml');
 
@@ -49,7 +58,7 @@ describe('coordinated mobile release contracts', () => {
     expect(fallback).not.toContain("tags: ['alpha-*', 'v*']");
   });
 
-  it('archives iOS in parallel but publishes TestFlight after Android beta', () => {
+  it('archives iOS in parallel and does not suppress TestFlight when Play fails', () => {
     const workflow = source('.github/workflows/release-play.yml');
     const archiveJob = workflow.slice(
       workflow.indexOf('  ios-archive:'),
@@ -60,6 +69,8 @@ describe('coordinated mobile release contracts', () => {
     expect(archiveJob).not.toContain('needs:');
     expect(workflow).toContain('Promote Android to beta');
     expect(uploadJob).toContain('needs: [android-release, ios-archive]');
+    expect(uploadJob).toContain('always()');
+    expect(uploadJob).toContain("needs.ios-archive.result == 'success'");
     expect(uploadJob).toContain('bundle exec fastlane ios upload_beta');
   });
 

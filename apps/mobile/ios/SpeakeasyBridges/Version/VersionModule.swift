@@ -30,6 +30,7 @@ final class VersionModule: NSObject {
       // Android's versionCode is an Int; CFBundleVersion is a string.
       // Emit an Int when it parses so the JS shape matches Android.
       "versionCode": Int(build) ?? 0,
+      "diagnosticsBeta": (info?["SpeakeasyDiagnosticsBeta"] as? String) == "YES",
     ]
   }
 }

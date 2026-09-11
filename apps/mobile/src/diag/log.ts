@@ -49,6 +49,8 @@ export interface DiagEntry {
   /** Free-form message + optional structured context. */
   msg: string;
   ctx?: Record<string, unknown>;
+  /** Retain across ordinary sampling floods until the bounded ring is all-important. */
+  important?: boolean;
 }
 
 const buffer: DiagEntry[] = [];
@@ -100,10 +102,18 @@ export function diagFingerprint(s: string): string {
 }
 
 export function diag(tag: string, msg: string, ctx?: Record<string, unknown>): void {
-  const entry: DiagEntry = { t: Date.now(), tag, msg, ctx };
+  appendDiag({ t: Date.now(), tag, msg, ctx });
+}
+
+export function diagImportant(tag: string, msg: string, ctx?: Record<string, unknown>): void {
+  appendDiag({ t: Date.now(), tag, msg, ctx, important: true });
+}
+
+function appendDiag(entry: DiagEntry): void {
   buffer.push(entry);
   if (buffer.length > MAX_ENTRIES) {
-    buffer.splice(0, buffer.length - MAX_ENTRIES);
+    const removable = buffer.findIndex((candidate) => !candidate.important);
+    buffer.splice(removable >= 0 ? removable : 0, 1);
   }
   schedulePersist();
   for (const s of subscribers) {

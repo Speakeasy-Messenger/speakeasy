@@ -1,5 +1,5 @@
 import { NativeModules, Platform } from 'react-native';
-import { diag } from '../diag/log.js';
+import { diag, diagImportant } from '../diag/log.js';
 import type { CallOrchestrator } from './orchestrator.js';
 import type { ActiveCall } from './types.js';
 import { useCalls } from '../store/calls.js';
@@ -74,8 +74,8 @@ function tryLoadCallKeep(): RNCallKeepShape | undefined {
  * untransformable source.
  */
 type RTCAudioSessionShape = {
-  audioSessionDidActivate: () => void;
-  audioSessionDidDeactivate: () => void;
+  audioSessionDidActivate: () => Record<string, unknown> | undefined;
+  audioSessionDidDeactivate: () => Record<string, unknown> | undefined;
 };
 function tryLoadRTCAudioSession(): RTCAudioSessionShape | undefined {
   try {
@@ -194,6 +194,8 @@ export class CallKeepBridge {
     { reportedAtMs: number; completed: boolean }
   >();
   private readonly acknowledgedNativeUuids = new Set<string>();
+  private readonly audioActivatedCallIds = new Set<string>();
+  private lastActivatedAudioCallId?: string;
   /** CallKit actions can arrive before the encrypted offer has reached JS. */
   private readonly pendingActions = new Map<string, 'answer' | 'end'>();
   /** Resolved on first start(); `undefined` when the native module
@@ -279,10 +281,13 @@ export class CallKeepBridge {
         // fight over the session and audio is one-way / silent.
         try {
           const wm = NativeModules.WebRTCModule as
-            | { setManualAudio?: (manual: boolean) => void }
+            | { setManualAudio?: (manual: boolean) => Record<string, unknown> }
             | undefined;
-          wm?.setManualAudio?.(true);
-          diag('callkeep', 'manual audio enabled');
+          const state = wm?.setManualAudio?.(true);
+          diagImportant('callkeep-audio', 'manual audio configured', {
+            callId: this.deps.orchestrator.getActive()?.callId ?? null,
+            state: state ?? null,
+          });
         } catch (err) {
           diag('callkeep', 'setManualAudio failed', { err: String(err) });
         }
@@ -354,6 +359,8 @@ export class CallKeepBridge {
     this.releasedFallbackCallIds.clear();
     this.blockedNativeFallbackCallIds.clear();
     this.nativeFallbackReportStates.clear();
+    this.audioActivatedCallIds.clear();
+    this.lastActivatedAudioCallId = undefined;
     this.setupDone = false;
   }
 
@@ -480,19 +487,38 @@ export class CallKeepBridge {
     // the right session — otherwise audio is silent / one-way. This is the
     // exact glue documented by react-native-callkeep + react-native-webrtc.
     this.rnCallKeep.addEventListener('didActivateAudioSession', () => {
-      diag('callkeep', 'didActivateAudioSession');
+      const callId = this.deps.orchestrator.getActive()?.callId;
       try {
-        tryLoadRTCAudioSession()?.audioSessionDidActivate();
+        const state = tryLoadRTCAudioSession()?.audioSessionDidActivate();
+        if (callId) {
+          this.audioActivatedCallIds.add(callId);
+          this.lastActivatedAudioCallId = callId;
+        }
+        diagImportant('callkeep-audio', 'provider activated audio session', {
+          callId: callId ?? null,
+          state: state ?? null,
+        });
       } catch (err) {
-        diag('callkeep', 'audioSessionDidActivate failed', { err: String(err) });
+        diagImportant('callkeep-audio', 'audioSessionDidActivate failed', {
+          callId: callId ?? null,
+          err: String(err),
+        });
       }
     });
     this.rnCallKeep.addEventListener('didDeactivateAudioSession', () => {
-      diag('callkeep', 'didDeactivateAudioSession');
+      const callId = this.deps.orchestrator.getActive()?.callId ?? this.lastActivatedAudioCallId;
       try {
-        tryLoadRTCAudioSession()?.audioSessionDidDeactivate();
+        const state = tryLoadRTCAudioSession()?.audioSessionDidDeactivate();
+        diagImportant('callkeep-audio', 'provider deactivated audio session', {
+          callId: callId ?? null,
+          state: state ?? null,
+        });
+        this.lastActivatedAudioCallId = undefined;
       } catch (err) {
-        diag('callkeep', 'audioSessionDidDeactivate failed', { err: String(err) });
+        diagImportant('callkeep-audio', 'audioSessionDidDeactivate failed', {
+          callId: callId ?? null,
+          err: String(err),
+        });
       }
     });
   }
@@ -781,6 +807,13 @@ export class CallKeepBridge {
   }
 
   private applyNativeReport(report: NativeCallKitReport): void {
+    diagImportant('callkeep-audio', 'native CallKit report result', {
+      callId: report.callId ?? null,
+      requested: true,
+      completed: report.reportCompleted ?? null,
+      expired: report.expired ?? null,
+      reportedAtMs: report.reportedAtMs ?? null,
+    });
     const uuid = normalizeUuid(report.callUUID);
     if (uuid) this.acknowledgedNativeUuids.delete(uuid);
     if (report.expired) {
@@ -891,7 +924,27 @@ export class CallKeepBridge {
     const active = this.deps.orchestrator.getActive();
     if (active?.callId !== callId || active.stage !== 'incoming_ringing') return;
     this.releasedFallbackCallIds.add(callId);
-    diag('callkeep', 'system incoming-call UI unavailable', { callId, error: String(error) });
+    let state: Record<string, unknown> | null = null;
+    try {
+      const wm = NativeModules.WebRTCModule as
+        | { audioSessionSnapshot?: (source: string) => Record<string, unknown> }
+        | undefined;
+      state = wm?.audioSessionSnapshot?.('incoming-fallback-release') ?? null;
+    } catch (snapshotError) {
+      diagImportant('callkeep-audio', 'fallback audio snapshot failed', {
+        callId,
+        err: String(snapshotError),
+      });
+    }
+    diagImportant('callkeep', 'system incoming-call UI unavailable', {
+      callId,
+      error: String(error),
+      audioOwnerExpected: 'app',
+      audioOwnerActual:
+        state?.isAudioEnabled === true ? 'callkit-active' : state?.isAudioEnabled === false ? 'inactive' : null,
+      activatedSinceCallBegan: this.audioActivatedCallIds.has(callId),
+      audioState: state,
+    });
     this.deps.orchestrator.showIncomingCallFallback(callId);
   }
 

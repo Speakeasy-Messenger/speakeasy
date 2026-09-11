@@ -20,6 +20,8 @@ apply plugin: "com.google.gms.google-services"
 //   - Production: `v<semver>` e.g. `v1.0.0`
 //       versionName → "1.0.0"; versionCode → M*10000+m*100+p (10000),
 //       which sits above the alpha rc range and rises monotonically.
+//   - Diagnostic beta: `diag-<semver>-rc.<N>`; uses the RC version code
+//       lane and enables metadata-only call diagnostics in release CI.
 // For builds off-tag (dirty/SHA) gradle uses a positive placeholder;
 // release CI only builds on a real tag, so it never reaches the Store.
 // See computedVersionName / computedVersionCode below.
@@ -66,6 +68,9 @@ def computedVersionName = {
     // About screen tells the truth about dev builds.
     if (rawVersionTag.startsWith("alpha-")) {
         return rawVersionTag.substring("alpha-".length())
+    }
+    if (rawVersionTag.startsWith("diag-")) {
+        return rawVersionTag.substring("diag-".length())
     }
     if (rawVersionTag ==~ /^v\d.*/) {
         // Strip the leading `v` and any `-hotfix.N` suffix so a re-cut of
@@ -376,6 +381,10 @@ android {
         // -Pspeakeasy.videoCallHarness=true.
         buildConfigField "boolean", "SPEAKEASY_VIDEO_CALL_HARNESS",
             "${(project.findProperty('speakeasy.videoCallHarness') ?: 'false').toBoolean()}"
+        // Explicit diagnostic beta channel. Production/App Store builds omit
+        // this property and therefore cannot upload diagnostic buffers.
+        buildConfigField "boolean", "SPEAKEASY_DIAGNOSTICS_BETA",
+            "${(project.findProperty('speakeasy.diagnosticsBeta') ?: 'false').toBoolean()}"
     }
     buildFeatures {
         buildConfig true

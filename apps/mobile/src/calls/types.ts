@@ -176,6 +176,8 @@ export interface CallPeer {
  */
 export interface CallPeerFactory {
   create(opts: {
+    /** Existing authorized call correlation id; never a user identifier. */
+    callId: string;
     iceServers: IceServer[];
     /** Direction matters for some WebRTC SDP munging. */
     role: 'caller' | 'callee';

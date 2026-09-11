@@ -34,4 +34,15 @@ describe('parseNativeCallKitReport', () => {
       expired: true,
     });
   });
+
+  it('preserves an actual false CallKit report result instead of treating it as missing', () => {
+    expect(
+      parseNativeCallKitReport({
+        call_id: 'call-1',
+        call_uuid: 'F5DCB01E-2619-54B4-BFC4-9F9DB17EFB32',
+        expired: false,
+        report_completed: false,
+      }),
+    ).toMatchObject({ expired: false, reportCompleted: false });
+  });
 });

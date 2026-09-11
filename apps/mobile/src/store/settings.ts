@@ -56,8 +56,8 @@ interface SettingsState {
   /** Beta-only: auto-stream the (already-redacted) diag ring buffer to
    *  the server on abnormal call ends / crashes so we stop asking
    *  testers to copy-paste logs. No effect on GA builds — the uploader
-   *  is hard-gated on a "-rc." version regardless of this flag. Default
-   *  on for beta; surfaced only on the Diagnostics screen. */
+   *  is hard-gated on an RC version or explicit diagnostic-beta build.
+   *  Default on for beta; surfaced only on the Diagnostics screen. */
   diagStreaming: boolean;
 
   hydrated: boolean;

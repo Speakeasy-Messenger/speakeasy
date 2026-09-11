@@ -14,8 +14,9 @@
  *     `diag/log.ts` (handles + previews are one-way fingerprints; no
  *     message plaintext is ever recorded). This module ships that buffer
  *     verbatim and adds nothing.
- *   - Beta only. Hard-gated on a "-rc." version string. GA builds never
- *     upload, and the server independently 403s non-beta versions.
+ *   - Beta only. Hard-gated on either a "-rc." version string or the native
+ *     diagnostic-beta build flag. Native store betas label the upload as an
+ *     RC for the existing server gate; the actual bundle version is unchanged.
  *   - Opt-out. Gated on the `diagStreaming` settings toggle (default on
  *     for beta, surfaced only on the Diagnostics screen).
  *
@@ -23,8 +24,8 @@
  * turn into a user-visible error or block a call teardown / crash path.
  */
 import type { ApiClient } from '../api/client.js';
-import { appVersion } from '../version.js';
-import { getDiagSnapshot } from './log.js';
+import { appVersion, isDiagnosticsBetaBuild } from '../version.js';
+import { diagImportant, getDiagSnapshot } from './log.js';
 import { useSettings } from '../store/settings.js';
 import { useIdentity } from '../store/identity.js';
 
@@ -49,9 +50,9 @@ export interface UploadDiagDeps {
   getDeviceToken: () => string | undefined;
 }
 
-/** True only on a beta ("-rc.") build with the streaming toggle enabled. */
+/** True only on an RC/diagnostic-beta build with the streaming toggle enabled. */
 export function isDiagStreamingEnabled(): boolean {
-  return appVersion().includes('-rc.') && useSettings.getState().diagStreaming;
+  return (appVersion().includes('-rc.') || isDiagnosticsBetaBuild()) && useSettings.getState().diagStreaming;
 }
 
 /**
@@ -75,13 +76,20 @@ export async function uploadDiag(
     const api = deps?.api ?? (await import('../services.js')).api;
 
     const entries = getDiagSnapshot().slice(-MAX_UPLOAD_ENTRIES);
+    const installedVersion = appVersion();
+    const uploadVersion =
+      isDiagnosticsBetaBuild() && !installedVersion.includes('-rc.')
+        ? `${installedVersion}-rc.diag`
+        : installedVersion;
     await api.uploadDiag(token, {
       entries,
-      appVersion: appVersion(),
+      appVersion: uploadVersion,
       reason: opts.reason,
       ...(opts.callId ? { callId: opts.callId } : {}),
     });
-  } catch {
-    /* fire-and-forget — a diag upload must never surface to the user */
+  } catch (err) {
+    // Non-blocking, but visible in the retained ring so "upload" never falsely
+    // means delivered when the device was offline or the server rejected it.
+    diagImportant('diag-upload', 'upload failed', { callId: opts.callId ?? null, err: String(err) });
   }
 }

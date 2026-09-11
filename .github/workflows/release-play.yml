@@ -3,11 +3,12 @@ name: Coordinated Mobile Beta Release
 # A single tag now builds Android once while iOS archives in parallel.
 # Publication is still ordered: Android reaches Play beta first, then the
 # already-built IPA uploads to TestFlight. alpha-* tags remain Android
-# Internal-only release candidates; v* tags run the complete beta sequence.
+# Internal-only release candidates; v* and diag-* tags run the complete beta
+# sequence. diag-* artifacts alone enable metadata-only diagnostic uploads.
 
 on:
   push:
-    tags: ['alpha-*', 'v*']
+    tags: ['alpha-*', 'v*', 'diag-*']
 
 concurrency:
   group: mobile-beta-${{ github.ref }}
@@ -82,15 +83,19 @@ jobs:
           fi
           keystore="$RUNNER_TEMP/speakeasy-release.keystore"
           echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > "$keystore"
+          diagnostics_beta=false
+          [[ "${GITHUB_REF##*/}" == diag-* ]] && diagnostics_beta=true
           ./gradlew :app:assembleRelease :app:bundleRelease --no-daemon \
             -Pvouchflow.apiKey="$VOUCHFLOW_WRITE_KEY" \
             -Pvouchflow.environment=production \
+            -Pspeakeasy.diagnosticsBeta="$diagnostics_beta" \
             -PRELEASE_STORE_FILE="$keystore"
 
       - name: Assert APK signing and artifact versions
         run: |
           tag="${GITHUB_REF##*/}"
           case "$tag" in
+            diag-*) expected_name="${tag#diag-}"; sub="${tag##*-rc.}" ;;
             v*-hotfix.*)
               base_name="${tag#v}"; expected_name="${base_name%-hotfix.*}"
               hf="${tag##*-hotfix.}"; sub=$((999 + 10#$hf)) ;;
@@ -153,8 +158,11 @@ jobs:
           if gh release view "$tag" >/dev/null 2>&1; then
             gh release upload "$tag" "${{ steps.rename.outputs.apk }}" --clobber
           else
+            prerelease=()
+            [[ "$tag" == diag-* ]] && prerelease+=(--prerelease)
             gh release create "$tag" "${{ steps.rename.outputs.apk }}" \
-              --title "$tag" --notes "Mobile artifacts built by the coordinated release workflow."
+              --title "$tag" --notes "Mobile artifacts built by the coordinated release workflow." \
+              "${prerelease[@]}"
           fi
 
       - name: Authenticate to Google Cloud
@@ -185,7 +193,7 @@ jobs:
         run: bash scripts/play-publish.sh
 
       - name: Promote Android to beta
-        if: startsWith(github.ref_name, 'v')
+        if: startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'diag-')
         env:
           ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
           PACKAGE_NAME: xyz.speakeasyapp.app
@@ -195,7 +203,7 @@ jobs:
         run: bash scripts/play-promote-track.sh
 
   ios-archive:
-    if: startsWith(github.ref_name, 'v')
+    if: startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'diag-')
     runs-on: macos-latest
     timeout-minutes: 75
     steps:
@@ -283,6 +291,7 @@ jobs:
           ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
           MATCH_PASSWORD: ${{ secrets.MATCH_PASSWORD }}
           BUILD_NUMBER: ${{ github.run_id }}
+          SPEAKEASY_DIAGNOSTICS_BETA: ${{ startsWith(github.ref_name, 'diag-') && 'true' || 'false' }}
         run: bundle exec fastlane ios build_beta
 
       - name: Upload IPA artifact
@@ -294,7 +303,9 @@ jobs:
           if-no-files-found: error
 
   ios-testflight:
-    if: startsWith(github.ref_name, 'v')
+    # Upload the already-built IPA even if Play publication fails. The two beta
+    # destinations have independent availability requirements and credentials.
+    if: ${{ always() && (startsWith(github.ref_name, 'v') || startsWith(github.ref_name, 'diag-')) && needs.ios-archive.result == 'success' }}
     needs: [android-release, ios-archive]
     runs-on: macos-latest
     timeout-minutes: 30
@@ -319,4 +330,5 @@ jobs:
           ASC_KEY_CONTENT: ${{ secrets.ASC_KEY_CONTENT }}
           IPA_PATH: ${{ github.workspace }}/testflight-ipa/Speakeasy.ipa
           TESTFLIGHT_EXTERNAL_GROUPS: Friends
+          TESTFLIGHT_CHANGELOG: Call-audio diagnostics beta; no call behavior changes.
         run: bundle exec fastlane ios upload_beta

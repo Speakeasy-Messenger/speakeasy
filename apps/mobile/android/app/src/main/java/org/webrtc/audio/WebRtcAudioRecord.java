@@ -27,6 +27,7 @@ import java.lang.System;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.Iterator;
+import java.util.HashMap;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.concurrent.Executors;
@@ -47,6 +48,7 @@ import xyz.speakeasyapp.app.voicefilter.ActiveFilterHolder;
 import xyz.speakeasyapp.app.voicefilter.FeatureWindow;
 import xyz.speakeasyapp.app.voicefilter.SampleFilter;
 import xyz.speakeasyapp.app.voicefilter.VoiceFilterModule;
+import xyz.speakeasyapp.app.audiodiag.AudioDiagnosticsStore;
 
 // SPEAKEASY FORK NOTE — see apps/mobile/android/app/src/main/java/org/webrtc/audio/README.md
 // This file is a verbatim copy of upstream WebRTC M124's WebRtcAudioRecord.java
@@ -134,6 +136,10 @@ class WebRtcAudioRecord {
    */
   private class AudioRecordThread extends Thread {
     private volatile boolean keepAlive = true;
+    private long diagnosticSamples;
+    private double diagnosticSquareSum;
+    private int diagnosticPeak;
+    private int diagnosticBuffers;
 
     public AudioRecordThread(String name) {
       super(name);
@@ -156,6 +162,28 @@ class WebRtcAudioRecord {
       while (keepAlive) {
         int bytesRead = audioRecord.read(byteBuffer, byteBuffer.capacity());
         if (bytesRead == byteBuffer.capacity()) {
+          // Metadata-only level sampling before mute/filter mutation. Never retain PCM.
+          for (int i = 0; i + 1 < bytesRead; i += 2) {
+            int sample = byteBuffer.getShort(i);
+            diagnosticSquareSum += (double) sample * sample;
+            diagnosticPeak = Math.max(diagnosticPeak, Math.abs(sample));
+            diagnosticSamples++;
+          }
+          diagnosticBuffers++;
+          if (diagnosticBuffers >= 200) {
+            HashMap<String, Object> fields = new HashMap<>();
+            fields.put("samplesObserved", diagnosticSamples);
+            fields.put("rms", diagnosticSamples == 0 ? 0.0 : Math.sqrt(diagnosticSquareSum / diagnosticSamples) / 32768.0);
+            fields.put("peak", diagnosticPeak / 32768.0);
+            fields.put("recordingState", audioRecord.getRecordingState());
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+              fields.put("routedDevice", AudioDiagnosticsStore.deviceType(audioRecord.getRoutedDevice()));
+            }
+            AudioDiagnosticsStore.record("capture samples", false, fields);
+            diagnosticSquareSum = 0;
+            diagnosticPeak = 0;
+            diagnosticBuffers = 0;
+          }
           if (microphoneMute) {
             byteBuffer.clear();
             byteBuffer.put(emptyBytes);
@@ -217,6 +245,9 @@ class WebRtcAudioRecord {
         } else {
           String errorMessage = "AudioRecord.read failed: " + bytesRead;
           Logging.e(TAG, errorMessage);
+          HashMap<String, Object> fields = new HashMap<>();
+          fields.put("error", errorMessage);
+          AudioDiagnosticsStore.record("capture read error", true, fields);
           if (bytesRead == AudioRecord.ERROR_INVALID_OPERATION) {
             keepAlive = false;
             reportWebRtcAudioRecordError(errorMessage);
@@ -391,6 +422,12 @@ class WebRtcAudioRecord {
     effects.enable(audioRecord.getAudioSessionId());
     logMainParameters();
     logMainParametersExtended();
+    HashMap<String, Object> fields = new HashMap<>();
+    fields.put("sampleRate", sampleRate);
+    fields.put("channels", channels);
+    fields.put("framesPerBuffer", framesPerBuffer);
+    fields.put("recordingState", audioRecord.getRecordingState());
+    AudioDiagnosticsStore.record("capture initialized", true, fields);
     // Check number of active recording sessions. Should be zero but we have seen conflict cases
     // and adding a log for it can help us figure out details about conflicting sessions.
     final int numActiveRecordingSessions =
@@ -441,6 +478,9 @@ class WebRtcAudioRecord {
     }
     audioThread = new AudioRecordThread("AudioRecordJavaThread");
     audioThread.start();
+    HashMap<String, Object> fields = new HashMap<>();
+    fields.put("recordingState", audioRecord.getRecordingState());
+    AudioDiagnosticsStore.record("capture started", true, fields);
     scheduleLogRecordingConfigurationsTask(audioRecord);
     return true;
   }
@@ -462,6 +502,7 @@ class WebRtcAudioRecord {
       WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     }
     audioThread = null;
+    AudioDiagnosticsStore.record("capture stopped", true, new HashMap<String, Object>());
     effects.release();
     releaseAudioResources();
     return true;
@@ -622,6 +663,8 @@ class WebRtcAudioRecord {
 
   private void reportWebRtcAudioRecordInitError(String errorMessage) {
     Logging.e(TAG, "Init recording error: " + errorMessage);
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("error", errorMessage);
+    AudioDiagnosticsStore.record("capture init error", true, fields);
     WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     logRecordingConfigurations(audioRecord, false /* verifyAudioConfig */);
     if (errorCallback != null) {
@@ -632,6 +675,8 @@ class WebRtcAudioRecord {
   private void reportWebRtcAudioRecordStartError(
       AudioRecordStartErrorCode errorCode, String errorMessage) {
     Logging.e(TAG, "Start recording error: " + errorCode + ". " + errorMessage);
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("error", errorMessage); fields.put("code", errorCode.toString());
+    AudioDiagnosticsStore.record("capture start error", true, fields);
     WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     logRecordingConfigurations(audioRecord, false /* verifyAudioConfig */);
     if (errorCallback != null) {
@@ -641,6 +686,8 @@ class WebRtcAudioRecord {
 
   private void reportWebRtcAudioRecordError(String errorMessage) {
     Logging.e(TAG, "Run-time recording error: " + errorMessage);
+    HashMap<String, Object> fields = new HashMap<>(); fields.put("error", errorMessage);
+    AudioDiagnosticsStore.record("capture runtime error", true, fields);
     WebRtcAudioUtils.logAudioState(TAG, context, audioManager);
     if (errorCallback != null) {
       errorCallback.onWebRtcAudioRecordError(errorMessage);

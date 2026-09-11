@@ -1,0 +1,78 @@
+diff --git a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
+index 10cb1e5..4cadfab 100644
+--- a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
++++ b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
+@@ -480,6 +480,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+         data.putString("eventText", focusChangeStr);
+         data.putInt("eventCode", focusChange);
+         sendEvent("onAudioFocusChange", data);
++        emitSpeakeasyAudioDiagnostics("focus changed", focusChangeStr);
+     }
+ 
+     /*
+@@ -538,6 +539,35 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+         }
+     }
+ 
++    // Speakeasy diagnostic beta: metadata-only focus/route truth. Null means the
++    // platform cannot provide a field; never turn missing state into a false zero.
++    private void emitSpeakeasyAudioDiagnostics(String event, @Nullable String focusResult) {
++        WritableMap data = Arguments.createMap();
++        data.putString("event", event);
++        data.putDouble("nativeElapsedMs", android.os.SystemClock.elapsedRealtime());
++        if (focusResult == null || focusResult.isEmpty()) data.putNull("focusResult");
++        else data.putString("focusResult", focusResult);
++        data.putInt("mode", audioManager.getMode());
++        data.putBoolean("microphoneMuted", audioManager.isMicrophoneMute());
++        data.putBoolean("speakerphoneOn", audioManager.isSpeakerphoneOn());
++        if (selectedAudioDevice == null) data.putNull("selectedAudioDevice");
++        else data.putString("selectedAudioDevice", selectedAudioDevice.name());
++        data.putString("availableAudioDevices", audioDevices.toString());
++        Activity activity = getCurrentActivity();
++        if (activity == null) data.putNull("appTopmost");
++        else data.putBoolean("appTopmost", activity.hasWindowFocus());
++        // This library does not own the app's FGS and cannot inspect its declared type.
++        data.putNull("microphoneForegroundService");
++        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
++            AudioDeviceInfo device = audioManager.getCommunicationDevice();
++            if (device == null) data.putNull("effectiveCommunicationDeviceType");
++            else data.putInt("effectiveCommunicationDeviceType", device.getType());
++        } else {
++            data.putNull("effectiveCommunicationDeviceType");
++        }
++        sendEvent("SpeakeasyAudioFocusDiagnostics", data);
++    }
++
+     @ReactMethod
+     public void start(final String _media, final boolean auto, final String ringbackUriType) {
+         media = _media;
+@@ -557,7 +587,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+                 stopRingtone(); // --- use brandnew instance
+             }
+             storeOriginalAudioSetup();
+-            requestAudioFocus();
++            String initialFocusResult = requestAudioFocus();
+             startEvents();
+             UiThreadUtil.runOnUiThread(() -> {
+                 bluetoothManager.start();
+@@ -574,6 +604,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+             selectedAudioDevice = AudioDevice.NONE;
+             audioDevices.clear();
+             updateAudioRoute();
++            emitSpeakeasyAudioDiagnostics("focus requested", initialFocusResult);
+ 
+             if (!ringbackUriType.isEmpty()) {
+                 startRingback(ringbackUriType);
+@@ -1842,6 +1873,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+                 if (audioManagerEvents != null) {
+                     // Notify a listening client that audio device has been changed.
+                     audioManagerEvents.onAudioDeviceChanged(selectedAudioDevice, audioDevices);
++                    emitSpeakeasyAudioDiagnostics("route changed", null);
+                 }
+                 */
+                 sendEvent("onAudioDeviceChanged", getAudioDeviceStatusMap());
+@@ -1896,4 +1928,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+         return newAudioDevice;
+     }
+ }
+-

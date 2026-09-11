@@ -15,9 +15,13 @@ import type { CallPeer, CallPeerFactory } from './types.js';
 // Beta diag streaming — mock the uploader so we can assert WHICH call
 // ends trigger a stream (abnormal only) without hitting the network or
 // the version/toggle gate. A no-op mock is harmless to every other test.
-vi.mock('../diag/upload.js', () => ({ uploadDiag: vi.fn(async () => undefined) }));
-import { uploadDiag } from '../diag/upload.js';
+vi.mock('../diag/upload.js', () => ({
+  uploadDiag: vi.fn(async () => undefined),
+  isDiagStreamingEnabled: vi.fn(() => false),
+}));
+import { isDiagStreamingEnabled, uploadDiag } from '../diag/upload.js';
 const mockUploadDiag = vi.mocked(uploadDiag);
+const mockDiagStreaming = vi.mocked(isDiagStreamingEnabled);
 
 type ConnState = 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected';
 
@@ -894,6 +898,7 @@ describe('CallOrchestrator', () => {
 describe('CallOrchestrator — beta diag streaming triggers', () => {
   beforeEach(() => {
     mockUploadDiag.mockClear();
+    mockDiagStreaming.mockReturnValue(false);
   });
 
   it('streams the diag buffer on an abnormal end (connection failed)', async () => {
@@ -931,6 +936,21 @@ describe('CallOrchestrator — beta diag streaming triggers', () => {
     h.callee.decline();
     await h.pump();
     expect(mockUploadDiag).not.toHaveBeenCalled();
+  });
+
+  it('uploads a completed call with its callId on a diagnostic beta', async () => {
+    vi.useFakeTimers();
+    mockDiagStreaming.mockReturnValue(true);
+    const h = makeOrchHarness();
+    const callId = await h.caller.startOutgoing('bob');
+    await h.pump();
+    await h.callee.accept();
+    await h.pump();
+    h.callerPeer().emitConnState('connected');
+    h.caller.hangup();
+    await vi.advanceTimersByTimeAsync(250);
+    expect(mockUploadDiag).toHaveBeenCalledWith({ reason: 'call_completed', callId });
+    vi.useRealTimers();
   });
 });
 
