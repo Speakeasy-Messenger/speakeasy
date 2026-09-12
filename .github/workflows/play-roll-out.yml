@@ -73,13 +73,20 @@ jobs:
           token_format: access_token
           access_token_scopes: https://www.googleapis.com/auth/androidpublisher
 
-      - name: Modify release
+      - name: Read release lifecycle
         env:
           ACCESS_TOKEN: ${{ steps.gcp-auth.outputs.access_token }}
           PACKAGE_NAME: xyz.speakeasyapp.app
           TRACK: ${{ inputs.track }}
-          RELEASE_STATUS: ${{ inputs.status }}
-          USER_FRACTION: ${{ inputs.user_fraction }}
-          RELEASE_NOTES_TEXT: ${{ inputs.release_notes_text }}
-          RELEASE_NOTES_LANGUAGE: ${{ inputs.release_notes_language }}
-        run: bash scripts/play-roll-out.sh
+        run: |
+          set -euo pipefail
+          url="https://androidpublisher.googleapis.com/androidpublisher/v3/applications/${PACKAGE_NAME}/tracks/${TRACK}/releases"
+          response=$(curl -sS -w $'\n%{http_code}' \
+            -H "Authorization: Bearer ${ACCESS_TOKEN}" "$url")
+          status=$(printf '%s' "$response" | tail -n1)
+          body=$(printf '%s' "$response" | sed '$d')
+          echo "GET $url → HTTP $status"
+          printf '%s\n' "$body" | python3 -m json.tool
+          if [ "$status" -lt 200 ] || [ "$status" -ge 300 ]; then
+            exit 1
+          fi
