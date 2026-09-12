@@ -86,17 +86,18 @@ describe('coordinated mobile release contracts', () => {
     expect(fallback).toContain('BUILD_NUMBER: ${{ github.run_id }}');
   });
 
-  // Play Console auto-sends a committed edit for Google review unless the
-  // commit carries `changesNotSentForReview=true`. Speakeasy does not use
-  // Google review, and an edit left in review makes the NEXT edit on that
-  // track fail with HTTP 400 INVALID_ARGUMENT. Guards every publisher
-  // script at once so a new one can't reintroduce the bug.
-  it('commits every Play edit without sending it for Google review', () => {
-    const commitLines = playApiLines((line) => line.includes(':commit'));
+  // Google now requires coordinated releases to enter ordinary review and
+  // rejects `changesNotSentForReview=true`. Guard both commits in the diag/v*
+  // path: Internal publication and the following beta promotion.
+  it('submits coordinated Play releases for ordinary Google review', () => {
+    for (const script of ['scripts/play-publish.sh', 'scripts/play-promote-track.sh']) {
+      const commitLines = source(script)
+        .split('\n')
+        .map((line) => line.trim())
+        .filter((line) => !line.startsWith('#') && line.includes(':commit'));
 
-    expect(commitLines.length).toBeGreaterThan(0);
-    for (const line of commitLines) {
-      expect(line).toContain(':commit?changesNotSentForReview=true');
+      expect(commitLines, script).toHaveLength(1);
+      expect(commitLines[0], script).not.toContain('changesNotSentForReview');
     }
   });
 

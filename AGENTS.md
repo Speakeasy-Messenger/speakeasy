@@ -31,16 +31,12 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   Preserve the offline parity/fixture-derivation/floor guard in
   `apps/mobile/src/integration/vouchflow-pin-rotation.test.ts` and its weekly
   live-chain workflow at `.github/workflows/vouchflow-pin-check.yml`.
-- Every Play Console edit in `scripts/play-*.sh` must be committed with
-  `changesNotSentForReview=true`. Speakeasy does not use Google review;
-  without the flag Google auto-sends a reviewed-track (production / beta /
-  Open Testing) edit for review and the next edit on that track fails with
-  HTTP 400 INVALID_ARGUMENT. Each script's header explains it, and the guard
-  in `apps/mobile/src/integration/release-pipeline.test.ts` fails if any
-  `:commit` call drops the flag. That same guard also bans `:validate`
-  entirely: the flag is a `commit`-only query parameter, so `:validate`
-  raises the identical 400 on a reviewed track with no way to silence it,
-  and `:commit` validates the edit anyway.
+- Coordinated Play releases use Google's ordinary review flow. The Internal
+  publish and beta promotion scripts invoked by `release-play.yml` must commit
+  without `changesNotSentForReview`; Google rejects that parameter when review
+  is automatic. The contract lives in
+  `apps/mobile/src/integration/release-pipeline.test.ts`. Keep `:validate` out
+  of all Play scripts because `:commit` already validates the atomic edit.
 - Pushing a release tag does NOT reach production/App Store on either
   platform — it only reaches the pre-production tracks. A `v*`/`alpha-*` tag
   (`release-play.yml`) publishes to Play Internal then auto-promotes to

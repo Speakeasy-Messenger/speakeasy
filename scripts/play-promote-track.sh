@@ -9,14 +9,9 @@
 # WIF-friendly bearer-token pattern, same verbose error handling, same
 # atomic-commit safety.
 #
-# Commit-review model: every edit this script creates is committed with
-# `changesNotSentForReview=true`. Speakeasy's release model does NOT use
-# Google review — releases commit directly. Without that query parameter
-# Google auto-sends a reviewed-track edit (production / beta / Open
-# Testing) for review, and the NEXT edit on that track fails hard with
-# HTTP 400 INVALID_ARGUMENT: "Changes cannot be sent for review
-# automatically. Please set the query parameter changesNotSentForReview
-# to true." Keep the flag on every `:commit` call here.
+# Commit-review model: coordinated releases use Google's ordinary review
+# flow. Commit the edit without `changesNotSentForReview`; Google rejects
+# that parameter when changes must be sent for review automatically.
 #
 # There is deliberately NO `:validate` call before the commit. Google
 # documents `changesNotSentForReview` on `edits.commit` ONLY —
@@ -48,9 +43,8 @@
 #                       click "Send to testers" in Play Console. This
 #                       is the safe default for the first time we ship
 #                       to a new track.
-#                       'completed' = published on TO_TRACK as soon as
-#                       the edit commits (no Google review — see the
-#                       commit-review note above).
+#                       'completed' = submitted for publication on TO_TRACK;
+#                       Google may hold it while ordinary review completes.
 #
 # Idempotent: re-running with the same FROM/TO drops a duplicate-
 # versionCode release request, which Google rejects with a clear
@@ -144,21 +138,19 @@ api PUT "$API/edits/$EDIT_ID/tracks/$TO_TRACK" \
 # 4. Commit
 # ───────────────────────────────────────────────────────────────────────
 echo "▸ Committing edit"
-api POST "$API/edits/$EDIT_ID:commit?changesNotSentForReview=true" >/dev/null
+api POST "$API/edits/$EDIT_ID:commit" >/dev/null
 echo "  $FROM_TRACK → $TO_TRACK promotion committed."
 echo ""
 echo "Status next:"
 case "$RELEASE_STATUS" in
   draft)
     echo "  - Release is in 'Ready to publish' on $TO_TRACK."
-    echo "  - Nothing was sent for Google review (commit used"
-    echo "    changesNotSentForReview=true). Click 'Send to testers' in"
-    echo "    Play Console once you've eyeballed the listing."
+    echo "  - The committed changes may enter Google's ordinary review flow."
+    echo "    Click 'Send to testers' in Play Console when they are ready."
     ;;
   completed)
-    echo "  - Release is published on $TO_TRACK — the commit was made with"
-    echo "    changesNotSentForReview=true, so there is no Google review to"
-    echo "    wait on."
+    echo "  - Release was submitted to $TO_TRACK and may remain pending while"
+    echo "    Google's ordinary review completes."
     ;;
   *)
     echo "  - status=$RELEASE_STATUS (advanced — Play Console will show the state)."
