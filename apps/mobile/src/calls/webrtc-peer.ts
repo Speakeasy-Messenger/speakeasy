@@ -32,6 +32,26 @@ import { ensureCameraPermission, ensureMicPermission } from '../permissions/runt
 import { diag, diagImportant } from '../diag/log.js';
 import { audioDiagnostics } from '../native/audio-diagnostics.js';
 import { utf8ToBytes } from '../utils/bytes.js';
+import { AudioRouteController, type AudioRoute, type RouteRequestResult } from './audio-route.js';
+
+/**
+ * Parse InCallManager's `onAudioDeviceChanged.availableAudioDeviceList`, which
+ * is a JSON-encoded string (e.g. `["SPEAKER_PHONE","WIRED_HEADSET"]`). Returns
+ * undefined for a malformed/absent payload so a bad native value can't be read
+ * as "no headsets".
+ */
+function parseAvailableAudioDevices(raw: string | undefined): string[] | undefined {
+  if (typeof raw !== 'string' || raw.length === 0) return undefined;
+  try {
+    const parsed: unknown = JSON.parse(raw);
+    if (Array.isArray(parsed)) {
+      return parsed.filter((d): d is string => typeof d === 'string');
+    }
+  } catch {
+    /* fall through */
+  }
+  return undefined;
+}
 
 /**
  * `react-native-webrtc`-backed `CallPeer` implementation. Audio-only;
@@ -56,28 +76,20 @@ class WebRtcCallPeer implements CallPeer {
   private remoteStreamCb?: (url: string | undefined) => void;
   private startedManager = false;
   /**
-   * Last requested speaker state — re-applied on (re)connect. Initialized
-   * from the media kind in the constructor: video calls default to
-   * speakerphone (you're looking at the screen, phone off the ear), audio /
-   * private calls to the earpiece. This MUST match the orchestrator's
-   * `active.speakerOn = (kind === 'video')` default, or the in-call speaker
-   * button shows ON while InCallManager is still routed to the earpiece —
-   * the user then has to tap twice to sync them (chloro, 2026-06-04).
+   * Headset-aware route selection. Owns the speaker preference and the
+   * plugged-in state; refuses to pick the first route until the headset
+   * query (and the Android device set) is known, so a headset connected
+   * before the call is never overridden by a forced earpiece. Initialized
+   * from the media kind: video calls default to speakerphone (you're looking
+   * at the screen, phone off the ear), audio / private calls to the earpiece.
+   * This MUST match the orchestrator's `active.speakerOn = (kind === 'video')`
+   * default, or the in-call speaker button shows ON while InCallManager is
+   * still routed to the earpiece — the user then has to tap twice to sync
+   * them (chloro, 2026-06-04).
    */
-  private speakerOn = false;
-  /**
-   * Whether a wired headset is currently plugged in. Tracked because
-   * InCallManager's `setForceSpeakerphoneOn` sets `userSelectedAudioDevice`
-   * (SPEAKER_PHONE / EARPIECE), which the native `getPreferredAudioDevice`
-   * checks *before* WIRED_HEADSET — so a forced route silently overrides a
-   * headset plugged in mid-call (the "stayed on speakerphone after I put
-   * headphones on" bug). When this is true we route to the headset instead
-   * of honoring `speakerOn`; on unplug we restore the user's `speakerOn`
-   * preference. Seeded from `getIsWiredHeadsetPluggedIn()` at start and kept
-   * live via the native `WiredHeadset` DeviceEventEmitter event.
-   */
-  private headsetPlugged = false;
+  private readonly audioRoute: AudioRouteController;
   private headsetSub?: EmitterSubscription;
+  private audioDeviceSub?: EmitterSubscription;
   private cameraFacing: 'user' | 'environment' = 'user';
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
@@ -142,7 +154,17 @@ class WebRtcCallPeer implements CallPeer {
     // Speaker default mirrors the orchestrator's `active.speakerOn` so the
     // UI toggle and the actual audio route agree the instant the call
     // connects — no double-tap to reconcile.
-    this.speakerOn = mediaKind === 'video';
+    this.audioRoute = new AudioRouteController({
+      initialSpeakerOn: mediaKind === 'video',
+      // Android emits `onAudioDeviceChanged`; iOS has no equivalent, so it
+      // must not wait for a device set that will never arrive.
+      deviceSetRequired: Platform.OS === 'android',
+      ports: {
+        request: (route) => this.requestAudioRoute(route),
+        log: (event, data) => diag('webrtc', event, data),
+        logImportant: (event, data) => diagImportant('webrtc', event, data),
+      },
+    });
     // ICE transport policy is deliberately left at the WebRTC default
     // (`'all'`): try direct (host/srflx) first and fall back to the TURN
     // relay. Do NOT force `'relay'`.
@@ -494,7 +516,9 @@ class WebRtcCallPeer implements CallPeer {
       const inboundBytesDelta = comparison ? inboundBytes - comparison.inboundBytes : undefined;
       const inboundFramesDelta = comparison ? inboundFrames - comparison.inboundFrames : undefined;
       const outboundBytesDelta = comparison ? outboundBytes - comparison.outboundBytes : undefined;
-      const outboundFramesDelta = comparison ? outboundFrames - comparison.outboundFrames : undefined;
+      const outboundFramesDelta = comparison
+        ? outboundFrames - comparison.outboundFrames
+        : undefined;
       diag('webrtc', `video stats @ ${trigger}`, {
         backgroundInterval,
         backgroundIntervalStatus,
@@ -689,35 +713,34 @@ class WebRtcCallPeer implements CallPeer {
   }
 
   setSpeakerOn(on: boolean): void {
-    this.speakerOn = on;
     diag('webrtc', 'setSpeakerOn', { on });
-    this.applyAudioRoute();
+    this.audioRoute.setSpeakerOn(on);
   }
 
   /**
-   * Apply the intended audio route, honoring a plugged-in wired headset
-   * above the `speakerOn` preference. Without this, forcing speaker (or
-   * earpiece) pins `userSelectedAudioDevice` in InCallManager, which wins
-   * over WIRED_HEADSET in the native route-preference order — so a headset
-   * plugged in mid-call is ignored. When a headset is present we explicitly
-   * `chooseAudioRoute('WIRED_HEADSET')`; otherwise we honor `speakerOn`.
+   * Platform adapter for `AudioRouteController`.
+   *
+   * Android routes through `chooseAudioRoute`: it performs the same
+   * `selectAudioDevice` the old `setForceSpeakerphoneOn` did, but resolves
+   * with the native device-status map (patched to carry
+   * `requestedDeviceSelected`) so the controller can see a dropped request
+   * instead of the library swallowing it in a `Log.e`. iOS has no
+   * `chooseAudioRoute`; forcing speaker off there lets the OS pick a
+   * connected headset, and forcing on picks the speaker.
    */
-  private applyAudioRoute(): void {
-    if (!this.startedManager) return;
-    if (this.headsetPlugged) {
-      // chooseAudioRoute is async (returns a Promise) but we don't await —
-      // it's fire-and-forget routing, same as setForceSpeakerphoneOn.
-      void Promise.resolve(InCallManager.chooseAudioRoute('WIRED_HEADSET')).catch(
-        (err: unknown) => {
-          diag('webrtc', 'chooseAudioRoute headset error', { err: String(err) });
-        },
-      ).finally(() => this.snapshotIosAudio('wired-route-applied'));
-      diag('webrtc', 'audio route -> wired headset', {});
-    } else {
-      InCallManager.setForceSpeakerphoneOn(this.speakerOn);
-      diag('webrtc', 'audio route -> speaker pref', { speakerOn: this.speakerOn });
-      this.snapshotIosAudio('speaker-route-applied');
+  private async requestAudioRoute(route: AudioRoute): Promise<RouteRequestResult> {
+    if (Platform.OS !== 'android') {
+      const speaker = route === 'SPEAKER_PHONE';
+      InCallManager.setForceSpeakerphoneOn(speaker);
+      this.snapshotIosAudio(speaker ? 'speaker-route-applied' : 'headset-route-applied');
+      return { accepted: true };
     }
+    const res = (await InCallManager.chooseAudioRoute(route)) as
+      | { requestedDeviceSelected?: boolean }
+      | undefined;
+    // Optimistic when the native patch is absent (older dev build): without
+    // the field there is nothing to observe, so do not invent a failure.
+    return { accepted: res?.requestedDeviceSelected !== false };
   }
 
   /** Query AVAudioSession itself; never infer the effective iOS route from UI intent. */
@@ -752,28 +775,45 @@ class WebRtcCallPeer implements CallPeer {
     this.headsetSub = DeviceEventEmitter.addListener(
       'WiredHeadset',
       (data: { isPlugged?: boolean } | undefined) => {
-        const plugged = !!data?.isPlugged;
-        if (plugged === this.headsetPlugged) return;
-        this.headsetPlugged = plugged;
-        diag('webrtc', 'WiredHeadset event', { plugged });
-        this.applyAudioRoute();
+        // `hasMic` is deliberately not tracked: routing does not depend on
+        // it, and the brief forbids carrying it speculatively.
+        this.audioRoute.updateHeadset(!!data?.isPlugged);
       },
     );
-    // Seed the current state — a headset already plugged in at call start
-    // won't fire a plug event, and forcing earpiece/speaker would otherwise
-    // override it.
+    // Seed the current state. A headset already plugged in at call start
+    // won't fire a plug event. The controller DEFERS the first route until
+    // this promise resolves, so the seed actually decides the first route
+    // (the pre-fix code applied the route before the seed landed).
     void Promise.resolve(InCallManager.getIsWiredHeadsetPluggedIn())
       .then((res: { isWiredHeadsetPluggedIn?: boolean } | boolean) => {
         const plugged = typeof res === 'boolean' ? res : !!res?.isWiredHeadsetPluggedIn;
-        if (plugged !== this.headsetPlugged) {
-          this.headsetPlugged = plugged;
-          diag('webrtc', 'headset seeded at start', { plugged });
-          this.applyAudioRoute();
-        }
+        diag('webrtc', 'headset seeded at start', { plugged });
+        this.audioRoute.resolveHeadsetSeed(plugged);
       })
       .catch((err: unknown) => {
         diag('webrtc', 'getIsWiredHeadsetPluggedIn error', { err: String(err) });
+        this.audioRoute.failHeadsetSeed();
       });
+  }
+
+  /**
+   * Track InCallManager's live audio-device set. The controller waits for the
+   * first event before routing on Android, and re-applies a dropped headset
+   * request once the device is actually in the set (the library clears and
+   * asynchronously repopulates it during `start()`).
+   */
+  private subscribeAudioDevices(): void {
+    if (this.audioDeviceSub) return;
+    if (Platform.OS !== 'android') return;
+    this.audioDeviceSub = DeviceEventEmitter.addListener(
+      'onAudioDeviceChanged',
+      (data: { availableAudioDeviceList?: string } | undefined) => {
+        const devices = parseAvailableAudioDevices(data?.availableAudioDeviceList);
+        if (!devices) return;
+        diag('webrtc', 'audio device set changed', { devices });
+        this.audioRoute.updateDevices(devices);
+      },
+    );
   }
 
   close(): void {
@@ -815,6 +855,11 @@ class WebRtcCallPeer implements CallPeer {
       this.headsetSub.remove();
       this.headsetSub = undefined;
     }
+    if (this.audioDeviceSub) {
+      this.audioDeviceSub.remove();
+      this.audioDeviceSub = undefined;
+    }
+    this.audioRoute.stop();
     if (this.startedManager) {
       InCallManager.stop({});
       this.startedManager = false;
@@ -1037,6 +1082,12 @@ class WebRtcCallPeer implements CallPeer {
     // into a PiP bubble when backgrounded (bug #4 — verified on a real iPhone
     // via the device log: audio-mode = prohibited, video-mode = possible).
     const media = this.mediaKind === 'video' ? 'video' : 'audio';
+    // Register the headset + audio-device listeners BEFORE InCallManager.start()
+    // so the `onAudioDeviceChanged` the library emits as it populates its
+    // device set during start() cannot race past us and leave the controller
+    // waiting forever. The seed query is also valid before start().
+    this.subscribeHeadset();
+    this.subscribeAudioDevices();
     if (Platform.OS !== 'ios') {
       InCallManager.start({ media, auto: true });
     }
@@ -1047,13 +1098,12 @@ class WebRtcCallPeer implements CallPeer {
     // here only for route controls, headset events, and screen-on behavior.
     this.startedManager = true;
     InCallManager.setKeepScreenOn(true);
-    // Listen for headset plug/unplug and seed the current state BEFORE
-    // applying the route, so a headset already plugged in wins over the
-    // speaker/earpiece preference.
-    this.subscribeHeadset();
-    this.applyAudioRoute();
+    // The controller refuses to pick the first route until the seed (and, on
+    // Android, the native device set) is known, so a headset already plugged
+    // in wins over the speaker/earpiece preference.
+    this.audioRoute.start();
     diag('webrtc', 'call audio controls ready', {
-      speakerOn: this.speakerOn,
+      speakerOn: this.audioRoute.currentSpeakerOn,
       owner: Platform.OS === 'ios' ? 'callkit' : 'incall-manager',
     });
   }
@@ -1070,10 +1120,10 @@ class WebRtcCallPeer implements CallPeer {
    */
   private reassertAudioRoute(): void {
     if (!this.startedManager) return;
-    this.applyAudioRoute();
+    this.audioRoute.reassert();
     diag('webrtc', 'audio route re-asserted (connected)', {
-      speakerOn: this.speakerOn,
-      headsetPlugged: this.headsetPlugged,
+      speakerOn: this.audioRoute.currentSpeakerOn,
+      headsetPlugged: this.audioRoute.isHeadsetPlugged,
     });
   }
 

@@ -5,6 +5,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
 - iOS CallKit/PushKit ownership and the required physical-device verification
   live in `apps/mobile/ios/PARITY.md`; keep native and JS call changes aligned
   with that contract.
+- Android call audio routing is headset-aware in
+  `apps/mobile/src/calls/audio-route.ts` (`AudioRouteController`), wired from
+  `apps/mobile/src/calls/webrtc-peer.ts`. Do not pick a route until the headset
+  seed resolves and, on Android, InCallManager reports its device set; a route
+  request the platform drops must stay observable. The patch
+  `apps/mobile/patches/react-native-incall-manager+4.2.1.patch` adds
+  `TYPE_USB_HEADSET` detection and request observability. The reproduced
+  failure and evidence are in `apps/mobile/src/calls/audio-route.test.ts`.
 - The Vouchflow device-confidence floor is set in several coupled places and
   must stay in agreement, or device verification dead-ends: the vouchflow.dev
   dashboard, `MIN_CONFIDENCE` in `packages/vouchflow/src/types.ts`, the server
