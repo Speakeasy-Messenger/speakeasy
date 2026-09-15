@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
-index 10cb1e5..0f7f9d5 100644
+index 10cb1e5..afd9209 100644
 --- a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 +++ b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 @@ -480,6 +480,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
@@ -60,23 +60,15 @@ index 10cb1e5..0f7f9d5 100644
              startEvents();
              UiThreadUtil.runOnUiThread(() -> {
                  bluetoothManager.start();
-@@ -574,6 +609,15 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -574,6 +609,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
              selectedAudioDevice = AudioDevice.NONE;
              audioDevices.clear();
              updateAudioRoute();
 +            emitSpeakeasyAudioDiagnostics("focus requested", initialFocusResult, null);
-+            // Speakeasy: the snapshot above is emitted on this thread before the
-+            // UI thread has run updateAudioDeviceState, so its
-+            // selectedAudioDevice and availableAudioDevices are still empty by
-+            // construction and must not be read as "no headset present". Posted
-+            // after that runnable (FIFO on the main looper), this snapshot
-+            // records the settled startup state once the device list exists.
-+            UiThreadUtil.runOnUiThread(() ->
-+                    emitSpeakeasyAudioDiagnostics("startup route settled", null, null));
  
              if (!ringbackUriType.isEmpty()) {
                  startRingback(ringbackUriType);
-@@ -1516,16 +1560,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1516,16 +1552,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
      public void chooseAudioRoute(String audioRoute, Promise promise) {
          Log.d(TAG, "RNInCallManager.chooseAudioRoute(): user choose audioDevice = " + audioRoute);
  
@@ -108,7 +100,7 @@ index 10cb1e5..0f7f9d5 100644
      }
  
      private static int getRandomInteger(int min, int max) {
-@@ -1633,14 +1687,28 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1633,14 +1679,28 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          updateAudioDeviceState();
      }
  
@@ -140,7 +132,7 @@ index 10cb1e5..0f7f9d5 100644
      }
  
      /** Returns current set of available/selectable audio devices. */
-@@ -1726,6 +1794,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1726,6 +1786,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET) {
                      Log.d(TAG, "hasWiredHeadset: found wired headset");
                      return true;
@@ -153,7 +145,7 @@ index 10cb1e5..0f7f9d5 100644
                  } else if (type == AudioDeviceInfo.TYPE_USB_DEVICE) {
                      Log.d(TAG, "hasWiredHeadset: found USB audio device");
                      return true;
-@@ -1845,6 +1919,11 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1845,6 +1911,11 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  }
                  */
                  sendEvent("onAudioDeviceChanged", getAudioDeviceStatusMap());
@@ -165,7 +157,7 @@ index 10cb1e5..0f7f9d5 100644
              }
              Log.d(TAG, "--- updateAudioDeviceState done");
          });
-@@ -1896,4 +1975,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1896,4 +1967,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          return newAudioDevice;
      }
  }

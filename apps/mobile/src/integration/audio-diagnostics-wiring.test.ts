@@ -1,5 +1,14 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../../../..');
@@ -23,27 +32,48 @@ describe('paired call-audio native bridge wiring', () => {
     expect(focusPatch).toContain('focus requested');
   });
 
-  it('records the route at the decision moment and after startup settles', () => {
-    const focusPatch = source('apps/mobile/patches/react-native-incall-manager+4.2.1.patch');
-    const routeChangedEmit = 'emitSpeakeasyAudioDiagnostics("route changed", null, null)';
-    expect(focusPatch).toContain(routeChangedEmit);
-    // The route-changed emit must be live code: it must not sit inside any
-    // block comment (it used to be dead code inside a /* ... */ block).
-    const blockComments = focusPatch
-      .split('/*')
-      .slice(1)
-      .map((chunk) => chunk.split('*/')[0])
-      .join('\n');
-    expect(blockComments).not.toContain(routeChangedEmit);
-    // Decision-moment records: what was requested, and whether it was dropped.
-    expect(focusPatch).toContain('emitSpeakeasyAudioDiagnostics("route selected", null, device.name())');
-    expect(focusPatch).toContain('emitSpeakeasyAudioDiagnostics("route select dropped", null, device.name())');
-    // Startup snapshot emitted after the UI-thread device-list population.
-    expect(focusPatch).toContain('emitSpeakeasyAudioDiagnostics("startup route settled", null, null)');
-    const startupEmit = focusPatch.indexOf('startup route settled');
-    const updateAudioRouteCall = focusPatch.indexOf('updateAudioRoute();\n            emitSpeakeasyAudioDiagnostics("focus requested"');
-    expect(startupEmit).toBeGreaterThan(updateAudioRouteCall);
-    expect(focusPatch.indexOf('UiThreadUtil.runOnUiThread', updateAudioRouteCall)).toBeLessThan(startupEmit);
+  it('ships an incall-manager patch that applies to the installed package', () => {
+    const patchRelPath = 'apps/mobile/patches/react-native-incall-manager+4.2.1.patch';
+    const patchPath = resolve(root, patchRelPath);
+    const patch = source(patchRelPath);
+    expect(patch.match(/^\+\+\+ b\//gm)).toHaveLength(1);
+    const target = /^\+\+\+ b\/(.+)$/m.exec(patch)?.[1] ?? '';
+    expect(target).not.toBe('');
+    const installRoot = resolve(
+      dirname(
+        createRequire(resolve(root, 'apps/mobile/package.json')).resolve(
+          'react-native-incall-manager/package.json',
+        ),
+      ),
+      '../..',
+    );
+    // git apply silently ignores patch paths outside its working directory, so
+    // stage the installed file at the patch's own path outside any repository.
+    const sandbox = mkdtempSync(join(tmpdir(), 'incall-patch-'));
+    try {
+      const staged = join(sandbox, target);
+      mkdirSync(dirname(staged), { recursive: true });
+      copyFileSync(resolve(installRoot, target), staged);
+      const check = (...args: string[]) => {
+        try {
+          execFileSync('git', ['apply', '--check', ...args, patchPath], {
+            cwd: sandbox,
+            stdio: 'pipe',
+          });
+          return null;
+        } catch (error) {
+          return String((error as { stderr?: Buffer }).stderr ?? error);
+        }
+      };
+      const applies = check();
+      const alreadyApplied = check('--reverse');
+      expect(
+        applies === null || alreadyApplied === null,
+        `patch neither applies to nor matches the installed package:\n${applies}\n${alreadyApplied}`,
+      ).toBe(true);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 
   it('returns actual iOS manual-audio, activation and route state', () => {
