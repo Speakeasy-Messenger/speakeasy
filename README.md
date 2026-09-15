@@ -80,7 +80,9 @@ For a failed real call, open **About**, tap the version five times, choose
 **Copy logs**, and paste the result into the bug report. The 200-event buffer
 persists across app backgrounding and one relaunch. Call diagnostics record app
 state, CallKit/PushKit lifecycle, PiP lifecycle and dimensions, WebRTC
-connection state, and five-second inbound/outbound byte and frame counters.
+connection state, Android audio focus and route decisions (which output device
+was requested and which one the platform applied), and five-second
+inbound/outbound byte and frame counters.
 The frame-counter entries do not record video frames, SDP, IP addresses, or
 peer identifiers; the copied buffer still contains other support breadcrumbs
 and should be treated as diagnostic data. On iOS, a log can prove that the VoIP

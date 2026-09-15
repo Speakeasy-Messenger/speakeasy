@@ -1,27 +1,33 @@
 diff --git a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
-index 10cb1e5..22fd93a 100644
+index 10cb1e5..eab56ec 100644
 --- a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 +++ b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 @@ -480,6 +480,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          data.putString("eventText", focusChangeStr);
          data.putInt("eventCode", focusChange);
          sendEvent("onAudioFocusChange", data);
-+        emitSpeakeasyAudioDiagnostics("focus changed", focusChangeStr);
++        emitSpeakeasyAudioDiagnostics("focus changed", focusChangeStr, null);
      }
  
      /*
-@@ -538,6 +539,35 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -538,6 +539,41 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          }
      }
  
 +    // Speakeasy diagnostic beta: metadata-only focus/route truth. Null means the
 +    // platform cannot provide a field; never turn missing state into a false zero.
-+    private void emitSpeakeasyAudioDiagnostics(String event, @Nullable String focusResult) {
++    private void emitSpeakeasyAudioDiagnostics(String event, @Nullable String focusResult,
++            @Nullable String requestedDevice) {
 +        WritableMap data = Arguments.createMap();
 +        data.putString("event", event);
++        data.putBoolean("important", true);
 +        data.putDouble("nativeElapsedMs", android.os.SystemClock.elapsedRealtime());
 +        if (focusResult == null || focusResult.isEmpty()) data.putNull("focusResult");
 +        else data.putString("focusResult", focusResult);
++        // Speakeasy: for "route selected"/"route select dropped" this is the
++        // device the caller asked for at the decision moment; null elsewhere.
++        if (requestedDevice == null) data.putNull("requestedDevice");
++        else data.putString("requestedDevice", requestedDevice);
 +        data.putInt("mode", audioManager.getMode());
 +        data.putBoolean("microphoneMuted", audioManager.isMicrophoneMute());
 +        data.putBoolean("speakerphoneOn", audioManager.isSpeakerphoneOn());
@@ -46,7 +52,7 @@ index 10cb1e5..22fd93a 100644
      @ReactMethod
      public void start(final String _media, final boolean auto, final String ringbackUriType) {
          media = _media;
-@@ -557,7 +587,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -557,7 +593,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  stopRingtone(); // --- use brandnew instance
              }
              storeOriginalAudioSetup();
@@ -55,15 +61,15 @@ index 10cb1e5..22fd93a 100644
              startEvents();
              UiThreadUtil.runOnUiThread(() -> {
                  bluetoothManager.start();
-@@ -574,6 +604,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -574,6 +610,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
              selectedAudioDevice = AudioDevice.NONE;
              audioDevices.clear();
              updateAudioRoute();
-+            emitSpeakeasyAudioDiagnostics("focus requested", initialFocusResult);
++            emitSpeakeasyAudioDiagnostics("focus requested", initialFocusResult, null);
  
              if (!ringbackUriType.isEmpty()) {
                  startRingback(ringbackUriType);
-@@ -1516,16 +1547,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1516,16 +1553,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
      public void chooseAudioRoute(String audioRoute, Promise promise) {
          Log.d(TAG, "RNInCallManager.chooseAudioRoute(): user choose audioDevice = " + audioRoute);
  
@@ -95,7 +101,7 @@ index 10cb1e5..22fd93a 100644
      }
  
      private static int getRandomInteger(int min, int max) {
-@@ -1633,14 +1675,20 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1633,14 +1680,28 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          updateAudioDeviceState();
      }
  
@@ -111,15 +117,23 @@ index 10cb1e5..22fd93a 100644
          if (device != AudioDevice.NONE && !audioDevices.contains(device)) {
              Log.e(TAG, "selectAudioDevice() Can not select " + device + " from available " + audioDevices);
 -            return;
++            // Speakeasy: a dropped route request must stay observable in the
++            // diagnostics, not only in this Log.e.
++            emitSpeakeasyAudioDiagnostics("route select dropped", null, device.name());
 +            return false;
          }
          userSelectedAudioDevice = device;
++        // Speakeasy: capture the route at the decision moment, before the
++        // UI-thread updateAudioDeviceState applies it (that apply can observe a
++        // still-empty device list and drop it; selectedAudioDevice here is
++        // still the previous route, requestedDevice is the decision).
++        emitSpeakeasyAudioDiagnostics("route selected", null, device.name());
          updateAudioDeviceState();
 +        return true;
      }
  
      /** Returns current set of available/selectable audio devices. */
-@@ -1726,6 +1774,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1726,6 +1787,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET) {
                      Log.d(TAG, "hasWiredHeadset: found wired headset");
                      return true;
@@ -132,15 +146,19 @@ index 10cb1e5..22fd93a 100644
                  } else if (type == AudioDeviceInfo.TYPE_USB_DEVICE) {
                      Log.d(TAG, "hasWiredHeadset: found USB audio device");
                      return true;
-@@ -1842,6 +1896,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
-                 if (audioManagerEvents != null) {
-                     // Notify a listening client that audio device has been changed.
-                     audioManagerEvents.onAudioDeviceChanged(selectedAudioDevice, audioDevices);
-+                    emitSpeakeasyAudioDiagnostics("route changed", null);
+@@ -1845,6 +1912,11 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  }
                  */
                  sendEvent("onAudioDeviceChanged", getAudioDeviceStatusMap());
-@@ -1896,4 +1951,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
++                // Speakeasy: this emit used to sit inside the block comment
++                // above and could never run, so the applied route was only ever
++                // visible indirectly. It fires on the UI thread right after the
++                // device switch, so selectedAudioDevice is the new route.
++                emitSpeakeasyAudioDiagnostics("route changed", null, null);
+             }
+             Log.d(TAG, "--- updateAudioDeviceState done");
+         });
+@@ -1896,4 +1968,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          return newAudioDevice;
      }
  }

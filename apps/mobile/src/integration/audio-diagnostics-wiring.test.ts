@@ -1,5 +1,14 @@
-import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { execFileSync } from 'node:child_process';
+import {
+  copyFileSync,
+  mkdirSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'node:fs';
+import { createRequire } from 'node:module';
+import { tmpdir } from 'node:os';
+import { dirname, join, resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 const root = resolve(__dirname, '../../../..');
@@ -21,6 +30,50 @@ describe('paired call-audio native bridge wiring', () => {
     expect(track).toContain('underrunCount');
     expect(focusPatch).toContain('SpeakeasyAudioFocusDiagnostics');
     expect(focusPatch).toContain('focus requested');
+  });
+
+  it('ships an incall-manager patch that applies to the installed package', () => {
+    const patchRelPath = 'apps/mobile/patches/react-native-incall-manager+4.2.1.patch';
+    const patchPath = resolve(root, patchRelPath);
+    const patch = source(patchRelPath);
+    expect(patch.match(/^\+\+\+ b\//gm)).toHaveLength(1);
+    const target = /^\+\+\+ b\/(.+)$/m.exec(patch)?.[1] ?? '';
+    expect(target).not.toBe('');
+    const installRoot = resolve(
+      dirname(
+        createRequire(resolve(root, 'apps/mobile/package.json')).resolve(
+          'react-native-incall-manager/package.json',
+        ),
+      ),
+      '../..',
+    );
+    // git apply silently ignores patch paths outside its working directory, so
+    // stage the installed file at the patch's own path outside any repository.
+    const sandbox = mkdtempSync(join(tmpdir(), 'incall-patch-'));
+    try {
+      const staged = join(sandbox, target);
+      mkdirSync(dirname(staged), { recursive: true });
+      copyFileSync(resolve(installRoot, target), staged);
+      const check = (...args: string[]) => {
+        try {
+          execFileSync('git', ['apply', '--check', ...args, patchPath], {
+            cwd: sandbox,
+            stdio: 'pipe',
+          });
+          return null;
+        } catch (error) {
+          return String((error as { stderr?: Buffer }).stderr ?? error);
+        }
+      };
+      const applies = check();
+      const alreadyApplied = check('--reverse');
+      expect(
+        applies === null || alreadyApplied === null,
+        `patch neither applies to nor matches the installed package:\n${applies}\n${alreadyApplied}`,
+      ).toBe(true);
+    } finally {
+      rmSync(sandbox, { recursive: true, force: true });
+    }
   });
 
   it('returns actual iOS manual-audio, activation and route state', () => {
