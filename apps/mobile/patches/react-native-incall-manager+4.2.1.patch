@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
-index 10cb1e5..afd9209 100644
+index 10cb1e5..eab56ec 100644
 --- a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 +++ b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 @@ -480,6 +480,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
@@ -10,7 +10,7 @@ index 10cb1e5..afd9209 100644
      }
  
      /*
-@@ -538,6 +539,40 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -538,6 +539,41 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          }
      }
  
@@ -20,6 +20,7 @@ index 10cb1e5..afd9209 100644
 +            @Nullable String requestedDevice) {
 +        WritableMap data = Arguments.createMap();
 +        data.putString("event", event);
++        data.putBoolean("important", true);
 +        data.putDouble("nativeElapsedMs", android.os.SystemClock.elapsedRealtime());
 +        if (focusResult == null || focusResult.isEmpty()) data.putNull("focusResult");
 +        else data.putString("focusResult", focusResult);
@@ -51,7 +52,7 @@ index 10cb1e5..afd9209 100644
      @ReactMethod
      public void start(final String _media, final boolean auto, final String ringbackUriType) {
          media = _media;
-@@ -557,7 +592,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -557,7 +593,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  stopRingtone(); // --- use brandnew instance
              }
              storeOriginalAudioSetup();
@@ -60,7 +61,7 @@ index 10cb1e5..afd9209 100644
              startEvents();
              UiThreadUtil.runOnUiThread(() -> {
                  bluetoothManager.start();
-@@ -574,6 +609,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -574,6 +610,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
              selectedAudioDevice = AudioDevice.NONE;
              audioDevices.clear();
              updateAudioRoute();
@@ -68,7 +69,7 @@ index 10cb1e5..afd9209 100644
  
              if (!ringbackUriType.isEmpty()) {
                  startRingback(ringbackUriType);
-@@ -1516,16 +1552,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1516,16 +1553,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
      public void chooseAudioRoute(String audioRoute, Promise promise) {
          Log.d(TAG, "RNInCallManager.chooseAudioRoute(): user choose audioDevice = " + audioRoute);
  
@@ -100,7 +101,7 @@ index 10cb1e5..afd9209 100644
      }
  
      private static int getRandomInteger(int min, int max) {
-@@ -1633,14 +1679,28 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1633,14 +1680,28 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          updateAudioDeviceState();
      }
  
@@ -132,7 +133,7 @@ index 10cb1e5..afd9209 100644
      }
  
      /** Returns current set of available/selectable audio devices. */
-@@ -1726,6 +1786,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1726,6 +1787,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET) {
                      Log.d(TAG, "hasWiredHeadset: found wired headset");
                      return true;
@@ -145,7 +146,7 @@ index 10cb1e5..afd9209 100644
                  } else if (type == AudioDeviceInfo.TYPE_USB_DEVICE) {
                      Log.d(TAG, "hasWiredHeadset: found USB audio device");
                      return true;
-@@ -1845,6 +1911,11 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1845,6 +1912,11 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  }
                  */
                  sendEvent("onAudioDeviceChanged", getAudioDeviceStatusMap());
@@ -157,7 +158,7 @@ index 10cb1e5..afd9209 100644
              }
              Log.d(TAG, "--- updateAudioDeviceState done");
          });
-@@ -1896,4 +1967,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1896,4 +1968,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          return newAudioDevice;
      }
  }
