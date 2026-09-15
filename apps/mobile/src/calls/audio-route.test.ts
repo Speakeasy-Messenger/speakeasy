@@ -1,9 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import {
-  AudioRouteController,
-  type AudioRoute,
-  type RouteRequestResult,
-} from './audio-route.js';
+import { AudioRouteController, type AudioRoute, type RouteRequestResult } from './audio-route.js';
 
 /**
  * Regression coverage for the confirmed Android bug: voice calls were silent
@@ -35,7 +31,9 @@ interface Harness {
   platformAvailable: Set<string>;
 }
 
-function harness(options: { deviceSetRequired?: boolean; initialSpeakerOn?: boolean } = {}): Harness {
+function harness(
+  options: { deviceSetRequired?: boolean; initialSpeakerOn?: boolean } = {},
+): Harness {
   const requests: AudioRoute[] = [];
   const applied: AudioRoute[] = [];
   const important: string[] = [];

@@ -32,11 +32,7 @@ import { ensureCameraPermission, ensureMicPermission } from '../permissions/runt
 import { diag, diagImportant } from '../diag/log.js';
 import { audioDiagnostics } from '../native/audio-diagnostics.js';
 import { utf8ToBytes } from '../utils/bytes.js';
-import {
-  AudioRouteController,
-  type AudioRoute,
-  type RouteRequestResult,
-} from './audio-route.js';
+import { AudioRouteController, type AudioRoute, type RouteRequestResult } from './audio-route.js';
 
 /**
  * Parse InCallManager's `onAudioDeviceChanged.availableAudioDeviceList`, which
@@ -520,7 +516,9 @@ class WebRtcCallPeer implements CallPeer {
       const inboundBytesDelta = comparison ? inboundBytes - comparison.inboundBytes : undefined;
       const inboundFramesDelta = comparison ? inboundFrames - comparison.inboundFrames : undefined;
       const outboundBytesDelta = comparison ? outboundBytes - comparison.outboundBytes : undefined;
-      const outboundFramesDelta = comparison ? outboundFrames - comparison.outboundFrames : undefined;
+      const outboundFramesDelta = comparison
+        ? outboundFrames - comparison.outboundFrames
+        : undefined;
       diag('webrtc', `video stats @ ${trigger}`, {
         backgroundInterval,
         backgroundIntervalStatus,
