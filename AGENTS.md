@@ -37,6 +37,14 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   is automatic. The contract lives in
   `apps/mobile/src/integration/release-pipeline.test.ts`. Keep `:validate` out
   of all Play scripts because `:commit` already validates the atomic edit.
+- Paired-call audio diagnostics (the `diag-*` beta builds): every `promise.resolve`
+  value in `AudioDiagnosticsModule.kt` must go through the pure converters in
+  `BridgeWritable.kt` — the RN bridge throws "Cannot convert argument of type class ..."
+  on raw Kotlin collections. Conversion contract:
+  `apps/mobile/android/app/src/test/java/xyz/speakeasyapp/app/audiodiag/BridgeWritableTest.kt`.
+  The diag ring's `native-audio`/`webrtc-audio` eviction floor in `apps/mobile/src/diag/log.ts`
+  is load-bearing: without it, ordinary sampling floods starve the audio records the build
+  exists to collect.
 - Pushing a release tag does NOT reach production/App Store on either
   platform — it only reaches the pre-production tracks. A `v*`/`alpha-*` tag
   (`release-play.yml`) publishes to Play Internal then auto-promotes to

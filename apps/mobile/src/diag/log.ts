@@ -28,6 +28,20 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 
 const MAX_ENTRIES = 200;
+/**
+ * Tags belonging to the paired-call audio-diagnostic channel. These are the
+ * records the diagnostic beta build exists to collect (capture/playout
+ * sampling, audio-focus and route changes, native snapshots, webrtc-audio
+ * stats) — and every periodic one of them is ordinary (important = false).
+ */
+const AUDIO_DIAG_TAGS = new Set(['native-audio', 'webrtc-audio']);
+/**
+ * How many audio-channel entries the ring protects from ordinary eviction.
+ * 100 of 200 slots ≈ 200 s of periodic webrtc-audio stats (one per 2 s) plus
+ * dozens of native capture/playout/focus records — far more than a full call
+ * produces, while ordinary logging keeps the other half of the ring.
+ */
+const AUDIO_DIAG_FLOOR = 100;
 const PERSIST_KEY = '@speakeasy/diag-buffer-v1';
 const PERSIST_THROTTLE_MS = 5000;
 
@@ -109,11 +123,44 @@ export function diagImportant(tag: string, msg: string, ctx?: Record<string, unk
   appendDiag({ t: Date.now(), tag, msg, ctx, important: true });
 }
 
+function isAudioDiagEntry(entry: DiagEntry): boolean {
+  return AUDIO_DIAG_TAGS.has(entry.tag);
+}
+
+/**
+ * Index of the entry to drop when the ring overflows.
+ *
+ * The previous rule — drop the oldest non-important entry — let a flood of
+ * ordinary sampling entries evict every audio-diagnostic record before
+ * upload: the 252-event diag-1.0.74-rc.2 upload contained zero capture,
+ * playout, focus or route records and a single t=0 webrtc-audio snapshot.
+ * The audio channel therefore gets a floor: while the ring holds
+ * AUDIO_DIAG_FLOOR or fewer audio entries, they are never the ones evicted.
+ * Eviction preference:
+ *   1. oldest ordinary (non-important, non-audio) entry — the usual case,
+ *   2. oldest non-important audio entry once the ring exceeds its floor,
+ *      so a long call rolls old audio samples rather than wedging,
+ *   3. oldest non-audio entry (important included) when only audio remains,
+ *      keeping the floor from starving the lifecycle/error log entirely,
+ *   4. oldest entry, when the ring is saturated with audio records.
+ * The total stays bounded at MAX_ENTRIES in every case.
+ */
+function evictIndex(): number {
+  const audioCount = buffer.reduce((n, e) => (isAudioDiagEntry(e) ? n + 1 : n), 0);
+  const ordinary = buffer.findIndex((e) => !e.important && !isAudioDiagEntry(e));
+  if (ordinary >= 0) return ordinary;
+  if (audioCount > AUDIO_DIAG_FLOOR) {
+    const audio = buffer.findIndex((e) => !e.important && isAudioDiagEntry(e));
+    if (audio >= 0) return audio;
+  }
+  const nonAudio = buffer.findIndex((e) => !isAudioDiagEntry(e));
+  return nonAudio >= 0 ? nonAudio : 0;
+}
+
 function appendDiag(entry: DiagEntry): void {
   buffer.push(entry);
   if (buffer.length > MAX_ENTRIES) {
-    const removable = buffer.findIndex((candidate) => !candidate.important);
-    buffer.splice(removable >= 0 ? removable : 0, 1);
+    buffer.splice(evictIndex(), 1);
   }
   schedulePersist();
   for (const s of subscribers) {
