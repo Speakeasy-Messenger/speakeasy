@@ -23,6 +23,29 @@ describe('paired call-audio native bridge wiring', () => {
     expect(focusPatch).toContain('focus requested');
   });
 
+  it('records the route at the decision moment and after startup settles', () => {
+    const focusPatch = source('apps/mobile/patches/react-native-incall-manager+4.2.1.patch');
+    const routeChangedEmit = 'emitSpeakeasyAudioDiagnostics("route changed", null, null)';
+    expect(focusPatch).toContain(routeChangedEmit);
+    // The route-changed emit must be live code: it must not sit inside any
+    // block comment (it used to be dead code inside a /* ... */ block).
+    const blockComments = focusPatch
+      .split('/*')
+      .slice(1)
+      .map((chunk) => chunk.split('*/')[0])
+      .join('\n');
+    expect(blockComments).not.toContain(routeChangedEmit);
+    // Decision-moment records: what was requested, and whether it was dropped.
+    expect(focusPatch).toContain('emitSpeakeasyAudioDiagnostics("route selected", null, device.name())');
+    expect(focusPatch).toContain('emitSpeakeasyAudioDiagnostics("route select dropped", null, device.name())');
+    // Startup snapshot emitted after the UI-thread device-list population.
+    expect(focusPatch).toContain('emitSpeakeasyAudioDiagnostics("startup route settled", null, null)');
+    const startupEmit = focusPatch.indexOf('startup route settled');
+    const updateAudioRouteCall = focusPatch.indexOf('updateAudioRoute();\n            emitSpeakeasyAudioDiagnostics("focus requested"');
+    expect(startupEmit).toBeGreaterThan(updateAudioRouteCall);
+    expect(focusPatch.indexOf('UiThreadUtil.runOnUiThread', updateAudioRouteCall)).toBeLessThan(startupEmit);
+  });
+
   it('returns actual iOS manual-audio, activation and route state', () => {
     const patch = source('apps/mobile/patches/react-native-webrtc+124.0.7.patch');
     const bridge = source('apps/mobile/src/calls/callkeep-bridge.ts');
