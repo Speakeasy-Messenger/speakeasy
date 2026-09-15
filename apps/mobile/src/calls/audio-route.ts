@@ -27,8 +27,8 @@
  *     which the native patch widens to include `TYPE_USB_HEADSET`, and
  *     `BLUETOOTH`) as a headset and routes to it;
  *   - reports a rejected route request through `logImportant` instead of
- *     letting the platform drop it silently, and retries it when the device
- *     set changes rather than after a guessed delay.
+ *     letting the platform drop it silently, and retries it when the routing
+ *     state changes rather than after a guessed delay.
  */
 
 /** Routes the app can request from InCallManager. */
@@ -66,8 +66,9 @@ export class AudioRouteController {
   /**
    * Set once the user explicitly requests the speaker. Native InCallManager
    * pins `userSelectedAudioDevice`, which its `getPreferredAudioDevice`
-   * checks BEFORE Bluetooth — an explicit speaker tap must likewise outrank a
-   * connected headset until the user turns the speaker off.
+   * checks BEFORE Bluetooth — an explicit speaker tap outranks a headset that
+   * was ALREADY connected when the tap happened. A NEW headset connect event
+   * clears it again so the audio moves to the freshly plugged headset.
    */
   private speakerForced = false;
   private headsetPlugged = false;
@@ -84,8 +85,12 @@ export class AudioRouteController {
   private inFlight?: AudioRoute;
   /** Monotonic request id so a superseded in-flight request cannot win. */
   private requestSeq = 0;
-  /** Bumped on every native device-set update, to detect updates mid-request. */
-  private deviceSetVersion = 0;
+  /**
+   * Bumped whenever the routing inputs change (speaker toggle, headset plug
+   * event, native device-set update) so a settled request can tell whether
+   * its outcome is still current.
+   */
+  private stateVersion = 0;
   /** A `reassert()` that arrived while a request was in flight. */
   private pendingReassert = false;
 
@@ -119,6 +124,7 @@ export class AudioRouteController {
   setSpeakerOn(on: boolean): void {
     this.speakerOn = on;
     this.speakerForced = on;
+    this.stateVersion += 1;
     // Explicit user intent must not be blocked by the "state unknown"
     // deferral; only the automatic default route waits.
     this.maybeApply(true);
@@ -144,6 +150,8 @@ export class AudioRouteController {
   updateHeadset(plugged: boolean): void {
     if (plugged === this.headsetPlugged) return;
     this.headsetPlugged = plugged;
+    if (plugged) this.speakerForced = false;
+    this.stateVersion += 1;
     this.options.ports.log('WiredHeadset event', { plugged });
     this.maybeApply();
   }
@@ -151,12 +159,24 @@ export class AudioRouteController {
   /**
    * The native audio-device set changed (Android `onAudioDeviceChanged`).
    * This is what unblocks the first route and what retries a request the
-   * platform dropped in its clear/repopulate window.
+   * platform dropped in its clear/repopulate window. A headset route newly
+   * appearing in an already-known set is a live connect event: it clears the
+   * speaker override so the audio moves to the headset. The FIRST set is the
+   * initial enumeration — devices already connected at call start — and must
+   * not clear an override the user explicitly set.
    */
   updateDevices(devices: Iterable<string>): void {
+    const wasKnown = this.devicesKnown;
+    const previous = this.available;
     this.devicesKnown = true;
     this.available = new Set(devices);
-    this.deviceSetVersion += 1;
+    if (wasKnown) {
+      const added = [...this.available].filter((d) => !previous.has(d));
+      if (added.includes('BLUETOOTH') || added.includes('WIRED_HEADSET')) {
+        this.speakerForced = false;
+      }
+    }
+    this.stateVersion += 1;
     this.maybeApply();
   }
 
@@ -194,7 +214,7 @@ export class AudioRouteController {
 
     const seq = ++this.requestSeq;
     this.inFlight = desired;
-    const versionAtRequest = this.deviceSetVersion;
+    const stateAtRequest = this.stateVersion;
     const available = [...this.available];
     this.options.ports.log('audio route request', {
       desired,
@@ -209,6 +229,10 @@ export class AudioRouteController {
         if (result.accepted) {
           this.lastAccepted = desired;
           this.options.ports.log('audio route applied', { route: desired });
+          // Re-evaluate so a toggle that landed while this request was in
+          // flight is not lost; desired === lastAccepted returns early.
+          if (this.pendingReassert) this.flushPendingReassert();
+          else this.maybeApply();
         } else {
           this.lastAccepted = undefined;
           // Observable, not a log line buried inside the native library.
@@ -216,15 +240,12 @@ export class AudioRouteController {
             route: desired,
             available,
           });
-          // The device set may have been repopulated while this request was in
-          // flight. If so, retry now that the route may be selectable; a
-          // later device-set change would otherwise have been swallowed by the
-          // in-flight guard and the route would never recover.
-          if (versionAtRequest !== this.deviceSetVersion) {
-            this.maybeApply();
-          }
+          // Retry only when the routing state moved while this request was in
+          // flight (device set repopulated, user toggled); re-requesting an
+          // unchanged dropped route would just drop again, forever.
+          if (this.pendingReassert) this.flushPendingReassert();
+          else if (stateAtRequest !== this.stateVersion) this.maybeApply();
         }
-        this.flushPendingReassert();
       })
       .catch((err: unknown) => {
         if (seq !== this.requestSeq) return;
@@ -234,7 +255,8 @@ export class AudioRouteController {
           route: desired,
           err: String(err),
         });
-        this.flushPendingReassert();
+        if (this.pendingReassert) this.flushPendingReassert();
+        else if (stateAtRequest !== this.stateVersion) this.maybeApply();
       });
   }
 

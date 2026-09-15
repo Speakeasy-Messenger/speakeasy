@@ -284,6 +284,90 @@ describe('AudioRouteController headset routing', () => {
     expect(requests).toEqual(['EARPIECE', 'EARPIECE']);
   });
 
+  it('moves audio to a headset plugged in mid-call even when the speaker was forced, and a later tap wins again', async () => {
+    const h = harness();
+    h.controller.start();
+    h.controller.updateDevices(['SPEAKER_PHONE', 'EARPIECE']);
+    h.controller.resolveHeadsetSeed(false);
+    await flush();
+    expect(h.applied).toEqual(['EARPIECE']);
+
+    h.controller.setSpeakerOn(true);
+    await flush();
+    expect(h.applied).toEqual(['EARPIECE', 'SPEAKER_PHONE']);
+
+    // Plugging in a headset is a NEW connect event: it must take the audio
+    // even though the user had explicitly tapped speaker earlier.
+    h.platformAvailable.add('WIRED_HEADSET');
+    h.controller.updateHeadset(true);
+    h.controller.updateDevices(['SPEAKER_PHONE', 'WIRED_HEADSET', 'EARPIECE']);
+    await flush();
+    expect(h.applied).toEqual(['EARPIECE', 'SPEAKER_PHONE', 'WIRED_HEADSET']);
+
+    // After the plug has taken over, a later speaker tap wins from then on.
+    h.controller.setSpeakerOn(true);
+    await flush();
+    expect(h.applied).toEqual(['EARPIECE', 'SPEAKER_PHONE', 'WIRED_HEADSET', 'SPEAKER_PHONE']);
+  });
+
+  it('moves audio to Bluetooth that connects mid-call even when the speaker was forced', async () => {
+    const h = harness();
+    h.controller.start();
+    h.controller.updateDevices(['SPEAKER_PHONE', 'EARPIECE']);
+    h.controller.resolveHeadsetSeed(false);
+    await flush();
+    h.controller.setSpeakerOn(true);
+    await flush();
+    expect(h.applied).toEqual(['EARPIECE', 'SPEAKER_PHONE']);
+
+    h.platformAvailable.add('BLUETOOTH');
+    h.controller.updateDevices(['SPEAKER_PHONE', 'BLUETOOTH', 'EARPIECE']);
+    await flush();
+    expect(h.applied).toEqual(['EARPIECE', 'SPEAKER_PHONE', 'BLUETOOTH']);
+  });
+
+  it('applies a speaker-off toggle that landed while the speaker-on request was in flight', async () => {
+    const requests: AudioRoute[] = [];
+    let resolveSpeaker: ((result: RouteRequestResult) => void) | undefined;
+    const speakerRequest = new Promise<RouteRequestResult>((resolve) => {
+      resolveSpeaker = resolve;
+    });
+    let calls = 0;
+    const controller = new AudioRouteController({
+      initialSpeakerOn: false,
+      deviceSetRequired: true,
+      ports: {
+        request: (route) => {
+          requests.push(route);
+          calls += 1;
+          if (calls === 2) return speakerRequest;
+          return Promise.resolve({ accepted: true });
+        },
+        log: () => {},
+        logImportant: () => {},
+      },
+    });
+    controller.start();
+    controller.updateDevices(['SPEAKER_PHONE', 'EARPIECE']);
+    controller.resolveHeadsetSeed(false);
+    await flush();
+    expect(requests).toEqual(['EARPIECE']);
+
+    controller.setSpeakerOn(true);
+    await flush();
+    expect(requests).toEqual(['EARPIECE', 'SPEAKER_PHONE']);
+
+    // The user taps speaker off before the native request resolves; without
+    // a settle-time re-evaluation the off state would be silently lost.
+    controller.setSpeakerOn(false);
+    await flush();
+    expect(requests).toEqual(['EARPIECE', 'SPEAKER_PHONE']);
+
+    resolveSpeaker?.({ accepted: true });
+    await flush();
+    expect(requests).toEqual(['EARPIECE', 'SPEAKER_PHONE', 'EARPIECE']);
+  });
+
   it('does not stack a second request while the same route is in flight', async () => {
     const requests: AudioRoute[] = [];
     let resolveFirst: ((result: RouteRequestResult) => void) | undefined;
