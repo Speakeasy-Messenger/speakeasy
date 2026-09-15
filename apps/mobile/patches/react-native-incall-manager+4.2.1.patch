@@ -1,5 +1,5 @@
 diff --git a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
-index 10cb1e5..4cadfab 100644
+index 10cb1e5..22fd93a 100644
 --- a/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 +++ b/node_modules/react-native-incall-manager/android/src/main/java/com/zxcpoiu/incallmanager/InCallManagerModule.java
 @@ -480,6 +480,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
@@ -63,7 +63,77 @@ index 10cb1e5..4cadfab 100644
  
              if (!ringbackUriType.isEmpty()) {
                  startRingback(ringbackUriType);
-@@ -1842,6 +1873,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1516,16 +1547,27 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+     public void chooseAudioRoute(String audioRoute, Promise promise) {
+         Log.d(TAG, "RNInCallManager.chooseAudioRoute(): user choose audioDevice = " + audioRoute);
+ 
++        AudioDevice requestedDevice = null;
+         if (audioRoute.equals(AudioDevice.EARPIECE.name())) {
+-            selectAudioDevice(AudioDevice.EARPIECE);
++            requestedDevice = AudioDevice.EARPIECE;
+         } else if (audioRoute.equals(AudioDevice.SPEAKER_PHONE.name())) {
+-            selectAudioDevice(AudioDevice.SPEAKER_PHONE);
++            requestedDevice = AudioDevice.SPEAKER_PHONE;
+         } else if (audioRoute.equals(AudioDevice.WIRED_HEADSET.name())) {
+-            selectAudioDevice(AudioDevice.WIRED_HEADSET);
++            requestedDevice = AudioDevice.WIRED_HEADSET;
+         } else if (audioRoute.equals(AudioDevice.BLUETOOTH.name())) {
+-            selectAudioDevice(AudioDevice.BLUETOOTH);
++            requestedDevice = AudioDevice.BLUETOOTH;
++        }
++        // Speakeasy: report whether the request was accepted so the JS layer can
++        // observe a dropped route instead of relying on the Log.e inside
++        // selectAudioDevice(). Applies to react-native-incall-manager upstream.
++        boolean requestedDeviceSelected = true;
++        if (requestedDevice != null) {
++            requestedDeviceSelected = selectAudioDevice(requestedDevice);
+         }
+-        promise.resolve(getAudioDeviceStatusMap());
++        WritableMap result = getAudioDeviceStatusMap();
++        result.putString("requestedAudioDevice", requestedDevice == null ? null : requestedDevice.name());
++        result.putBoolean("requestedDeviceSelected", requestedDeviceSelected);
++        promise.resolve(result);
+     }
+ 
+     private static int getRandomInteger(int min, int max) {
+@@ -1633,14 +1675,20 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+         updateAudioDeviceState();
+     }
+ 
+-    /** Changes selection of the currently active audio device. */
+-    public void selectAudioDevice(AudioDevice device) {
++    /**
++     * Changes selection of the currently active audio device.
++     * @return whether the platform accepted the request. False means the
++     *         device was not in {@link #audioDevices} and the request was
++     *         dropped; the caller can surface that instead of it vanishing.
++     */
++    public boolean selectAudioDevice(AudioDevice device) {
+         if (device != AudioDevice.NONE && !audioDevices.contains(device)) {
+             Log.e(TAG, "selectAudioDevice() Can not select " + device + " from available " + audioDevices);
+-            return;
++            return false;
+         }
+         userSelectedAudioDevice = device;
+         updateAudioDeviceState();
++        return true;
+     }
+ 
+     /** Returns current set of available/selectable audio devices. */
+@@ -1726,6 +1774,12 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+                 if (type == AudioDeviceInfo.TYPE_WIRED_HEADSET) {
+                     Log.d(TAG, "hasWiredHeadset: found wired headset");
+                     return true;
++                } else if (type == AudioDeviceInfo.TYPE_USB_HEADSET) {
++                    // Speakeasy: TYPE_USB_HEADSET was missing, so a USB-C
++                    // headset was invisible to the pre-call query even though
++                    // it fires the plug broadcast later. Applies upstream.
++                    Log.d(TAG, "hasWiredHeadset: found USB headset");
++                    return true;
+                 } else if (type == AudioDeviceInfo.TYPE_USB_DEVICE) {
+                     Log.d(TAG, "hasWiredHeadset: found USB audio device");
+                     return true;
+@@ -1842,6 +1896,7 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
                  if (audioManagerEvents != null) {
                      // Notify a listening client that audio device has been changed.
                      audioManagerEvents.onAudioDeviceChanged(selectedAudioDevice, audioDevices);
@@ -71,7 +141,7 @@ index 10cb1e5..4cadfab 100644
                  }
                  */
                  sendEvent("onAudioDeviceChanged", getAudioDeviceStatusMap());
-@@ -1896,4 +1928,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1896,4 +1951,3 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
          return newAudioDevice;
      }
  }
