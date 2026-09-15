@@ -226,6 +226,64 @@ describe('AudioRouteController headset routing', () => {
     expect(h.requests).toEqual(['EARPIECE', 'EARPIECE']);
   });
 
+  it('lets an explicit speaker request override a connected Bluetooth headset', async () => {
+    const h = harness();
+    h.controller.start();
+    h.platformAvailable.add('BLUETOOTH');
+    h.controller.updateDevices(['SPEAKER_PHONE', 'BLUETOOTH', 'EARPIECE']);
+    h.controller.resolveHeadsetSeed(false);
+    await flush();
+    expect(h.applied).toEqual(['BLUETOOTH']);
+
+    // The speaker button must not silently no-op against the BT route; this
+    // mirrors native `userSelectedAudioDevice` outranking BLUETOOTH.
+    h.controller.setSpeakerOn(true);
+    await flush();
+    expect(h.applied).toEqual(['BLUETOOTH', 'SPEAKER_PHONE']);
+
+    // Turning the speaker off releases the override; Bluetooth wins again.
+    h.controller.setSpeakerOn(false);
+    await flush();
+    expect(h.applied).toEqual(['BLUETOOTH', 'SPEAKER_PHONE', 'BLUETOOTH']);
+  });
+
+  it('reissues a re-assert that landed while the same route was in flight', async () => {
+    const requests: AudioRoute[] = [];
+    let resolveFirst: ((result: RouteRequestResult) => void) | undefined;
+    const first = new Promise<RouteRequestResult>((resolve) => {
+      resolveFirst = resolve;
+    });
+    let calls = 0;
+    const controller = new AudioRouteController({
+      initialSpeakerOn: false,
+      deviceSetRequired: true,
+      ports: {
+        request: (route) => {
+          requests.push(route);
+          calls += 1;
+          return calls === 1 ? first : Promise.resolve({ accepted: true });
+        },
+        log: () => {},
+        logImportant: () => {},
+      },
+    });
+    controller.start();
+    controller.updateDevices(['SPEAKER_PHONE', 'EARPIECE']);
+    controller.resolveHeadsetSeed(false);
+    await flush();
+    expect(requests).toEqual(['EARPIECE']);
+
+    // 'connected' fires before the request promise resolves: the re-assert
+    // must be remembered and reissued once the request settles, not lost.
+    controller.reassert();
+    await flush();
+    expect(requests).toEqual(['EARPIECE']);
+
+    resolveFirst?.({ accepted: true });
+    await flush();
+    expect(requests).toEqual(['EARPIECE', 'EARPIECE']);
+  });
+
   it('does not stack a second request while the same route is in flight', async () => {
     const requests: AudioRoute[] = [];
     let resolveFirst: ((result: RouteRequestResult) => void) | undefined;

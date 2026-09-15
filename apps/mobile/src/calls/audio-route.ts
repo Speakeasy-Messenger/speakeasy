@@ -8,8 +8,8 @@
  * `webrtc-peer.ts` lets `audio-route.test.ts` reproduce the sequence with a
  * fake platform.
  *
- * The failure it fixes (see `data/spk-headset-route-diagnosis/report.md` and
- * upstream react-native-webrtc/react-native-incall-manager#138): the old
+ * The failure it fixes (see upstream
+ * react-native-webrtc/react-native-incall-manager#138): the old
  * `ensureManager()` seeded the headset state from an async
  * `getIsWiredHeadsetPluggedIn()` query, but applied the first route on the
  * very next line. That first route therefore always saw `headsetPlugged =
@@ -63,6 +63,13 @@ export interface AudioRouteControllerOptions {
 
 export class AudioRouteController {
   private speakerOn: boolean;
+  /**
+   * Set once the user explicitly requests the speaker. Native InCallManager
+   * pins `userSelectedAudioDevice`, which its `getPreferredAudioDevice`
+   * checks BEFORE Bluetooth — an explicit speaker tap must likewise outrank a
+   * connected headset until the user turns the speaker off.
+   */
+  private speakerForced = false;
   private headsetPlugged = false;
   private seedResolved = false;
   private devicesKnown = false;
@@ -79,6 +86,8 @@ export class AudioRouteController {
   private requestSeq = 0;
   /** Bumped on every native device-set update, to detect updates mid-request. */
   private deviceSetVersion = 0;
+  /** A `reassert()` that arrived while a request was in flight. */
+  private pendingReassert = false;
 
   constructor(private readonly options: AudioRouteControllerOptions) {
     this.speakerOn = options.initialSpeakerOn;
@@ -92,10 +101,6 @@ export class AudioRouteController {
     return this.headsetPlugged;
   }
 
-  get isStarted(): boolean {
-    return this.started;
-  }
-
   start(): void {
     if (this.started) return;
     this.started = true;
@@ -105,6 +110,7 @@ export class AudioRouteController {
   stop(): void {
     this.started = false;
     this.inFlight = undefined;
+    this.pendingReassert = false;
     // Bump the sequence so an in-flight request resolving after close cannot
     // mark a route as applied.
     this.requestSeq += 1;
@@ -112,6 +118,7 @@ export class AudioRouteController {
 
   setSpeakerOn(on: boolean): void {
     this.speakerOn = on;
+    this.speakerForced = on;
     // Explicit user intent must not be blocked by the "state unknown"
     // deferral; only the automatic default route waits.
     this.maybeApply(true);
@@ -179,7 +186,11 @@ export class AudioRouteController {
     }
 
     const desired = this.preferredRoute();
-    if (desired === this.lastAccepted || desired === this.inFlight) return;
+    if (desired === this.lastAccepted) return;
+    if (desired === this.inFlight) {
+      if (force) this.pendingReassert = true;
+      return;
+    }
 
     const seq = ++this.requestSeq;
     this.inFlight = desired;
@@ -213,6 +224,7 @@ export class AudioRouteController {
             this.maybeApply();
           }
         }
+        this.flushPendingReassert();
       })
       .catch((err: unknown) => {
         if (seq !== this.requestSeq) return;
@@ -222,14 +234,29 @@ export class AudioRouteController {
           route: desired,
           err: String(err),
         });
+        this.flushPendingReassert();
       });
   }
 
   /**
-   * Bluetooth first, matching InCallManager's own `getPreferredAudioDevice`
-   * order, then any wired/USB headset, then the user's speaker preference.
+   * A `reassert()` that landed while a request was in flight was recorded
+   * rather than dropped; reissue it now that the request has settled.
+   */
+  private flushPendingReassert(): void {
+    if (!this.pendingReassert) return;
+    this.pendingReassert = false;
+    this.lastAccepted = undefined;
+    this.maybeApply(true);
+  }
+
+  /**
+   * An explicit speaker request outranks everything, matching the native
+   * `userSelectedAudioDevice`-first precedence in InCallManager's own
+   * `getPreferredAudioDevice`. Otherwise Bluetooth first, then any wired/USB
+   * headset, then the user's speaker preference.
    */
   private preferredRoute(): AudioRoute {
+    if (this.speakerForced && this.speakerOn) return 'SPEAKER_PHONE';
     if (this.available.has('BLUETOOTH')) return 'BLUETOOTH';
     if (this.headsetPlugged || this.available.has('WIRED_HEADSET')) return 'WIRED_HEADSET';
     return this.speakerOn ? 'SPEAKER_PHONE' : 'EARPIECE';

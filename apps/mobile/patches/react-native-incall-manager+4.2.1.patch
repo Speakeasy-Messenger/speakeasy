@@ -63,7 +63,7 @@ index 10cb1e5..22fd93a 100644
  
              if (!ringbackUriType.isEmpty()) {
                  startRingback(ringbackUriType);
-@@ -1516,16 +1547,27 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
+@@ -1516,16 +1547,26 @@ public class InCallManagerModule extends ReactContextBaseJavaModule implements L
      public void chooseAudioRoute(String audioRoute, Promise promise) {
          Log.d(TAG, "RNInCallManager.chooseAudioRoute(): user choose audioDevice = " + audioRoute);
  
@@ -90,7 +90,6 @@ index 10cb1e5..22fd93a 100644
          }
 -        promise.resolve(getAudioDeviceStatusMap());
 +        WritableMap result = getAudioDeviceStatusMap();
-+        result.putString("requestedAudioDevice", requestedDevice == null ? null : requestedDevice.name());
 +        result.putBoolean("requestedDeviceSelected", requestedDeviceSelected);
 +        promise.resolve(result);
      }
