@@ -271,6 +271,74 @@ describe('clearDiag()', () => {
   });
 });
 
+describe('audio-diagnostic eviction floor', () => {
+  /**
+   * The paired-call diagnostic build (#224) exists to collect the periodic
+   * native-audio / webrtc-audio records, but every one of them is ordinary
+   * (important = false). Under the old eviction rule (drop the oldest
+   * non-important entry) ordinary sampling floods evicted all of them before
+   * upload. These tests pin the audio-channel floor: a flood of ordinary
+   * entries cannot evict audio records while the ring is at or below the
+   * floor, the ring stays bounded either way, and above the floor the audio
+   * channel yields rather than starving the ordinary log.
+   */
+  const fill = (tag: string, count: number, important = false): void => {
+    for (let i = 0; i < count; i++) {
+      if (important) diagImportant(tag, `${tag} ${i}`);
+      else diag(tag, `${tag} ${i}`);
+    }
+  };
+
+  it('a flood of ordinary entries cannot evict native-audio records', () => {
+    fill('native-audio', 120); // capture/playout/focus/route records
+    fill('ordinary', 100); // sampling flood, overflows the 200-entry ring
+    const snapshot = getDiagSnapshot();
+    expect(snapshot.length).toBeLessThanOrEqual(200);
+    const audio = snapshot.filter((e) => e.tag === 'native-audio');
+    expect(audio).toHaveLength(120);
+    // The oldest audio record survives — not just the most recent ones.
+    expect(audio[0]!.msg).toBe('native-audio 0');
+  });
+
+  it('a flood of ordinary entries cannot evict webrtc-audio stats records', () => {
+    fill('webrtc-audio', 120);
+    fill('ordinary', 100);
+    const snapshot = getDiagSnapshot();
+    expect(snapshot.length).toBeLessThanOrEqual(200);
+    const stats = snapshot.filter((e) => e.tag === 'webrtc-audio');
+    expect(stats).toHaveLength(120);
+    expect(stats[0]!.msg).toBe('webrtc-audio 0');
+  });
+
+  it('interleaved ordinary traffic evicts ordinary entries, not audio records', () => {
+    fill('native-audio', 60);
+    // 160 more ordinary entries: the ring overflows repeatedly, but every
+    // eviction takes an ordinary entry while audio stays below its floor.
+    fill('ordinary', 160);
+    const snapshot = getDiagSnapshot();
+    expect(snapshot.length).toBe(200);
+    expect(snapshot.filter((e) => e.tag === 'native-audio')).toHaveLength(60);
+    expect(snapshot.filter((e) => e.tag === 'ordinary')).toHaveLength(140);
+  });
+
+  it('above the floor the audio channel yields instead of starving the ordinary log', () => {
+    fill('native-audio', 150);
+    fill('ordinary', 60, true); // important ordinary entries only
+    const snapshot = getDiagSnapshot();
+    expect(snapshot.length).toBeLessThanOrEqual(200);
+    // Every important ordinary entry survives; the audio surplus rolls.
+    expect(snapshot.filter((e) => e.tag === 'ordinary')).toHaveLength(60);
+    const audio = snapshot.filter((e) => e.tag === 'native-audio');
+    expect(audio.length).toBeLessThan(150);
+    expect(audio.length).toBeGreaterThanOrEqual(100);
+  });
+
+  it('stays bounded even when the ring saturates with audio records alone', () => {
+    fill('native-audio', 300);
+    expect(getDiagSnapshot().length).toBe(200);
+  });
+});
+
 describe('formatDiag()', () => {
   it('renders entries as paste-ready lines with timestamps', () => {
     const entries = [

@@ -23,6 +23,29 @@ describe('paired call-audio native bridge wiring', () => {
     expect(focusPatch).toContain('focus requested');
   });
 
+  it('resolves drain/snapshot through the bridge, never with raw Kotlin collections', () => {
+    // The RN bridge only accepts String, Boolean, Double, Integer, WritableMap,
+    // WritableArray and null as a resolved value. On fcf05a8 the module resolved
+    // the store's raw List<LinkedHashMap> and every drain()/snapshot() threw
+    // "Cannot convert argument of type class ..." ("class m5.z" = minified
+    // Kotlin ArrayList), so no native records ever reached the diag buffer.
+    // Pin the conversion on the resolve path: drain() must build a WritableArray
+    // of per-entry maps and snapshot() must wrap the store map in makeNativeMap,
+    // which recursively converts nested maps/lists, coerces Long/Float to
+    // Double, and keeps null fields as explicit nulls.
+    const module = source(
+      'apps/mobile/android/app/src/main/java/xyz/speakeasyapp/app/audiodiag/AudioDiagnosticsModule.kt',
+    );
+    expect(module).toMatch(
+      /fun drain\(promise: Promise\)\s*\{[\s\S]*?Arguments\.createArray\(\)[\s\S]*?Arguments\.makeNativeMap\(entry\)[\s\S]*?promise\.resolve\(array\)\s*\}/,
+    );
+    expect(module).toMatch(
+      /fun snapshot\(trigger: String, promise: Promise\)\s*\{\s*promise\.resolve\(Arguments\.makeNativeMap\(AudioDiagnosticsStore\.snapshot\(context, trigger\)\)\)\s*\}/,
+    );
+    // The raw store return values must never be passed to resolve() directly.
+    expect(module).not.toMatch(/promise\.resolve\(\s*AudioDiagnosticsStore\./);
+  });
+
   it('returns actual iOS manual-audio, activation and route state', () => {
     const patch = source('apps/mobile/patches/react-native-webrtc+124.0.7.patch');
     const bridge = source('apps/mobile/src/calls/callkeep-bridge.ts');
