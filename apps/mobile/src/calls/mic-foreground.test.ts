@@ -38,7 +38,12 @@ const mockShow = vi.mocked(showOngoingCallNotification);
 const mockCheck = vi.mocked(audioDiagnostics.isMicrophoneForegroundServiceActive);
 const mockMicPermission = vi.mocked(ensureMicPermission);
 
-const call = { callId: 'call-test', peerUserId: 'bob', kind: 'audio' as const };
+const call = {
+  callId: 'call-test',
+  peerUserId: 'bob',
+  kind: 'audio' as const,
+  isStillActive: () => true,
+};
 
 const platform = Platform as { OS: string; Version?: number };
 
@@ -78,8 +83,8 @@ describe('ensureMicForegroundService', () => {
     );
   });
 
-  it('resolves false when the FGS start throws (e.g. Android 14 background start rejection)', async () => {
-    mockShow.mockRejectedValue(new Error('ForegroundServiceStartNotAllowedException'));
+  it('resolves false when the pill notification cannot be posted at all (e.g. channel creation rejects)', async () => {
+    mockShow.mockRejectedValue(new Error('createChannel failed'));
     const result = await ensureMicForegroundService(call);
     expect(result).toBe(false);
     expect(mockCheck).not.toHaveBeenCalled();
@@ -182,6 +187,25 @@ describe('ensureMicForegroundService', () => {
     mockMicPermission.mockResolvedValue('denied');
     await expect(ensureMicForegroundService(call)).rejects.toThrow('mic permission denied');
     expect(mockShow).not.toHaveBeenCalled();
+  });
+
+  /**
+   * The permission prompt is open-ended, so the call can be cancelled (or
+   * time out) while it is up. The teardown's pill dismiss has already run by
+   * then, so posting the FGS afterwards would strand an undismissable
+   * 'Voice call' pill and a microphone service on a call that no longer
+   * exists — until the next call ends or the user hits the pill's End.
+   */
+  it('starts nothing when the call ends while the permission prompt is up', async () => {
+    let live = true;
+    mockMicPermission.mockImplementation(async () => {
+      live = false;
+      return 'granted';
+    });
+    const result = await ensureMicForegroundService({ ...call, isStillActive: () => live });
+    expect(result).toBe(false);
+    expect(mockShow).not.toHaveBeenCalled();
+    expect(mockCheck).not.toHaveBeenCalled();
   });
 
   it('still requires confirmation when the API level is unknown (fail closed)', async () => {

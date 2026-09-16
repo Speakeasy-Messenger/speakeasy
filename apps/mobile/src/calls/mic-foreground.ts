@@ -27,7 +27,12 @@ import { showOngoingCallNotification } from './call-notification.js';
  *      downstream of this gate; a non-`granted` result throws
  *      `mic permission <result>` (the shape `permissionErrorKind` parses)
  *      so the dial/accept UI can offer Open Settings, exactly as a
- *      capture-time denial did.
+ *      capture-time denial did. That prompt is open-ended — the user can
+ *      leave it up indefinitely — so the call's liveness is re-checked
+ *      (`isStillActive`) before anything is started: the pill is dismissed
+ *      by a teardown that already ran, and starting it afterwards would
+ *      strand an undismissable pill plus a microphone FGS on a call that no
+ *      longer exists.
  *   1. The notifee microphone FGS ("voice-call pill") is started BEFORE any
  *      AudioRecord capture begins for the call — outgoing dial AND incoming
  *      accept, all kinds (video included; PiP does not satisfy while-in-use).
@@ -62,6 +67,8 @@ export interface MicForegroundGateCall {
   callId: string;
   peerUserId: string;
   kind: CallKind;
+  /** Is this exact call still the orchestrator's live one? */
+  isStillActive: () => boolean;
 }
 
 /** Sleep helper (injectable via fake timers in tests). */
@@ -70,11 +77,12 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 /**
  * Acquire RECORD_AUDIO, start the microphone FGS, and wait until it is
  * confirmed foreground. Resolves true only when a microphone FGS is
- * verifiably active; false when confirmation times out, or when the pill
- * could not be posted at all. THROWS `mic permission <result>` when the
- * user does not grant the microphone. Non-Android resolves true
- * immediately (CallKit owns the audio session), as does Android below
- * MIC_FGS_MIN_API_LEVEL.
+ * verifiably active; false when confirmation times out, when the pill could
+ * not be posted at all, or when the call ended while the permission prompt
+ * was up (nothing is started in that case, so there is nothing to dismiss).
+ * THROWS `mic permission <result>` when the user does not grant the
+ * microphone. Non-Android resolves true immediately (CallKit owns the audio
+ * session), as does Android below MIC_FGS_MIN_API_LEVEL.
  *
  * The pill start is deliberately the SAME notification the ongoing-call
  * pill uses (`call-notification.ts`): one id, idempotent, and the pill UI
@@ -92,6 +100,12 @@ export async function ensureMicForegroundService(call: MicForegroundGateCall): P
       result: mic,
     });
     throw new Error(`mic permission ${mic}`);
+  }
+  if (!call.isStillActive()) {
+    diag('call', 'mic fgs: call ended during the permission prompt — nothing started', {
+      callId: call.callId,
+    });
+    return false;
   }
   try {
     await showOngoingCallNotification({

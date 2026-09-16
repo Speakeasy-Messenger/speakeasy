@@ -35,6 +35,7 @@ vi.mock('@notifee/react-native', () => ({
   AndroidImportance: { DEFAULT: 4 },
   AndroidVisibility: { PUBLIC: 1 },
 }));
+import type { MicForegroundGateCall } from './mic-foreground.js';
 import { permissionErrorKind } from '../permissions/runtime.js';
 import { isDiagStreamingEnabled, uploadDiag } from '../diag/upload.js';
 const mockUploadDiag = vi.mocked(uploadDiag);
@@ -135,11 +136,7 @@ function makeOrchHarness(
     };
     /** Mic-FGS capture gate override. When unset the harness injects a
      *  pass-through stub (the production default touches notifee). */
-    ensureMicForegroundService?: (call: {
-      callId: string;
-      peerUserId: string;
-      kind: string;
-    }) => Promise<boolean>;
+    ensureMicForegroundService?: (call: MicForegroundGateCall) => Promise<boolean>;
   } = {},
 ): OrchHarness {
   const callerOut: WsClientMsg[] = [];
@@ -165,7 +162,7 @@ function makeOrchHarness(
       return calleePeerInstance;
     },
   };
-  const micGate = (call: { callId: string; peerUserId: string; kind: string }) => {
+  const micGate = (call: MicForegroundGateCall) => {
     events.push(`mic-gate:${call.kind}`);
     return opts.ensureMicForegroundService?.(call) ?? Promise.resolve(true);
   };
@@ -1112,6 +1109,35 @@ describe('mic-FGS capture gate (call-01M2N41QF1P7BE6HSWR152SMRG)', () => {
     await expect(h.callee.accept()).rejects.toThrow(/mic foreground service/);
     expect(h.callee.getActive()).toBeUndefined();
     expect(h.finishedCallee[0]?.reason).toBe('failed');
+  });
+
+  /**
+   * The gate asks for RECORD_AUDIO, and that OS prompt can stay up for as
+   * long as the user ignores it — long enough for the call to be cancelled
+   * underneath it. The gate needs a way to notice, or it raises a foreground
+   * service the already-finished teardown can no longer dismiss.
+   */
+  it('hands the gate a liveness probe that follows the live call', async () => {
+    let probe: (() => boolean) | undefined;
+    let releaseGate: ((confirmed: boolean) => void) | undefined;
+    const h = makeOrchHarness({
+      ensureMicForegroundService: (gateCall) => {
+        probe = gateCall.isStillActive;
+        return new Promise((resolve) => {
+          releaseGate = resolve;
+        });
+      },
+    });
+    const dialing = h.caller.startOutgoing('bob');
+    await vi.waitFor(() => expect(probe).toBeDefined());
+    expect(probe?.()).toBe(true);
+
+    h.caller.hangup();
+    expect(probe?.()).toBe(false);
+
+    releaseGate!(false);
+    await expect(dialing).rejects.toThrow(/mic foreground service/);
+    expect(h.events).not.toContain('peer-created');
   });
 
   /**

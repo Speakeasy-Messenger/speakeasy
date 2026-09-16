@@ -36,7 +36,7 @@ import type {
 import { mediaKindForCall } from './types.js';
 import { CallKeepBridge } from './callkeep-bridge.js';
 import { FilterError, setFilterBypass } from '../native/voice-filter.js';
-import { ensureMicForegroundService } from './mic-foreground.js';
+import { ensureMicForegroundService, type MicForegroundGateCall } from './mic-foreground.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
@@ -185,11 +185,7 @@ export interface CallOrchestratorDeps {
    * this resolves true — on false the call is ended instead. Optional so
    * tests inject a stub; the production default is the real gate.
    */
-  ensureMicForegroundService?: (call: {
-    callId: string;
-    peerUserId: string;
-    kind: CallKind;
-  }) => Promise<boolean>;
+  ensureMicForegroundService?: (call: MicForegroundGateCall) => Promise<boolean>;
 }
 
 export interface CallHistoryEntry {
@@ -298,9 +294,16 @@ export class CallOrchestrator {
 
   /**
    * The mic-FGS capture gate (see CallOrchestratorDeps.ensureMicForeground
-   * Service + mic-foreground.ts). Resolves false — never throws — when the
-   * microphone FGS could not be started AND confirmed active; callers end
-   * the call rather than capture into a muted-forever stream.
+   * Service + mic-foreground.ts). Resolves false when the microphone FGS
+   * could not be started AND confirmed active, and THROWS
+   * `mic permission <result>` when the user refuses the microphone — the
+   * shape RootNavigator / IncomingCallScreen classify via
+   * `permissionErrorKind` to offer Open Settings. Both call sites therefore
+   * belong inside their existing try/catch.
+   *
+   * `isStillActive` lets the gate abandon a call that ended while its
+   * permission prompt was up, rather than raising a foreground service the
+   * already-completed teardown can no longer dismiss.
    */
   private ensureMicForegroundReady(
     callId: string,
@@ -308,7 +311,12 @@ export class CallOrchestrator {
     peerUserId: string,
   ): Promise<boolean> {
     const gate = this.deps.ensureMicForegroundService ?? ensureMicForegroundService;
-    return gate({ callId, peerUserId, kind });
+    return gate({
+      callId,
+      peerUserId,
+      kind,
+      isStillActive: () => this.active?.callId === callId,
+    });
   }
 
   getActive(): ActiveCall | undefined {
