@@ -1171,10 +1171,11 @@ export default function App({ videoCallHarness = false }: AppProps) {
           foregroundInboxRetry = null;
           void drainBackgroundMessageInbox();
         }, 2_000);
-        // The ongoing-call pill is posted at call-connect and persists for the
-        // whole call (dropped on call end), so we no longer dismiss it on
-        // foreground — it just sits quietly in the shade while the in-app call
-        // UI is up, then becomes the return-to-call pill once backgrounded.
+        // The ongoing-call pill is posted at call start by the mic-FGS gate
+        // (calls/mic-foreground.ts) and persists for the whole call (dropped
+        // on call end), so we no longer dismiss it on foreground — it just
+        // sits quietly in the shade while the in-app call UI is up, then
+        // becomes the return-to-call pill once backgrounded.
         const state = ws.getState();
         // `reconnecting` already has a timer pending — the WS client
         // turned `connect()` into a no-op for that state in the loop

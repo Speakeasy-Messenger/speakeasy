@@ -1320,9 +1320,10 @@ export class CallOrchestrator {
    * the IncomingCallScreen is up. iOS no-ops these (system handles
    * via Info.plist). On Android, the OS dialog overlays the call
    * screen and the user grants while the call is still ringing —
-   * by the time they tap Accept, gUM is instant. Without this,
-   * permissions fired inside `accept() → createAnswer() → gUM` and
-   * the 5–15s of dialog tapping pushed the caller past their PC's
+   * by the time they tap Accept, the mic gate and gUM are instant.
+   * Without this, the prompts fire inside `accept()` — mic in the
+   * mic-FGS capture gate, camera in `createAnswer() → gUM` — and the
+   * 5–15s of dialog tapping pushed the caller past their PC's
    * answer-window. Idempotent — a second call to ensureMicPermission
    * after the user has decided is a no-op.
    */

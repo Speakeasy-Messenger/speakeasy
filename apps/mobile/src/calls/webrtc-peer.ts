@@ -608,7 +608,10 @@ class WebRtcCallPeer implements CallPeer {
       // inbound audio packets well after connect — the peer transmitted no
       // audio at all (its capture start likely failed; silence packets would
       // still count). Emitted once, only from periodic sampling.
-      const dead = detectInboundAudioDead(reports, this.connectedAtMs === undefined ? undefined : Date.now() - this.connectedAtMs);
+      const dead = detectInboundAudioDead(
+        reports,
+        this.connectedAtMs === undefined ? undefined : Date.now() - this.connectedAtMs,
+      );
       if (dead && !this.inboundAudioDeadFlagged) {
         this.inboundAudioDeadFlagged = true;
         diagImportant('webrtc-audio', 'inbound audio dead: no RTP from peer', {
