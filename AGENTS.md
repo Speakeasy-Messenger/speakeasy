@@ -13,6 +13,11 @@ This file is the project's committed home for project-intrinsic agent knowledge:
   `apps/mobile/patches/react-native-incall-manager+4.2.1.patch` adds
   `TYPE_USB_HEADSET` detection and request observability. The reproduced
   failure and evidence are in `apps/mobile/src/calls/audio-route.test.ts`.
+- Android mic capture must never start before a `microphone`-typed foreground
+  service is started AND confirmed active (API 30+; below that the pill is
+  still posted but the contract is skipped). The invariant and its fail-closed
+  contract live in `apps/mobile/src/calls/mic-foreground.ts`, with regression
+  coverage in `mic-foreground.test.ts` and `orchestrator.test.ts`.
 - The Vouchflow device-confidence floor is set in several coupled places and
   must stay in agreement, or device verification dead-ends: the vouchflow.dev
   dashboard, `MIN_CONFIDENCE` in `packages/vouchflow/src/types.ts`, the server

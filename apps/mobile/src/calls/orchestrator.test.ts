@@ -19,6 +19,24 @@ vi.mock('../diag/upload.js', () => ({
   uploadDiag: vi.fn(async () => undefined),
   isDiagStreamingEnabled: vi.fn(() => false),
 }));
+
+// The mic-FGS capture gate's pill carrier (call-notification) statically
+// imports notifee, whose CJS entry requires the real react-native package
+// — unparseable under vitest. Tests below inject a stub gate; this mock
+// just keeps the module import graph loadable.
+vi.mock('@notifee/react-native', () => ({
+  default: {
+    createChannel: vi.fn(async () => undefined),
+    displayNotification: vi.fn(async () => undefined),
+    stopForegroundService: vi.fn(async () => undefined),
+  },
+  AndroidCategory: { CALL: 'call' },
+  AndroidForegroundServiceType: { FOREGROUND_SERVICE_TYPE_MICROPHONE: 'microphone' },
+  AndroidImportance: { DEFAULT: 4 },
+  AndroidVisibility: { PUBLIC: 1 },
+}));
+import type { MicForegroundGateCall } from './mic-foreground.js';
+import { permissionErrorKind } from '../permissions/runtime.js';
 import { isDiagStreamingEnabled, uploadDiag } from '../diag/upload.js';
 const mockUploadDiag = vi.mocked(uploadDiag);
 const mockDiagStreaming = vi.mocked(isDiagStreamingEnabled);
@@ -94,6 +112,10 @@ interface OrchHarness {
   pump(): Promise<void>;
   finishedCaller: any[];
   finishedCallee: any[];
+  /** Cross-cutting ordering events: `mic-gate:<kind>` / `peer-created`. */
+  events: string[];
+  /** The mic-gate kinds seen so far. */
+  micGateCalls(): string[];
 }
 
 function makeOrchHarness(
@@ -112,26 +134,37 @@ function makeOrchHarness(
       wrap: (callId: string) => Promise<unknown>;
       dispose: () => Promise<void>;
     };
+    /** Mic-FGS capture gate override. When unset the harness injects a
+     *  pass-through stub (the production default touches notifee). */
+    ensureMicForegroundService?: (call: MicForegroundGateCall) => Promise<boolean>;
   } = {},
 ): OrchHarness {
   const callerOut: WsClientMsg[] = [];
   const calleeOut: WsClientMsg[] = [];
   const finishedCaller: any[] = [];
   const finishedCallee: any[] = [];
+  /** Cross-cutting event order: `mic-gate:<kind>` vs `peer-created`. */
+  const events: string[] = [];
 
   let callerPeerInstance: MockPeer | undefined;
   let calleePeerInstance: MockPeer | undefined;
   const callerFactory: CallPeerFactory = {
     async create() {
+      events.push('peer-created');
       callerPeerInstance = new MockPeer('caller');
       return callerPeerInstance;
     },
   };
   const calleeFactory: CallPeerFactory = {
     async create() {
+      events.push('peer-created');
       calleePeerInstance = new MockPeer('callee');
       return calleePeerInstance;
     },
+  };
+  const micGate = (call: MicForegroundGateCall) => {
+    events.push(`mic-gate:${call.kind}`);
+    return opts.ensureMicForegroundService?.(call) ?? Promise.resolve(true);
   };
 
   const caller = new CallOrchestrator({
@@ -148,6 +181,7 @@ function makeOrchHarness(
     voiceFilter: opts.voiceFilter,
     ringTimeoutMs: opts.ringTimeoutMs,
     connectingTimeoutMs: opts.connectingTimeoutMs,
+    ensureMicForegroundService: micGate,
   });
   const callee = new CallOrchestrator({
     myUserId: 'bob',
@@ -163,6 +197,7 @@ function makeOrchHarness(
     voiceFilter: opts.voiceFilter,
     ringTimeoutMs: opts.ringTimeoutMs,
     connectingTimeoutMs: opts.connectingTimeoutMs,
+    ensureMicForegroundService: micGate,
   });
 
   async function pump(): Promise<void> {
@@ -187,6 +222,8 @@ function makeOrchHarness(
     pump,
     finishedCaller,
     finishedCallee,
+    events,
+    micGateCalls: () => events.filter((e) => e.startsWith('mic-gate:')),
   };
 }
 
@@ -1006,5 +1043,230 @@ describe('reported bug — ongoing-call pill controls via background registry', 
   it('getActiveCallControls is undefined once controls are cleared (call ended)', () => {
     setActiveCallControls(undefined);
     expect(getActiveCallControls()).toBeUndefined();
+  });
+});
+
+describe('mic-FGS capture gate (call-01M2N41QF1P7BE6HSWR152SMRG)', () => {
+  it('gates outgoing capture: mic FGS started + confirmed BEFORE the peer (and its AudioRecord) exists', async () => {
+    const h = makeOrchHarness();
+    await h.caller.startOutgoing('bob', 'video');
+    // The gate must run — and pass — before peerFactory.create: capture
+    // begins inside peer.createOffer → ensureLocalStream → getUserMedia,
+    // so anything after peer creation is already too late.
+    expect(h.events.indexOf('mic-gate:video')).toBeGreaterThanOrEqual(0);
+    expect(h.events.indexOf('mic-gate:video')).toBeLessThan(h.events.indexOf('peer-created'));
+    expect(h.caller.getActive()?.stage).toBe('outgoing_ringing');
+  });
+
+  it('gates incoming capture: mic FGS confirmed before the callee answers (createAnswer)', async () => {
+    const order: string[] = [];
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => {
+        order.push('gate');
+        return true;
+      },
+    });
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    const calleePeer = h.calleePeer();
+    const origAnswer = calleePeer.createAnswer.bind(calleePeer);
+    calleePeer.createAnswer = async () => {
+      order.push('answer');
+      return origAnswer();
+    };
+    await h.callee.accept();
+    // The callee's gate MUST precede createAnswer — capture starts inside
+    // it. (The first 'gate' entry is the caller's, from startOutgoing.)
+    expect(order.slice(-2)).toEqual(['gate', 'answer']);
+    expect(h.micGateCalls()).toEqual(['mic-gate:audio', 'mic-gate:audio']); // caller dial + callee accept
+  });
+
+  it('ends the call FAILED instead of capturing when the mic FGS cannot be confirmed', async () => {
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => false,
+    });
+    await expect(h.caller.startOutgoing('bob')).rejects.toThrow(/mic foreground service/);
+    expect(h.caller.getActive()).toBeUndefined();
+    expect(h.finishedCaller[0]?.reason).toBe('failed');
+    // No offer ever sent — no capture, no signaling for a muted-forever call.
+    expect(h.callerOut.filter((f) => f.type === 'call_offer')).toHaveLength(0);
+    // The failure IS announced on the wire, so a peer that did see the call
+    // (a gate failure later in dial, after the offer drained) stops ringing.
+    const callEnd = h.callerOut.find((f) => f.type === 'call_end');
+    expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('failed');
+    await h.pump();
+    expect(h.callee.getActive()).toBeUndefined();
+  });
+
+  it('callee also ends FAILED when its mic FGS gate fails at accept', async () => {
+    let gateOk = true;
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => gateOk,
+    });
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    gateOk = false;
+    await expect(h.callee.accept()).rejects.toThrow(/mic foreground service/);
+    expect(h.callee.getActive()).toBeUndefined();
+    expect(h.finishedCallee[0]?.reason).toBe('failed');
+  });
+
+  /**
+   * The gate asks for RECORD_AUDIO, and that OS prompt can stay up for as
+   * long as the user ignores it — long enough for the call to be cancelled
+   * underneath it. The gate needs a way to notice, or it raises a foreground
+   * service the already-finished teardown can no longer dismiss.
+   */
+  it('hands the gate a liveness probe that follows the live call', async () => {
+    let probe: (() => boolean) | undefined;
+    let releaseGate: ((confirmed: boolean) => void) | undefined;
+    const h = makeOrchHarness({
+      ensureMicForegroundService: (gateCall) => {
+        probe = gateCall.isStillActive;
+        return new Promise((resolve) => {
+          releaseGate = resolve;
+        });
+      },
+    });
+    const dialing = h.caller.startOutgoing('bob');
+    await vi.waitFor(() => expect(probe).toBeDefined());
+    expect(probe?.()).toBe(true);
+
+    h.caller.hangup();
+    expect(probe?.()).toBe(false);
+
+    releaseGate!(false);
+    await expect(dialing).rejects.toThrow(/mic foreground service/);
+    expect(h.events).not.toContain('peer-created');
+  });
+
+  /**
+   * The gate now owns RECORD_AUDIO acquisition (it starts a microphone-typed
+   * FGS, which API 34+ refuses without the permission). A denial must still
+   * reach the dial/accept UI as the typed error those screens classify to
+   * offer "Open Settings" — otherwise the alert paths are dead code and the
+   * user just sees a call that failed.
+   */
+  it('propagates a mic-permission denial from the gate in the shape the UI classifies', async () => {
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => {
+        throw new Error('mic permission denied');
+      },
+    });
+    const err = await h.caller.startOutgoing('bob').then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(permissionErrorKind(err)).toEqual({ kind: 'mic', result: 'denied' });
+    // Denied means no service and no capture: the peer is never built.
+    expect(h.events).not.toContain('peer-created');
+    expect(h.caller.getActive()).toBeUndefined();
+    expect(h.finishedCaller[0]?.reason).toBe('failed');
+  });
+
+  it('propagates the denial out of accept too, and tells the caller', async () => {
+    let gateOk = true;
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => {
+        if (!gateOk) throw new Error('mic permission never_ask_again');
+        return true;
+      },
+    });
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    gateOk = false;
+    const err = await h.callee.accept().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(permissionErrorKind(err)).toEqual({ kind: 'mic', result: 'never_ask_again' });
+    expect(h.calleeOut.filter((f) => f.type === 'call_answer')).toHaveLength(0);
+    const callEnd = h.calleeOut.find((f) => f.type === 'call_end');
+    expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('failed');
+    expect(h.finishedCallee[0]?.reason).toBe('failed');
+  });
+
+  /**
+   * Regression: the gate adds an up-to-4s await between "user tapped Accept"
+   * and createAnswer, and createAnswer is what calls getUserMedia. If the
+   * ring timeout (or a caller cancel) tears the call down inside that window,
+   * capture must NOT start — the peer is already closed, so the stream it
+   * opened would be unreachable and the mic would stay hot for the process
+   * lifetime.
+   */
+  it('accept whose gate resolves after the ring timeout never starts capture', async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseCalleeGate: ((confirmed: boolean) => void) | undefined;
+      let gateCalls = 0;
+      const h = makeOrchHarness({
+        ringTimeoutMs: 1_000,
+        ensureMicForegroundService: () => {
+          gateCalls += 1;
+          // First call is the caller's dial; the callee's accept is the one
+          // we hold open across the ring timeout.
+          if (gateCalls === 1) return Promise.resolve(true);
+          return new Promise((resolve) => {
+            releaseCalleeGate = resolve;
+          });
+        },
+      });
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      const calleePeer = h.calleePeer();
+      let capturedAfterTeardown = false;
+      calleePeer.createAnswer = async () => {
+        capturedAfterTeardown = true;
+        return { v: 1, sdp: 'answer-from-callee', candidates: [] };
+      };
+
+      const accepting = h.callee.accept();
+      expect(releaseCalleeGate).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(h.callee.getActive()).toBeUndefined();
+      expect(calleePeer.closed).toBe(true);
+
+      releaseCalleeGate!(true);
+      await expect(accepting).rejects.toThrow(/call no longer active/);
+      expect(capturedAfterTeardown).toBe(false);
+      expect(h.calleeOut.filter((f) => f.type === 'call_answer')).toHaveLength(0);
+      expect(h.finishedCallee.map((f) => f.reason)).toEqual(['no_answer']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
+   * Regression: the callee's gate failure used to end only locally, so the
+   * caller sat in `outgoing_ringing` until RING_TIMEOUT_MS and then filed a
+   * `no_answer` — the wrong story (nobody ignored the call) and a 45s hang.
+   */
+  it("tells the caller when the callee's gate fails, instead of a 45s no_answer", async () => {
+    vi.useFakeTimers();
+    try {
+      let gateOk = true;
+      const h = makeOrchHarness({
+        ringTimeoutMs: 45_000,
+        ensureMicForegroundService: async () => gateOk,
+      });
+      const callId = await h.caller.startOutgoing('bob');
+      await h.pump();
+      expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
+
+      gateOk = false;
+      await expect(h.callee.accept()).rejects.toThrow(/mic foreground service/);
+      const callEnd = h.calleeOut.find((f) => f.type === 'call_end');
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('failed');
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.call_id).toBe(callId);
+
+      await h.pump();
+      // Caller is done immediately — before the ring timeout could fire.
+      expect(h.caller.getActive()).toBeUndefined();
+      expect(h.finishedCaller[0]?.reason).toBe('failed');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(h.finishedCaller.map((f) => f.reason)).toEqual(['failed']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });

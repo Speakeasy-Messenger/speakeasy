@@ -24,6 +24,7 @@ import type { CallMediaKind, CallPeer, CallPeerFactory, IceServer } from './type
 import { ANIMATION_CHANNEL_LABEL } from './animation-channel.js';
 import { summarizeVideoStats } from './video-stats.js';
 import {
+  detectInboundAudioDead,
   summarizeAudioPeer,
   summarizeAudioSdp,
   type AudioCounterState,
@@ -102,6 +103,10 @@ class WebRtcCallPeer implements CallPeer {
   private audioDiagActive = false;
   private audioDiagQueue: Promise<void> = Promise.resolve();
   private lastAudioCounters?: AudioCounterState;
+  /** Wall-clock ms when the peer connection first reached 'connected'. */
+  private connectedAtMs?: number;
+  /** One-shot: the inbound-audio-dead breadcrumb has been emitted for this call. */
+  private inboundAudioDeadFlagged = false;
   private nativeAudioUnsub?: () => void;
   /**
    * Cumulative video RTP counters sampled every five seconds. The counters
@@ -251,6 +256,7 @@ class WebRtcCallPeer implements CallPeer {
         void this.dumpIceStats(s);
       }
       if (s === 'connected') {
+        this.connectedAtMs ??= Date.now();
         // Re-assert audio routing now that media is flowing — see
         // reassertAudioRoute() for the callee-mic bug this addresses.
         this.reassertAudioRoute();
@@ -597,6 +603,23 @@ class WebRtcCallPeer implements CallPeer {
       const ctx = { callId: this.callId, trigger, ...snapshot };
       if (important) diagImportant('webrtc-audio', 'snapshot', ctx);
       else diag('webrtc-audio', 'snapshot', ctx);
+      // One-shot asymmetric-audio breadcrumb (repro
+      // call-01M2N41QF1P7BE6HSWR152SMRG): local audio RTP flowing but ZERO
+      // inbound audio packets well after connect — the peer transmitted no
+      // audio at all (its capture start likely failed; silence packets would
+      // still count). Emitted once, only from periodic sampling.
+      const dead = detectInboundAudioDead(
+        reports,
+        this.connectedAtMs === undefined ? undefined : Date.now() - this.connectedAtMs,
+      );
+      if (dead && !this.inboundAudioDeadFlagged) {
+        this.inboundAudioDeadFlagged = true;
+        diagImportant('webrtc-audio', 'inbound audio dead: no RTP from peer', {
+          callId: this.callId,
+          trigger,
+          ...dead,
+        });
+      }
     } catch (err) {
       diagImportant('webrtc-audio', 'getStats failed', {
         callId: this.callId,

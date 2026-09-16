@@ -323,7 +323,7 @@ export type CallId = string;
 /**
  * Wire-level reason a call ended. Locally the orchestrator may also
  * record synthetic reasons that are never sent over the wire
- * (`no_answer`, `callee_offline`, `error`); see `apps/mobile/src/calls/`.
+ * (`no_answer`, `callee_offline`, `completed`); see `apps/mobile/src/calls/`.
  */
 export type CallEndReason =
   | 'hangup' // active call ended by either party
@@ -353,6 +353,17 @@ export type CallEndReason =
    * (#13 unified call entry.)
    */
   | 'video_refused'
+  /**
+   * The sender could not bring its own capture up and ended the call
+   * before any media flowed — today that is the Android mic-foreground
+   * capture gate refusing to start AudioRecord into a while-in-use-muted
+   * stream (see `apps/mobile/src/calls/mic-foreground.ts`). Sent so the
+   * peer stops ringing immediately instead of waiting out its ring
+   * timeout and reporting a bogus `no_answer`. Pre-rc clients that don't
+   * know this reason fall through their `default` branch to a plain
+   * hangup, which is the same prompt teardown.
+   */
+  | 'failed'
   /**
    * Server-originated: the peer's WebSocket dropped mid-call (swipe-away,
    * process-kill, or a network loss with no reconnect inside the server's

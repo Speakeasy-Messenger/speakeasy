@@ -5,6 +5,7 @@ interface NativeAudioDiagnostics {
   setCallId(callId: string | null): void;
   drain(): Promise<unknown[]>;
   snapshot(trigger: string): Promise<Record<string, unknown>>;
+  isMicrophoneForegroundServiceActive(): Promise<boolean | null>;
   addListener(eventName: string): void;
   removeListeners(count: number): void;
 }
@@ -54,5 +55,20 @@ export const audioDiagnostics = {
   stop(callId: string): void {
     if (Platform.OS !== 'android' || !native) return;
     void this.snapshot(callId, 'peer-closed').finally(() => native.setCallId(null));
+  },
+
+  /**
+   * Mic-FGS confirmation for the capture gate (`calls/mic-foreground.ts`).
+   * Resolves true/false once the microphone foreground service is (or
+   * isn't) foreground; null when the OS can't tell (pre-Q) or no native
+   * module. The gate treats anything but `true` as NOT confirmed.
+   */
+  async isMicrophoneForegroundServiceActive(): Promise<boolean | null> {
+    if (Platform.OS !== 'android' || !native) return null;
+    try {
+      return await native.isMicrophoneForegroundServiceActive();
+    } catch {
+      return null;
+    }
   },
 };

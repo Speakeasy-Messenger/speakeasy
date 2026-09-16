@@ -36,6 +36,7 @@ import type {
 import { mediaKindForCall } from './types.js';
 import { CallKeepBridge } from './callkeep-bridge.js';
 import { FilterError, setFilterBypass } from '../native/voice-filter.js';
+import { ensureMicForegroundService, type MicForegroundGateCall } from './mic-foreground.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
@@ -174,6 +175,17 @@ export interface CallOrchestratorDeps {
   callKeepFactory?: (
     orchestrator: CallOrchestrator,
   ) => Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
+  /**
+   * Mic-FGS capture gate (`./mic-foreground.ts`) — starts the microphone
+   * foreground service and resolves true only when it is CONFIRMED active.
+   * The orchestrator awaits it before anything can begin AudioRecord
+   * capture (caller: before createOffer; callee: before createAnswer).
+   * Android 14+ delivers a permanently-muted capture stream when capture
+   * starts backgrounded with no mic FGS, so capture must not begin until
+   * this resolves true — on false the call is ended instead. Optional so
+   * tests inject a stub; the production default is the real gate.
+   */
+  ensureMicForegroundService?: (call: MicForegroundGateCall) => Promise<boolean>;
 }
 
 export interface CallHistoryEntry {
@@ -280,6 +292,33 @@ export class CallOrchestrator {
     return this.deps.callKeepEnabled ?? CALLKEEP_ENABLED;
   }
 
+  /**
+   * The mic-FGS capture gate (see CallOrchestratorDeps.ensureMicForeground
+   * Service + mic-foreground.ts). Resolves false when the microphone FGS
+   * could not be started AND confirmed active, and THROWS
+   * `mic permission <result>` when the user refuses the microphone — the
+   * shape RootNavigator / IncomingCallScreen classify via
+   * `permissionErrorKind` to offer Open Settings. Both call sites therefore
+   * belong inside their existing try/catch.
+   *
+   * `isStillActive` lets the gate abandon a call that ended while its
+   * permission prompt was up, rather than raising a foreground service the
+   * already-completed teardown can no longer dismiss.
+   */
+  private ensureMicForegroundReady(
+    callId: string,
+    kind: CallKind,
+    peerUserId: string,
+  ): Promise<boolean> {
+    const gate = this.deps.ensureMicForegroundService ?? ensureMicForegroundService;
+    return gate({
+      callId,
+      peerUserId,
+      kind,
+      isStillActive: () => this.active?.callId === callId,
+    });
+  }
+
   getActive(): ActiveCall | undefined {
     return this.active;
   }
@@ -336,6 +375,17 @@ export class CallOrchestrator {
     diag('call', 'startOutgoing', { callId, peerUserId, kind });
 
     try {
+      // Mic-FGS capture gate — MUST resolve before AudioRecord capture can
+      // start. Capture begins inside peer.createOffer() → ensureLocalStream
+      // → getUserMedia, which can land seconds later (first-call init) —
+      // possibly AFTER the user backgrounds during ringing (repro
+      // call-01M2N41QF1P7BE6HSWR152SMRG: backgrounded capture without a
+      // microphone FGS = permanently-muted stream, silence for the whole
+      // call). So start + confirm the mic FGS HERE, at the first foreground
+      // moment, and never capture until it holds. See mic-foreground.ts.
+      if (!(await this.ensureMicForegroundReady(callId, kind, peerUserId))) {
+        throw new Error('mic foreground service not confirmed before capture');
+      }
       const iceServers = await this.fetchIceServers();
       this.assertActiveGeneration(generation, callId);
       diag('call', 'iceServers fetched', { count: iceServers.length });
@@ -392,7 +442,7 @@ export class CallOrchestrator {
       return callId;
     } catch (err) {
       diag('call', 'startOutgoing FAILED', { err: String(err) });
-      if (this.isActiveGeneration(generation, callId)) this.endLocally('failed');
+      if (this.isActiveGeneration(generation, callId)) this.endWithLocalFailure();
       throw err;
     }
   }
@@ -412,6 +462,20 @@ export class CallOrchestrator {
     const active = this.active;
     const peer = this.peer;
     try {
+      // Mic-FGS capture gate — symmetric with startOutgoing: capture begins
+      // at peer.createAnswer() below, so the microphone FGS must be started
+      // AND confirmed active first (Android 14+ mutes backgrounded capture
+      // with no mic FGS, and the user CAN background during ringing then
+      // answer). See mic-foreground.ts.
+      if (!(await this.ensureMicForegroundReady(active.callId, active.kind, active.peerUserId))) {
+        throw new Error('mic foreground service not confirmed before capture');
+      }
+      // The gate polls for up to MIC_FGS_CONFIRM_TIMEOUT_MS, long enough for
+      // the ring timeout / a caller cancel to tear this call down mid-await.
+      // Re-assert before createAnswer: ensureLocalStream → getUserMedia
+      // behind it would otherwise open the mic AFTER peer.close(), leaving a
+      // stream nothing holds a handle to — a hot mic for the process life.
+      this.assertActivePeer(generation, active.callId, peer);
       // Phase 5j Private Call — install the voice filter BEFORE
       // createAnswer triggers ensureLocalStream → getUserMedia →
       // addTrack on the callee side. Symmetric with startOutgoing on
@@ -447,7 +511,7 @@ export class CallOrchestrator {
       this.clearRingTimeout();
     } catch (err) {
       diag('call', 'accept FAILED', { err: String(err) });
-      if (this.isActivePeer(generation, active.callId, peer)) this.endLocally('failed');
+      if (this.isActivePeer(generation, active.callId, peer)) this.endWithLocalFailure();
       throw err;
     }
   }
@@ -518,6 +582,35 @@ export class CallOrchestrator {
       diag('call', 'sendAnimationFrame failed', { err: String(err) });
     }
     return this.outboundAnimationSeq;
+  }
+
+  /**
+   * Local-failure teardown for the dial/accept setup paths. Mirrors
+   * `endWithFilterFailure`: tell the peer on the wire FIRST, then tear
+   * down locally as `failed`.
+   *
+   * The wire send is what stops the other end from sitting on a dead
+   * call. When the callee's mic-foreground capture gate refuses (see
+   * `mic-foreground.ts`), a silent local end left the caller ringing
+   * until RING_TIMEOUT_MS and then reporting `no_answer` — a wrong
+   * story about a technical failure. The send is wrapped because a
+   * flapped socket must not stop the local teardown that frees the mic.
+   */
+  private endWithLocalFailure(): void {
+    if (!this.active) return;
+    try {
+      this.deps.send({
+        type: 'call_end',
+        to: this.active.peerUserId,
+        call_id: this.active.callId,
+        reason: 'failed',
+      });
+    } catch (err) {
+      diag('call', 'failed-end send failed (continuing local teardown)', {
+        err: String(err),
+      });
+    }
+    this.endLocally('failed');
   }
 
   /**
@@ -1024,6 +1117,12 @@ export class CallOrchestrator {
       case 'filter_failure':
         local = 'peer_filter_failure';
         break;
+      case 'failed':
+        // The peer's own setup failed (mic-FGS capture gate, etc.) before
+        // media ever flowed. Record it as the technical failure it is
+        // rather than letting it read as a social hangup.
+        local = 'failed';
+        break;
       case 'peer_filter_failure':
         // Malformed: a peer shouldn't claim this. Fall through to
         // generic hangup so the UI doesn't get stuck.
@@ -1221,9 +1320,10 @@ export class CallOrchestrator {
    * the IncomingCallScreen is up. iOS no-ops these (system handles
    * via Info.plist). On Android, the OS dialog overlays the call
    * screen and the user grants while the call is still ringing —
-   * by the time they tap Accept, gUM is instant. Without this,
-   * permissions fired inside `accept() → createAnswer() → gUM` and
-   * the 5–15s of dialog tapping pushed the caller past their PC's
+   * by the time they tap Accept, the mic gate and gUM are instant.
+   * Without this, the prompts fire inside `accept()` — mic in the
+   * mic-FGS capture gate, camera in `createAnswer() → gUM` — and the
+   * 5–15s of dialog tapping pushed the caller past their PC's
    * answer-window. Idempotent — a second call to ensureMicPermission
    * after the user has decided is a no-op.
    */

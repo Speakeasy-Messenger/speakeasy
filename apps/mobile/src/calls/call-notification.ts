@@ -8,11 +8,15 @@ import { Platform } from 'react-native';
 import { diag } from '../diag/log.js';
 
 /**
- * The "voice-call pill": an ongoing Android notification shown while a call
- * is active and the app is backgrounded — WhatsApp-style. Shows the peer, a
- * live duration, Mute/End actions, and tap-to-return. Video calls float into
- * a PiP bubble instead, so this is primarily the affordance for AUDIO calls
- * (which have nothing visible when backgrounded), but it works for any kind.
+ * The "voice-call pill": an ongoing Android notification shown for the whole
+ * call — WhatsApp-style. Shows the peer, a live duration, Mute/End actions,
+ * and tap-to-return, and it is the affordance for a backgrounded call (an
+ * audio call otherwise has nothing visible at all).
+ *
+ * It is also the carrier of the `microphone` foreground service every call
+ * needs before capture may start, so ALL kinds get it — video included, even
+ * though video additionally floats into a PiP bubble. The start/confirm
+ * contract lives in `mic-foreground.ts`; this module only posts the pill.
  *
  * iOS gets this for free from CallKit's system call UI (see CallKeepBridge);
  * this module is Android-only.

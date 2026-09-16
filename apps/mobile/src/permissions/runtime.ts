@@ -158,11 +158,14 @@ export function showOpenSettingsAlert(kind: PermKind): void {
 }
 
 /**
- * Classify an error thrown out of the call media path
- * (`ensureLocalStream` throws `Error('<kind> permission <result>')` when a
- * runtime permission isn't granted — webrtc-peer.ts). Returns the kind +
- * result so a call-start UI can give the user feedback instead of failing
- * silently. Returns null for non-permission errors (busy / self-call / a
+ * Classify an error thrown out of the call setup path — both the Android
+ * mic-foreground capture gate (`calls/mic-foreground.ts`, which is where a
+ * denied microphone now surfaces first, before any capture) and
+ * `ensureLocalStream` (webrtc-peer.ts) throw
+ * `Error('<kind> permission <result>')` when a runtime permission isn't
+ * granted. Returns the kind + result so a call-start UI can give the user
+ * feedback instead of failing silently. Returns null for non-permission
+ * errors (busy / self-call / an unconfirmed mic foreground service / a
  * generic getUserMedia rejection), which callers should leave to diag().
  *
  * Note: `never_ask_again` is already surfaced by `ensure()` via
