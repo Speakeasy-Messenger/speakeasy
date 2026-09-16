@@ -1114,6 +1114,56 @@ describe('mic-FGS capture gate (call-01M2N41QF1P7BE6HSWR152SMRG)', () => {
   });
 
   /**
+   * Regression: the gate adds an up-to-4s await between "user tapped Accept"
+   * and createAnswer, and createAnswer is what calls getUserMedia. If the
+   * ring timeout (or a caller cancel) tears the call down inside that window,
+   * capture must NOT start — the peer is already closed, so the stream it
+   * opened would be unreachable and the mic would stay hot for the process
+   * lifetime.
+   */
+  it('accept whose gate resolves after the ring timeout never starts capture', async () => {
+    vi.useFakeTimers();
+    try {
+      let releaseCalleeGate: ((confirmed: boolean) => void) | undefined;
+      let gateCalls = 0;
+      const h = makeOrchHarness({
+        ringTimeoutMs: 1_000,
+        ensureMicForegroundService: () => {
+          gateCalls += 1;
+          // First call is the caller's dial; the callee's accept is the one
+          // we hold open across the ring timeout.
+          if (gateCalls === 1) return Promise.resolve(true);
+          return new Promise((resolve) => {
+            releaseCalleeGate = resolve;
+          });
+        },
+      });
+      await h.caller.startOutgoing('bob');
+      await h.pump();
+      const calleePeer = h.calleePeer();
+      let capturedAfterTeardown = false;
+      calleePeer.createAnswer = async () => {
+        capturedAfterTeardown = true;
+        return { v: 1, sdp: 'answer-from-callee', candidates: [] };
+      };
+
+      const accepting = h.callee.accept();
+      expect(releaseCalleeGate).toBeDefined();
+      await vi.advanceTimersByTimeAsync(1_500);
+      expect(h.callee.getActive()).toBeUndefined();
+      expect(calleePeer.closed).toBe(true);
+
+      releaseCalleeGate!(true);
+      await expect(accepting).rejects.toThrow(/call no longer active/);
+      expect(capturedAfterTeardown).toBe(false);
+      expect(h.calleeOut.filter((f) => f.type === 'call_answer')).toHaveLength(0);
+      expect(h.finishedCallee.map((f) => f.reason)).toEqual(['no_answer']);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  /**
    * Regression: the callee's gate failure used to end only locally, so the
    * caller sat in `outgoing_ringing` until RING_TIMEOUT_MS and then filed a
    * `no_answer` — the wrong story (nobody ignored the call) and a 45s hang.

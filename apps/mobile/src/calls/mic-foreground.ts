@@ -24,25 +24,28 @@ import { showOngoingCallNotification } from './call-notification.js';
  *   2. The service is CONFIRMED active via the native ActivityManager check
  *      (`audioDiagnostics.isMicrophoneForegroundServiceActive`) before the
  *      gate resolves — starting it is not enough, Android can silently drop
- *      a background FGS start.
+ *      a background FGS start. `showOngoingCallNotification` absorbs that
+ *      rejection itself (it falls back to a plain, non-FGS pill), so the
+ *      confirm poll is the ONLY thing that can tell a real FGS from a
+ *      cosmetic notification.
  *   3. If the FGS cannot be confirmed within the deadline, the gate returns
  *      false and the orchestrator ends the call instead of capturing — a
- *      muted-forever mic call is worse than a failed one.
+ *      muted-forever mic call is worse than a failed one. This is the
+ *      fail-closed path; nothing else in the gate closes it.
  *
  * Confirmation is a poll (the FGS transitions asynchronously after the
  * notification posts); the deadline bounds the added dial/accept latency.
  *
  * Steps 2 and 3 apply from API 30 up only (MIC_FGS_MIN_API_LEVEL). The
- * `microphone` foreground-service type and the while-in-use capture muting
- * it satisfies were both introduced in Android 11; on API 28/29 (minSdk is
- * 28) there is nothing to confirm — ActivityManager cannot report a
- * microphone FGS there at all, so requiring confirmation would time out and
- * fail every call on a platform the bug cannot occur on. The pill is still
- * started there; only the confirm-or-refuse contract is skipped.
+ * `microphone` foreground-service type exists from API 29 (Q) and the
+ * native check works there; the threshold is 30 because the permanent
+ * while-in-use capture muting this gate exists for starts in Android 11.
+ * Below it (minSdk is 28) the pill is still started; only the
+ * confirm-or-refuse contract is skipped.
  */
 export const MIC_FGS_CONFIRM_TIMEOUT_MS = 4_000;
 export const MIC_FGS_POLL_INTERVAL_MS = 150;
-/** First Android API level with a `microphone` foreground-service type. */
+/** First Android API level that mutes while-in-use background capture. */
 export const MIC_FGS_MIN_API_LEVEL = 30;
 
 export interface MicForegroundGateCall {
@@ -57,9 +60,9 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 /**
  * Start the microphone FGS and wait until it is confirmed foreground.
  * Resolves true only when a microphone FGS is verifiably active; false
- * otherwise (start threw, wrong platform state, confirmation timed out).
- * Non-Android resolves true immediately (CallKit owns the audio session),
- * as does Android below MIC_FGS_MIN_API_LEVEL.
+ * when confirmation times out, or when the pill could not be posted at
+ * all. Non-Android resolves true immediately (CallKit owns the audio
+ * session), as does Android below MIC_FGS_MIN_API_LEVEL.
  *
  * The pill start is deliberately the SAME notification the ongoing-call
  * pill uses (`call-notification.ts`): one id, idempotent, and the pill UI
@@ -77,9 +80,12 @@ export async function ensureMicForegroundService(call: MicForegroundGateCall): P
       kind: call.kind,
     });
   } catch (err) {
-    diagImportant('call', 'mic fgs: start failed — capture gate closed', {
+    // showOngoingCallNotification swallows an FGS-start rejection (it posts
+    // a plain pill instead), so reaching here means the notification itself
+    // could not be posted — there is no pill and no service to confirm.
+    diagImportant('call', 'mic fgs: pill notification failed to post', {
       callId: call.callId,
-      confirmationRequired,
+      captureGateClosed: confirmationRequired,
       err: String(err),
     });
     return !confirmationRequired;

@@ -462,6 +462,12 @@ export class CallOrchestrator {
       if (!(await this.ensureMicForegroundReady(active.callId, active.kind, active.peerUserId))) {
         throw new Error('mic foreground service not confirmed before capture');
       }
+      // The gate polls for up to MIC_FGS_CONFIRM_TIMEOUT_MS, long enough for
+      // the ring timeout / a caller cancel to tear this call down mid-await.
+      // Re-assert before createAnswer: ensureLocalStream → getUserMedia
+      // behind it would otherwise open the mic AFTER peer.close(), leaving a
+      // stream nothing holds a handle to — a hot mic for the process life.
+      this.assertActivePeer(generation, active.callId, peer);
       // Phase 5j Private Call — install the voice filter BEFORE
       // createAnswer triggers ensureLocalStream → getUserMedia →
       // addTrack on the callee side. Symmetric with startOutgoing on

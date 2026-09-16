@@ -203,6 +203,13 @@ function writeCallEndedBubble(myUserId: string, entry: CallHistoryEntry): void {
     const mm = Math.floor(sec / 60);
     const ss = String(sec % 60).padStart(2, '0');
     text = `${noun} · ${mm}:${ss}.`;
+  } else if (entry.reason === 'failed') {
+    // Setup died before media (mic-FGS capture gate refusing, connecting
+    // timeout, a peer that sent call_end{failed}). Nobody ignored anybody —
+    // "no answer" / "you missed it" would blame a person for a device fault.
+    text = wasIncoming
+      ? `${noun} with @${entry.peerUserId} failed to connect.`
+      : `${noun} failed to connect.`;
   } else if (wasIncoming) {
     text = `@${entry.peerUserId} ${verbedIncoming}. you missed it.`;
   } else {
