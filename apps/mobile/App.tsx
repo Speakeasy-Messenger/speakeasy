@@ -1281,31 +1281,15 @@ export default function App({ videoCallHarness = false }: AppProps) {
       ) {
         navRef.current?.navigate('Call');
       }
-      // #5 pill (Android; iOS uses CallKit; video uses PiP): START the ongoing-
-      // call foreground service at the call's first FOREGROUND moment — the
-      // caller pressing dial, or the callee accepting an incoming call. This is
-      // deliberate: the FGS is `microphone`-typed and Android 14 rejects a
-      // microphone-FGS start from the background, so starting it lazily (at
-      // connect, which can land after the user has already tabbed away while it
-      // rings, or on the AppState→background transition) silently failed — the
-      // reported "pill never shows". Started here while foreground, the service
-      // is already running before any backgrounding, keeping both the pill and
-      // the call's process alive. `connectedAt` is undefined until connect; the
-      // connect branch below re-displays to add the live duration.
-      const pillStart =
-        (s.active?.stage === 'outgoing_dialing' && prev?.active?.stage !== 'outgoing_dialing') ||
-        (prev?.active?.stage === 'incoming_ringing' &&
-          s.active != null &&
-          s.active.stage !== 'incoming_ringing');
-      if (Platform.OS === 'android' && s.active && s.active.kind !== 'video' && pillStart) {
-        diag('call', 'pill: foreground start', { stage: s.active.stage, kind: s.active.kind });
-        void showOngoingCallNotification({
-          peerHandle: s.active.peerUserId,
-          connectedAtMs: s.active.connectedAt,
-          micMuted: s.active.micMuted,
-          kind: s.active.kind,
-        });
-      }
+      // #5 pill (Android): the microphone FGS START is owned by the
+      // orchestrator's mic-foreground capture gate (calls/mic-foreground.ts),
+      // which starts + confirms it at the call's first FOREGROUND moment —
+      // outgoing dial and incoming accept, ALL kinds (video included: PiP
+      // does not satisfy Android 14+ while-in-use mic access, and capture
+      // must not begin until the FGS is confirmed active). This subscriber
+      // only re-displays the already-running FGS at connect to add the live
+      // duration chronometer (same notification id — an update, not a start,
+      // so it is allowed even if it lands while backgrounded).
       // Re-display at connect to add the live duration chronometer. This UPDATES
       // the already-running FGS (same notification id) rather than starting a
       // new one, so it is allowed even if it lands while backgrounded.
@@ -1313,8 +1297,7 @@ export default function App({ videoCallHarness = false }: AppProps) {
         Platform.OS === 'android' &&
         s.active &&
         s.active.stage === 'connected' &&
-        prev?.active?.stage !== 'connected' &&
-        s.active.kind !== 'video'
+        prev?.active?.stage !== 'connected'
       ) {
         void showOngoingCallNotification({
           peerHandle: s.active.peerUserId,

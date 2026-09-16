@@ -36,6 +36,7 @@ import type {
 import { mediaKindForCall } from './types.js';
 import { CallKeepBridge } from './callkeep-bridge.js';
 import { FilterError, setFilterBypass } from '../native/voice-filter.js';
+import { ensureMicForegroundService } from './mic-foreground.js';
 
 /** Wall-clock ms before we give up on an unanswered ringing call. */
 const RING_TIMEOUT_MS = 45_000;
@@ -174,6 +175,21 @@ export interface CallOrchestratorDeps {
   callKeepFactory?: (
     orchestrator: CallOrchestrator,
   ) => Pick<CallKeepBridge, 'start'> & Partial<Pick<CallKeepBridge, 'stop' | 'rejectIncomingCall'>>;
+  /**
+   * Mic-FGS capture gate (`./mic-foreground.ts`) — starts the microphone
+   * foreground service and resolves true only when it is CONFIRMED active.
+   * The orchestrator awaits it before anything can begin AudioRecord
+   * capture (caller: before createOffer; callee: before createAnswer).
+   * Android 14+ delivers a permanently-muted capture stream when capture
+   * starts backgrounded with no mic FGS, so capture must not begin until
+   * this resolves true — on false the call is ended instead. Optional so
+   * tests inject a stub; the production default is the real gate.
+   */
+  ensureMicForegroundService?: (call: {
+    callId: string;
+    peerUserId: string;
+    kind: CallKind;
+  }) => Promise<boolean>;
 }
 
 export interface CallHistoryEntry {
@@ -280,6 +296,21 @@ export class CallOrchestrator {
     return this.deps.callKeepEnabled ?? CALLKEEP_ENABLED;
   }
 
+  /**
+   * The mic-FGS capture gate (see CallOrchestratorDeps.ensureMicForeground
+   * Service + mic-foreground.ts). Resolves false — never throws — when the
+   * microphone FGS could not be started AND confirmed active; callers end
+   * the call rather than capture into a muted-forever stream.
+   */
+  private ensureMicForegroundReady(
+    callId: string,
+    kind: CallKind,
+    peerUserId: string,
+  ): Promise<boolean> {
+    const gate = this.deps.ensureMicForegroundService ?? ensureMicForegroundService;
+    return gate({ callId, peerUserId, kind });
+  }
+
   getActive(): ActiveCall | undefined {
     return this.active;
   }
@@ -336,6 +367,17 @@ export class CallOrchestrator {
     diag('call', 'startOutgoing', { callId, peerUserId, kind });
 
     try {
+      // Mic-FGS capture gate — MUST resolve before AudioRecord capture can
+      // start. Capture begins inside peer.createOffer() → ensureLocalStream
+      // → getUserMedia, which can land seconds later (first-call init) —
+      // possibly AFTER the user backgrounds during ringing (repro
+      // call-01M2N41QF1P7BE6HSWR152SMRG: backgrounded capture without a
+      // microphone FGS = permanently-muted stream, silence for the whole
+      // call). So start + confirm the mic FGS HERE, at the first foreground
+      // moment, and never capture until it holds. See mic-foreground.ts.
+      if (!(await this.ensureMicForegroundReady(callId, kind, peerUserId))) {
+        throw new Error('mic foreground service not confirmed before capture');
+      }
       const iceServers = await this.fetchIceServers();
       this.assertActiveGeneration(generation, callId);
       diag('call', 'iceServers fetched', { count: iceServers.length });
@@ -412,6 +454,14 @@ export class CallOrchestrator {
     const active = this.active;
     const peer = this.peer;
     try {
+      // Mic-FGS capture gate — symmetric with startOutgoing: capture begins
+      // at peer.createAnswer() below, so the microphone FGS must be started
+      // AND confirmed active first (Android 14+ mutes backgrounded capture
+      // with no mic FGS, and the user CAN background during ringing then
+      // answer). See mic-foreground.ts.
+      if (!(await this.ensureMicForegroundReady(active.callId, active.kind, active.peerUserId))) {
+        throw new Error('mic foreground service not confirmed before capture');
+      }
       // Phase 5j Private Call — install the voice filter BEFORE
       // createAnswer triggers ensureLocalStream → getUserMedia →
       // addTrack on the callee side. Symmetric with startOutgoing on

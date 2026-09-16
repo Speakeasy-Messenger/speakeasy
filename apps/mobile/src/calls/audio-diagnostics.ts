@@ -186,3 +186,57 @@ export function summarizeAudioSdp(sdp: string): Record<string, unknown> {
     codecs,
   };
 }
+
+/**
+ * How long after `connected` we allow inbound audio to stay silent before
+ * flagging it dead. Covers normal SDP/ICE ramp-up; a live audio sender
+ * produces its first RTP well within this window.
+ */
+export const INBOUND_AUDIO_DEAD_AFTER_MS = 10_000;
+
+/**
+ * Inbound-audio-dead detector (pure; unit-tested). Repro
+ * call-01M2N41QF1P7BE6HSWR152SMRG: outbound audio packetsSent grew with
+ * audioLevel 0 (OS-muted capture — see mic-foreground.ts) while inbound
+ * audio packetsReceived stayed 0 for the WHOLE call even though inbound
+ * VIDEO flowed on the same peer connection. Silence packets would still
+ * count as packetsReceived, so 0 received means the peer transmitted no
+ * audio RTP at all (no frames ever produced, e.g. its capture start
+ * failed) — this breadcrumb captures exactly that evidence per snapshot.
+ *
+ * Returns null unless the call has been connected ≥
+ * INBOUND_AUDIO_DEAD_AFTER_MS AND local audio is demonstrably flowing
+ * (packetsSent > 0) while inbound audio is still at zero packets.
+ */
+export function detectInboundAudioDead(
+  reports: StatsReport[],
+  connectedElapsedMs: number | undefined,
+): Record<string, unknown> | null {
+  if (connectedElapsedMs === undefined || connectedElapsedMs < INBOUND_AUDIO_DEAD_AFTER_MS) {
+    return null;
+  }
+  let outAudioPackets: number | null = null;
+  let inAudioPackets: number | null = null;
+  let inVideoPackets: number | null = null;
+  for (const report of reports) {
+    if (report.type === 'outbound-rtp' && audio(report)) {
+      outAudioPackets = Math.max(outAudioPackets ?? 0, finite(report.packetsSent) ?? 0);
+    } else if (report.type === 'inbound-rtp' && audio(report)) {
+      inAudioPackets = Math.max(inAudioPackets ?? 0, finite(report.packetsReceived) ?? 0);
+    } else if (report.type === 'inbound-rtp') {
+      inVideoPackets = Math.max(inVideoPackets ?? 0, finite(report.packetsReceived) ?? 0);
+    }
+  }
+  // Local capture demonstrably producing RTP (not the mic-foreground mute
+  // case, which still sends silence packets) but zero inbound audio.
+  if ((outAudioPackets ?? 0) <= 0 || (inAudioPackets ?? 0) > 0) return null;
+  return {
+    connectedElapsedMs: Math.round(connectedElapsedMs),
+    outboundAudioPacketsSent: outAudioPackets,
+    inboundAudioPacketsReceived: inAudioPackets ?? 0,
+    inboundVideoPacketsReceived: inVideoPackets,
+    // Same-transport asymmetry (BUNDLE): video arriving while audio doesn't
+    // rules out the network path and points at the peer's audio sender.
+    inboundVideoFlowing: (inVideoPackets ?? 0) > 0,
+  };
+}

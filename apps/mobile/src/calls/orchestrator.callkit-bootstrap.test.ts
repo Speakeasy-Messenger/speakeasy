@@ -6,6 +6,22 @@ import { createSerializedFilterOperations } from '../native/voice-filter.js';
 import { CallKeepBridge } from './callkeep-bridge.js';
 import { CallOrchestrator } from './orchestrator.js';
 
+// call-notification (the pill FGS carrier behind the orchestrator's
+// mic-FGS capture gate) imports notifee, whose CJS entry requires the real
+// react-native package — unparseable under vitest. Mock it: these tests
+// pass a stub gate on the orchestrator anyway.
+vi.mock('@notifee/react-native', () => ({
+  default: {
+    createChannel: vi.fn(async () => undefined),
+    displayNotification: vi.fn(async () => undefined),
+    stopForegroundService: vi.fn(async () => undefined),
+  },
+  AndroidCategory: { CALL: 'call' },
+  AndroidForegroundServiceType: { FOREGROUND_SERVICE_TYPE_MICROPHONE: 'microphone' },
+  AndroidImportance: { DEFAULT: 4 },
+  AndroidVisibility: { PUBLIC: 1 },
+}));
+
 const UUIDS = [
   '38c37551-9389-55a1-b8fc-bab3ed28db31',
   '26686650-db46-5378-92d3-19da7c9a947d',
@@ -155,6 +171,7 @@ function harness(opts: {
     voiceFilter,
     getAllowIncomingCalls: () => opts.allowIncoming ?? true,
     callKeepEnabled: true,
+    ensureMicForegroundService: async () => true,
     callKeepFactory: (owner) => {
       bridge = new CallKeepBridge({
         orchestrator: owner,

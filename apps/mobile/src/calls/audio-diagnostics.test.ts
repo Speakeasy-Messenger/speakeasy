@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { summarizeAudioPeer, summarizeAudioSdp } from './audio-diagnostics.js';
+import {
+  detectInboundAudioDead,
+  summarizeAudioPeer,
+  summarizeAudioSdp,
+} from './audio-diagnostics.js';
 
 describe('audio diagnostics privacy and counters', () => {
   it('reports cumulative RTP counters and deltas with hashed correlation ids', () => {
@@ -70,5 +74,44 @@ describe('audio diagnostics privacy and counters', () => {
     expect(json).not.toContain('203.0.113.10');
     expect(json).not.toContain('secret-user-fragment');
     expect(json).not.toContain('candidate');
+  });
+});
+
+describe('detectInboundAudioDead (call-01M2N41QF1P7BE6HSWR152SMRG breadcrumb)', () => {
+  const reports = (audio: { sent: number; recv: number }, video: { recv: number }) => [
+    { type: 'outbound-rtp', kind: 'audio', packetsSent: audio.sent, bytesSent: audio.sent * 30 },
+    { type: 'inbound-rtp', kind: 'audio', packetsReceived: audio.recv, bytesReceived: audio.recv * 30 },
+    { type: 'inbound-rtp', kind: 'video', packetsReceived: video.recv, bytesReceived: video.recv * 1200 },
+  ];
+
+  it('flags dead inbound audio while inbound video flows (BUNDLE asymmetry)', () => {
+    const d = detectInboundAudioDead(reports({ sent: 50, recv: 0 }, { recv: 900 }), 12_000);
+    expect(d).not.toBeNull();
+    // Same-transport asymmetry: video flowing while audio isn't points at
+    // the peer's audio sender, not the network path.
+    expect(d).toMatchObject({
+      connectedElapsedMs: 12_000,
+      outboundAudioPacketsSent: 50,
+      inboundAudioPacketsReceived: 0,
+      inboundVideoPacketsReceived: 900,
+      inboundVideoFlowing: true,
+    });
+  });
+
+  it('stays silent before the grace window elapses', () => {
+    expect(detectInboundAudioDead(reports({ sent: 50, recv: 0 }, { recv: 900 }), 9_000)).toBeNull();
+  });
+
+  it('stays silent while we ourselves sent no outbound audio (sender-side mute is a different failure)', () => {
+    expect(detectInboundAudioDead(reports({ sent: 0, recv: 0 }, { recv: 0 }), 30_000)).toBeNull();
+  });
+
+  it('stays silent when inbound audio is actually flowing', () => {
+    expect(detectInboundAudioDead(reports({ sent: 50, recv: 40 }, { recv: 900 }), 30_000)).toBeNull();
+  });
+
+  it('handles missing report kinds without crashing', () => {
+    expect(detectInboundAudioDead([{ type: 'outbound-rtp', kind: 'audio', packetsSent: 10 }], 30_000)).not.toBeNull();
+    expect(detectInboundAudioDead([], 30_000)).toBeNull();
   });
 });

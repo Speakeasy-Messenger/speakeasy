@@ -23,6 +23,16 @@ class AudioDiagnosticsModule(private val context: ReactApplicationContext) :
     populateBridgeMap(map, AudioDiagnosticsStore.snapshot(context, trigger))
     promise.resolve(map)
   }
+
+  /**
+   * Mic-FGS gate: resolves true/false once the microphone foreground
+   * service is (or isn't) in the foreground state. Resolves null when the
+   * OS can't tell (pre-Q) — callers treat null as "not confirmed".
+   */
+  @ReactMethod fun isMicrophoneForegroundServiceActive(promise: Promise) {
+    val active = AudioDiagnosticsStore.microphoneForegroundService(context)
+    promise.resolve(active)
+  }
   @ReactMethod fun addListener(eventName: String) = Unit
   @ReactMethod fun removeListeners(count: Int) = Unit
 }

@@ -71,7 +71,16 @@ object AudioDiagnosticsStore {
     )
   }
 
-  private fun microphoneForegroundService(context: Context): Boolean? {
+  /**
+   * Whether a `microphone`-typed foreground service of ours is currently in
+   * the foreground state. JS calls this (via the module below) to CONFIRM
+   * the mic FGS is actually active before AudioRecord capture starts —
+   * Android 14+ delivers a permanently-muted capture stream when AudioRecord
+   * starts while backgrounded with no microphone FGS (the call-01M2N41QF1P7
+   * no-audio repro), so starting the service is not enough; it must be
+   * verified before getUserMedia.
+   */
+  fun microphoneForegroundService(context: Context): Boolean? {
     if (Build.VERSION.SDK_INT < Build.VERSION_CODES.Q) return null
     return try {
       val manager = context.getSystemService(Context.ACTIVITY_SERVICE) as ActivityManager
