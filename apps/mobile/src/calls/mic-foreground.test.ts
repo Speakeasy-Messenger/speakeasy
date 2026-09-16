@@ -78,9 +78,7 @@ describe('ensureMicForegroundService', () => {
 
   it('passes the call kind through (video calls need the mic FGS too)', async () => {
     await ensureMicForegroundService({ ...call, kind: 'video' });
-    expect(mockShow).toHaveBeenCalledWith(
-      expect.objectContaining({ kind: 'video' }),
-    );
+    expect(mockShow).toHaveBeenCalledWith(expect.objectContaining({ kind: 'video' }));
   });
 
   it('resolves false when the pill notification cannot be posted at all (e.g. channel creation rejects)', async () => {
@@ -174,9 +172,7 @@ describe('ensureMicForegroundService', () => {
     'refuses with a typed error and starts no service when the mic is %s',
     async (result) => {
       mockMicPermission.mockResolvedValue(result);
-      await expect(ensureMicForegroundService(call)).rejects.toThrow(
-        `mic permission ${result}`,
-      );
+      await expect(ensureMicForegroundService(call)).rejects.toThrow(`mic permission ${result}`);
       expect(mockShow).not.toHaveBeenCalled();
       expect(mockCheck).not.toHaveBeenCalled();
     },

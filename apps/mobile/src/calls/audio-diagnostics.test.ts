@@ -80,8 +80,18 @@ describe('audio diagnostics privacy and counters', () => {
 describe('detectInboundAudioDead (call-01M2N41QF1P7BE6HSWR152SMRG breadcrumb)', () => {
   const reports = (audio: { sent: number; recv: number }, video: { recv: number }) => [
     { type: 'outbound-rtp', kind: 'audio', packetsSent: audio.sent, bytesSent: audio.sent * 30 },
-    { type: 'inbound-rtp', kind: 'audio', packetsReceived: audio.recv, bytesReceived: audio.recv * 30 },
-    { type: 'inbound-rtp', kind: 'video', packetsReceived: video.recv, bytesReceived: video.recv * 1200 },
+    {
+      type: 'inbound-rtp',
+      kind: 'audio',
+      packetsReceived: audio.recv,
+      bytesReceived: audio.recv * 30,
+    },
+    {
+      type: 'inbound-rtp',
+      kind: 'video',
+      packetsReceived: video.recv,
+      bytesReceived: video.recv * 1200,
+    },
   ];
 
   it('flags dead inbound audio while inbound video flows (BUNDLE asymmetry)', () => {
@@ -106,7 +116,9 @@ describe('detectInboundAudioDead (call-01M2N41QF1P7BE6HSWR152SMRG breadcrumb)', 
   });
 
   it('stays silent when inbound audio is actually flowing', () => {
-    expect(detectInboundAudioDead(reports({ sent: 50, recv: 40 }, { recv: 900 }), 30_000)).toBeNull();
+    expect(
+      detectInboundAudioDead(reports({ sent: 50, recv: 40 }, { recv: 900 }), 30_000),
+    ).toBeNull();
   });
 
   it('stays silent on an audio-only call — with no inbound video there is no asymmetry to report', () => {
