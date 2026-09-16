@@ -94,7 +94,6 @@ describe('detectInboundAudioDead (call-01M2N41QF1P7BE6HSWR152SMRG breadcrumb)', 
       outboundAudioPacketsSent: 50,
       inboundAudioPacketsReceived: 0,
       inboundVideoPacketsReceived: 900,
-      inboundVideoFlowing: true,
     });
   });
 
@@ -110,8 +109,14 @@ describe('detectInboundAudioDead (call-01M2N41QF1P7BE6HSWR152SMRG breadcrumb)', 
     expect(detectInboundAudioDead(reports({ sent: 50, recv: 40 }, { recv: 900 }), 30_000)).toBeNull();
   });
 
+  it('stays silent on an audio-only call — with no inbound video there is no asymmetry to report', () => {
+    expect(detectInboundAudioDead(reports({ sent: 50, recv: 0 }, { recv: 0 }), 30_000)).toBeNull();
+  });
+
   it('handles missing report kinds without crashing', () => {
-    expect(detectInboundAudioDead([{ type: 'outbound-rtp', kind: 'audio', packetsSent: 10 }], 30_000)).not.toBeNull();
+    expect(
+      detectInboundAudioDead([{ type: 'outbound-rtp', kind: 'audio', packetsSent: 10 }], 30_000),
+    ).toBeNull();
     expect(detectInboundAudioDead([], 30_000)).toBeNull();
   });
 });

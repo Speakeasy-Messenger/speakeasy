@@ -31,9 +31,19 @@ import { showOngoingCallNotification } from './call-notification.js';
  *
  * Confirmation is a poll (the FGS transitions asynchronously after the
  * notification posts); the deadline bounds the added dial/accept latency.
+ *
+ * Steps 2 and 3 apply from API 30 up only (MIC_FGS_MIN_API_LEVEL). The
+ * `microphone` foreground-service type and the while-in-use capture muting
+ * it satisfies were both introduced in Android 11; on API 28/29 (minSdk is
+ * 28) there is nothing to confirm — ActivityManager cannot report a
+ * microphone FGS there at all, so requiring confirmation would time out and
+ * fail every call on a platform the bug cannot occur on. The pill is still
+ * started there; only the confirm-or-refuse contract is skipped.
  */
 export const MIC_FGS_CONFIRM_TIMEOUT_MS = 4_000;
 export const MIC_FGS_POLL_INTERVAL_MS = 150;
+/** First Android API level with a `microphone` foreground-service type. */
+export const MIC_FGS_MIN_API_LEVEL = 30;
 
 export interface MicForegroundGateCall {
   callId: string;
@@ -48,7 +58,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  * Start the microphone FGS and wait until it is confirmed foreground.
  * Resolves true only when a microphone FGS is verifiably active; false
  * otherwise (start threw, wrong platform state, confirmation timed out).
- * Non-Android resolves true immediately (CallKit owns the audio session).
+ * Non-Android resolves true immediately (CallKit owns the audio session),
+ * as does Android below MIC_FGS_MIN_API_LEVEL.
  *
  * The pill start is deliberately the SAME notification the ongoing-call
  * pill uses (`call-notification.ts`): one id, idempotent, and the pill UI
@@ -57,6 +68,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
  */
 export async function ensureMicForegroundService(call: MicForegroundGateCall): Promise<boolean> {
   if (Platform.OS !== 'android') return true;
+  // An unknown/NaN version confirms rather than skipping — fail closed.
+  const confirmationRequired = !(Number(Platform.Version) < MIC_FGS_MIN_API_LEVEL);
   try {
     await showOngoingCallNotification({
       peerHandle: call.peerUserId,
@@ -66,9 +79,18 @@ export async function ensureMicForegroundService(call: MicForegroundGateCall): P
   } catch (err) {
     diagImportant('call', 'mic fgs: start failed — capture gate closed', {
       callId: call.callId,
+      confirmationRequired,
       err: String(err),
     });
-    return false;
+    return !confirmationRequired;
+  }
+  if (!confirmationRequired) {
+    diag('call', 'mic fgs: confirmation not required below API level', {
+      callId: call.callId,
+      apiLevel: Platform.Version,
+      minApiLevel: MIC_FGS_MIN_API_LEVEL,
+    });
+    return true;
   }
   const deadline = Date.now() + MIC_FGS_CONFIRM_TIMEOUT_MS;
   let confirmed: boolean | null = null;

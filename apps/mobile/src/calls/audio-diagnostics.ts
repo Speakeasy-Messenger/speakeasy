@@ -206,7 +206,11 @@ export const INBOUND_AUDIO_DEAD_AFTER_MS = 10_000;
  *
  * Returns null unless the call has been connected ≥
  * INBOUND_AUDIO_DEAD_AFTER_MS AND local audio is demonstrably flowing
- * (packetsSent > 0) while inbound audio is still at zero packets.
+ * (packetsSent > 0) AND inbound VIDEO is flowing while inbound audio is
+ * still at zero packets. The inbound-video requirement is what makes this
+ * evidence rather than noise: it is the same BUNDLE transport, so video
+ * arriving rules out the network path. Without it the breadcrumb would
+ * fire on every audio-only call whose peer is simply silent on the wire.
  */
 export function detectInboundAudioDead(
   reports: StatsReport[],
@@ -228,15 +232,14 @@ export function detectInboundAudioDead(
     }
   }
   // Local capture demonstrably producing RTP (not the mic-foreground mute
-  // case, which still sends silence packets) but zero inbound audio.
-  if ((outAudioPackets ?? 0) <= 0 || (inAudioPackets ?? 0) > 0) return null;
+  // case, which still sends silence packets) but zero inbound audio while
+  // inbound video keeps arriving on the same transport.
+  if ((outAudioPackets ?? 0) <= 0) return null;
+  if ((inAudioPackets ?? 0) > 0 || (inVideoPackets ?? 0) <= 0) return null;
   return {
     connectedElapsedMs: Math.round(connectedElapsedMs),
     outboundAudioPacketsSent: outAudioPackets,
     inboundAudioPacketsReceived: inAudioPackets ?? 0,
     inboundVideoPacketsReceived: inVideoPackets,
-    // Same-transport asymmetry (BUNDLE): video arriving while audio doesn't
-    // rules out the network path and points at the peer's audio sender.
-    inboundVideoFlowing: (inVideoPackets ?? 0) > 0,
   };
 }

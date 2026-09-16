@@ -434,7 +434,7 @@ export class CallOrchestrator {
       return callId;
     } catch (err) {
       diag('call', 'startOutgoing FAILED', { err: String(err) });
-      if (this.isActiveGeneration(generation, callId)) this.endLocally('failed');
+      if (this.isActiveGeneration(generation, callId)) this.endWithLocalFailure();
       throw err;
     }
   }
@@ -497,7 +497,7 @@ export class CallOrchestrator {
       this.clearRingTimeout();
     } catch (err) {
       diag('call', 'accept FAILED', { err: String(err) });
-      if (this.isActivePeer(generation, active.callId, peer)) this.endLocally('failed');
+      if (this.isActivePeer(generation, active.callId, peer)) this.endWithLocalFailure();
       throw err;
     }
   }
@@ -568,6 +568,35 @@ export class CallOrchestrator {
       diag('call', 'sendAnimationFrame failed', { err: String(err) });
     }
     return this.outboundAnimationSeq;
+  }
+
+  /**
+   * Local-failure teardown for the dial/accept setup paths. Mirrors
+   * `endWithFilterFailure`: tell the peer on the wire FIRST, then tear
+   * down locally as `failed`.
+   *
+   * The wire send is what stops the other end from sitting on a dead
+   * call. When the callee's mic-foreground capture gate refuses (see
+   * `mic-foreground.ts`), a silent local end left the caller ringing
+   * until RING_TIMEOUT_MS and then reporting `no_answer` — a wrong
+   * story about a technical failure. The send is wrapped because a
+   * flapped socket must not stop the local teardown that frees the mic.
+   */
+  private endWithLocalFailure(): void {
+    if (!this.active) return;
+    try {
+      this.deps.send({
+        type: 'call_end',
+        to: this.active.peerUserId,
+        call_id: this.active.callId,
+        reason: 'failed',
+      });
+    } catch (err) {
+      diag('call', 'failed-end send failed (continuing local teardown)', {
+        err: String(err),
+      });
+    }
+    this.endLocally('failed');
   }
 
   /**
@@ -1073,6 +1102,12 @@ export class CallOrchestrator {
         break;
       case 'filter_failure':
         local = 'peer_filter_failure';
+        break;
+      case 'failed':
+        // The peer's own setup failed (mic-FGS capture gate, etc.) before
+        // media ever flowed. Record it as the technical failure it is
+        // rather than letting it read as a social hangup.
+        local = 'failed';
         break;
       case 'peer_filter_failure':
         // Malformed: a peer shouldn't claim this. Fall through to

@@ -21,15 +21,10 @@ export type CallStage =
   | 'ended';
 
 /**
- * Wire reasons (`hangup`/`decline`/`cancel`/`busy`) plus local-only
- * synthetic states the orchestrator records but never sends.
+ * Wire reasons (`hangup`/`decline`/`cancel`/`busy`/`failed`/…) plus
+ * local-only synthetic states the orchestrator records but never sends.
  */
-export type CallEndedReason =
-  | CallEndReason
-  | 'no_answer'
-  | 'callee_offline'
-  | 'completed'
-  | 'failed';
+export type CallEndedReason = CallEndReason | 'no_answer' | 'callee_offline' | 'completed';
 
 /**
  * What WebRTC's PeerConnection negotiates. 'private' is conspicuously

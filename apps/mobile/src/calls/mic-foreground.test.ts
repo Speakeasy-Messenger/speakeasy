@@ -25,6 +25,7 @@ import { showOngoingCallNotification } from './call-notification.js';
 import { audioDiagnostics } from '../native/audio-diagnostics.js';
 import {
   MIC_FGS_CONFIRM_TIMEOUT_MS,
+  MIC_FGS_MIN_API_LEVEL,
   MIC_FGS_POLL_INTERVAL_MS,
   ensureMicForegroundService,
 } from './mic-foreground.js';
@@ -34,6 +35,8 @@ const mockCheck = vi.mocked(audioDiagnostics.isMicrophoneForegroundServiceActive
 
 const call = { callId: 'call-test', peerUserId: 'bob', kind: 'audio' as const };
 
+const platform = Platform as { OS: string; Version?: number };
+
 describe('ensureMicForegroundService', () => {
   beforeEach(() => {
     vi.useFakeTimers();
@@ -41,10 +44,13 @@ describe('ensureMicForegroundService', () => {
     mockCheck.mockClear();
     mockShow.mockResolvedValue(undefined);
     mockCheck.mockResolvedValue(true);
+    platform.OS = 'android';
+    platform.Version = MIC_FGS_MIN_API_LEVEL;
   });
   afterEach(() => {
     vi.useRealTimers();
-    (Platform as { OS: string }).OS = 'android';
+    platform.OS = 'android';
+    delete platform.Version;
   });
 
   it('starts the pill FGS and resolves true once the microphone FGS is confirmed active', async () => {
@@ -91,7 +97,7 @@ describe('ensureMicForegroundService', () => {
     expect(mockCheck.mock.calls.length).toBeGreaterThan(2);
   });
 
-  it('treats a null native answer (pre-Q / no module) as not confirmed', async () => {
+  it('treats a null native answer (no native module) as not confirmed', async () => {
     mockCheck.mockReset();
     mockCheck.mockResolvedValue(null);
     const pending = ensureMicForegroundService(call);
@@ -100,10 +106,41 @@ describe('ensureMicForegroundService', () => {
   });
 
   it('is a no-op pass-through on non-Android (CallKit owns the audio session)', async () => {
-    (Platform as { OS: string }).OS = 'ios';
+    platform.OS = 'ios';
     const result = await ensureMicForegroundService(call);
     expect(result).toBe(true);
     expect(mockShow).not.toHaveBeenCalled();
     expect(mockCheck).not.toHaveBeenCalled();
+  });
+
+  /**
+   * minSdk is 28. The `microphone` FGS type — and the while-in-use capture
+   * muting it exists to satisfy — only arrived in API 30, so below that the
+   * native check can only ever answer null. Requiring confirmation there
+   * timed out the full deadline and failed 100% of calls on API 28/29.
+   */
+  it('starts the pill but skips confirmation below the mic-FGS API level', async () => {
+    platform.Version = MIC_FGS_MIN_API_LEVEL - 1;
+    mockCheck.mockReset();
+    mockCheck.mockResolvedValue(null);
+    const result = await ensureMicForegroundService(call);
+    expect(result).toBe(true);
+    expect(mockShow).toHaveBeenCalledTimes(1);
+    expect(mockCheck).not.toHaveBeenCalled();
+  });
+
+  it('does not fail the call below the mic-FGS API level when the pill start throws', async () => {
+    platform.Version = MIC_FGS_MIN_API_LEVEL - 1;
+    mockShow.mockRejectedValue(new Error('no notification channel'));
+    expect(await ensureMicForegroundService(call)).toBe(true);
+  });
+
+  it('still requires confirmation when the API level is unknown (fail closed)', async () => {
+    delete platform.Version;
+    mockCheck.mockReset();
+    mockCheck.mockResolvedValue(false);
+    const pending = ensureMicForegroundService(call);
+    await vi.advanceTimersByTimeAsync(MIC_FGS_CONFIRM_TIMEOUT_MS + MIC_FGS_POLL_INTERVAL_MS);
+    expect(await pending).toBe(false);
   });
 });

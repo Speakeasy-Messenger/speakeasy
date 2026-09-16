@@ -1092,6 +1092,10 @@ describe('mic-FGS capture gate (call-01M2N41QF1P7BE6HSWR152SMRG)', () => {
     expect(h.finishedCaller[0]?.reason).toBe('failed');
     // No offer ever sent — no capture, no signaling for a muted-forever call.
     expect(h.callerOut.filter((f) => f.type === 'call_offer')).toHaveLength(0);
+    // The failure IS announced on the wire, so a peer that did see the call
+    // (a gate failure later in dial, after the offer drained) stops ringing.
+    const callEnd = h.callerOut.find((f) => f.type === 'call_end');
+    expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('failed');
     await h.pump();
     expect(h.callee.getActive()).toBeUndefined();
   });
@@ -1107,5 +1111,39 @@ describe('mic-FGS capture gate (call-01M2N41QF1P7BE6HSWR152SMRG)', () => {
     await expect(h.callee.accept()).rejects.toThrow(/mic foreground service/);
     expect(h.callee.getActive()).toBeUndefined();
     expect(h.finishedCallee[0]?.reason).toBe('failed');
+  });
+
+  /**
+   * Regression: the callee's gate failure used to end only locally, so the
+   * caller sat in `outgoing_ringing` until RING_TIMEOUT_MS and then filed a
+   * `no_answer` — the wrong story (nobody ignored the call) and a 45s hang.
+   */
+  it("tells the caller when the callee's gate fails, instead of a 45s no_answer", async () => {
+    vi.useFakeTimers();
+    try {
+      let gateOk = true;
+      const h = makeOrchHarness({
+        ringTimeoutMs: 45_000,
+        ensureMicForegroundService: async () => gateOk,
+      });
+      const callId = await h.caller.startOutgoing('bob');
+      await h.pump();
+      expect(h.callee.getActive()?.stage).toBe('incoming_ringing');
+
+      gateOk = false;
+      await expect(h.callee.accept()).rejects.toThrow(/mic foreground service/);
+      const callEnd = h.calleeOut.find((f) => f.type === 'call_end');
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('failed');
+      expect(callEnd && callEnd.type === 'call_end' && callEnd.call_id).toBe(callId);
+
+      await h.pump();
+      // Caller is done immediately — before the ring timeout could fire.
+      expect(h.caller.getActive()).toBeUndefined();
+      expect(h.finishedCaller[0]?.reason).toBe('failed');
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(h.finishedCaller.map((f) => f.reason)).toEqual(['failed']);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
