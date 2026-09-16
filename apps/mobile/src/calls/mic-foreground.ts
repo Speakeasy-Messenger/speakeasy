@@ -2,6 +2,7 @@ import { Platform } from 'react-native';
 import type { CallKind } from '@speakeasy/shared';
 import { diag, diagImportant } from '../diag/log.js';
 import { audioDiagnostics } from '../native/audio-diagnostics.js';
+import { ensureMicPermission } from '../permissions/runtime.js';
 import { showOngoingCallNotification } from './call-notification.js';
 
 /**
@@ -18,6 +19,15 @@ import { showOngoingCallNotification } from './call-notification.js';
  * was peak:0 / rms:0 while outbound RTP kept flowing (silence packets).
  *
  * Contract (load-bearing — see orchestrator.ts startOutgoing/accept):
+ *   0. RECORD_AUDIO is granted BEFORE the service is started. The FGS is
+ *      `microphone`-typed and from API 34 `startForeground` with that type
+ *      without the permission is a SecurityException, so a permission-cold
+ *      or permission-denied device could never confirm and every call would
+ *      fail. The prompt used to live inside getUserMedia, which is now
+ *      downstream of this gate; a non-`granted` result throws
+ *      `mic permission <result>` (the shape `permissionErrorKind` parses)
+ *      so the dial/accept UI can offer Open Settings, exactly as a
+ *      capture-time denial did.
  *   1. The notifee microphone FGS ("voice-call pill") is started BEFORE any
  *      AudioRecord capture begins for the call — outgoing dial AND incoming
  *      accept, all kinds (video included; PiP does not satisfy while-in-use).
@@ -58,11 +68,13 @@ export interface MicForegroundGateCall {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /**
- * Start the microphone FGS and wait until it is confirmed foreground.
- * Resolves true only when a microphone FGS is verifiably active; false
- * when confirmation times out, or when the pill could not be posted at
- * all. Non-Android resolves true immediately (CallKit owns the audio
- * session), as does Android below MIC_FGS_MIN_API_LEVEL.
+ * Acquire RECORD_AUDIO, start the microphone FGS, and wait until it is
+ * confirmed foreground. Resolves true only when a microphone FGS is
+ * verifiably active; false when confirmation times out, or when the pill
+ * could not be posted at all. THROWS `mic permission <result>` when the
+ * user does not grant the microphone. Non-Android resolves true
+ * immediately (CallKit owns the audio session), as does Android below
+ * MIC_FGS_MIN_API_LEVEL.
  *
  * The pill start is deliberately the SAME notification the ongoing-call
  * pill uses (`call-notification.ts`): one id, idempotent, and the pill UI
@@ -73,6 +85,14 @@ export async function ensureMicForegroundService(call: MicForegroundGateCall): P
   if (Platform.OS !== 'android') return true;
   // An unknown/NaN version confirms rather than skipping — fail closed.
   const confirmationRequired = !(Number(Platform.Version) < MIC_FGS_MIN_API_LEVEL);
+  const mic = await ensureMicPermission();
+  if (mic !== 'granted') {
+    diag('call', 'mic fgs: RECORD_AUDIO not granted — no service started', {
+      callId: call.callId,
+      result: mic,
+    });
+    throw new Error(`mic permission ${mic}`);
+  }
   try {
     await showOngoingCallNotification({
       peerHandle: call.peerUserId,

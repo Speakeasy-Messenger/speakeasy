@@ -20,9 +20,13 @@ vi.mock('../native/audio-diagnostics.js', () => ({
   },
 }));
 vi.mock('../diag/log.js', () => ({ diag: vi.fn(), diagImportant: vi.fn() }));
+vi.mock('../permissions/runtime.js', () => ({
+  ensureMicPermission: vi.fn(async () => 'granted'),
+}));
 
 import { showOngoingCallNotification } from './call-notification.js';
 import { audioDiagnostics } from '../native/audio-diagnostics.js';
+import { ensureMicPermission } from '../permissions/runtime.js';
 import {
   MIC_FGS_CONFIRM_TIMEOUT_MS,
   MIC_FGS_MIN_API_LEVEL,
@@ -32,6 +36,7 @@ import {
 
 const mockShow = vi.mocked(showOngoingCallNotification);
 const mockCheck = vi.mocked(audioDiagnostics.isMicrophoneForegroundServiceActive);
+const mockMicPermission = vi.mocked(ensureMicPermission);
 
 const call = { callId: 'call-test', peerUserId: 'bob', kind: 'audio' as const };
 
@@ -44,6 +49,8 @@ describe('ensureMicForegroundService', () => {
     mockCheck.mockClear();
     mockShow.mockResolvedValue(undefined);
     mockCheck.mockResolvedValue(true);
+    mockMicPermission.mockClear();
+    mockMicPermission.mockResolvedValue('granted');
     platform.OS = 'android';
     platform.Version = MIC_FGS_MIN_API_LEVEL;
   });
@@ -111,13 +118,15 @@ describe('ensureMicForegroundService', () => {
     expect(result).toBe(true);
     expect(mockShow).not.toHaveBeenCalled();
     expect(mockCheck).not.toHaveBeenCalled();
+    expect(mockMicPermission).not.toHaveBeenCalled();
   });
 
   /**
-   * minSdk is 28. The `microphone` FGS type — and the while-in-use capture
-   * muting it exists to satisfy — only arrived in API 30, so below that the
-   * native check can only ever answer null. Requiring confirmation there
-   * timed out the full deadline and failed 100% of calls on API 28/29.
+   * minSdk is 28. The threshold is 30 because that is where the permanent
+   * while-in-use capture muting this gate exists for starts (Android 11) —
+   * the `microphone` FGS type itself exists from API 29 (Q), which is where
+   * the native check's own guard sits. Requiring confirmation below the
+   * threshold burned the full deadline and failed 100% of calls on API 28/29.
    */
   it('starts the pill but skips confirmation below the mic-FGS API level', async () => {
     platform.Version = MIC_FGS_MIN_API_LEVEL - 1;
@@ -133,6 +142,46 @@ describe('ensureMicForegroundService', () => {
     platform.Version = MIC_FGS_MIN_API_LEVEL - 1;
     mockShow.mockRejectedValue(new Error('no notification channel'));
     expect(await ensureMicForegroundService(call)).toBe(true);
+  });
+
+  /**
+   * The FGS is `microphone`-typed; from API 34 starting one without
+   * RECORD_AUDIO is a SecurityException, and the service then never reaches
+   * the foreground state the confirm poll looks for — so a permission-cold
+   * device would burn the deadline and fail every call, forever, because the
+   * prompt that used to live inside getUserMedia is now downstream of this
+   * gate. Ask first, and refuse in the shape the dial/accept UI can classify.
+   */
+  it('acquires RECORD_AUDIO before starting the service', async () => {
+    const order: string[] = [];
+    mockMicPermission.mockImplementation(async () => {
+      order.push('permission');
+      return 'granted';
+    });
+    mockShow.mockImplementation(async () => {
+      order.push('fgs-start');
+    });
+    expect(await ensureMicForegroundService(call)).toBe(true);
+    expect(order).toEqual(['permission', 'fgs-start']);
+  });
+
+  it.each(['denied', 'never_ask_again'] as const)(
+    'refuses with a typed error and starts no service when the mic is %s',
+    async (result) => {
+      mockMicPermission.mockResolvedValue(result);
+      await expect(ensureMicForegroundService(call)).rejects.toThrow(
+        `mic permission ${result}`,
+      );
+      expect(mockShow).not.toHaveBeenCalled();
+      expect(mockCheck).not.toHaveBeenCalled();
+    },
+  );
+
+  it('asks for the mic below the API threshold too (the pill is still mic-typed)', async () => {
+    platform.Version = MIC_FGS_MIN_API_LEVEL - 1;
+    mockMicPermission.mockResolvedValue('denied');
+    await expect(ensureMicForegroundService(call)).rejects.toThrow('mic permission denied');
+    expect(mockShow).not.toHaveBeenCalled();
   });
 
   it('still requires confirmation when the API level is unknown (fail closed)', async () => {

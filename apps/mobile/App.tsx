@@ -1255,8 +1255,9 @@ export default function App({ videoCallHarness = false }: AppProps) {
           // isn't protected, One UI kills the backgrounded call, and the pill
           // never appears (the repeatedly-reported bug). The FGS is instead
           // started at the call's first FOREGROUND moment (caller dialing /
-          // callee accept) in the store subscriber below, so by the time we
-          // background here it is already running and simply keeps running.
+          // callee accept) by the orchestrator's capture gate
+          // (calls/mic-foreground.ts), so by the time we background here it is
+          // already running and simply keeps running.
         }
       }
     });
@@ -1297,9 +1298,6 @@ export default function App({ videoCallHarness = false }: AppProps) {
       // only re-displays the already-running FGS at connect to add the live
       // duration chronometer (same notification id — an update, not a start,
       // so it is allowed even if it lands while backgrounded).
-      // Re-display at connect to add the live duration chronometer. This UPDATES
-      // the already-running FGS (same notification id) rather than starting a
-      // new one, so it is allowed even if it lands while backgrounded.
       if (
         Platform.OS === 'android' &&
         s.active &&

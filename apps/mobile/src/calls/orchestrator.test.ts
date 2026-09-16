@@ -35,6 +35,7 @@ vi.mock('@notifee/react-native', () => ({
   AndroidImportance: { DEFAULT: 4 },
   AndroidVisibility: { PUBLIC: 1 },
 }));
+import { permissionErrorKind } from '../permissions/runtime.js';
 import { isDiagStreamingEnabled, uploadDiag } from '../diag/upload.js';
 const mockUploadDiag = vi.mocked(uploadDiag);
 const mockDiagStreaming = vi.mocked(isDiagStreamingEnabled);
@@ -1110,6 +1111,52 @@ describe('mic-FGS capture gate (call-01M2N41QF1P7BE6HSWR152SMRG)', () => {
     gateOk = false;
     await expect(h.callee.accept()).rejects.toThrow(/mic foreground service/);
     expect(h.callee.getActive()).toBeUndefined();
+    expect(h.finishedCallee[0]?.reason).toBe('failed');
+  });
+
+  /**
+   * The gate now owns RECORD_AUDIO acquisition (it starts a microphone-typed
+   * FGS, which API 34+ refuses without the permission). A denial must still
+   * reach the dial/accept UI as the typed error those screens classify to
+   * offer "Open Settings" — otherwise the alert paths are dead code and the
+   * user just sees a call that failed.
+   */
+  it('propagates a mic-permission denial from the gate in the shape the UI classifies', async () => {
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => {
+        throw new Error('mic permission denied');
+      },
+    });
+    const err = await h.caller.startOutgoing('bob').then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(permissionErrorKind(err)).toEqual({ kind: 'mic', result: 'denied' });
+    // Denied means no service and no capture: the peer is never built.
+    expect(h.events).not.toContain('peer-created');
+    expect(h.caller.getActive()).toBeUndefined();
+    expect(h.finishedCaller[0]?.reason).toBe('failed');
+  });
+
+  it('propagates the denial out of accept too, and tells the caller', async () => {
+    let gateOk = true;
+    const h = makeOrchHarness({
+      ensureMicForegroundService: async () => {
+        if (!gateOk) throw new Error('mic permission never_ask_again');
+        return true;
+      },
+    });
+    await h.caller.startOutgoing('bob');
+    await h.pump();
+    gateOk = false;
+    const err = await h.callee.accept().then(
+      () => undefined,
+      (e: unknown) => e,
+    );
+    expect(permissionErrorKind(err)).toEqual({ kind: 'mic', result: 'never_ask_again' });
+    expect(h.calleeOut.filter((f) => f.type === 'call_answer')).toHaveLength(0);
+    const callEnd = h.calleeOut.find((f) => f.type === 'call_end');
+    expect(callEnd && callEnd.type === 'call_end' && callEnd.reason).toBe('failed');
     expect(h.finishedCallee[0]?.reason).toBe('failed');
   });
 
