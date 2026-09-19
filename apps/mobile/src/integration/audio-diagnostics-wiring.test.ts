@@ -83,7 +83,13 @@ describe('paired call-audio native bridge wiring', () => {
     expect(patch).toContain('@"manualAudio"');
     expect(patch).toContain('@"isAudioEnabled"');
     expect(patch).toContain('@"currentOutputPorts"');
+    expect(patch).toContain('activateAudioSessionForFallback');
+    expect(patch).toContain('deactivateAudioSessionForFallback');
+    expect(patch).toContain('setCategory:AVAudioSessionCategoryPlayAndRecord');
+    expect(patch).toContain('rtc.isAudioEnabled = YES');
+    expect(patch).toContain('rtc.isAudioEnabled = NO');
     expect(bridge).toContain("'provider activated audio session'");
+    expect(bridge).toContain("'fallback activated audio session'");
     expect(bridge).toContain('activatedSinceCallBegan');
     expect(bridge).toContain('audioOwnerActual');
   });

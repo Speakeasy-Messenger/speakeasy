@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
+import { AppState, NativeModules, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
 import { mediaDevices, RTCPeerConnection, type MediaStream } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import { VideoCallScreen } from './VideoCallScreen.js';
@@ -10,6 +10,9 @@ import {
   dismissOngoingCallNotification,
 } from '../calls/call-notification.js';
 import { pip } from '../native/pip.js';
+import { CallKeepBridge } from '../calls/callkeep-bridge.js';
+import type { NativeCallKitReportSource } from '../native/callkit.js';
+import { getDiagSnapshot } from '../diag/log.js';
 
 /**
  * __DEV__-only test harness for the video-call UI — NOT shipped.
@@ -31,6 +34,10 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   const [error, setError] = useState<string | null>(null);
   const [backgroundVideoResult, setBackgroundVideoResult] = useState('not-run');
   const [statsReady, setStatsReady] = useState(false);
+  const [fallbackAudioState, setFallbackAudioState] = useState<Record<string, unknown> | null>(
+    null,
+  );
+  const [outboundAudioPackets, setOutboundAudioPackets] = useState(0);
   const localStreamRef = useRef<MediaStream | null>(null);
   const remoteStreamRef = useRef<MediaStream | null>(null);
   const senderRef = useRef<RTCPeerConnection | null>(null);
@@ -62,93 +69,155 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
 
   useEffect(() => {
     let cancelled = false;
+    let fallbackBridge: CallKeepBridge | undefined;
     // A real call activates the AVAudioSession (playAndRecord + videoChat mode)
     // via InCallManager / WebRTC. iOS only auto-starts Picture-in-Picture from
     // inline when an audio session is ACTIVE — the mock orchestrator never did
     // this, so the first device run never triggered PiP. Activate it here so the
     // harness faithfully exercises the iosPIP auto-start path. Request audio in
     // getUserMedia too (an audio track is part of a real call's session).
-    try {
-      InCallManager.start({ media: 'video', auto: true });
-      InCallManager.setForceSpeakerphoneOn(true);
-    } catch {
-      /* non-native test env */
+    if (Platform.OS !== 'ios') {
+      try {
+        InCallManager.start({ media: 'video', auto: true });
+        InCallManager.setForceSpeakerphoneOn(true);
+      } catch {
+        /* non-native test env */
+      }
     }
-    void mediaDevices
-      .getUserMedia({ audio: true, video: { facingMode: 'user' } })
-      .then(async (s) => {
-        const ms = s as MediaStream;
-        if (cancelled) {
-          ms.getTracks().forEach((t) => t.stop());
-          return;
-        }
-        localStreamRef.current = ms;
-        setLocalStream(ms);
-
-        // Encode/decode the camera through two real RTCPeerConnections instead
-        // of painting the local stream twice. The displayed "remote" feed is
-        // therefore proof that camera capture -> WebRTC sender -> receiver ->
-        // renderer is alive. This is still an on-device loopback (no TURN), but
-        // it exercises the exact media pipeline that used to freeze when the
-        // calling app backgrounded.
-        const sender = new RTCPeerConnection({ iceServers: [] });
-        const receiver = new RTCPeerConnection({ iceServers: [] });
-        senderRef.current = sender;
-        receiverRef.current = receiver;
-        ms.getTracks().forEach((track) => sender.addTrack(track, ms));
-
-        const remotePromise = new Promise<MediaStream>((resolve) => {
-          const handler = (event: any) => {
-            const remote = event.streams?.[0] as MediaStream | undefined;
-            if (remote) resolve(remote);
-          };
-          (receiver as any).addEventListener('track', handler);
+    void (async () => {
+      if (Platform.OS === 'ios') {
+        let releaseFallback = () => {};
+        const fallbackReleased = new Promise<void>((resolve) => {
+          releaseFallback = resolve;
         });
-
-        const offer = await sender.createOffer();
-        await sender.setLocalDescription(offer);
-        await waitForIceGathering(sender);
-        await receiver.setRemoteDescription(sender.localDescription!);
-        const answer = await receiver.createAnswer();
-        await receiver.setLocalDescription(answer);
-        await waitForIceGathering(receiver);
-        await sender.setRemoteDescription(receiver.localDescription!);
-
-        const remote = await remotePromise;
-        if (cancelled) return;
-        remoteStreamRef.current = remote;
-        setRemoteStream(remote);
-        // Keep a fresh pre-background baseline. AppState's background callback
-        // gets only a short execution window on iOS; starting getStats there can
-        // be suspended before its promise resolves, so snapshot the last
-        // completed native counters synchronously instead.
-        statsTimerRef.current = setInterval(() => {
-          void readInboundVideoStats(receiver).then((stats) => {
-            latestStatsRef.current = stats;
-            setStatsReady(true);
-          });
-        }, 500);
+        const nativeReports: NativeCallKitReportSource = {
+          drain: async () => [],
+          subscribe: () => () => {},
+          end: () => true,
+          acknowledge: () => {},
+        };
+        const fallbackOrchestrator = {
+          getActive: () => useCalls.getState().active,
+          accept: async () => {},
+          decline: () => {},
+          hangup: () => {},
+          setMicMuted: () => {},
+          showIncomingCallFallback: () => releaseFallback(),
+        } as unknown as CallOrchestrator;
+        fallbackBridge = new CallKeepBridge({
+          orchestrator: fallbackOrchestrator,
+          nativeReports,
+          platform: 'ios',
+        });
+        await fallbackBridge.start();
         useCalls.getState().setActive({
-          callId: 'dev-harness',
-          peerUserId: 'dev-peer',
-          isCaller: true,
-          stage: 'connected',
+          callId: 'browserstack-fallback-audio',
+          peerUserId: 'android-caller',
+          isCaller: false,
+          stage: 'incoming_ringing',
           stageEnteredAt: Date.now(),
-          connectedAt: Date.now(),
           micMuted: false,
           speakerOn: true,
           kind: 'video',
         });
-        // Also show the ongoing-call pill so it can be screencapped (the
-        // real lifecycle shows it on background; here we show it eagerly).
-        void showOngoingCallNotification({
-          peerHandle: 'dev-peer',
-          connectedAtMs: Date.now(),
-          micMuted: false,
-          kind: 'audio',
+        await Promise.race([
+          fallbackReleased,
+          new Promise<never>((_, reject) =>
+            setTimeout(() => reject(new Error('incoming fallback was not released')), 5_000),
+          ),
+        ]);
+        useCalls.getState().setActive({
+          ...useCalls.getState().active!,
+          stage: 'connecting',
+          stageEnteredAt: Date.now(),
         });
-      })
-      .catch((e) => setError(String(e?.message ?? e)));
+        const state = (
+          NativeModules.WebRTCModule as
+            | { audioSessionSnapshot?: (source: string) => Record<string, unknown> }
+            | undefined
+        )?.audioSessionSnapshot?.('browserstack-fallback-answer');
+        setFallbackAudioState(state ?? null);
+      }
+
+      const s = await mediaDevices.getUserMedia({
+        audio: true,
+        video: { facingMode: 'user' },
+      });
+      const ms = s as MediaStream;
+      if (cancelled) {
+        ms.getTracks().forEach((t) => t.stop());
+        return;
+      }
+      localStreamRef.current = ms;
+      setLocalStream(ms);
+
+      // Encode/decode the camera through two real RTCPeerConnections instead
+      // of painting the local stream twice. The displayed "remote" feed is
+      // therefore proof that camera capture -> WebRTC sender -> receiver ->
+      // renderer is alive. This is still an on-device loopback (no TURN), but
+      // it exercises the exact media pipeline that used to freeze when the
+      // calling app backgrounded.
+      const sender = new RTCPeerConnection({ iceServers: [] });
+      const receiver = new RTCPeerConnection({ iceServers: [] });
+      senderRef.current = sender;
+      receiverRef.current = receiver;
+      ms.getTracks().forEach((track) => sender.addTrack(track, ms));
+
+      const remotePromise = new Promise<MediaStream>((resolve) => {
+        const handler = (event: any) => {
+          const remote = event.streams?.[0] as MediaStream | undefined;
+          if (remote) resolve(remote);
+        };
+        (receiver as any).addEventListener('track', handler);
+      });
+
+      const offer = await sender.createOffer();
+      await sender.setLocalDescription(offer);
+      await waitForIceGathering(sender);
+      await receiver.setRemoteDescription(sender.localDescription!);
+      const answer = await receiver.createAnswer();
+      await receiver.setLocalDescription(answer);
+      await waitForIceGathering(receiver);
+      await sender.setRemoteDescription(receiver.localDescription!);
+
+      const remote = await remotePromise;
+      if (cancelled) return;
+      remoteStreamRef.current = remote;
+      setRemoteStream(remote);
+      // Keep a fresh pre-background baseline. AppState's background callback
+      // gets only a short execution window on iOS; starting getStats there can
+      // be suspended before its promise resolves, so snapshot the last
+      // completed native counters synchronously instead.
+      statsTimerRef.current = setInterval(() => {
+        void Promise.all([readInboundVideoStats(receiver), readOutboundAudioStats(sender)]).then(
+          ([videoStats, audioStats]) => {
+            latestStatsRef.current = videoStats;
+            setOutboundAudioPackets(audioStats.packets);
+            setStatsReady(true);
+          },
+        );
+      }, 500);
+      const fallbackCall = useCalls.getState().active;
+      useCalls.getState().setActive({
+        callId: fallbackCall?.callId ?? 'dev-harness',
+        peerUserId: fallbackCall?.peerUserId ?? 'dev-peer',
+        isCaller: fallbackCall?.isCaller ?? true,
+        stage: 'connected',
+        stageEnteredAt: Date.now(),
+        connectedAt: Date.now(),
+        micMuted: false,
+        speakerOn: true,
+        kind: 'video',
+      });
+      // Also show the ongoing-call pill so it can be screencapped (the
+      // real lifecycle shows it on background; here we show it eagerly).
+      void showOngoingCallNotification({
+        peerHandle: 'dev-peer',
+        connectedAtMs: Date.now(),
+        micMuted: false,
+        kind: 'audio',
+      });
+    })().catch((e) => setError(String(e?.message ?? e)));
 
     const appStateSub = AppState.addEventListener('change', (state) => {
       // Android can keep React Native's AppState "active" while the Activity is
@@ -167,6 +236,7 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
       removePipModeListener();
       if (statsTimerRef.current) clearInterval(statsTimerRef.current);
       useCalls.getState().setActive(undefined);
+      fallbackBridge?.stop();
       void dismissOngoingCallNotification();
       localStreamRef.current?.getTracks().forEach((t) => t.stop());
       remoteStreamRef.current?.getTracks().forEach((t) => t.stop());
@@ -197,6 +267,15 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
 
   const localUrl = localStream.toURL();
   const remoteUrl = remoteStream.toURL();
+  const fallbackActivationRecorded = getDiagSnapshot().some(
+    (entry) => entry.tag === 'callkeep-audio' && entry.msg === 'fallback activated audio session',
+  );
+  const fallbackAudioPassed =
+    fallbackAudioState?.isAudioEnabled === true &&
+    fallbackAudioState.category === 'AVAudioSessionCategoryPlayAndRecord' &&
+    fallbackAudioState.mode === 'AVAudioSessionModeVideoChat' &&
+    fallbackActivationRecorded &&
+    outboundAudioPackets > 0;
   // Minimal stand-in for the CallOrchestrator surface VideoCallScreen uses.
   const mock = {
     getLocalStreamURL: () => localUrl,
@@ -220,6 +299,18 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   return (
     <View style={styles.fill}>
       <VideoCallScreen orchestrator={mock} onClosed={onClosed} />
+      {Platform.OS === 'ios' ? (
+        <Text
+          testID={`harness-fallback-audio-${fallbackAudioPassed ? 'pass' : 'waiting'}`}
+          accessibilityLabel={`harness-fallback-audio-${fallbackAudioPassed ? 'pass' : 'waiting'}`}
+          style={styles.audioProof}
+        >
+          fallback audio: {fallbackAudioState?.isAudioEnabled === true ? 'enabled' : 'waiting'} ·{' '}
+          {String(fallbackAudioState?.category ?? 'no-category')} ·{' '}
+          {String(fallbackAudioState?.mode ?? 'no-mode')} · activation record:{' '}
+          {fallbackActivationRecorded ? 'yes' : 'no'} · outbound packets: {outboundAudioPackets}
+        </Text>
+      ) : null}
       {statsReady && backgroundVideoResult === 'not-run' ? (
         <Pressable
           testID="harness-arm-background-video"
@@ -281,9 +372,29 @@ async function readInboundVideoStats(
   return { bytes, frames };
 }
 
+async function readOutboundAudioStats(pc: RTCPeerConnection): Promise<{ packets: number }> {
+  let packets = 0;
+  const report = await pc.getStats();
+  report.forEach((stat: any) => {
+    if (stat.type !== 'outbound-rtp' || (stat.kind ?? stat.mediaType) !== 'audio') return;
+    packets += Number(stat.packetsSent ?? 0);
+  });
+  return { packets };
+}
+
 const styles = StyleSheet.create({
   fill: { flex: 1, backgroundColor: '#000', alignItems: 'center', justifyContent: 'center' },
   msg: { color: '#fff', fontSize: 16, padding: 24, textAlign: 'center' },
+  audioProof: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 18,
+    padding: 8,
+    color: '#fff',
+    backgroundColor: '#171717',
+    fontSize: 10,
+  },
   // Accessible to Maestro after returning from PiP, visually negligible in
   // screenshots so it cannot mask the pixels being evaluated.
   probe: { position: 'absolute', width: 1, height: 1, opacity: 0.01, top: 0, left: 0 },

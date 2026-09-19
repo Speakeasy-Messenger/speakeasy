@@ -1,4 +1,6 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { NativeModules } from 'react-native';
+import { __resetDiagForTests, getDiagSnapshot } from '../diag/log.js';
 import { useCalls } from '../store/calls.js';
 import {
   parseNativeCallKitReport,
@@ -122,6 +124,8 @@ function harness(
 afterEach(() => {
   vi.useRealTimers();
   useCalls.setState({ active: undefined });
+  delete (NativeModules as { WebRTCModule?: unknown }).WebRTCModule;
+  __resetDiagForTests();
 });
 
 describe('CallKeepBridge native PushKit adoption', () => {
@@ -182,6 +186,61 @@ describe('CallKeepBridge native PushKit adoption', () => {
 
     expect(h.callKeep.displayIncomingCall).not.toHaveBeenCalled();
     expect(h.orchestrator.showIncomingCallFallback).toHaveBeenCalledWith(CALL_ID);
+    h.bridge.stop();
+  });
+
+  it('activates app-owned iOS audio when the in-app fallback is answered and deactivates it on hangup', async () => {
+    vi.useFakeTimers();
+    let isAudioEnabled = false;
+    const activateAudioSessionForFallback = vi.fn((mode: string) => {
+      isAudioEnabled = true;
+      return {
+        source: 'fallback-didActivate',
+        category: 'AVAudioSessionCategoryPlayAndRecord',
+        mode,
+        manualAudio: true,
+        isAudioEnabled,
+      };
+    });
+    const deactivateAudioSessionForFallback = vi.fn(() => {
+      isAudioEnabled = false;
+      return {
+        source: 'fallback-didDeactivate',
+        manualAudio: true,
+        isAudioEnabled,
+      };
+    });
+    (NativeModules as { WebRTCModule?: unknown }).WebRTCModule = {
+      setManualAudio: vi.fn(),
+      audioSessionSnapshot: vi.fn(() => ({ manualAudio: true, isAudioEnabled: false })),
+      activateAudioSessionForFallback,
+      deactivateAudioSessionForFallback,
+    };
+    const h = harness();
+    await h.bridge.start();
+    useCalls.getState().setActive(incoming());
+    await vi.advanceTimersByTimeAsync(1_500);
+
+    useCalls.getState().setActive({ ...incoming(), stage: 'connecting' });
+
+    expect(activateAudioSessionForFallback).toHaveBeenCalledWith('AVAudioSessionModeVoiceChat');
+    expect(isAudioEnabled).toBe(true);
+    expect(getDiagSnapshot()).toContainEqual(
+      expect.objectContaining({
+        tag: 'callkeep-audio',
+        msg: 'fallback activated audio session',
+        important: true,
+        ctx: expect.objectContaining({
+          callId: CALL_ID,
+          state: expect.objectContaining({ isAudioEnabled: true }),
+        }),
+      }),
+    );
+
+    useCalls.getState().setActive(undefined);
+
+    expect(deactivateAudioSessionForFallback).toHaveBeenCalledOnce();
+    expect(isAudioEnabled).toBe(false);
     h.bridge.stop();
   });
 

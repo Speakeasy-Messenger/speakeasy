@@ -77,6 +77,12 @@ type RTCAudioSessionShape = {
   audioSessionDidActivate: () => Record<string, unknown> | undefined;
   audioSessionDidDeactivate: () => Record<string, unknown> | undefined;
 };
+
+type NativeWebRTCAudioSessionShape = {
+  activateAudioSessionForFallback?: (mode: string) => Record<string, unknown> | undefined;
+  deactivateAudioSessionForFallback?: () => Record<string, unknown> | undefined;
+};
+
 function tryLoadRTCAudioSession(): RTCAudioSessionShape | undefined {
   try {
     // eslint-disable-next-line @typescript-eslint/no-require-imports, @typescript-eslint/no-var-requires
@@ -195,6 +201,8 @@ export class CallKeepBridge {
   >();
   private readonly acknowledgedNativeUuids = new Set<string>();
   private readonly audioActivatedCallIds = new Set<string>();
+  /** Incoming calls whose in-app fallback owns AVAudioSession instead of CallKit. */
+  private readonly fallbackAudioActivatedCallIds = new Set<string>();
   private lastActivatedAudioCallId?: string;
   /** CallKit actions can arrive before the encrypted offer has reached JS. */
   private readonly pendingActions = new Map<string, 'answer' | 'end'>();
@@ -313,6 +321,9 @@ export class CallKeepBridge {
 
   stop(): void {
     this.lifecycleGeneration += 1;
+    for (const callId of this.fallbackAudioActivatedCallIds) {
+      this.deactivateIncomingFallbackAudio(callId);
+    }
     const ownedUuids = new Map([...this.idToUuid].map(([callId, uuid]) => [uuid, callId]));
     for (const [uuid, callId] of this.failedNativeUuids) ownedUuids.set(uuid, callId);
     for (const [uuid, callId] of ownedUuids) {
@@ -360,6 +371,7 @@ export class CallKeepBridge {
     this.blockedNativeFallbackCallIds.clear();
     this.nativeFallbackReportStates.clear();
     this.audioActivatedCallIds.clear();
+    this.fallbackAudioActivatedCallIds.clear();
     this.lastActivatedAudioCallId = undefined;
     this.setupDone = false;
   }
@@ -948,6 +960,66 @@ export class CallKeepBridge {
     this.deps.orchestrator.showIncomingCallFallback(callId);
   }
 
+  private activateIncomingFallbackAudio(call: ActiveCall): void {
+    if (
+      this.platform() !== 'ios' ||
+      !this.releasedFallbackCallIds.has(call.callId) ||
+      this.fallbackAudioActivatedCallIds.has(call.callId)
+    ) {
+      return;
+    }
+    const mode =
+      call.kind === 'video' ? 'AVAudioSessionModeVideoChat' : 'AVAudioSessionModeVoiceChat';
+    try {
+      const wm = NativeModules.WebRTCModule as NativeWebRTCAudioSessionShape | undefined;
+      const state = wm?.activateAudioSessionForFallback?.(mode);
+      if (state?.isAudioEnabled !== true) {
+        diagImportant('callkeep-audio', 'fallback audio activation failed', {
+          callId: call.callId,
+          mode,
+          error: wm?.activateAudioSessionForFallback
+            ? 'native fallback activation did not enable WebRTC audio'
+            : 'native fallback activation unavailable',
+          state: state ?? null,
+        });
+        return;
+      }
+      this.fallbackAudioActivatedCallIds.add(call.callId);
+      this.audioActivatedCallIds.add(call.callId);
+      diagImportant('callkeep-audio', 'fallback activated audio session', {
+        callId: call.callId,
+        mode,
+        state,
+      });
+    } catch (err) {
+      diagImportant('callkeep-audio', 'fallback audio activation failed', {
+        callId: call.callId,
+        mode,
+        err: String(err),
+      });
+    }
+  }
+
+  private deactivateIncomingFallbackAudio(callId: string): void {
+    if (!this.fallbackAudioActivatedCallIds.has(callId)) return;
+    try {
+      const wm = NativeModules.WebRTCModule as NativeWebRTCAudioSessionShape | undefined;
+      const state = wm?.deactivateAudioSessionForFallback?.();
+      diagImportant('callkeep-audio', 'fallback deactivated audio session', {
+        callId,
+        state: state ?? null,
+      });
+    } catch (err) {
+      diagImportant('callkeep-audio', 'fallback audio deactivation failed', {
+        callId,
+        err: String(err),
+      });
+    } finally {
+      this.fallbackAudioActivatedCallIds.delete(callId);
+      this.audioActivatedCallIds.delete(callId);
+    }
+  }
+
   private displayFailed(error: unknown, errorCode: unknown): boolean {
     if (errorCode === 'CallUUIDAlreadyExists') return false;
     return (
@@ -975,6 +1047,16 @@ export class CallKeepBridge {
   }
 
   private diff(prev: ActiveCall | undefined, next: ActiveCall | undefined): void {
+    if (
+      prev?.stage === 'incoming_ringing' &&
+      next?.callId === prev.callId &&
+      next.stage === 'connecting'
+    ) {
+      this.activateIncomingFallbackAudio(next);
+    }
+    if (prev && (!next || next.callId !== prev.callId)) {
+      this.deactivateIncomingFallbackAudio(prev.callId);
+    }
     const RNCallKeep = this.rnCallKeep;
     if (!RNCallKeep) {
       if (!prev && next?.stage === 'incoming_ringing' && !next.isCaller) {
