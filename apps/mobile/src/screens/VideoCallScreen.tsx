@@ -158,24 +158,20 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // bubbles when a new outgoing call replaced `active` before React
   // committed the intermediate undefined render.
 
-  // Subscribe to the local + remote stream URLs from the peer. The
-  // orchestrator exposes the active peer reference; calling
-  // `getLocalStreamURL()` after the local stream is ensured returns
-  // the toURL() string we hand to RTCView.
+  // Subscribe to the local + remote stream URLs from the peer. Both
+  // subscriptions replay an already-present stream, and the local one also
+  // covers the callee path where this screen mounts before media acquisition.
   useEffect(() => {
     if (!active) return;
-    setLocalUrl(orchestrator.getLocalStreamURL());
-    const unsub = orchestrator.onRemoteStreamURL((url) => {
+    const unsubLocal = orchestrator.onLocalStreamURL((url) => {
+      setLocalUrl(url);
+    });
+    const unsubRemote = orchestrator.onRemoteStreamURL((url) => {
       setRemoteUrl(url);
     });
-    // Some platforms surface the local URL slightly after first paint
-    // (camera warmup). Re-poll once after 600ms to catch that case.
-    const t = setTimeout(() => {
-      setLocalUrl((prev) => prev ?? orchestrator.getLocalStreamURL());
-    }, 600);
     return () => {
-      clearTimeout(t);
-      unsub();
+      unsubLocal();
+      unsubRemote();
     };
   }, [orchestrator, active?.callId]);
 
@@ -347,8 +343,9 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
       fullscreen: !hasRemote || swapped ? 'local' : 'remote',
       bubble: hasRemote ? (swapped ? 'remote' : 'local') : 'none',
       stage: active.stage,
+      localUrlPresent: !!localUrl,
     });
-  }, [active?.stage, remoteUrl, swapped]);
+  }, [active?.stage, localUrl, remoteUrl, swapped]);
 
   if (!active) {
     return (

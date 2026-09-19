@@ -129,6 +129,12 @@ export interface CallPeer {
    */
   getLocalStreamURL?(): string | undefined;
   /**
+   * Video-only — subscribe to the local MediaStream URL once capture
+   * succeeds. Replays an already-present stream to late subscribers and
+   * returns an unsubscribe function.
+   */
+  onLocalStreamURL?(cb: (url: string | undefined) => void): () => void;
+  /**
    * Video-only — subscribe to the remote MediaStream URL once it
    * arrives. Fired on the `track` event with kind=video. Returns an
    * unsubscribe function.

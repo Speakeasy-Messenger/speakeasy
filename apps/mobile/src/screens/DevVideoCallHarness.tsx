@@ -204,6 +204,10 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   // Minimal stand-in for the CallOrchestrator surface VideoCallScreen uses.
   const mock = {
     getLocalStreamURL: () => localUrl,
+    onLocalStreamURL: (cb: (u: string | undefined) => void) => {
+      cb(localUrl);
+      return () => {};
+    },
     onRemoteStreamURL: (cb: (u: string | undefined) => void) => {
       cb(remoteUrl);
       return () => {};

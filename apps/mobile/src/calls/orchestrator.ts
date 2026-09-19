@@ -745,6 +745,9 @@ export class CallOrchestrator {
   getLocalStreamURL(): string | undefined {
     return this.peer?.getLocalStreamURL?.();
   }
+  onLocalStreamURL(cb: (url: string | undefined) => void): () => void {
+    return this.peer?.onLocalStreamURL?.(cb) ?? (() => {});
+  }
   onRemoteStreamURL(cb: (url: string | undefined) => void): () => void {
     return this.peer?.onRemoteStreamURL?.(cb) ?? (() => {});
   }
