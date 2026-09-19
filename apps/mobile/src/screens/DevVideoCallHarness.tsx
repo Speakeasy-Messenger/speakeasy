@@ -1,10 +1,6 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { AppState, Platform, Pressable, StyleSheet, Text, View } from 'react-native';
-import {
-  mediaDevices,
-  RTCPeerConnection,
-  type MediaStream,
-} from 'react-native-webrtc';
+import { mediaDevices, RTCPeerConnection, type MediaStream } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
 import { VideoCallScreen } from './VideoCallScreen.js';
 import { useCalls } from '../store/calls.js';
@@ -278,10 +274,7 @@ async function readInboundVideoStats(
   let frames = 0;
   const report = await pc.getStats();
   report.forEach((stat: any) => {
-    if (
-      stat.type !== 'inbound-rtp' ||
-      (stat.kind ?? stat.mediaType) !== 'video'
-    ) return;
+    if (stat.type !== 'inbound-rtp' || (stat.kind ?? stat.mediaType) !== 'video') return;
     bytes += Number(stat.bytesReceived ?? 0);
     frames += Number(stat.framesDecoded ?? stat.framesReceived ?? 0);
   });

@@ -12,11 +12,7 @@ import {
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { RTCView } from 'react-native-webrtc';
 import InCallManager from 'react-native-incall-manager';
-import {
-  MicIcon,
-  PhoneEndIcon,
-  SpeakerIcon,
-} from '../components/icons/CallIcons.js';
+import { MicIcon, PhoneEndIcon, SpeakerIcon } from '../components/icons/CallIcons.js';
 import { Handle } from '../components/Handle.js';
 import { pip } from '../native/pip.js';
 import { diag } from '../diag/log.js';
@@ -140,9 +136,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // its existing RTCView mounted while AVKit moves that view into system PiP.
   const compact =
     Platform.OS === 'android' &&
-    (inPip ||
-      nativePipSize !== undefined ||
-      Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE);
+    (inPip || nativePipSize !== undefined || Math.min(winW, winH) < PIP_COMPACT_MAX_SHORT_SIDE);
   useEffect(() => {
     diag('call', 'pip mode change', {
       inPip,
@@ -283,8 +277,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // and in the floating window the `compact` gate hides it entirely. `active`
   // is non-null past the early return below, but hooks must run every render,
   // so guard on it here.
-  const autoHideActive =
-    !!active && active.stage === 'connected' && !compact;
+  const autoHideActive = !!active && active.stage === 'connected' && !compact;
   const [chromeShown, setChromeShown] = useState(true);
   // Bumped on every control interaction to restart the idle countdown.
   const [activityNonce, setActivityNonce] = useState(0);
@@ -400,8 +393,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // stable because AVKit requires its PiP source RTCView to remain mounted.
   const fullscreenFeedTag =
     Platform.OS === 'android' ? (fullscreenIsLocal ? 'local' : 'remote') : 'stable';
-  const bubbleFeedTag =
-    Platform.OS === 'android' ? (swapped ? 'remote' : 'local') : 'stable';
+  const bubbleFeedTag = Platform.OS === 'android' ? (swapped ? 'remote' : 'local') : 'stable';
   // Android PiP / floating window: render ONLY the remote video, full-bleed,
   // and nothing else. This is the proven react-native-webrtc PiP recipe ("show
   // only the video") — the tiny window has no room for chrome, and the simpler
@@ -521,12 +513,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           BELOW the overlay so the control buttons still win their own taps,
           and a tap on the bare video (or where hidden controls were) falls
           through the box-none overlay to here. No-op until connected. */}
-      {!compact ? (
-        <Pressable
-          style={StyleSheet.absoluteFill}
-          onPress={onBackdropTap}
-        />
-      ) : null}
+      {!compact ? <Pressable style={StyleSheet.absoluteFill} onPress={onBackdropTap} /> : null}
 
       {/* Overlay chrome (top bar + controls) — hidden whenever we're in the
           small floating window: it only has room for the video itself, and
@@ -535,120 +522,107 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
           collapses on the window resize even if the native PiP event is
           dropped. */}
       {!compact ? (
-      <SafeAreaView style={styles.overlay} pointerEvents="box-none">
-        {/* Top bar: peer handle + stage label. Translucent over the
+        <SafeAreaView style={styles.overlay} pointerEvents="box-none">
+          {/* Top bar: peer handle + stage label. Translucent over the
             video stream so the user can read it without it taking
             real-estate from the picture. */}
-        {/* Top bar is display-only (no buttons), so it never captures
+          {/* Top bar is display-only (no buttons), so it never captures
             touches — pointerEvents none lets taps over it reach the backdrop
             and toggle. Fades with the rest of the chrome. */}
-        <Animated.View
-          style={[styles.topBar, { opacity: chromeOpacity }]}
-          pointerEvents="none"
-        >
-          {/* Force a light handle color: the top bar is always over
+          <Animated.View style={[styles.topBar, { opacity: chromeOpacity }]} pointerEvents="none">
+            {/* Force a light handle color: the top bar is always over
               the video stream + a dark scrim, so themed.ink (dark in
               light mode) renders the handle invisible. Matches the
               hardcoded white of the stage label below. */}
-          <Handle
-            value={active.peerUserId}
-            variant="display"
-            color={callPalette.fg}
-          />
-          <Text style={styles.topStage}>{stageLabel[active.stage]}</Text>
-        </Animated.View>
+            <Handle value={active.peerUserId} variant="display" color={callPalette.fg} />
+            <Text style={styles.topStage}>{stageLabel[active.stage]}</Text>
+          </Animated.View>
 
-        {/* Corner bubble — the non-full-screen feed. Tap to swap which
+          {/* Corner bubble — the non-full-screen feed. Tap to swap which
             feed is full-screen. Only shown once the peer's video is
             flowing (before that, the local feed owns the full screen). */}
-        {pipUrl ? (
-          <AnimatedPressable
-            testID="video-call-pip"
-            // Rises into the top-right corner while the chrome is hidden
-            // (the top bar's slot is free), returns when it fades back in.
-            style={[styles.pip, { transform: [{ translateY: pipRaise }] }]}
-            onPress={() => {
-              bumpActivity();
-              setSwapped((s) => !s);
-            }}
-          >
-            <RTCView
-              key={`bubble-${bubbleFeedTag}`}
-              streamURL={pipUrl}
-              style={StyleSheet.absoluteFill}
-              objectFit="cover"
-              zOrder={1}
-              onDimensionsChange={(e) =>
-                diag('call', 'video dimensions', {
-                  which: pipUrl === localUrl ? 'local' : 'remote',
-                  slot: 'bubble',
-                  w: e.nativeEvent.width,
-                  h: e.nativeEvent.height,
-                })
-              }
-              // Mirror only when the bubble is showing the local self-preview.
-              mirror={pipUrl === localUrl}
-              // When swapped, the remote feed lives in the bubble — keep
-              // PiP attached to the remote feed so backgrounding still
-              // floats the caller (not the suspended local camera).
-              iosPIP={swapped ? VIDEO_PIP_OPTS : undefined}
-            />
-          </AnimatedPressable>
-        ) : null}
+          {pipUrl ? (
+            <AnimatedPressable
+              testID="video-call-pip"
+              // Rises into the top-right corner while the chrome is hidden
+              // (the top bar's slot is free), returns when it fades back in.
+              style={[styles.pip, { transform: [{ translateY: pipRaise }] }]}
+              onPress={() => {
+                bumpActivity();
+                setSwapped((s) => !s);
+              }}
+            >
+              <RTCView
+                key={`bubble-${bubbleFeedTag}`}
+                streamURL={pipUrl}
+                style={StyleSheet.absoluteFill}
+                objectFit="cover"
+                zOrder={1}
+                onDimensionsChange={(e) =>
+                  diag('call', 'video dimensions', {
+                    which: pipUrl === localUrl ? 'local' : 'remote',
+                    slot: 'bubble',
+                    w: e.nativeEvent.width,
+                    h: e.nativeEvent.height,
+                  })
+                }
+                // Mirror only when the bubble is showing the local self-preview.
+                mirror={pipUrl === localUrl}
+                // When swapped, the remote feed lives in the bubble — keep
+                // PiP attached to the remote feed so backgrounding still
+                // floats the caller (not the suspended local camera).
+                iosPIP={swapped ? VIDEO_PIP_OPTS : undefined}
+              />
+            </AnimatedPressable>
+          ) : null}
 
-        {/* Bottom controls. Mute / hang up / flip camera. Fades with the
+          {/* Bottom controls. Mute / hang up / flip camera. Fades with the
             chrome; while hidden, pointerEvents none lets taps fall to the
             backdrop (which re-shows it). Any touch here restarts the idle
             countdown so adjusting controls doesn't hide the bar mid-tap. */}
-        <Animated.View
-          style={[styles.controls, { opacity: chromeOpacity }]}
-          pointerEvents={chromeVisible ? 'auto' : 'none'}
-          onTouchStart={bumpActivity}
-        >
-          <Pressable
-            testID="video-call-mute"
-            onPress={() => orchestrator.setMicMuted(!active.micMuted)}
-            style={[
-              styles.controlBtn,
-              active.micMuted && { backgroundColor: themed.primary },
-            ]}
+          <Animated.View
+            style={[styles.controls, { opacity: chromeOpacity }]}
+            pointerEvents={chromeVisible ? 'auto' : 'none'}
+            onTouchStart={bumpActivity}
           >
-            <MicIcon
-              size={26}
-              muted={active.micMuted}
-              color={active.micMuted ? themed.cream : '#FFF'}
-            />
-          </Pressable>
-          <Pressable
-            testID="video-call-speaker"
-            onPress={() => orchestrator.setSpeakerOn(!active.speakerOn)}
-            style={[
-              styles.controlBtn,
-              active.speakerOn && { backgroundColor: themed.primary },
-            ]}
-          >
-            <SpeakerIcon
-              size={26}
-              active={active.speakerOn}
-              color={active.speakerOn ? themed.cream : '#FFF'}
-            />
-          </Pressable>
-          <Pressable
-            testID="video-call-end"
-            onPress={() => orchestrator.hangup()}
-            style={[styles.endBtn, { backgroundColor: callPalette.decline }]}
-          >
-            <PhoneEndIcon size={32} color={themed.cream} />
-          </Pressable>
-          <Pressable
-            testID="video-call-flip"
-            onPress={() => void orchestrator.flipCamera()}
-            style={styles.controlBtn}
-          >
-            <Text style={styles.flipGlyph}>↺</Text>
-          </Pressable>
-        </Animated.View>
-      </SafeAreaView>
+            <Pressable
+              testID="video-call-mute"
+              onPress={() => orchestrator.setMicMuted(!active.micMuted)}
+              style={[styles.controlBtn, active.micMuted && { backgroundColor: themed.primary }]}
+            >
+              <MicIcon
+                size={26}
+                muted={active.micMuted}
+                color={active.micMuted ? themed.cream : '#FFF'}
+              />
+            </Pressable>
+            <Pressable
+              testID="video-call-speaker"
+              onPress={() => orchestrator.setSpeakerOn(!active.speakerOn)}
+              style={[styles.controlBtn, active.speakerOn && { backgroundColor: themed.primary }]}
+            >
+              <SpeakerIcon
+                size={26}
+                active={active.speakerOn}
+                color={active.speakerOn ? themed.cream : '#FFF'}
+              />
+            </Pressable>
+            <Pressable
+              testID="video-call-end"
+              onPress={() => orchestrator.hangup()}
+              style={[styles.endBtn, { backgroundColor: callPalette.decline }]}
+            >
+              <PhoneEndIcon size={32} color={themed.cream} />
+            </Pressable>
+            <Pressable
+              testID="video-call-flip"
+              onPress={() => void orchestrator.flipCamera()}
+              style={styles.controlBtn}
+            >
+              <Text style={styles.flipGlyph}>↺</Text>
+            </Pressable>
+          </Animated.View>
+        </SafeAreaView>
       ) : null}
     </View>
   );

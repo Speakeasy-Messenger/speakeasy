@@ -26,9 +26,9 @@ projects are **not** scaffolded — see "Add native shells" below.
 - `App.tsx` opens the WebSocket with a `getToken` that re-attests on every
   reconnect; cleans up when identity clears
 
-19 unit tests cover api / ws / vouchflow / stores. RN component rendering
-is **not** under test (no RN test runtime configured here — that arrives
-when native shells are added and Jest can use the RN preset).
+Run `npm test` for the Vitest suite. Component rendering coverage includes
+the delayed local-preview regression in `src/screens/VideoCallScreen.test.ts`,
+using mocked native modules; it does not verify native video rendering on devices.
 
 ## Add native shells (one-time)
 
@@ -67,9 +67,9 @@ Server must be running at `http://localhost:8080` with
 
 ## What lands later
 
-| Phase | Adds |
-| ----- | ---- |
+| Phase | Adds                                                                                                                                  |
+| ----- | ------------------------------------------------------------------------------------------------------------------------------------- |
 | 2     | Real Signal Protocol native module (CryptoKit / Conscrypt), real PreKey bundles, SQLCipher + key derivation from Vouchflow device key |
-| 2     | Real Vouchflow native module wired to `NativeVouchflowClient` |
-| 3     | Chat screen, communities, disappearing-message TTL engine, media upload |
-| 4     | Push notifications (notify-only), multi-device |
+| 2     | Real Vouchflow native module wired to `NativeVouchflowClient`                                                                         |
+| 3     | Chat screen, communities, disappearing-message TTL engine, media upload                                                               |
+| 4     | Push notifications (notify-only), multi-device                                                                                        |

@@ -103,6 +103,7 @@ describe('VideoCallScreen local preview', () => {
     const unsubscribeLocal = vi.fn();
     const unsubscribeRemote = vi.fn();
     const orchestrator = {
+      getLocalStreamURL: vi.fn(() => undefined),
       onLocalStreamURL: vi.fn((cb: (url: string | undefined) => void) => {
         publishLocal = cb;
         return unsubscribeLocal;
@@ -129,6 +130,9 @@ describe('VideoCallScreen local preview', () => {
 
     expect(tree!.root.findAllByProps({ testID: 'video-call-pip' })).toHaveLength(0);
 
+    // Reproduce capture arriving after both reads in the old 600 ms poll.
+    act(() => vi.advanceTimersByTime(4000));
+    expect(tree!.root.findAllByProps({ testID: 'video-call-pip' })).toHaveLength(0);
     act(() => publishLocal?.('local-stream'));
 
     const bubble = tree!.root.findByProps({ testID: 'video-call-pip' });

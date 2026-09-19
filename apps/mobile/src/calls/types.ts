@@ -105,9 +105,7 @@ export interface CallPeer {
   /** Subscribe to ICE/DTLS connection-state changes. 'disconnected' is an
    * ICE flap (cosmetic "Reconnecting…" hint), not a terminal end-state. */
   onConnectionStateChange(
-    cb: (
-      state: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
-    ) => void,
+    cb: (state: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected') => void,
   ): () => void;
   /**
    * Phase 5 — subscribe to per-track audio levels (RMS in [0, 1]) so
