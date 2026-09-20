@@ -131,7 +131,9 @@ describe('VideoCallScreen local preview', () => {
     expect(tree!.root.findAllByProps({ testID: 'video-call-pip' })).toHaveLength(0);
 
     // Reproduce capture arriving after both reads in the old 600 ms poll.
-    act(() => vi.advanceTimersByTime(4000));
+    act(() => {
+      vi.advanceTimersByTime(4000);
+    });
     expect(tree!.root.findAllByProps({ testID: 'video-call-pip' })).toHaveLength(0);
     act(() => publishLocal?.('local-stream'));
 
