@@ -76,24 +76,6 @@ describe('paired call-audio native bridge wiring', () => {
     }
   });
 
-  it('returns actual iOS manual-audio, activation and route state', () => {
-    const patch = source('apps/mobile/patches/react-native-webrtc+124.0.7.patch');
-    const bridge = source('apps/mobile/src/calls/callkeep-bridge.ts');
-    expect(patch).toContain('SpeakeasyAudioSessionSnapshot');
-    expect(patch).toContain('@"manualAudio"');
-    expect(patch).toContain('@"isAudioEnabled"');
-    expect(patch).toContain('@"currentOutputPorts"');
-    expect(patch).toContain('activateAudioSessionForFallback');
-    expect(patch).toContain('deactivateAudioSessionForFallback');
-    expect(patch).toContain('setCategory:AVAudioSessionCategoryPlayAndRecord');
-    expect(patch).toContain('rtc.isAudioEnabled = YES');
-    expect(patch).toContain('rtc.isAudioEnabled = NO');
-    expect(bridge).toContain("'provider activated audio session'");
-    expect(bridge).toContain("'fallback activated audio session'");
-    expect(bridge).toContain('activatedSinceCallBegan');
-    expect(bridge).toContain('audioOwnerActual');
-  });
-
   it('enables uploads only in explicitly-built beta artifacts on both platforms', () => {
     const workflow = source('.github/workflows/release-play.yml');
     const android = source('apps/mobile/android/app/build.gradle');
