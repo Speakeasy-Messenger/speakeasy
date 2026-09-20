@@ -283,8 +283,8 @@ export class CallKeepBridge {
       if (Platform.OS === 'ios') {
         // Manual-audio mode for CallKit coexistence (see the
         // WebRTCModule+RTCAudioSession patch). WebRTC must NOT auto-grab the
-        // AVAudioSession — CallKit owns it and drives isAudioEnabled via the
-        // didActivate/didDeactivate handlers below. Set once here, before the
+        // AVAudioSession — ownership is explicit (see ios/PARITY.md).
+        // Set once here, before the
         // first call's audio unit initialises. Without this, WebRTC and CallKit
         // fight over the session and audio is one-way / silent.
         try {
@@ -953,7 +953,11 @@ export class CallKeepBridge {
       error: String(error),
       audioOwnerExpected: 'app',
       audioOwnerActual:
-        state?.isAudioEnabled === true ? 'callkit-active' : state?.isAudioEnabled === false ? 'inactive' : null,
+        state?.isAudioEnabled === true
+          ? 'callkit-active'
+          : state?.isAudioEnabled === false
+            ? 'inactive'
+            : null,
       activatedSinceCallBegan: this.audioActivatedCallIds.has(callId),
       audioState: state,
     });

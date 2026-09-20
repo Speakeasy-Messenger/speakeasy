@@ -85,6 +85,15 @@ Audited, accepted as-is (low priority):
   retry `displayIncomingCall`, reusing the failed report's UUID; if that retry
   fails, the app shows its in-app incoming-call UI. With no native report, the
   bounded fallback uses the in-app UI instead of allocating a second iOS UUID.
+  WebRTC uses manual audio: CallKit activation normally enables its audio unit.
+  When a released in-app fallback is answered (`incoming_ringing` → `connecting`),
+  the app instead activates `AVAudioSession` with `playAndRecord` and `voiceChat`
+  or `videoChat`, then enables WebRTC audio through the patched native module.
+  It records successful ownership only when native state confirms
+  `isAudioEnabled: true`; missing activation support or native activation errors
+  produce failure diagnostics. App-owned audio is released when that call leaves
+  the store or the bridge stops. The executable fallback lifecycle regression is
+  in `src/calls/callkeep-bridge.test.ts`.
   Diagnostics persist native VoIP-push receipt, incoming-call report
   completion, `didDisplayIncomingCall`, and audio-session activation. A real
   incoming call must still confirm physical ring/vibration and uninterrupted
@@ -95,6 +104,10 @@ Audited, accepted as-is (low priority):
   `iosPIP` source view mounted while AVKit moves it into system PiP. The
   real-device harness verifies background WebRTC frame continuity and return;
   iOS close-to-end and a true two-device remote feed remain device assertions.
+  On iOS, `DevVideoCallHarness.tsx` also drives the no-native-report fallback
+  through the bridge before capture. Its `harness-fallback-audio-pass` marker
+  requires enabled audio, `playAndRecord`/`videoChat`, an activation diagnostic,
+  and outbound audio packets in the local loopback; it does not prove peer audibility.
 
 ## 4. iOS gaps, ranked
 

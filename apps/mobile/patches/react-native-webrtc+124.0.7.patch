@@ -949,9 +949,9 @@ index cd4fa13..19c6c00 100644
 +// react-native-incall-manager, producing one-way / silent audio on iOS. The
 +// documented CallKit+WebRTC recipe is: set useManualAudio = YES up front, then
 +// let CallKit's provider:didActivate/didDeactivate drive isAudioEnabled, so
-+// WebRTC touches the session ONLY when CallKit says it's active. `manual` is
-+// set once at CallKeep setup; `isAudioEnabled` is toggled from the CallKit
-+// didActivate/didDeactivate events (the two methods below).
++// WebRTC starts audio only after explicit activation. `manual` is set once
++// at CallKeep setup. Fallback ownership uses the separate methods below;
++// see apps/mobile/ios/PARITY.md for the ownership contract.
 +//
 +// Refs: Medium "Mastering VoIP Audio with CallKit and WebRTC on iOS";
 +// webrtc RTCAudioSession (useManualAudio / isAudioEnabled).

@@ -15,7 +15,7 @@ import type { NativeCallKitReportSource } from '../native/callkit.js';
 import { getDiagSnapshot } from '../diag/log.js';
 
 /**
- * __DEV__-only test harness for the video-call UI — NOT shipped.
+ * Build-selected test harness for the video-call UI; see App's videoCallHarness prop.
  *
  * Renders the REAL VideoCallScreen fed by this device's own camera (the
  * Android emulator's fake camera works fine) plus a fake "connected" call
@@ -23,10 +23,9 @@ import { getDiagSnapshot } from '../diag/log.js';
  * background-bubble resize and the return-to-call transition — be tested
  * on a device WITHOUT standing up a real two-peer WebRTC call.
  *
- * The local camera stream is wired as BOTH the local and the "remote"
- * feed, so the full-screen remote view (what fills the PiP bubble once
- * connected) shows live video to resize. Gated behind __DEV__ + a flag in
- * App.tsx; flip that flag, reload, and the call screen comes up standalone.
+ * The remote feed passes through two local WebRTC peers so it exercises
+ * encoding and decoding. For the iOS fallback-audio proof contract, see
+ * ios/PARITY.md's platform divergence ledger.
  */
 export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   const [localStream, setLocalStream] = useState<MediaStream | null>(null);
@@ -70,12 +69,9 @@ export function DevVideoCallHarness({ onClosed }: { onClosed: () => void }) {
   useEffect(() => {
     let cancelled = false;
     let fallbackBridge: CallKeepBridge | undefined;
-    // A real call activates the AVAudioSession (playAndRecord + videoChat mode)
-    // via InCallManager / WebRTC. iOS only auto-starts Picture-in-Picture from
-    // inline when an audio session is ACTIVE — the mock orchestrator never did
-    // this, so the first device run never triggered PiP. Activate it here so the
-    // harness faithfully exercises the iosPIP auto-start path. Request audio in
-    // getUserMedia too (an audio track is part of a real call's session).
+    // iOS inline PiP requires an active audio session. Exercise the bridge's
+    // fallback ownership below; Android uses InCallManager. Include a real
+    // audio track so the harness exercises call media as well as PiP.
     if (Platform.OS !== 'ios') {
       try {
         InCallManager.start({ media: 'video', auto: true });
