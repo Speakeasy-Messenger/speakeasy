@@ -903,10 +903,10 @@ index e7f52a1..837cc59 100644
  
  - (void)stopCapture {
 diff --git a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
-index cd4fa13..6f9fbcb 100644
+index cd4fa13..19c6c00 100644
 --- a/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
 +++ b/node_modules/react-native-webrtc/ios/RCTWebRTC/WebRTCModule+RTCAudioSession.m
-@@ -7,14 +7,67 @@
+@@ -7,14 +7,118 @@
  
  @implementation WebRTCModule (RTCAudioSession)
  
@@ -933,6 +933,14 @@ index cd4fa13..6f9fbcb 100644
 +    };
 +}
 +
++static NSDictionary *SpeakeasyAudioSessionFailure(NSString *source, NSString *stage, NSError *error) {
++    NSMutableDictionary *state =
++        [SpeakeasyAudioSessionSnapshot(source) mutableCopy];
++    state[@"errorStage"] = stage;
++    state[@"error"] = error.localizedDescription ?: @"unknown AVAudioSession error";
++    return state;
++}
++
 +// Speakeasy patch: manual-audio mode for CallKit coexistence.
 +//
 +// Stock react-native-webrtc 124 never sets `useManualAudio`, so WebRTC's ADM
@@ -941,9 +949,9 @@ index cd4fa13..6f9fbcb 100644
 +// react-native-incall-manager, producing one-way / silent audio on iOS. The
 +// documented CallKit+WebRTC recipe is: set useManualAudio = YES up front, then
 +// let CallKit's provider:didActivate/didDeactivate drive isAudioEnabled, so
-+// WebRTC touches the session ONLY when CallKit says it's active. `manual` is
-+// set once at CallKeep setup; `isAudioEnabled` is toggled from the CallKit
-+// didActivate/didDeactivate events (the two methods below).
++// WebRTC starts audio only after explicit activation. `manual` is set once
++// at CallKeep setup. Fallback ownership uses the separate methods below;
++// see apps/mobile/ios/PARITY.md for the ownership contract.
 +//
 +// Refs: Medium "Mastering VoIP Audio with CallKit and WebRTC on iOS";
 +// webrtc RTCAudioSession (useManualAudio / isAudioEnabled).
@@ -975,6 +983,49 @@ index cd4fa13..6f9fbcb 100644
 +    // CallKit tore the session down — stop the VoIP audio unit.
 +    session.isAudioEnabled = NO;
 +    return SpeakeasyAudioSessionSnapshot(@"callkit-didDeactivate");
++}
++
++// CallKit normally owns AVAudioSession activation. If both native and JS
++// incoming-call reports fail, Speakeasy owns the in-app fallback UI and must
++// perform the equivalent activation itself before WebRTC can start its manual
++// audio unit. This path is intentionally separate from CallKit's callbacks.
++RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(activateAudioSessionForFallback : (NSString *)requestedMode) {
++    AVAudioSession *audio = [AVAudioSession sharedInstance];
++    RTCAudioSession *rtc = [RTCAudioSession sharedInstance];
++    NSString *mode = [requestedMode isEqualToString:AVAudioSessionModeVideoChat]
++        ? AVAudioSessionModeVideoChat
++        : AVAudioSessionModeVoiceChat;
++    NSError *error = nil;
++    AVAudioSessionCategoryOptions options = AVAudioSessionCategoryOptionAllowBluetooth |
++        AVAudioSessionCategoryOptionAllowBluetoothA2DP;
++    if (![audio setCategory:AVAudioSessionCategoryPlayAndRecord
++                withOptions:options
++                      error:&error]) {
++        return SpeakeasyAudioSessionFailure(@"fallback-didActivate", @"setCategory", error);
++    }
++    if (![audio setMode:mode error:&error]) {
++        return SpeakeasyAudioSessionFailure(@"fallback-didActivate", @"setMode", error);
++    }
++    if (![audio setActive:YES error:&error]) {
++        return SpeakeasyAudioSessionFailure(@"fallback-didActivate", @"setActive", error);
++    }
++    [rtc audioSessionDidActivate:audio];
++    rtc.isAudioEnabled = YES;
++    return SpeakeasyAudioSessionSnapshot(@"fallback-didActivate");
++}
++
++RCT_EXPORT_BLOCKING_SYNCHRONOUS_METHOD(deactivateAudioSessionForFallback) {
++    AVAudioSession *audio = [AVAudioSession sharedInstance];
++    RTCAudioSession *rtc = [RTCAudioSession sharedInstance];
++    rtc.isAudioEnabled = NO;
++    [rtc audioSessionDidDeactivate:audio];
++    NSError *error = nil;
++    if (![audio setActive:NO
++              withOptions:AVAudioSessionSetActiveOptionNotifyOthersOnDeactivation
++                    error:&error]) {
++        return SpeakeasyAudioSessionFailure(@"fallback-didDeactivate", @"setActive", error);
++    }
++    return SpeakeasyAudioSessionSnapshot(@"fallback-didDeactivate");
  }
  
  @end
