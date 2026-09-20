@@ -105,9 +105,7 @@ export interface CallPeer {
   /** Subscribe to ICE/DTLS connection-state changes. 'disconnected' is an
    * ICE flap (cosmetic "Reconnecting…" hint), not a terminal end-state. */
   onConnectionStateChange(
-    cb: (
-      state: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
-    ) => void,
+    cb: (state: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected') => void,
   ): () => void;
   /**
    * Phase 5 — subscribe to per-track audio levels (RMS in [0, 1]) so
@@ -128,6 +126,12 @@ export interface CallPeer {
    * it. Returns the stream's toURL() result.
    */
   getLocalStreamURL?(): string | undefined;
+  /**
+   * Video-only — subscribe to the local MediaStream URL once capture
+   * succeeds. Replays an already-present stream to late subscribers and
+   * returns an unsubscribe function.
+   */
+  onLocalStreamURL?(cb: (url: string | undefined) => void): () => void;
   /**
    * Video-only — subscribe to the remote MediaStream URL once it
    * arrives. Fired on the `track` event with kind=video. Returns an

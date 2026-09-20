@@ -70,6 +70,7 @@ class WebRtcCallPeer implements CallPeer {
   private readonly pc: RTCPeerConnection;
   private localStream?: MediaStream;
   private remoteStream?: MediaStream;
+  private localStreamCb?: (url: string | undefined) => void;
   private localIceCb?: (c: CallIceCandidate) => void;
   private connStateCb?: (
     s: 'connecting' | 'connected' | 'failed' | 'closed' | 'disconnected',
@@ -1006,6 +1007,8 @@ class WebRtcCallPeer implements CallPeer {
           : false,
     })) as MediaStream;
     this.localStream = stream;
+    const localUrl = (stream as { toURL?: () => string }).toURL?.();
+    this.localStreamCb?.(localUrl);
     diag('webrtc', 'local media acquired', {
       audioTracks: stream.getAudioTracks().length,
       videoTracks: stream.getVideoTracks().length,
@@ -1059,6 +1062,18 @@ class WebRtcCallPeer implements CallPeer {
 
   getLocalStreamURL(): string | undefined {
     return (this.localStream as { toURL?: () => string } | undefined)?.toURL?.();
+  }
+
+  onLocalStreamURL(cb: (url: string | undefined) => void): () => void {
+    this.localStreamCb = cb;
+    // Fire immediately if capture completed before the screen subscribed
+    // (the outgoing caller path normally hits this).
+    if (this.localStream) {
+      cb(this.getLocalStreamURL());
+    }
+    return () => {
+      if (this.localStreamCb === cb) this.localStreamCb = undefined;
+    };
   }
 
   onRemoteStreamURL(cb: (url: string | undefined) => void): () => void {
