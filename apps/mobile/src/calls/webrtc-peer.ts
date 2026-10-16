@@ -93,6 +93,7 @@ class WebRtcCallPeer implements CallPeer {
   private headsetSub?: EmitterSubscription;
   private audioDeviceSub?: EmitterSubscription;
   private cameraFacing: 'user' | 'environment' = 'user';
+  private cameraSwitchQueue: Promise<void> = Promise.resolve();
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
   // runs while at least one subscriber is alive. We poll instead of
@@ -1091,18 +1092,26 @@ class WebRtcCallPeer implements CallPeer {
 
   async flipCamera(): Promise<'user' | 'environment' | undefined> {
     if (this.mediaKind !== 'video' || !this.localStream) return;
-    // RN-WebRTC's local video tracks expose `_switchCamera()` as a
-    // non-standard convenience that toggles facingMode without re-
-    // negotiating. Cheaper than tearing down the track + getUserMedia
-    // again. Falls back to a manual replace if the helper is missing.
-    for (const track of this.localStream.getVideoTracks()) {
-      const t = track as unknown as { _switchCamera?: () => void };
-      if (typeof t._switchCamera === 'function') {
-        t._switchCamera();
-      }
-    }
-    this.cameraFacing = this.cameraFacing === 'user' ? 'environment' : 'user';
-    return this.cameraFacing;
+    const result = this.cameraSwitchQueue
+      .then(async () => {
+        const track = this.localStream?.getVideoTracks()[0];
+        if (!track || track.readyState === 'ended') return;
+        const constraints = track.getSettings();
+        delete constraints.deviceId;
+        constraints.facingMode = constraints.facingMode === 'user' ? 'environment' : 'user';
+        await track.applyConstraints(constraints);
+        if (track.readyState === 'ended') return;
+        const facing = track.getSettings().facingMode;
+        if (facing !== 'user' && facing !== 'environment') return;
+        this.cameraFacing = facing;
+        return facing;
+      })
+      .catch((err) => {
+        diag('webrtc', 'camera switch failed', { err: String(err) });
+        return undefined;
+      });
+    this.cameraSwitchQueue = result.then(() => undefined);
+    return result;
   }
 
   private ensureManager(): void {
