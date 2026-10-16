@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { diag } from '../diag/log.js';
 import { reactNativeWebRtcPeerFactory } from './webrtc-peer.js';
 
 const videoTrack = vi.hoisted(() => ({
@@ -78,6 +79,10 @@ describe('WebRtcCallPeer local stream subscription', () => {
     });
   });
 
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
   it('publishes a newly acquired stream and replays it to a late subscriber', async () => {
     const peer = await reactNativeWebRtcPeerFactory.create({
       iceServers: [],
@@ -118,7 +123,8 @@ describe('WebRtcCallPeer local stream subscription', () => {
     peer.close();
   });
 
-  it('keeps preview facing aligned with the helper when two taps precede a settings update', async () => {
+  it('serializes rapid flips until each asynchronous switch is confirmed', async () => {
+    vi.useFakeTimers();
     const peer = await reactNativeWebRtcPeerFactory.create({
       iceServers: [],
       callId: 'call-rapid-flips',
@@ -126,13 +132,49 @@ describe('WebRtcCallPeer local stream subscription', () => {
       mediaKind: 'video',
     });
     await peer.createAnswer();
-    videoTrack._switchCamera.mockImplementationOnce(() => undefined);
+    videoTrack._switchCamera.mockImplementation(() => {
+      const target = cameraState.facingMode === 'user' ? 'environment' : 'user';
+      setTimeout(() => {
+        cameraState.facingMode = target;
+      }, 100);
+    });
     const first = peer.flipCamera!();
     const second = peer.flipCamera!();
+    await vi.advanceTimersByTimeAsync(50);
+    expect(videoTrack._switchCamera).toHaveBeenCalledTimes(1);
+    expect(cameraState.facingMode).toBe('user');
+    await vi.advanceTimersByTimeAsync(50);
     expect(await first).toBe('environment');
-    expect(await second).toBe('environment');
-    expect(videoTrack.getSettings().facingMode).toBe('environment');
+    await vi.advanceTimersByTimeAsync(100);
+    expect(await second).toBe('user');
+    expect(cameraState.facingMode).toBe('user');
     expect(videoTrack._switchCamera).toHaveBeenCalledTimes(2);
+    peer.close();
+  });
+
+  it('retains rear facing on an unconfirmed switch and allows a later retry', async () => {
+    vi.useFakeTimers();
+    const peer = await reactNativeWebRtcPeerFactory.create({
+      iceServers: [],
+      callId: 'call-failed-flip',
+      role: 'callee',
+      mediaKind: 'video',
+    });
+    await peer.createAnswer();
+    expect(await peer.flipCamera!()).toBe('environment');
+    videoTrack._switchCamera.mockImplementationOnce(() => undefined);
+    const failed = peer.flipCamera!();
+    await vi.advanceTimersByTimeAsync(1000);
+    expect(await failed).toBe('environment');
+    expect(cameraState.facingMode).toBe('environment');
+    expect(diag).toHaveBeenCalledWith('webrtc', 'camera switch unconfirmed', {
+      facing: 'environment',
+    });
+    videoTrack._switchCamera.mockImplementationOnce(() => {
+      throw new Error('camera unavailable');
+    });
+    expect(await peer.flipCamera!()).toBe('environment');
+    expect(await peer.flipCamera!()).toBe('user');
     peer.close();
   });
 });
