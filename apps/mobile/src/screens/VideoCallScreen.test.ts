@@ -1,4 +1,5 @@
 import React from 'react';
+import { Platform } from 'react-native';
 import { act, create } from 'react-test-renderer';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { CallOrchestrator } from '../calls/orchestrator.js';
@@ -6,6 +7,7 @@ import { useCalls } from '../store/calls.js';
 import { VideoCallScreen } from './VideoCallScreen.js';
 
 const diagMock = vi.hoisted(() => vi.fn());
+const dimensionsMock = vi.hoisted(() => ({ width: 390, height: 844 }));
 
 vi.mock('react-native', () => {
   class AnimatedValue {
@@ -32,7 +34,7 @@ vi.mock('react-native', () => {
       create: (styles: unknown) => styles,
     },
     Text: 'span',
-    useWindowDimensions: () => ({ width: 390, height: 844 }),
+    useWindowDimensions: () => dimensionsMock,
     View: 'section',
   };
 });
@@ -78,6 +80,9 @@ describe('VideoCallScreen local preview', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     diagMock.mockReset();
+    Object.assign(Platform, { OS: 'android' });
+    dimensionsMock.width = 390;
+    dimensionsMock.height = 844;
     useCalls.setState({
       active: {
         callId: 'call-callee',
@@ -98,7 +103,7 @@ describe('VideoCallScreen local preview', () => {
     vi.useRealTimers();
   });
 
-  it('mounts the corner self-view when a callee local stream arrives after the screen', () => {
+  it('mounts the front-camera corner self-view when callee capture arrives late', async () => {
     let publishLocal: ((url: string | undefined) => void) | undefined;
     const unsubscribeLocal = vi.fn();
     const unsubscribeRemote = vi.fn();
@@ -130,6 +135,13 @@ describe('VideoCallScreen local preview', () => {
 
     expect(tree!.root.findAllByProps({ testID: 'video-call-pip' })).toHaveLength(0);
 
+    // A flip attempted before capture is a peer no-op and must not change
+    // how the eventual front-camera preview is drawn.
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'video-call-flip' }).props.onPress();
+      await Promise.resolve();
+    });
+
     // Reproduce capture arriving after both reads in the old 600 ms poll.
     act(() => {
       vi.advanceTimersByTime(4000);
@@ -139,6 +151,7 @@ describe('VideoCallScreen local preview', () => {
 
     const bubble = tree!.root.findByProps({ testID: 'video-call-pip' });
     expect(bubble.findByProps({ streamURL: 'local-stream' }).type).toBe('rtc-view');
+    expect(bubble.findByProps({ streamURL: 'local-stream' }).props.mirror).toBe(true);
     expect(diagMock).toHaveBeenCalledWith(
       'call',
       'video slot assignment',
@@ -152,5 +165,84 @@ describe('VideoCallScreen local preview', () => {
     act(() => tree!.unmount());
     expect(unsubscribeLocal).toHaveBeenCalledOnce();
     expect(unsubscribeRemote).toHaveBeenCalledOnce();
+  });
+
+  it.each(['android', 'ios'] as const)(
+    'mirrors only the front camera in the %s connected bubble and swapped fullscreen view',
+    async (platform) => {
+      Object.assign(Platform, { OS: platform });
+      const flipCamera = vi
+        .fn()
+        .mockResolvedValueOnce('environment')
+        .mockResolvedValueOnce('user');
+      const orchestrator = {
+        onLocalStreamURL: (cb: (url: string) => void) => {
+          cb('local-stream');
+          return () => undefined;
+        },
+        onRemoteStreamURL: (cb: (url: string) => void) => {
+          cb('remote-stream');
+          return () => undefined;
+        },
+        flipCamera,
+      } as unknown as CallOrchestrator;
+      let tree: ReturnType<typeof create>;
+      act(() => {
+        tree = create(React.createElement(VideoCallScreen, { orchestrator, onClosed: vi.fn() }));
+      });
+
+      const view = (url: string) => tree!.root.findByProps({ streamURL: url });
+      expect(view('local-stream').props.mirror).toBe(true);
+      expect(view('remote-stream').props.mirror).toBe(false);
+
+      await act(async () => {
+        tree!.root.findByProps({ testID: 'video-call-flip' }).props.onPress();
+        await Promise.resolve();
+      });
+      expect(view('local-stream').props.mirror).toBe(false);
+      expect(view('remote-stream').props.mirror).toBe(false);
+
+      act(() => tree!.root.findByProps({ testID: 'video-call-pip' }).props.onPress());
+      expect(view('local-stream').props.mirror).toBe(false);
+      expect(view('remote-stream').props.mirror).toBe(false);
+
+      await act(async () => {
+        tree!.root.findByProps({ testID: 'video-call-flip' }).props.onPress();
+        await Promise.resolve();
+      });
+      expect(view('local-stream').props.mirror).toBe(true);
+      expect(view('remote-stream').props.mirror).toBe(false);
+      act(() => tree!.unmount());
+    },
+  );
+
+  it('uses camera facing for the local fullscreen and Android compact fallback', async () => {
+    const orchestrator = {
+      onLocalStreamURL: (cb: (url: string) => void) => {
+        cb('local-stream');
+        return () => undefined;
+      },
+      onRemoteStreamURL: () => () => undefined,
+      flipCamera: vi.fn(async () => 'environment'),
+    } as unknown as CallOrchestrator;
+    let tree: ReturnType<typeof create>;
+    act(() => {
+      tree = create(React.createElement(VideoCallScreen, { orchestrator, onClosed: vi.fn() }));
+    });
+    const localView = () => tree!.root.findByProps({ streamURL: 'local-stream' });
+    expect(localView().props.mirror).toBe(true);
+
+    await act(async () => {
+      tree!.root.findByProps({ testID: 'video-call-flip' }).props.onPress();
+      await Promise.resolve();
+    });
+    expect(localView().props.mirror).toBe(false);
+
+    act(() => {
+      dimensionsMock.width = 200;
+      tree!.update(React.createElement(VideoCallScreen, { orchestrator, onClosed: vi.fn() }));
+    });
+    expect(localView().props.mirror).toBe(false);
+    act(() => tree!.unmount());
   });
 });

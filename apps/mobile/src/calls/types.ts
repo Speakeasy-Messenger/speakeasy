@@ -140,9 +140,10 @@ export interface CallPeer {
   onRemoteStreamURL?(cb: (url: string | undefined) => void): () => void;
   /**
    * Video-only — flip between front-facing (user) and rear (environment)
-   * camera. No-op for audio peers.
+   * camera. Returns the new facing for the local preview, or undefined when
+   * capture has not started. No-op for audio peers.
    */
-  flipCamera?(): Promise<void>;
+  flipCamera?(): Promise<'user' | 'environment' | undefined>;
   /**
    * Phase 5j Private Call — open the unreliable, unordered side
    * channel for the sender's per-frame `AnimationFrame` broadcast at

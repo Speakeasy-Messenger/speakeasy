@@ -1,9 +1,10 @@
 import { describe, expect, it, vi } from 'vitest';
 import { reactNativeWebRtcPeerFactory } from './webrtc-peer.js';
 
+const videoTrack = vi.hoisted(() => ({ stop: vi.fn(), _switchCamera: vi.fn() }));
 const localStream = vi.hoisted(() => ({
   getAudioTracks: () => [{ stop: vi.fn() }],
-  getVideoTracks: () => [{ stop: vi.fn() }],
+  getVideoTracks: () => [videoTrack],
   getTracks: () => [],
   toURL: () => 'local-stream',
 }));
@@ -85,6 +86,23 @@ describe('WebRtcCallPeer local stream subscription', () => {
     expect(late).toHaveBeenCalledWith('local-stream');
 
     unsubscribe();
+    peer.close();
+  });
+
+  it('returns the camera facing after each switch and leaves it unchanged before capture', async () => {
+    videoTrack._switchCamera.mockClear();
+    const peer = await reactNativeWebRtcPeerFactory.create({
+      iceServers: [],
+      callId: 'call-camera-switch',
+      role: 'callee',
+      mediaKind: 'video',
+    });
+
+    expect(await peer.flipCamera!()).toBeUndefined();
+    await peer.createAnswer();
+    expect(await peer.flipCamera!()).toBe('environment');
+    expect(await peer.flipCamera!()).toBe('user');
+    expect(videoTrack._switchCamera).toHaveBeenCalledTimes(2);
     peer.close();
   });
 });

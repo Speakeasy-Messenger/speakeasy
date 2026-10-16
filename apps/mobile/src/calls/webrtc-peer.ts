@@ -1089,7 +1089,7 @@ class WebRtcCallPeer implements CallPeer {
     };
   }
 
-  async flipCamera(): Promise<void> {
+  async flipCamera(): Promise<'user' | 'environment' | undefined> {
     if (this.mediaKind !== 'video' || !this.localStream) return;
     // RN-WebRTC's local video tracks expose `_switchCamera()` as a
     // non-standard convenience that toggles facingMode without re-
@@ -1102,6 +1102,7 @@ class WebRtcCallPeer implements CallPeer {
       }
     }
     this.cameraFacing = this.cameraFacing === 'user' ? 'environment' : 'user';
+    return this.cameraFacing;
   }
 
   private ensureManager(): void {
