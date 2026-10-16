@@ -93,6 +93,7 @@ class WebRtcCallPeer implements CallPeer {
   private headsetSub?: EmitterSubscription;
   private audioDeviceSub?: EmitterSubscription;
   private cameraFacing: 'user' | 'environment' = 'user';
+  private cameraSwitchQueue: Promise<void> = Promise.resolve();
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
   // runs while at least one subscriber is alive. We poll instead of
@@ -1089,19 +1090,36 @@ class WebRtcCallPeer implements CallPeer {
     };
   }
 
-  async flipCamera(): Promise<void> {
+  async flipCamera(): Promise<'user' | 'environment' | undefined> {
     if (this.mediaKind !== 'video' || !this.localStream) return;
-    // RN-WebRTC's local video tracks expose `_switchCamera()` as a
-    // non-standard convenience that toggles facingMode without re-
-    // negotiating. Cheaper than tearing down the track + getUserMedia
-    // again. Falls back to a manual replace if the helper is missing.
-    for (const track of this.localStream.getVideoTracks()) {
+    const result = this.cameraSwitchQueue.then(async () => {
+      const track = this.localStream?.getVideoTracks()[0];
+      if (!track) return;
       const t = track as unknown as { _switchCamera?: () => void };
-      if (typeof t._switchCamera === 'function') {
+      if (typeof t._switchCamera !== 'function') return this.cameraFacing;
+      try {
+        const before = track.getSettings().facingMode;
+        if (before === 'user' || before === 'environment') this.cameraFacing = before;
+        const expected = this.cameraFacing === 'user' ? 'environment' : 'user';
         t._switchCamera();
+        for (let attempt = 0; attempt <= 20; attempt++) {
+          if (track.getSettings().facingMode === expected) {
+            this.cameraFacing = expected;
+            return this.cameraFacing;
+          }
+          if (attempt < 20) await new Promise((resolve) => setTimeout(resolve, 50));
+        }
+        diag('webrtc', 'camera switch unconfirmed', { facing: this.cameraFacing });
+      } catch (err) {
+        diag('webrtc', 'camera switch failed', { err: String(err) });
       }
-    }
-    this.cameraFacing = this.cameraFacing === 'user' ? 'environment' : 'user';
+      return this.cameraFacing;
+    });
+    this.cameraSwitchQueue = result.then(
+      () => undefined,
+      () => undefined,
+    );
+    return result;
   }
 
   private ensureManager(): void {

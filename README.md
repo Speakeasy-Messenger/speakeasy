@@ -59,6 +59,10 @@ enables retry without discarding your existing identity.
 The alpha points at a dev sandbox API server on a public IP. Production
 DNS / TLS coming with Phase 5d.
 
+In video calls, only the front-camera self-view is mirrored. The rear-camera
+self-view and the other person's video remain unmirrored, including when
+you swap the self-view between the corner bubble and full screen.
+
 ## Real-device call verification
 
 The call test harness boots directly into the production video-call screen,

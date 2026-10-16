@@ -751,8 +751,8 @@ export class CallOrchestrator {
   onRemoteStreamURL(cb: (url: string | undefined) => void): () => void {
     return this.peer?.onRemoteStreamURL?.(cb) ?? (() => {});
   }
-  async flipCamera(): Promise<void> {
-    await this.peer?.flipCamera?.();
+  async flipCamera(): Promise<'user' | 'environment' | undefined> {
+    return this.peer?.flipCamera?.();
   }
 
   /**

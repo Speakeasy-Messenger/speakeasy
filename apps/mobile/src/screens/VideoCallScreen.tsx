@@ -82,6 +82,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
 
   const [localUrl, setLocalUrl] = useState<string | undefined>();
   const [remoteUrl, setRemoteUrl] = useState<string | undefined>();
+  const [cameraFacing, setCameraFacing] = useState<'user' | 'environment'>('user');
   const [elapsed, setElapsed] = useState('');
   // Picture-in-picture swap: false = remote full-screen / local in the
   // corner bubble (default once connected); true = local full-screen /
@@ -102,6 +103,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const pipCloseHandled = useRef(false);
   useEffect(() => {
     pipCloseHandled.current = false;
+    setCameraFacing('user');
   }, [active?.callId]);
   useEffect(() => {
     diag('call', 'app state at video screen mount', { state: AppState.currentState });
@@ -365,13 +367,8 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   // feed is full-screen; when the peer's video arrives it migrates to the
   // corner bubble. Tapping the bubble swaps which feed is full-screen.
   //
-  // Mirroring: the LOCAL self-preview is mirrored (the selfie-mirror
-  // convention every video app uses — you see yourself as in a mirror),
-  // wherever it currently lives (full-screen while ringing, or the corner
-  // bubble once connected). The REMOTE feed is never mirrored — the peer
-  // must appear the right way round. We mirror whichever RTCView is showing
-  // `localUrl`. (Earlier this was rendered raw/un-mirrored; the un-mirrored
-  // preview reads as backwards to the user, so it's restored to mirrored.)
+  // Mirror the local self-preview only for the front camera, wherever it
+  // appears. The rear camera and remote feed show the scene as captured.
   // Treat the remote feed as "active" (take the full screen, push local to the
   // corner bubble) only once the call is actually CONNECTED — not the instant
   // the remote track is added during negotiation. onRemoteStreamURL fires at
@@ -385,6 +382,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
   const fullscreenUrl = fullscreenIsLocal ? localUrl : remoteUrl;
   // The bubble only exists once both feeds are present (i.e. connected).
   const pipUrl = remoteActive ? (swapped ? remoteUrl : localUrl) : undefined;
+  const mirrorLocal = cameraFacing === 'user';
   // Android/Fabric can deliver the full-screen local→remote prop update while
   // mounting the local bubble in the same commit. Reusing both native WebRTC
   // renderers in that handoff occasionally leaves their track attachments
@@ -432,7 +430,7 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             streamURL={pipFeed}
             style={StyleSheet.absoluteFill}
             objectFit="cover"
-            mirror={pipFeed === localUrl}
+            mirror={pipFeed === localUrl && mirrorLocal}
             onDimensionsChange={(e) =>
               diag('call', 'pip feed dimensions', {
                 w: e.nativeEvent.width,
@@ -499,8 +497,8 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
               h: Math.round(e.nativeEvent.layout.height),
             })
           }
-          // Mirror only when this view is showing the local self-preview.
-          mirror={fullscreenUrl === localUrl}
+          // Mirror only the front-camera self-preview.
+          mirror={fullscreenUrl === localUrl && mirrorLocal}
           // PiP the remote feed when it's the full-screen one (default,
           // not swapped) so backgrounding floats the caller.
           iosPIP={fullscreenIsLocal ? undefined : VIDEO_PIP_OPTS}
@@ -566,8 +564,8 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
                     h: e.nativeEvent.height,
                   })
                 }
-                // Mirror only when the bubble is showing the local self-preview.
-                mirror={pipUrl === localUrl}
+                // Mirror only the front-camera self-preview.
+                mirror={pipUrl === localUrl && mirrorLocal}
                 // When swapped, the remote feed lives in the bubble — keep
                 // PiP attached to the remote feed so backgrounding still
                 // floats the caller (not the suspended local camera).
@@ -616,7 +614,11 @@ export function VideoCallScreen({ orchestrator, onClosed }: Props) {
             </Pressable>
             <Pressable
               testID="video-call-flip"
-              onPress={() => void orchestrator.flipCamera()}
+              onPress={() => {
+                void orchestrator.flipCamera().then((facing) => {
+                  if (facing) setCameraFacing(facing);
+                });
+              }}
               style={styles.controlBtn}
             >
               <Text style={styles.flipGlyph}>↺</Text>
