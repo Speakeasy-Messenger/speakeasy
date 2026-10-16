@@ -171,10 +171,7 @@ describe('VideoCallScreen local preview', () => {
     'mirrors only the front camera in the %s connected bubble and swapped fullscreen view',
     async (platform) => {
       Object.assign(Platform, { OS: platform });
-      const flipCamera = vi
-        .fn()
-        .mockResolvedValueOnce('environment')
-        .mockResolvedValueOnce('user');
+      const flipCamera = vi.fn().mockResolvedValueOnce('environment').mockResolvedValueOnce('user');
       const orchestrator = {
         onLocalStreamURL: (cb: (url: string) => void) => {
           cb('local-stream');
