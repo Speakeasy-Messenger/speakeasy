@@ -17,8 +17,13 @@ import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeout
 
 private const val TAG = "VouchflowModule"
+// Resolve the native promise before the JS bridge's 60-second fallback timeout.
+// Cancelling verify also dismisses the SDK's cancellable biometric prompt.
+private const val VERIFY_TIMEOUT_MS = 55_000L
 
 /**
  * RN bridge for the Vouchflow Android SDK (`dev.vouchflow:android-sdk`).
@@ -37,7 +42,7 @@ private const val TAG = "VouchflowModule"
  *
  * Errors are rejected with codes mirroring `VouchflowError` subtypes:
  *   biometric_cancelled · biometric_failed · biometric_unavailable
- *   minimum_confidence_unmet · network_unavailable · enrollment_failed
+ *   minimum_confidence_unmet · network_unavailable · verification_timeout · enrollment_failed
  *   account_store_access_denied · no_activity · bad_context
  *   bad_confidence · bad_fallback_reason · unknown_error
  *
@@ -82,13 +87,14 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
 
     scope.launch {
       try {
-        val result =
-            if (minConf != null) {
-              Vouchflow.shared.verify(
-                  activity = activity, context = ctx, minimumConfidence = minConf)
-            } else {
-              Vouchflow.shared.verify(activity = activity, context = ctx)
-            }
+        val result = withTimeout(VERIFY_TIMEOUT_MS) {
+          if (minConf != null) {
+            Vouchflow.shared.verify(
+                activity = activity, context = ctx, minimumConfidence = minConf)
+          } else {
+            Vouchflow.shared.verify(activity = activity, context = ctx)
+          }
+        }
         val signals =
             Arguments.createMap().apply {
               putBoolean("biometricUsed", result.signals.biometricUsed)
@@ -112,6 +118,9 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
               putMap("signals", signals)
             }
         promise.resolve(map)
+      } catch (e: TimeoutCancellationException) {
+        Log.e(TAG, "verify: verification_timeout", e)
+        promise.reject("verification_timeout", "Device verification timed out", e)
       } catch (e: VouchflowError.BiometricCancelled) {
         Log.e(TAG, "verify: biometric_cancelled", e)
         promise.reject("biometric_cancelled", e.message, e)
@@ -128,6 +137,14 @@ class VouchflowModule(reactContext: ReactApplicationContext) :
         Log.e(TAG, "verify: network_unavailable", e)
         promise.reject("network_unavailable", e.message, e)
       } catch (e: VouchflowError.EnrollmentFailed) {
+        // SDK 2.3.0 wraps cancellation from ensureEnrolled() in EnrollmentFailed.
+        // Keep a deadline during that phase retryable instead of marking the
+        // device permanently unsupported in JS.
+        if (e.enrollmentCause is TimeoutCancellationException) {
+          Log.e(TAG, "verify: verification_timeout during enrollment", e)
+          promise.reject("verification_timeout", "Device verification timed out", e)
+          return@launch
+        }
         // EnrollmentFailed in SDK 2.0.0 carries the original exception
         // in `enrollmentCause: Throwable?` (NOT in the standard
         // Throwable.cause chain). Network and ServerError rejections

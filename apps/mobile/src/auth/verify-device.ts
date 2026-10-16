@@ -1,5 +1,5 @@
 import { UNSUPPORTED_DEVICE_MESSAGE } from './unsupported-device.js';
-import { isUnsupportedDeviceError, verifyWithTimeout } from './claim-handle.js';
+import { isUnsupportedDeviceError, verificationFailureMessage, verifyWithTimeout } from './claim-handle.js';
 import { type VouchflowClient } from '../native/vouchflow.js';
 import { useIdentity } from '../store/identity.js';
 import { useVerifySheet } from '../store/verify-sheet.js';
@@ -84,7 +84,7 @@ export async function verifyDeviceWithExplanation(
           .fail(
             unsupported
               ? UNSUPPORTED_DEVICE_MESSAGE
-              : "Couldn't verify this device. Please try again.",
+              : verificationFailureMessage(err),
             !unsupported,
           );
         if (unsupported) throw err;

@@ -16,7 +16,7 @@ import { defaultAnimalForUser } from '../avatars/default.js';
 import { vouchflow } from '../services.js';
 import { useIdentity } from '../store/identity.js';
 import { useProfiles } from '../store/profiles.js';
-import { isUnsupportedDeviceError, verifyWithTimeout } from '../auth/claim-handle.js';
+import { isUnsupportedDeviceError, verificationFailureMessage, verifyWithTimeout } from '../auth/claim-handle.js';
 import { accent, brand, font, motion, type as typeScale, workspace } from '../theme/tokens.js';
 import { space } from '../theme/index.js';
 import { diag } from '../diag/log.js';
@@ -66,7 +66,7 @@ export function VerifyGateScreen(): React.ReactElement {
       const unavailable = isUnsupportedDeviceError(err);
       setUnsupported(unavailable);
       setErrorCopy(
-        unavailable ? UNSUPPORTED_DEVICE_MESSAGE : "Couldn't verify this device. Please try again.",
+        unavailable ? UNSUPPORTED_DEVICE_MESSAGE : verificationFailureMessage(err),
       );
     } finally {
       setVerifying(false);

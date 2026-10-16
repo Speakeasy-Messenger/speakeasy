@@ -63,6 +63,7 @@ export type VouchflowErrorReason =
   | 'attestation_unavailable'
   | 'minimum_confidence_unmet'
   | 'network_unavailable'
+  | 'verification_timeout'
   | 'enrollment_failed'
   | 'no_session'
   | 'account_store_access_denied'
