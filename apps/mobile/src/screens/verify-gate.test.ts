@@ -63,4 +63,22 @@ describe('VerifyGateScreen', () => {
     ).toBe('Verify this device');
     tree.unmount();
   });
+
+  it('leaves the gate retryable when native verification times out', async () => {
+    vouchflowMock.verify.mockRejectedValueOnce(new VouchflowClientError('verification_timeout'));
+    const tree = create(React.createElement(VerifyGateScreen));
+
+    await act(async () => {
+      tree.root.findByProps({ testID: 'verify-gate-continue' }).props.onPress();
+      await Promise.resolve();
+    });
+
+    expect(tree.root.findByProps({ testID: 'verify-gate-error' }).props.children).toBe(
+      'Verification timed out. Please try again.',
+    );
+    expect(
+      tree.root.findByProps({ testID: 'verify-gate-continue' }).props.children.props.children,
+    ).toBe('Verify this device');
+    tree.unmount();
+  });
 });

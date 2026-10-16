@@ -117,6 +117,27 @@ describe('verifyDeviceWithExplanation', () => {
     expect(useIdentity.getState().userId).toBe('alice');
   });
 
+  it('shows a retryable timeout, then stores the token from a successful retry', async () => {
+    const vouchflow = client();
+    useIdentity.setState({ deviceToken: 'dvt_existing' });
+    vi.mocked(vouchflow.verify)
+      .mockRejectedValueOnce(new VouchflowClientError('verification_timeout'))
+      .mockResolvedValueOnce(result('dvt_recovered'));
+    const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
+
+    useVerifySheet.getState().confirm();
+    await flush();
+    expect(useVerifySheet.getState().error).toBe('Verification timed out. Please try again.');
+    expect(useVerifySheet.getState().retryable).toBe(true);
+    expect(useVerifySheet.getState().verificationInFlight).toBe(false);
+    expect(useIdentity.getState().deviceToken).toBe('dvt_existing');
+
+    useVerifySheet.getState().retry();
+    await expect(pending).resolves.toEqual({ deviceToken: 'dvt_recovered' });
+    expect(useIdentity.getState().deviceToken).toBe('dvt_recovered');
+    expect(useVerifySheet.getState().pending).toBeUndefined();
+  });
+
   it('does not call verify when the user cancels the sheet', async () => {
     const vouchflow = client();
     const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
@@ -126,6 +147,29 @@ describe('verifyDeviceWithExplanation', () => {
     await expect(pending).rejects.toBeInstanceOf(DeviceVerificationCancelledError);
     expect(vouchflow.verify).not.toHaveBeenCalled();
     expect(useVerifySheet.getState().pending).toBeUndefined();
+  });
+
+  it('leaves Verifying with a retryable error when native verify never settles', async () => {
+    vi.useFakeTimers();
+    try {
+      // The prior cancellation test arms the shared 60-second prompt cooldown.
+      vi.setSystemTime(new Date(Date.now() + 60_001));
+      const vouchflow = client();
+      vi.mocked(vouchflow.verify).mockImplementation(() => new Promise<VerifyResult>(() => {}));
+      const pending = verifyDeviceWithExplanation(vouchflow, 'send_message');
+      const rejected = expect(pending).rejects.toBeInstanceOf(DeviceVerificationCancelledError);
+      useVerifySheet.getState().confirm();
+
+      await vi.advanceTimersByTimeAsync(60_000);
+      expect(useVerifySheet.getState().verificationInFlight).toBe(false);
+      expect(useVerifySheet.getState().error).toBe('Verification timed out. Please try again.');
+      expect(useVerifySheet.getState().retryable).toBe(true);
+
+      useVerifySheet.getState().cancel();
+      await rejected;
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

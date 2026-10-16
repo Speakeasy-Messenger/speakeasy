@@ -60,6 +60,17 @@ export function isUnsupportedDeviceError(error: unknown): boolean {
   return error instanceof VouchflowClientError && UNSUPPORTED_DEVICE_REASONS.has(error.reason);
 }
 
+/** A timed-out native verify can be retried without discarding the identity. */
+export function verificationFailureMessage(error: unknown): string {
+  if (
+    error instanceof VerificationTimeoutError ||
+    (error instanceof VouchflowClientError && error.reason === 'verification_timeout')
+  ) {
+    return 'Verification timed out. Please try again.';
+  }
+  return "Couldn't verify this device. Please try again.";
+}
+
 export async function enrollHandle(
   deps: ClaimDeps,
   args: { handle: string; deviceToken: string },
