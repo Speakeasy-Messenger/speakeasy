@@ -140,10 +140,9 @@ export interface CallPeer {
   onRemoteStreamURL?(cb: (url: string | undefined) => void): () => void;
   /**
    * Video-only — flip between front-facing (user) and rear (environment)
-   * camera. Serializes switches and returns the confirmed facing for the
-   * local preview, which may be unchanged if the requested camera is unavailable.
-   * Returns undefined if capture is absent or ended, switching fails, or the
-   * facing cannot be confirmed. No-op for audio peers.
+   * camera. Returns the facing for the local preview, using observed track
+   * settings when updated or the requested facing while the native switch
+   * completes. Returns undefined before capture. No-op for audio peers.
    */
   flipCamera?(): Promise<'user' | 'environment' | undefined>;
   /**

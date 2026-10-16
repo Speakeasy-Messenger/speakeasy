@@ -93,7 +93,6 @@ class WebRtcCallPeer implements CallPeer {
   private headsetSub?: EmitterSubscription;
   private audioDeviceSub?: EmitterSubscription;
   private cameraFacing: 'user' | 'environment' = 'user';
-  private cameraSwitchQueue: Promise<void> = Promise.resolve();
   // Phase 5 — audio-level polling.
   // `audioLevelCb` is set when a UI subscribes; the polling loop only
   // runs while at least one subscriber is alive. We poll instead of
@@ -1092,26 +1091,28 @@ class WebRtcCallPeer implements CallPeer {
 
   async flipCamera(): Promise<'user' | 'environment' | undefined> {
     if (this.mediaKind !== 'video' || !this.localStream) return;
-    const result = this.cameraSwitchQueue
-      .then(async () => {
-        const track = this.localStream?.getVideoTracks()[0];
-        if (!track || track.readyState === 'ended') return;
-        const constraints = track.getSettings();
-        delete constraints.deviceId;
-        constraints.facingMode = constraints.facingMode === 'user' ? 'environment' : 'user';
-        await track.applyConstraints(constraints);
-        if (track.readyState === 'ended') return;
-        const facing = track.getSettings().facingMode;
-        if (facing !== 'user' && facing !== 'environment') return;
-        this.cameraFacing = facing;
-        return facing;
-      })
-      .catch((err) => {
-        diag('webrtc', 'camera switch failed', { err: String(err) });
-        return undefined;
-      });
-    this.cameraSwitchQueue = result.then(() => undefined);
-    return result;
+    const tracks = this.localStream.getVideoTracks();
+    const before = tracks[0]?.getSettings().facingMode;
+    // RN-WebRTC's local video tracks expose `_switchCamera()` as a
+    // non-standard convenience that toggles facingMode without re-
+    // negotiating. Its internal applyConstraints is asynchronous, so settings
+    // may still show the old camera immediately after this call.
+    for (const track of tracks) {
+      const t = track as unknown as { _switchCamera?: () => void };
+      if (typeof t._switchCamera === 'function') t._switchCamera();
+    }
+    const expected =
+      before === 'user'
+        ? 'environment'
+        : before === 'environment'
+          ? 'user'
+          : this.cameraFacing === 'user'
+            ? 'environment'
+            : 'user';
+    const after = tracks[0]?.getSettings().facingMode;
+    this.cameraFacing =
+      after !== before && (after === 'user' || after === 'environment') ? after : expected;
+    return this.cameraFacing;
   }
 
   private ensureManager(): void {

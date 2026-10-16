@@ -3,10 +3,10 @@ import { reactNativeWebRtcPeerFactory } from './webrtc-peer.js';
 
 const videoTrack = vi.hoisted(() => ({
   stop: vi.fn(),
-  readyState: 'live',
   getSettings: vi.fn(),
-  applyConstraints: vi.fn(),
+  _switchCamera: vi.fn(),
 }));
+const cameraState = vi.hoisted(() => ({ facingMode: 'user' as 'user' | 'environment' }));
 const localStream = vi.hoisted(() => ({
   getAudioTracks: () => [{ stop: vi.fn() }],
   getVideoTracks: () => [videoTrack],
@@ -71,12 +71,10 @@ vi.mock('../native/audio-diagnostics.js', () => ({
 
 describe('WebRtcCallPeer local stream subscription', () => {
   beforeEach(() => {
-    let settings = { facingMode: 'user', width: 1280, height: 720, deviceId: 'front' };
-    videoTrack.readyState = 'live';
-    videoTrack.getSettings.mockReset().mockImplementation(() => ({ ...settings }));
-    videoTrack.applyConstraints.mockReset().mockImplementation(async (constraints) => {
-      await Promise.resolve();
-      settings = { ...constraints, deviceId: constraints.facingMode };
+    cameraState.facingMode = 'user';
+    videoTrack.getSettings.mockReset().mockImplementation(() => ({ ...cameraState }));
+    videoTrack._switchCamera.mockReset().mockImplementation(() => {
+      cameraState.facingMode = cameraState.facingMode === 'user' ? 'environment' : 'user';
     });
   });
 
@@ -116,16 +114,11 @@ describe('WebRtcCallPeer local stream subscription', () => {
     await peer.createAnswer();
     expect(await peer.flipCamera!()).toBe('environment');
     expect(await peer.flipCamera!()).toBe('user');
-    expect(videoTrack.applyConstraints).toHaveBeenCalledTimes(2);
-    expect(videoTrack.applyConstraints).toHaveBeenNthCalledWith(1, {
-      facingMode: 'environment',
-      width: 1280,
-      height: 720,
-    });
+    expect(videoTrack._switchCamera).toHaveBeenCalledTimes(2);
     peer.close();
   });
 
-  it('serializes rapid flips and waits for the confirmed camera facing', async () => {
+  it('keeps preview facing aligned with the helper when two taps precede a settings update', async () => {
     const peer = await reactNativeWebRtcPeerFactory.create({
       iceServers: [],
       callId: 'call-rapid-flips',
@@ -133,67 +126,13 @@ describe('WebRtcCallPeer local stream subscription', () => {
       mediaKind: 'video',
     });
     await peer.createAnswer();
-    let completeSwitch!: () => void;
-    videoTrack.applyConstraints.mockImplementationOnce(
-      (constraints) =>
-        new Promise<void>((resolve) => {
-          completeSwitch = () => {
-            videoTrack.getSettings.mockReturnValue({ ...constraints });
-            resolve();
-          };
-        }),
-    );
-    const firstResolved = vi.fn();
-    const first = peer.flipCamera!().then((facing) => {
-      firstResolved(facing);
-      return facing;
-    });
-    const second = peer.flipCamera!();
-    await Promise.resolve();
-    expect(firstResolved).not.toHaveBeenCalled();
-    expect(videoTrack.applyConstraints).toHaveBeenCalledTimes(1);
-    videoTrack.applyConstraints.mockImplementationOnce(async (constraints) => {
-      videoTrack.getSettings.mockReturnValue({ ...constraints });
-    });
-    completeSwitch();
-    expect(await first).toBe('environment');
-    expect(await second).toBe('user');
-    expect(videoTrack.getSettings().facingMode).toBe('user');
-    expect(videoTrack.applyConstraints).toHaveBeenNthCalledWith(2, {
-      facingMode: 'user',
-      width: 1280,
-      height: 720,
-    });
-    peer.close();
-  });
-
-  it('returns the actual facing when the requested camera is unavailable', async () => {
-    const peer = await reactNativeWebRtcPeerFactory.create({
-      iceServers: [],
-      callId: 'call-single-camera',
-      role: 'callee',
-      mediaKind: 'video',
-    });
-    await peer.createAnswer();
-    videoTrack.applyConstraints.mockImplementationOnce(async () => undefined);
-    expect(await peer.flipCamera!()).toBe('user');
-    peer.close();
-  });
-
-  it('keeps queued flips usable after a failed switch', async () => {
-    const peer = await reactNativeWebRtcPeerFactory.create({
-      iceServers: [],
-      callId: 'call-failed-flip',
-      role: 'callee',
-      mediaKind: 'video',
-    });
-    await peer.createAnswer();
-    videoTrack.applyConstraints.mockRejectedValueOnce(new Error('camera unavailable'));
+    videoTrack._switchCamera.mockImplementationOnce(() => undefined);
     const first = peer.flipCamera!();
     const second = peer.flipCamera!();
-    expect(await first).toBeUndefined();
+    expect(await first).toBe('environment');
     expect(await second).toBe('environment');
     expect(videoTrack.getSettings().facingMode).toBe('environment');
+    expect(videoTrack._switchCamera).toHaveBeenCalledTimes(2);
     peer.close();
   });
 });
