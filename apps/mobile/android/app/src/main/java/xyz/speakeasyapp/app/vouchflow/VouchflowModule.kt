@@ -40,7 +40,7 @@ private const val VERIFY_TIMEOUT_MS = 55_000L
  *                crossAppHistory, anomalyFlags },
  *   }>
  *
- * Errors are rejected with codes mirroring `VouchflowError` subtypes:
+ * Errors include mapped `VouchflowError` subtypes and bridge-owned failures:
  *   biometric_cancelled · biometric_failed · biometric_unavailable
  *   minimum_confidence_unmet · network_unavailable · verification_timeout · enrollment_failed
  *   account_store_access_denied · no_activity · bad_context

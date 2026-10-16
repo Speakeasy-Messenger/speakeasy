@@ -51,6 +51,11 @@ session) in progress.
    identity generated → land on Conversations.
 3. Tap **+ New chat**, paste a peer's handle, send a message.
 
+If your session drops, tap **Continue** in **Verify this device** to confirm
+with your passkey and reconnect. If verification times out, the sheet or
+verification gate shows **Verification timed out. Please try again.** and
+enables retry without discarding your existing identity.
+
 The alpha points at a dev sandbox API server on a public IP. Production
 DNS / TLS coming with Phase 5d.
 

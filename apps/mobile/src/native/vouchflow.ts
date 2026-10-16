@@ -55,7 +55,7 @@ export interface VouchflowClient {
   getCachedDeviceToken(): Promise<string | null>;
 }
 
-/** Mirrors the Kotlin `VouchflowError` sealed class (SDK 2.0.0). */
+/** Native bridge error codes, including SDK errors and bridge-owned failures. */
 export type VouchflowErrorReason =
   | 'biometric_cancelled'
   | 'biometric_failed'
@@ -118,9 +118,9 @@ function loadNativeModule(): NativeVouchflowModule | undefined {
 
 /**
  * Production wiring — calls `NativeModules.Vouchflow.verify()`
- * (Kotlin/Swift modules wrapping `dev.vouchflow:android-sdk:2.0.0` /
- * `VouchflowSDK` 2.0.0). Throws `VouchflowClientError` with a
- * `reason` mirroring the SDK's `VouchflowError` subtypes.
+ * through the Kotlin/Swift SDK bridges. SDK versions are tracked in
+ * `apps/mobile/ios/PARITY.md`. Throws `VouchflowClientError` with a
+ * `reason` from the native bridge (see `VouchflowErrorReason`).
  */
 export class NativeVouchflowClient implements VouchflowClient {
   private readonly module: NativeVouchflowModule;

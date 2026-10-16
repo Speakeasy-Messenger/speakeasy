@@ -20,24 +20,30 @@ The crypto core has full parity: shared TypeScript contracts in
 native implementations on both sides.
 
 - Signal Protocol (1:1) · Group Messaging (Sender Keys) · Channel Keys
-  (community ECIES) · SQLCipher store · Vouchflow bridge.
+  (community ECIES) · SQLCipher store.
 
 All app logic in `src/` (stores, screens, WS, navigation, the
 `src/integration/` test harness) is shared and platform-agnostic.
 
 ## 2. Native module parity
 
-| Module         | Android (Kotlin)            | iOS (Swift)                    | Status    |
-| -------------- | --------------------------- | ------------------------------ | --------- |
-| SignalProtocol | `SignalProtocolModule.kt`   | `SignalProtocolModule.swift`   | ✅ parity |
-| GroupMessaging | `GroupMessagingModule.kt`   | `GroupMessagingModule.swift`   | ✅ parity |
-| ChannelKey     | `ChannelKeyModule.kt`       | `ChannelKeyModule.swift`       | ✅ parity |
-| Vouchflow      | `VouchflowModule.kt`        | `VouchflowModule.swift`        | ✅ parity |
-| SpeakeasyDb    | `SpeakeasyDb.kt` / `Schema` | `SpeakeasyDb.swift` / `Schema` | ✅ parity |
-| Version        | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity |
+| Module         | Android (Kotlin)            | iOS (Swift)                    | Status                                             |
+| -------------- | --------------------------- | ------------------------------ | -------------------------------------------------- |
+| SignalProtocol | `SignalProtocolModule.kt`   | `SignalProtocolModule.swift`   | ✅ parity                                          |
+| GroupMessaging | `GroupMessagingModule.kt`   | `GroupMessagingModule.swift`   | ✅ parity                                          |
+| ChannelKey     | `ChannelKeyModule.kt`       | `ChannelKeyModule.swift`       | ✅ parity                                          |
+| Vouchflow      | `VouchflowModule.kt`        | `VouchflowModule.swift`        | Shared interface; timeout handling differs (below) |
+| SpeakeasyDb    | `SpeakeasyDb.kt` / `Schema` | `SpeakeasyDb.swift` / `Schema` | ✅ parity                                          |
+| Version        | `VersionModule.kt`          | `Version/VersionModule.swift`  | ✅ parity                                          |
 
 SDK versions — LibSignal `0.59.0` (both), SQLCipher `~4.6`
 iOS / `4.14.1` Android, Vouchflow iOS `2.5.1` / Android `2.3.0`.
+
+The Android Vouchflow bridge bounds native verification with coroutine
+cancellation in `VouchflowModule.kt`; the iOS bridge has no native deadline.
+Both verification UIs use the shared JS fallback in
+`src/auth/claim-handle.ts` (`verifyWithTimeout`), which bounds the JS wait
+without cancelling the native operation.
 
 ## 3. `Platform.OS` divergence ledger
 
